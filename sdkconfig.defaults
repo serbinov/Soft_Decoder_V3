@@ -59,3 +59,14 @@ CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
 # CONFIG_MBEDTLS_TLS_SERVER is not set
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_NEWLIB_NANO_FORMAT=y
+
+# IPv6 disabled: the decoder runs an IPv4-only softAP/captive portal. This
+# drops nd6/ip6/ICMPv6 from lwIP and saves ~10-15 KB of flash.
+CONFIG_LWIP_IPV6=n
+
+# ESP32-S3FH4R2 has 2 MB in-package QUAD PSRAM. Enable it and integrate into
+# malloc() so large buffers can spill into PSRAM instead of internal SRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y

@@ -610,9 +610,24 @@ static esp_err_t wifi_start(const settings_config_t *cfg)
         ESP_LOGW(TAG, "AP password ignored (<8 chars): access point stays open");
     }
 
-    /* AP-only: a stored STA/APSTA mode is ignored. Start as APSTA just long
-     * enough to scan, then drop the station interface. */
-    ESP_ERROR_CHECK(esp_wifi_set_mode(sta_netif != NULL ? WIFI_MODE_APSTA : WIFI_MODE_AP));
+    /* Choose the AP channel BEFORE the AP is started. Scanning needs the radio
+     * up, so bring the station up briefly, scan, then stop it. Doing this
+     * before the AP starts avoids switching the AP channel right after it came
+     * up (which dropped clients that were already associating and delayed
+     * their DHCP/IP). */
+    if (sta_netif != NULL) {
+        if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK && esp_wifi_start() == ESP_OK) {
+            uint8_t ch = wifi_pick_channel();
+            (void)esp_wifi_stop();
+            if (ch != ap.ap.channel) {
+                ap.ap.channel = ch;
+                ESP_LOGI(TAG, "AP channel set to %u (least used of 1/6/11)", (unsigned)ch);
+            }
+        }
+    }
+
+    /* AP-only: a stored STA/APSTA mode is ignored. */
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
 
     /* Access point address: configurable (default 192.168.100.1). */
@@ -641,16 +656,6 @@ static esp_err_t wifi_start(const settings_config_t *cfg)
     }
 
     ESP_ERROR_CHECK(esp_wifi_start());
-
-    if (sta_netif != NULL) {
-        uint8_t ch = wifi_pick_channel();
-        if (ch != ap.ap.channel) {
-            ap.ap.channel = ch;
-            (void)esp_wifi_set_config(WIFI_IF_AP, &ap);
-            ESP_LOGI(TAG, "AP channel set to %u (least used of 1/6/11)", (unsigned)ch);
-        }
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    }
 
     esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
 

@@ -24,6 +24,7 @@ set "PORT=COM3"
 
 echo ================================================
 echo  Flash ADDITIPUS AURA-X decoder via %PORT%
+echo  (bootloader + partition table + ota_data + app)
 echo ================================================
 "%PIO%" run -e esp32-s3-devkitc-1 -t upload --upload-port %PORT%
 

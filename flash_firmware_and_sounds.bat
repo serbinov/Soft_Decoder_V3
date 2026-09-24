@@ -24,6 +24,7 @@ set "PORT=COM3"
 
 echo ================================================================
 echo  Flash firmware + write sounds to the external flash (%PORT%)
+echo  (bootloader + partition table + ota_data + app, then sounds)
 echo  WARNING: the external flash will be erased and re-written.
 echo ================================================================
 

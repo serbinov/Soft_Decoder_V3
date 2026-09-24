@@ -1,18 +1,20 @@
 # =============================================================
 #  ADDITIPUS AURA-X standalone flasher (no dependencies)
-#  Pure PowerShell: enters download mode, flashes firmware
-#  (bootloader + partitions + ota_data + app) and uploads sounds.
-#  No Python / esptool / PlatformIO required.
+#  Pure PowerShell: enters download mode, erases the internal flash,
+#  flashes firmware (bootloader + partitions + ota_data + app) and uploads
+#  sounds. No Python / esptool / PlatformIO required.
 #
 #  Usage:
 #    .\flash_standalone.ps1
 #    .\flash_standalone.ps1 -FwDir "..\release\flash_download_tool" -SoundDir "..\..\SOUND"
 #    .\flash_standalone.ps1 -NoSounds
+#    .\flash_standalone.ps1 -NoErase     (skip the full internal-flash erase)
 # =============================================================
 param(
     [string]$FwDir = (Join-Path $PSScriptRoot "..\release\flash_download_tool"),
     [string]$SoundDir = (Join-Path $PSScriptRoot "..\..\SOUND"),
     [switch]$NoSounds,
+    [switch]$NoErase,
     [string]$Port = ""
 )
 
@@ -187,6 +189,18 @@ function Reset-To-Download($sp) {
     Set-Dtr $sp $false
 }
 
+# Full chip erase through the ROM FLASH_BEGIN command: it erases 'erase_size'
+# bytes starting at 'offset'. num_blocks = 0 means no data blocks follow.
+function Erase-Chip($sp) {
+    Write-Info "erasing entire internal flash (can take ~10-40 s)..."
+    $begin = New-Object System.Collections.Generic.List[byte]
+    foreach ($v in @([uint32]0x400000, [uint32]0, [uint32]0x400, [uint32]0, [uint32]0)) {
+        $begin.AddRange([byte[]](To-U32 $v))
+    }
+    Send-Cmd $sp 0x02 $begin.ToArray() 0 180000 "FLASH_BEGIN erase" | Out-Null
+    Write-Ok "internal flash erased"
+}
+
 # ---------------- flash ----------------
 function Flash-Image($sp, [string]$path, [uint32]$offset, [string]$label) {
     $bytes = [System.IO.File]::ReadAllBytes($path)
@@ -353,6 +367,11 @@ try {
 
     Attach-Spi $sp
     Write-Ok "SPI flash attached"
+
+    if (-not $NoErase) {
+        # Best-effort: if the ROM rejects the erase we still proceed to flash.
+        try { Erase-Chip $sp } catch { Write-Warn "chip erase skipped: $($_.Exception.Message)" }
+    }
 
     Flash-Image $sp $bootloader 0x0       "bootloader"
     Flash-Image $sp $partitions 0x8000    "partitions"

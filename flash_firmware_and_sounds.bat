@@ -24,10 +24,20 @@ set "PORT=COM3"
 
 echo ================================================================
 echo  Flash firmware + write sounds to the external flash (%PORT%)
-echo  (bootloader + partition table + ota_data + app, then sounds)
-echo  WARNING: the external flash will be erased and re-written.
+echo  (full flash erase, then bootloader + partition table + ota_data + app)
+echo  WARNING: internal flash and the external flash will be erased.
 echo ================================================================
 
+echo [1/3] Erasing internal flash (NVS/settings will be cleared)...
+"%PIO%" run -e esp32-s3-devkitc-1 -t erase --upload-port %PORT%
+if errorlevel 1 (
+    echo.
+    echo [FAIL] Erase failed.
+    pause
+    exit /b 1
+)
+
+echo [2/3] Writing firmware...
 "%PIO%" run -e esp32-s3-devkitc-1 -t upload --upload-port %PORT%
 if errorlevel 1 (
     echo.

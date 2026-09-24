@@ -24,8 +24,19 @@ set "PORT=COM3"
 
 echo ================================================
 echo  Flash ADDITIPUS AURA-X decoder via %PORT%
-echo  (bootloader + partition table + ota_data + app)
+echo  (full flash erase, then bootloader + partition table + ota_data + app)
 echo ================================================
+
+echo [1/2] Erasing flash (NVS/settings will be cleared)...
+"%PIO%" run -e esp32-s3-devkitc-1 -t erase --upload-port %PORT%
+if errorlevel 1 (
+    echo.
+    echo [FAIL] Erase failed. Check the COM port and board connection.
+    pause
+    exit /b 1
+)
+
+echo [2/2] Writing firmware...
 "%PIO%" run -e esp32-s3-devkitc-1 -t upload --upload-port %PORT%
 
 if errorlevel 1 (

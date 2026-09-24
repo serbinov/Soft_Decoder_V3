@@ -21,13 +21,12 @@ static const char *TAG = "storage";
 
 #define EXT_PARTITION_LABEL "ext_userdata"
 #define EXT_PARTITION_SIZE  (16 * 1024 * 1024)
-#define INT_PARTITION_LABEL "userdata"
 #define MOUNT_POINT         "/userdata"
 
 static esp_flash_t *s_ext_flash = NULL;
 static const esp_partition_t *s_ext_partition = NULL;
 static bool s_mounted = false;
-static storage_backend_t s_backend = STORAGE_BACKEND_INTERNAL;
+static storage_backend_t s_backend = STORAGE_BACKEND_NONE;
 
 static esp_err_t external_nor_init(void)
 {
@@ -89,22 +88,12 @@ static esp_err_t mount_littlefs_ext(bool format_on_fail)
     return esp_vfs_littlefs_register(&conf);
 }
 
-static esp_err_t mount_littlefs_int(bool format_on_fail)
-{
-    esp_vfs_littlefs_conf_t conf = {
-        .base_path = MOUNT_POINT,
-        .partition_label = INT_PARTITION_LABEL,
-        .format_if_mount_failed = format_on_fail,
-    };
-    return esp_vfs_littlefs_register(&conf);
-}
-
 esp_err_t storage_init(void)
 {
     esp_err_t err = external_nor_init();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "External NOR init failed, using internal fallback");
-        s_backend = STORAGE_BACKEND_INTERNAL;
+        ESP_LOGW(TAG, "External NOR init failed: sound features disabled");
+        s_backend = STORAGE_BACKEND_NONE;
     } else {
         s_backend = STORAGE_BACKEND_EXTERNAL_NOR;
     }
@@ -116,32 +105,22 @@ esp_err_t storage_mount(void)
     if (s_mounted) {
         return ESP_OK;
     }
-
-    esp_err_t err;
-    if (s_backend == STORAGE_BACKEND_EXTERNAL_NOR) {
-        /* Never auto-format the external chip: a transient or format-version
-         * mismatch on mount would silently erase every sound file. Formatting
-         * happens only explicitly in storage_format() (provisioning). If the
-         * mount fails here the data is left untouched and we fall back to the
-         * internal partition so the rest of the firmware keeps working. */
-        err = mount_littlefs_ext(false);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Mounted external NOR user data at %s", MOUNT_POINT);
-            s_mounted = true;
-            return ESP_OK;
-        }
-        ESP_LOGE(TAG, "External NOR LittleFS mount failed (%s); data NOT formatted, "
-                      "falling back to internal storage (run provisioning to reformat)",
-                 esp_err_to_name(err));
-        s_backend = STORAGE_BACKEND_INTERNAL;
+    if (s_backend != STORAGE_BACKEND_EXTERNAL_NOR || s_ext_partition == NULL) {
+        ESP_LOGW(TAG, "External NOR not available: sound features disabled");
+        return ESP_ERR_NOT_FOUND;
     }
 
-    err = mount_littlefs_int(true);
+    /* Never auto-format the external chip: a transient or format-version
+     * mismatch on mount would silently erase every sound file. Formatting
+     * happens only explicitly in storage_format() (provisioning). If the mount
+     * fails the device keeps running, just without sound. */
+    esp_err_t err = mount_littlefs_ext(false);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Internal LittleFS mount failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "External NOR LittleFS mount failed (%s); data NOT formatted "
+                      "(run provisioning to reformat)", esp_err_to_name(err));
         return err;
     }
-    ESP_LOGI(TAG, "Mounted internal user data at %s", MOUNT_POINT);
+    ESP_LOGI(TAG, "Mounted external NOR user data at %s", MOUNT_POINT);
     s_mounted = true;
     return ESP_OK;
 }
@@ -177,14 +156,9 @@ esp_err_t storage_format(void)
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    /* Unmount whatever is currently on /userdata (external or the internal
-     * fallback) so the external NOR can take the mount point back. */
+    /* Unmount the external NOR so it can be reformatted and remounted. */
     if (s_mounted) {
-        if (s_backend == STORAGE_BACKEND_EXTERNAL_NOR) {
-            (void)esp_vfs_littlefs_unregister_partition(s_ext_partition);
-        } else {
-            (void)esp_vfs_littlefs_unregister(INT_PARTITION_LABEL);
-        }
+        (void)esp_vfs_littlefs_unregister_partition(s_ext_partition);
         s_mounted = false;
     }
 
@@ -217,9 +191,7 @@ esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
 
     size_t total = 0;
     size_t used = 0;
-    esp_err_t err = (s_backend == STORAGE_BACKEND_EXTERNAL_NOR)
-                        ? esp_littlefs_partition_info(s_ext_partition, &total, &used)
-                        : esp_littlefs_info(INT_PARTITION_LABEL, &total, &used);
+    esp_err_t err = esp_littlefs_partition_info(s_ext_partition, &total, &used);
     if (err != ESP_OK) {
         return err;
     }

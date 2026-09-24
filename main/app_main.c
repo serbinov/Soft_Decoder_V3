@@ -305,9 +305,16 @@ void app_main(void)
      * float (storage/NVS init takes a moment), which can make the motor twitch. */
     motor_boot_safe();
     ESP_ERROR_CHECK(storage_init());
-    ESP_ERROR_CHECK(storage_mount());
+    /* Storage is optional: without the external W25Q128 (or if its LittleFS
+     * fails to mount) the decoder must keep running with sound disabled, so a
+     * mount failure is logged and not treated as fatal. */
+    esp_err_t storage_err = storage_mount();
+    if (storage_err != ESP_OK) {
+        ESP_LOGW(TAG, "Storage unavailable (%s): sound features disabled",
+                 esp_err_to_name(storage_err));
+    }
     ESP_LOGI(TAG, "Storage: %s", storage_get_backend() == STORAGE_BACKEND_EXTERNAL_NOR
-                                    ? "external NOR" : "internal");
+                                    ? "external NOR" : "none");
 
     ESP_ERROR_CHECK(settings_init());
 

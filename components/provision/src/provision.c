@@ -478,6 +478,7 @@ static void provision_run(void)
     esp_err_t err = storage_format();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "provision: external NOR unavailable, aborting");
+        send_line("PROV-ERR storage");
         return;
     }
     (void)mkdir("/userdata/audio", 0755);

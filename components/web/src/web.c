@@ -1285,6 +1285,9 @@ static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
 
 static esp_err_t audio_upload_post(httpd_req_t *req)
 {
+    if (!storage_is_mounted()) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage unavailable");
+    }
     if (req->content_len <= 0 || req->content_len > UPLOAD_MAX) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid size");
     }

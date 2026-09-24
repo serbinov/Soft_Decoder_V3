@@ -7,8 +7,8 @@
 #include "esp_err.h"
 
 typedef enum {
-    STORAGE_BACKEND_EXTERNAL_NOR = 0,
-    STORAGE_BACKEND_INTERNAL = 1,
+    STORAGE_BACKEND_NONE = 0,
+    STORAGE_BACKEND_EXTERNAL_NOR = 1,
 } storage_backend_t;
 
 esp_err_t storage_init(void);

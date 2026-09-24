@@ -5,7 +5,7 @@
 периферии и памяти, список задач, компоненты и их взаимодействие, настройки,
 REST API и ресурсы.
 
-Версия прошивки: **0.6** (`version.txt`, попадает в веб-страницу и CV7).
+Версия прошивки: **0.7** (`version.txt`, попадает в веб-страницу и CV7).
 Целевой модуль сборки: `esp32-s3-devkitc-1` (PlatformIO), фреймворк ESP-IDF
 `5.1.4`. Язык: C (C11), без C++.
 
@@ -38,7 +38,7 @@ DCC-декодер для модели железной дороги с:
 | Ядра | 2 × Xtensa LX7 |
 | Тактовая частота | **160 МГц** (`CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160`; 240 доступно, не используется ради нагрева/потребления) |
 | Встроенная flash | **4 МБ** (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y`, `board_build.flash_size=4MB`) |
-| Встроенная PSRAM | 2 МБ физически (FH4R2), но **отключена** (`# CONFIG_SPIRAM is not set`) |
+| Встроенная PSRAM | **2 МБ, включена** как heap (quad, 80 МГц; `CONFIG_SPIRAM=y`) |
 | Пакет сборки PlatformIO | `esp32-s3-devkitc-1` (совместимый «декит-профиль»; микросхема на плате — S3FH4R2) |
 | Режим загрузки flash | DIO @ 80 МГц |
 
@@ -118,15 +118,17 @@ DCC-декодер для модели железной дороги с:
 
 | Раздел | Тип | Смещение | Размер | Назначение |
 |---|---|---|---|---|
-| `nvs` | data/nvs | 0x009000 | 24 КБ | настройки, CV и пр. |
-| `phy_init` | data/phy | 0x00F000 | 4 КБ | калибровка RF |
-| `otadata` | data/ota | 0x010000 | 8 КБ | выбор OTA-слота |
-| `ota_0` | app | 0x020000 | 896 КБ | приложение (текущий образ) |
-| `ota_1` | app | 0x100000 | 896 КБ | приложение (OTA-приёмник) |
-| `userdata` | data/littlefs | 0x1F0000 | 2 МБ | **внутренний** fallback-накопитель |
-| `coredump` | data/coredump | 0x3F0000 | 64 КБ | core dump |
+| `nvs` | data/nvs | 0x009000 | 64 КБ | настройки, CV и пр. |
+| `phy_init` | data/phy | 0x019000 | 4 КБ | калибровка RF |
+| `otadata` | data/ota | 0x01A000 | 8 КБ | выбор OTA-слота |
+| `ota_0` | app | 0x020000 | 1920 КБ | приложение (текущий образ) |
+| `ota_1` | app | 0x200000 | 1920 КБ | приложение (OTA-приёмник) |
+| `coredump` | data/coredump | 0x3E0000 | 128 КБ | core dump |
 
-Таблица разделов на смещении 0x8000 (`CONFIG_PARTITION_TABLE_OFFSET`).
+Таблица разделов на смещении 0x8000 (`CONFIG_PARTITION_TABLE_OFFSET`). Между
+`otadata` (конец 0x01C000) и `ota_0` (0x020000) — выравнивающая пауза 16 КБ.
+Внутреннего `userdata`/fallback **нет**: звуки хранятся только на внешней NOR;
+без неё устройство работает с отключённым звуком.
 
 ### 3.2 Внешняя NOR 16 МБ
 
@@ -135,9 +137,9 @@ DCC-декодер для модели железной дороги с:
   (`components/storage/src/storage.c`, `EXT_PARTITION_SIZE = 16 МБ`).
 - Форматируется в **LittleFS** и монтируется в `/userdata`.
 - Если внешняя NOR не отвечает или mount не удался — прошивка **не форматирует**
-  её автоматически (чтобы не потерять звуки), а откатывается на внутренний
-  раздел `userdata` (2 МБ). Текущий backend смотрится в
-  `storage_get_backend()` и выводится в лог при загрузке.
+  её автоматически (чтобы не потерять звуки) и продолжает работу с отключённым
+  звуком (внутреннего fallback нет). Backend смотрится в `storage_get_backend()`
+  (`STORAGE_BACKEND_EXTERNAL_NOR`/`STORAGE_BACKEND_NONE`) и выводится в лог.
 - Формат внешней NOR выполняется только явно — при провижининге
   (`storage_format()`).
 
@@ -146,11 +148,17 @@ DCC-декодер для модели железной дороги с:
 Пространство имён `decoder`. Legacy-ключ `cv` хранит блоб `SETTINGS_CV_COUNT+1 =
 513 байт` + CRC32 (`cv_crc`). Остальные ключи — `components/settings/src/settings.c`.
 
+Рядом со звуками на внешней NOR лежит **манифест** `/userdata/audio/tracks.txt`
+(список слотов + карта F↔AUX). Он перезаписывается при любом изменении этих
+метаданных и читается при пустом NVS — так имена, категории и карта F↔AUX
+переживают полный сброс (см. §15).
+
 ### 3.4 RAM
 
 - Встроенная SRAM ESP32-S3 — 512 КБ, из них под приложение доступно
   ~320 КБ DRAM (PlatformIO считает от 327 680 Б).
-- PSRAM не задействована.
+- **PSRAM 2 МБ включена** (`CONFIG_SPIRAM=y`, quad, 80 МГц) и отдаётся в heap:
+  крупные аллокации уходят в PSRAM, мелкие остаются во внутренней DRAM.
 - Точные цифры — в разделе 17.
 
 ---
@@ -200,10 +208,10 @@ pio run -e esp32-s3-devkitc-1 -t size         # размер образа
 
 | Скрипт | Назначение |
 |---|---|
-| `flash_firmware.bat [COMx]` | Сборка + прошивка по UART/USB-JTAG (автопоиск порта) |
-| `flash_firmware_and_sounds.bat [COMx]` | Прошивка + заливка звуков на внешнюю NOR (стирает её) |
+| `flash_firmware.bat [COMx] [erase]` | Сборка + прошивка по UART/USB-JTAG (автопоиск порта). `erase` — полная очистка чипа (стирает NVS); без него настройки сохраняются |
+| `flash_firmware_and_sounds.bat [COMx] [erase]` | Прошивка + заливка звуков на внешнюю NOR (внешняя NOR всегда стирается; `erase` дополнительно чистит внутреннюю flash/NVS) |
 | `build_ota_bin.bat` | Сборка и копирование OTA-образа в `../release/ADDITIPUS_AURA-X_v<ver>.bin` |
-| `build_flash_tool_files.bat` | Файлы для Espressif Flash Download Tool (`bootloader/partitions/otadata/firmware`) |
+| `build_flash_tool_files.bat` | Файлы для Espressif Flash Download Tool + генерация `README.txt` из `partitions.csv` |
 | `build_ota_with_sounds.ps1` | Сборка составного OTA-контейнера (прошивка + звуки) |
 | `provision_sounds.ps1` | Заливка звуков по UART (протокол провижининга) |
 | `read_bemf.ps1` | Чтение коэффициентов BEMF по UART, опц. запись в `bemf_cal_base.h` |
@@ -247,16 +255,18 @@ firmware/
 ├─ partitions.csv            таблица разделов
 ├─ sdkconfig.defaults        базовые настройки IDF
 ├─ sdkconfig.esp32-s3-...    итоговый sdkconfig (генерируется)
-├─ version.txt               0.6 — единственный источник версии
+├─ version.txt               0.7 — единственный источник версии
 ├─ CMakeLists.txt            project(soft_decoder_v3)
 ├─ web_ui.html               исходник веб-страницы (single-file)
+├─ ARCHITECTURE.md           референс-документ (этот файл)
+├─ CHANGELOG.md              журнал изменений
 ├─ main/
 │  ├─ CMakeLists.txt
 │  └─ app_main.c             точка входа, колбэки DCC, safety-задача
 ├─ components/
 │  ├─ pinmap/                карта выводов + валидация
-│  ├─ settings/              NVS: конфиг, CV, треки, карты, AUX, BEMF
-│  ├─ storage/               LittleFS: внешняя NOR + внутренний fallback
+│  ├─ settings/              NVS: конфиг, CV, треки, карты, AUX, BEMF + манифест метаданных
+│  ├─ storage/               LittleFS: внешняя NOR (без внутреннего fallback)
 │  ├─ dcc/                   разбор DCC, service/ops mode, consist
 │  ├─ motor/                 DRV8870 ШИМ + BEMF-PID + калибровка
 │  ├─ track/                 рельсовый ADC, DC-режим
@@ -284,21 +294,25 @@ firmware/
 - Зависимости: нет. Задачи: нет.
 
 ### settings (`components/settings`)
-- Файлы: `src/settings.c`, `include/settings.h`.
+- Файлы: `src/settings.c`, `src/track_manifest.c`, `include/settings.h`.
 - Роль: NVS-хранилище: конфиг устройства, CV-блок (513 Б + CRC32 FNV-1a),
   список треков, категории слотов, карта функций, конфиг AUX, калибровка BEMF и
   флаг включения BEMF. Отложенная запись (`settings_save_deferred` + фоновый
   `settings_pending_flush`) защищает flash/радио от частых коммитов.
+  `track_manifest.c` дублирует список треков + карту F↔AUX в
+  `/userdata/audio/tracks.txt` и восстанавливает их при пустом NVS.
 - API: `settings_load/save`, `settings_cv_*`, `settings_tracks_*`,
   `settings_track_cats_*`, `settings_func_map_*`, `settings_aux_cfg_*`,
-  `settings_bemf_cal_*`, `settings_bemf_use_*`, `settings_factory_reset`.
+  `settings_bemf_cal_*`, `settings_bemf_use_*`, `settings_factory_reset`,
+  `settings_manifest_sync/load`.
 - Зависимости: `nvs_flash`, `esp_timer`. Задачи: нет (синхронно).
 
 ### storage (`components/storage`)
 - Файлы: `src/storage.c`, `include/storage.h`.
 - Роль: регистрация внешней SPI-NOR как `ext_userdata`, LittleFS-монтирование в
-  `/userdata`, фолбэк на внутренний раздел, форматирование, бенчмарк,
-  `storage_get_free_bytes()`.
+  `/userdata`, форматирование, бенчмарк, `storage_get_free_bytes()`. Внутреннего
+  fallback нет: без внешней NOR `storage_mount()` возвращает ошибку, но не
+  фатален (`STORAGE_BACKEND_NONE`), звук просто отключён.
 - API: `storage_init/mount/format`, `storage_get_backend`, `storage_get_free_bytes`.
 - Зависимости: `spi_flash esp_partition esp_littlefs vfs driver nvs_flash pinmap esp_timer`.
 - Задачи: нет.
@@ -383,10 +397,11 @@ firmware/
 - Задачи: **`prov_listen`**, стек 8192, prio 4.
 
 ### app_main (`main/app_main.c`)
-- Порядок старта: `pinmap_validate` → `motor_boot_safe` → `storage_init/mount` →
-  `settings_init` → `provision_try` → `motor_init` → `audio_init` → `dcc_init` +
-  регистрация колбэков → `web_init` → восстановление списка треков из файлов →
-  `track_init` → задача `safety` → `provision_listener_start`.
+- Порядок старта: `pinmap_validate` → `motor_boot_safe` → `storage_init/mount`
+  (не фатально: без внешней NOR звук отключён) → `settings_init` → `provision_try` →
+  `motor_init` → `audio_init` → `dcc_init` + регистрация колбэков → `web_init` →
+  восстановление метаданных (манифест, иначе из имён файлов) → `track_init` →
+  задача `safety` → `provision_listener_start`.
 - Колбэки DCC: скорость → `motor_set_speed` + `web_motion_changed`; функции →
   `web_apply_function`; CV write/read → `settings_cv_*`; reset → `motor_stop` +
   гашение функций. В режиме «Веб» колбэки скорости/функций игнорируются.
@@ -499,7 +514,7 @@ flowchart TD
 | 3 / 4 | 0 | разгон / торможение (0 = мгновенно) |
 | 5 | 255 | Vhigh (~100 % ШИМ на 126) |
 | 6 | 128 | Vmid (50 % на 63) |
-| 7 | 6 | версия декодера (совпадает с `version.txt`) |
+| 7 | 7 | версия декодера (совпадает с `version.txt`) |
 | 8 | 0 | производитель; запись 8 = CV factory reset |
 | 11 | 0 | таймаут DCC-пакетов (×20 мс, 0=выкл) |
 | 17/18 | 0 | длинный адрес |
@@ -639,9 +654,17 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
   Скрипт: `provision_sounds.ps1`, обёртка `flash_firmware_and_sounds.bat`.
 - **OTA**: `POST /api/ota/update`. Поддерживается составной контейнер
   (`AURAOTA2`: заголовок + прошивка + список файлов) — прошивка и звуки одним
-  файлом (`build_ota_with_sounds.ps1`).
-- Восстановление списка треков: если NVS пуст, но WAV на месте — список
-  пересобирается из файлов (`recover_tracks_from_storage`).
+  файлом (`build_ota_with_sounds.ps1`). Размер одного аплоада ≤ 8 МБ.
+- **Восстановление метаданных** (`recover_tracks_from_storage`, `app_main.c`):
+  если NVS пуст, сначала читается **манифест** `/userdata/audio/tracks.txt`
+  (имена, категории, карта F↔AUX); если его нет — список пересобирается из имён
+  файлов (`slotN.wav` → «Слот N»).
+- Манифест пишется автоматически из `settings_tracks/cats/func_map_save`
+  (`components/settings/src/track_manifest.c`) — при провижининге, веб-загрузке,
+  OTA+звуки и смене категорий/карты.
+
+> Таблицу разделов по OTA обновить нельзя — она прошивается только по USB
+> (`flash_firmware.bat`); см. §18.
 
 ---
 
@@ -663,22 +686,23 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 ## 17. Использование ресурсов
 
-### 17.1 Сводка (сборка release, `pio run`)
+### 17.1 Сводка (сборка release, `pio run`, версия 0.7)
 
 | Ресурс | Занято | Всего | % |
 |---|---|---|---|
-| RAM (DRAM) | 49 708 Б | 327 680 Б | 15.2 % |
-| Flash (образ приложения) | 834 709 Б | 917 504 Б (слот `ota_0`/`ota_1`) | 91.0 % |
-| Свободно в слоте приложения | ~83 КБ | | |
+| RAM (DRAM, статически) | 50 392 Б | 327 680 Б | 15.4 % |
+| Flash (образ приложения) | 816 688 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 41.5 % |
+| Свободно в слоте приложения | ~1.1 МБ | | |
 
-> Flash уже на 91 % — при добавлении кода держите в уме остаток ~80 КБ;
-> веб-страница (`web_ui.html`) лежит в rodata и весит ~56 КБ.
+> Запас в OTA-слоте большой (~1.1 МБ), поэтому рост кода не критичен. Дополнительно
+> доступна **PSRAM 2 МБ** как heap. Веб-страница (`web_ui.html`) лежит в rodata и
+> весит ~60 КБ.
 
-Размеры ELF-секций (xtensa size): `text` ≈ 630 КБ, `data` ≈ 215 КБ,
-`bss` — см. .map.
+Размеры ELF-секций (xtensa size) и разбивку по компонентам смотрите в актуальном
+`.map` после сборки (`pio run -t size`).
 
-### 17.2 Flash по компонентам (из `soft_decoder_v3.map`, без выброшенных
-`--gc-sections` секций; сумма ≈ размер образа)
+### 17.2 Flash по компонентам (из `soft_decoder_v3.map`; порядок величин —
+снято на сборке ~0.6, точные цифры — в актуальном `.map`)
 
 | Компонент | Flash, Б | Комментарий |
 |---|---|---|
@@ -707,8 +731,9 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | **pinmap** | 363 | карта выводов |
 
 Собственно «наш» код (web, provision, motor, settings, main, dcc, audio,
-storage, auxio, track, pinmap) занимает примерно **120 КБ** flash из 835 КБ;
-остальное — ESP-IDF (Wi-Fi/lwIP/LittleFS/toolchain).
+storage, auxio, track, pinmap) занимает примерно **120 КБ** flash из ~816 КБ;
+остальное — ESP-IDF (Wi-Fi/lwIP/LittleFS/toolchain). После 0.7 добавился
+`esp_psram`, из lwIP ушёл IPv6, из libm — `powf`.
 
 ### 17.3 RAM
 
@@ -749,10 +774,15 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 
 **Ограничения/риски:**
 
-- Flash 91 % — запас ~80 КБ.
-- PSRAM не включена; крупные буферы только в DRAM.
+- Flash занят ~41 % (запас в OTA-слоте ~1.1 МБ) — рост кода не критичен.
+- **PSRAM включена** (2 МБ heap); крупные буферы могут уходить в неё, но не все
+  (DMA-совместимость, `SPIRAM_MALLOC_ALWAYSINTERNAL`).
 - Внешняя NOR не форматируется автоматически — при повреждении FS нужен
-  провижининг/явный `storage_format()`.
+  провижининг/явный `storage_format()`; без неё звук отключён (fallback нет).
+- **Смена таблицы разделов** (размеры/смещения `nvs`/`ota`/`coredump`) выполняется
+  только по USB — OTA её не обновляет. Обычная прошивка по USB (`pio run -t
+  upload`) таблицу перезапишет; полная очистка (`erase`) нужна лишь раз при
+  переходе со старой разметки.
 - Wi-Fi — только SoftAP (STA/APSTA игнорируются), power management выключен.
 - DCC ISR level-3 на CPU1 — при переносе задач с ядра 1 возможны конфликты по
   приоритету/латентности.

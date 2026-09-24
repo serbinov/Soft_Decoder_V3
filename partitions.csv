@@ -2,9 +2,9 @@
 # No internal userdata/fallback: sound files live only on the external W25Q128.
 # If that chip is absent/fails, the device keeps working with sound disabled.
 # Name,      Type, SubType,  Offset,   Size,     Flags
-nvs,         data, nvs,      0x009000, 0x006000,
-phy_init,    data, phy,      0x00f000, 0x001000,
-otadata,     data, ota,      0x010000, 0x002000,
+nvs,         data, nvs,      0x009000, 0x010000,
+phy_init,    data, phy,      0x019000, 0x001000,
+otadata,     data, ota,      0x01a000, 0x002000,
 ota_0,       app,  ota_0,    0x020000, 0x1e0000,
 ota_1,       app,  ota_1,    0x200000, 0x1e0000,
 coredump,    data, coredump, 0x3e0000, 0x020000,

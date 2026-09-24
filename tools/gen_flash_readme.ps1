@@ -35,6 +35,10 @@ Get-Content -LiteralPath $Csv | ForEach-Object {
 $totalKiB = ($rows | Measure-Object -Property SizeKiB -Sum).Sum
 $fw = $rows | Where-Object { $_.Sub -eq "ota_0" } | Select-Object -First 1
 $fwOffset = if ($fw) { $fw.Offset } else { "0x20000" }
+$phy = $rows | Where-Object { $_.Sub -eq "phy" } | Select-Object -First 1
+$phyOffset = if ($phy) { $phy.Offset } else { "0x00f000" }
+$ota = $rows | Where-Object { $_.Sub -eq "ota" } | Select-Object -First 1
+$otaOffset = if ($ota) { $ota.Offset } else { "0x10000" }
 
 $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine("================================================================")
@@ -51,7 +55,7 @@ $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine("  ---------------------  --------")
 [void]$sb.AppendLine("  bootloader.bin         0x0000")
 [void]$sb.AppendLine("  partitions.bin         0x8000")
-[void]$sb.AppendLine("  ota_data_initial.bin   0x10000")
+[void]$sb.AppendLine(("  ota_data_initial.bin   {0}" -f $otaOffset))
 [void]$sb.AppendLine(("  firmware.bin           {0}   (слот ota_0)" -f $fwOffset))
 [void]$sb.AppendLine("")
 [void]$sb.AppendLine("Настройки в Flash Download Tool:")
@@ -82,7 +86,7 @@ foreach ($r in $rows) {
 [void]$sb.AppendLine("  * Перед записью на плату с ПРЕЖНЕЙ разметкой обязательно выполните ERASE")
 [void]$sb.AppendLine("    (полная очистка flash): таблица разделов изменилась, и старая область")
 [void]$sb.AppendLine("    userdata (0x1f0000) теперь попадает внутрь нового слота ota_1.")
-[void]$sb.AppendLine("  * phy_init (0x00f000) не загружается: RF-калибровка генерируется прошивкой.")
+[void]$sb.AppendLine(("  * phy_init ({0}) не загружается: RF-калибровка генерируется прошивкой." -f $phyOffset))
 [void]$sb.AppendLine("  * ota_data_initial.bin сбрасывает выбор загрузки на ota_0.")
 [void]$sb.AppendLine("  * После прошивки нажмите START; по завершении плата перезагрузится.")
 [void]$sb.AppendLine("")

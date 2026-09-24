@@ -45,7 +45,7 @@ echo.
 echo [OK] Files written to %DST%:
 echo   bootloader.bin        @ 0x00000
 echo   partitions.bin        @ 0x08000
-echo   ota_data_initial.bin  @ 0x10000
+echo   ota_data_initial.bin  @ otadata offset (see README.txt)
 echo   firmware.bin          @ ota_0 offset (see README.txt)
 echo.
 echo Offsets and the current partition table: %DST%\README.txt

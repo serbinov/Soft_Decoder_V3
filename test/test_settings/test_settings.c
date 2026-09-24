@@ -53,7 +53,7 @@ static void test_defaults(void)
     TEST_ASSERT_EQUAL_UINT8(0, s_cv[2]);           /* Vstart (slow low steps) */
     TEST_ASSERT_EQUAL_UINT8(255, s_cv[5]);         /* Vhigh = full */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[6]);         /* Vmid = half */
-    TEST_ASSERT_EQUAL_UINT8(6, s_cv[7]);           /* decoder version = version.txt */
+    TEST_ASSERT_EQUAL_UINT8(7, s_cv[7]);           /* decoder version = version.txt */
     TEST_ASSERT_EQUAL_UINT8(0, s_cv[8]);           /* manufacturer (read-only) */
     TEST_ASSERT_EQUAL_UINT8(0x02, s_cv[29]);       /* 28 steps, DCC */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[54]);
@@ -111,7 +111,7 @@ static void test_cv7_readonly(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_write(7, 5));
     uint8_t v = 0;
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(7, &v));
-    TEST_ASSERT_EQUAL_UINT8(6, v); /* unchanged default */
+    TEST_ASSERT_EQUAL_UINT8(7, v); /* unchanged default */
 }
 
 static void test_cv8_not_factory_reset(void)

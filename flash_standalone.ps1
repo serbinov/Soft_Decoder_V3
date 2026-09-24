@@ -373,10 +373,31 @@ try {
         try { Erase-Chip $sp } catch { Write-Warn "chip erase skipped: $($_.Exception.Message)" }
     }
 
-    Flash-Image $sp $bootloader 0x0       "bootloader"
-    Flash-Image $sp $partitions 0x8000    "partitions"
-    Flash-Image $sp $ota       0x10000    "ota_data"
-    Flash-Image $sp $firmware  0x20000    "firmware"
+    # bootloader/partitions offsets are fixed by ESP-IDF; the ota_data and app
+    # offsets depend on the partition table, so read them from partitions.csv
+    # (fall back to known-good values if the file is missing).
+    $bootOffset = [uint32]0x0
+    $partOffset = [uint32]0x8000
+    $fwOffset   = [uint32]0x20000
+    $otaOffset  = [uint32]0x1a000
+    $csv = Join-Path $PSScriptRoot "partitions.csv"
+    if (Test-Path -LiteralPath $csv) {
+        foreach ($line in (Get-Content -LiteralPath $csv)) {
+            $t = $line.Trim()
+            if ($t -eq "" -or $t.StartsWith("#")) { continue }
+            $c = @($t.Split(",") | ForEach-Object { $_.Trim() })
+            if ($c.Count -lt 5) { continue }
+            if ($c[2] -eq "ota_0") { $fwOffset  = [uint32][Convert]::ToInt64($c[3], 16) }
+            elseif ($c[2] -eq "ota") { $otaOffset = [uint32][Convert]::ToInt64($c[3], 16) }
+        }
+    } else {
+        Write-Warn "partitions.csv not found; using default flash offsets"
+    }
+
+    Flash-Image $sp $bootloader $bootOffset "bootloader"
+    Flash-Image $sp $partitions $partOffset "partitions"
+    Flash-Image $sp $ota        $otaOffset  "ota_data"
+    Flash-Image $sp $firmware   $fwOffset   "firmware"
 
     # FLASH_END reboot: <I 0>
     Write-Info "rebooting chip..."

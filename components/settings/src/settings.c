@@ -41,7 +41,7 @@ static void cv_set_defaults(void)
     s_cv[2] = 0;      /* Vstart: 0 at step 1 so the lowest steps creep slowly */
     s_cv[5] = 255;    /* Vhigh: full PWM at step 126 */
     s_cv[6] = 128;    /* Vmid: half PWM at step 63 (linear 0..max curve) */
-    s_cv[7] = 6;      /* decoder version (minor, matches version.txt) */
+    s_cv[7] = 7;      /* decoder version (minor, matches version.txt) */
     s_cv[8] = 0;      /* manufacturer (read-only) */
     s_cv[29] = 0x02;  /* 28 speed steps, DCC (analog DC off by default) */
     s_cv[54] = 128;   /* BEMF Kp (~1.05) */

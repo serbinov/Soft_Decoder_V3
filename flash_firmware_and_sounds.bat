@@ -9,7 +9,16 @@ if not exist "%PIO%" (
     exit /b 1
 )
 
-set "PORT=%~1"
+rem Usage: flash_firmware_and_sounds.bat [COMx] [erase]
+rem   erase  = full internal-chip erase first (wipes NVS: settings, CVs,
+rem            sound labels, Wi-Fi). Use once when migrating an old layout.
+rem   no arg = keep internal NVS/settings.
+rem Sounds on the external W25Q128 are always (re)written by this script.
+set "PORT="
+set "DO_ERASE=0"
+for %%a in (%*) do (
+    if /I "%%a"=="erase" (set "DO_ERASE=1") else (set "PORT=%%a")
+)
 if not "%PORT%"=="" goto :port_ok
 
 rem Auto-detect the Espressif USB-Serial-JTAG port (VID_303A/PID_1001).
@@ -24,10 +33,18 @@ set "PORT=COM3"
 
 echo ================================================================
 echo  Flash firmware + write sounds to the external flash (%PORT%)
-echo  (full flash erase, then bootloader + partition table + ota_data + app)
-echo  WARNING: internal flash and the external flash will be erased.
+if "%DO_ERASE%"=="1" (
+    echo  MODE: internal full erase ^(NVS/settings cleared^)
+) else (
+    echo  MODE: keep internal settings ^(NVS preserved^)
+)
+echo  External flash ^(W25Q128/sounds^) is always re-written.
 echo ================================================================
 
+if "%DO_ERASE%"=="1" goto :do_erase
+goto :flash
+
+:do_erase
 echo [1/3] Erasing internal flash (NVS/settings will be cleared)...
 "%PIO%" run -e esp32-s3-devkitc-1 -t erase --upload-port %PORT%
 if errorlevel 1 (
@@ -36,7 +53,9 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+goto :flash
 
+:flash
 echo [2/3] Writing firmware...
 "%PIO%" run -e esp32-s3-devkitc-1 -t upload --upload-port %PORT%
 if errorlevel 1 (
@@ -47,7 +66,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [OK] Firmware flashed. Uploading sounds (keep the board connected)...
+echo [3/3] Uploading sounds (keep the board connected)...
 powershell -ExecutionPolicy Bypass -File "%~dp0provision_sounds.ps1" -Port %PORT%
 if errorlevel 1 (
     echo.

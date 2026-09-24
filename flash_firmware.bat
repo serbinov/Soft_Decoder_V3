@@ -9,7 +9,15 @@ if not exist "%PIO%" (
     exit /b 1
 )
 
-set "PORT=%~1"
+rem Usage: flash_firmware.bat [COMx] [erase]
+rem   erase  = full chip erase first (wipes NVS: settings, CVs, sound labels,
+rem            Wi-Fi). Use it once when migrating an old partition layout.
+rem   no arg = keep NVS/settings; just write bootloader + partitions + app.
+set "PORT="
+set "DO_ERASE=0"
+for %%a in (%*) do (
+    if /I "%%a"=="erase" (set "DO_ERASE=1") else (set "PORT=%%a")
+)
 if not "%PORT%"=="" goto :port_ok
 
 rem Auto-detect the Espressif USB-Serial-JTAG port (VID_303A/PID_1001).
@@ -24,9 +32,18 @@ set "PORT=COM3"
 
 echo ================================================
 echo  Flash ADDITIPUS AURA-X decoder via %PORT%
-echo  (full flash erase, then bootloader + partition table + ota_data + app)
+if "%DO_ERASE%"=="1" (
+    echo  MODE: full chip erase, NVS/settings WILL be cleared
+) else (
+    echo  MODE: keep settings, NVS/settings preserved
+)
+echo  (bootloader + partition table + ota_data + app)
 echo ================================================
 
+if "%DO_ERASE%"=="1" goto :do_erase
+goto :flash
+
+:do_erase
 echo [1/2] Erasing flash (NVS/settings will be cleared)...
 "%PIO%" run -e esp32-s3-devkitc-1 -t erase --upload-port %PORT%
 if errorlevel 1 (
@@ -35,8 +52,10 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+goto :flash
 
-echo [2/2] Writing firmware...
+:flash
+echo Writing firmware...
 "%PIO%" run -e esp32-s3-devkitc-1 -t upload --upload-port %PORT%
 
 if errorlevel 1 (

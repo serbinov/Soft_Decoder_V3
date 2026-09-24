@@ -75,7 +75,7 @@ static bool s_motion_initialized;
  * CV writes, ...). The page polls /api/log and appends new entries, so the
  * journal shows everything that drives an output, not just web clicks. */
 #define WEB_EVLOG_MAX      40
-#define WEB_EVLOG_TAG_MAX  12
+#define WEB_EVLOG_TAG_MAX  24
 #define WEB_EVLOG_TEXT_MAX 96
 
 typedef struct {
@@ -89,6 +89,29 @@ static uint32_t s_evlog_head;
 static uint32_t s_evlog_seq;
 static SemaphoreHandle_t s_evlog_mutex;
 
+/* Largest length <= n that does not cut a UTF-8 character in half. Prevents
+ * the journal from showing a broken glyph when a tag/text is truncated. */
+static size_t utf8_safe_len(const char *s, size_t n)
+{
+    size_t i = 0;
+    while (i < n) {
+        unsigned char c = (unsigned char)s[i];
+        size_t clen = 1;
+        if ((c & 0xE0U) == 0xC0U) {
+            clen = 2;
+        } else if ((c & 0xF0U) == 0xE0U) {
+            clen = 3;
+        } else if ((c & 0xF8U) == 0xF0U) {
+            clen = 4;
+        }
+        if (i + clen > n) {
+            break;
+        }
+        i += clen;
+    }
+    return i;
+}
+
 void web_log_event(const char *tag, const char *fmt, ...)
 {
     if (s_evlog_mutex == NULL) {
@@ -101,8 +124,11 @@ void web_log_event(const char *tag, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(ev.text, sizeof(ev.text), fmt, ap);
     va_end(ap);
+    ev.text[utf8_safe_len(ev.text, strlen(ev.text))] = '\0';
     if (tag != NULL) {
-        strncpy(ev.tag, tag, sizeof(ev.tag) - 1U);
+        size_t tn = utf8_safe_len(tag, sizeof(ev.tag) - 1U);
+        memcpy(ev.tag, tag, tn);
+        ev.tag[tn] = '\0';
     }
     (void)xSemaphoreTake(s_evlog_mutex, portMAX_DELAY);
     s_evlog_seq++;

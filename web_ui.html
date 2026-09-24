@@ -518,7 +518,7 @@ async function setControlSource(src){
     var d=await api('/api/control/source?source='+src,{method:'POST'});
     if(!d||!d.ok)throw new Error('не удалось');
     state.control_source=d.source||src;
-    log('Управление','источник: '+(state.control_source==='web'?'Веб':'Рельсы')+' (мотор остановлен)');
+    log('Управление','источник: '+(state.control_source==='web'?'Веб':'Рельсы')+(state.motor.speed>0?' (мотор остановлен)':''));
   }catch(e){log('Управление','ошибка: '+e.message);}
   renderControlSource();
 }

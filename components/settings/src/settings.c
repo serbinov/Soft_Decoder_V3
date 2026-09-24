@@ -340,6 +340,9 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
         err = nvs_commit(s_h);
     }
     xSemaphoreGive(s_lock);
+    if (err == ESP_OK) {
+        settings_manifest_sync();
+    }
     return err;
 }
 
@@ -374,6 +377,9 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count)
         err = nvs_commit(s_h);
     }
     xSemaphoreGive(s_lock);
+    if (err == ESP_OK) {
+        settings_manifest_sync();
+    }
     return err;
 }
 
@@ -421,6 +427,9 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
         err = nvs_commit(s_h);
     }
     xSemaphoreGive(s_lock);
+    if (err == ESP_OK) {
+        settings_manifest_sync();
+    }
     return err;
 }
 

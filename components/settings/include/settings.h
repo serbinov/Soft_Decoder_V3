@@ -127,6 +127,14 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count);
 esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count);
 esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count);
 
+/* Metadata manifest stored next to the sounds on the external storage
+ * (/userdata/audio/tracks.txt). It survives a full NVS reset, so the track
+ * names, categories and function map come back even after a chip erase.
+ * settings_manifest_sync() rewrites it whenever that metadata changes;
+ * settings_manifest_load() restores it (ESP_OK when tracks were restored). */
+void settings_manifest_sync(void);
+esp_err_t settings_manifest_load(void);
+
 /* Per-output PWM level and light effect (F0F, F0R, AUX1..AUX7). */
 #define SETTINGS_AUX_COUNT 9
 typedef struct {

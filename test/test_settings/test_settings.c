@@ -15,6 +15,11 @@
 /* Host stubs for ESP-IDF services (nvs, freertos, ...). */
 #include "../../test_libs/teststubs/stubs.c"
 
+/* settings.c calls the metadata-manifest sync on every save; the host build has
+ * no VFS, so provide no-op stubs (the manifest itself is not under test here). */
+void settings_manifest_sync(void) { }
+esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
+
 void setUp(void)
 {
     mock_nvs_reset();

@@ -229,7 +229,17 @@ static void recover_tracks_from_storage(void)
     }
 
     if (lerr == ESP_OK && count > 0) {
-        web_log_event("Звуки", "список в NVS уже есть (%u слотов)", (unsigned)count);
+        ESP_LOGI(TAG, "track list present in NVS (%u slots)", (unsigned)count);
+        return;
+    }
+    /* NVS track list is gone (e.g. a full chip erase) but the sounds survived:
+     * restore the full metadata (names, categories, function map) from the
+     * manifest on the external storage before falling back to file names. */
+    if (settings_manifest_load() == ESP_OK) {
+        size_t rc = 0;
+        (void)settings_tracks_load(existing, &rc);
+        web_log_event("Звуки", "метаданные восстановлены из манифеста (%u слотов)",
+                      (unsigned)rc);
         return;
     }
     if (nf == 0) {

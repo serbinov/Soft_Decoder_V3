@@ -1,0 +1,1401 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ADDITIPUS AURA-X · v__VERSION__</title>
+<style>
+:root{--bg:#0f1115;--panel:#14171d;--panel2:#12161d;--text:#ffffff;--muted:#ffffff;--good:#8bd18b;--warn:#e0be63;--bad:#e07070;--line:#2a2d34;--accent:#3a6bb5;--accent2:#243041;--input:#101319}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;background:var(--bg);color:var(--text)}
+button,input,select{font:inherit}
+button{cursor:pointer}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.shell{max-width:1080px;margin:0 auto;padding:10px 12px}
+
+.hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:#0d1018;border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+.brand{font-size:16px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
+.brand small{font-size:10px;color:var(--muted);font-weight:500;margin-left:6px}
+.conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex-shrink:0}
+.dot.ok{background:var(--good)}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+.panel h2{margin:0;padding:10px 12px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+.panel .bd{padding:10px 12px}
+.panel-hd{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
+.panel-hd h2{border-bottom:0;flex:1}
+.panel-hd .chev{color:var(--muted);font-size:11px;padding-right:12px;transition:transform .15s}
+.panel-hd.open .chev{transform:rotate(90deg)}
+
+.btn{border:1px solid var(--line);background:#1a1e26;color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;min-height:42px;touch-action:manipulation;user-select:none;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent2);border-color:var(--accent2);color:#f3f6fb;font-weight:700}
+.btn.bad,.btn.danger{border-color:#7b3030;color:var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.active{background:var(--good);border-color:var(--good);color:#0b0f0b;font-weight:700}
+.btn.sm{min-height:36px;padding:6px 10px;font-size:12px}
+.btn.ghost{background:#171b22}
+.btn.x{min-width:24px;min-height:24px;height:24px;padding:0;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;color:var(--bad);border-color:#7b3030;background:#171b22;margin-left:auto}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.field{display:flex;flex-direction:column;gap:4px}
+.field.grow{flex:1;min-width:0}
+.field label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+input[type=number],input[type=text],input[type=password],select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--text);width:100%;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+select{cursor:pointer}
+.muted{color:var(--muted)}
+.hint{font-size:12px;color:var(--muted)}
+
+.seg{display:flex;gap:6px;margin-bottom:8px}
+.seg .btn{flex:1}
+
+.speed-row{display:grid;grid-template-columns:70px 1fr 3.5em;gap:10px;align-items:center;margin-bottom:10px}
+.speed-row label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.speed-row .val{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;color:var(--good);text-align:right}
+.dir-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.fn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:7px}
+.fn-grid .btn{min-height:44px;font-size:12px;font-weight:700}
+
+.locked{opacity:.45}
+
+.vol{display:grid;grid-template-columns:70px 1fr 2.5em;gap:8px;align-items:center;margin-bottom:8px}
+.vol label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.vol .val{font-size:11px;font-family:ui-monospace,Consolas,monospace;color:var(--good);text-align:right}
+
+.s-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.slot{border:1px solid var(--line);border-radius:8px;background:var(--panel2);padding:8px;display:grid;gap:6px;min-width:0}
+.slot.playing{border-color:var(--good);box-shadow:0 0 0 1px rgba(139,209,139,.15) inset}
+.slot .head{display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0}
+.slot .idx{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.slot .name{display:block;font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.slot .name .ni{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.slot .file{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .acts{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.slot input[type=file]{display:none}
+.slot input[type=text]{flex:1;min-width:0;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--input);color:var(--text);font-size:12px}
+.up-bar{height:8px;border-radius:4px;background:var(--input);overflow:hidden;display:none}
+.up-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.up-meta{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;display:none}
+
+.cv-quick{display:grid;grid-template-columns:130px 130px auto auto auto auto;gap:8px;align-items:end;margin-bottom:10px}
+.cv-list{display:grid;gap:6px}
+.cv-card{border:1px solid var(--line);border-radius:8px;background:var(--panel2);padding:8px;display:grid;gap:6px}
+.cv-card.active{border-color:var(--accent)}
+.cv-card .head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.cv-card .name{font-size:13px;font-weight:700}
+.cv-card .idx{font-size:12px;color:var(--good);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.cv-card .desc{font-size:11px;color:var(--muted)}
+.cv-card .ctrl{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:end}
+.mini{display:flex;gap:6px;flex-wrap:wrap}
+
+.log{display:grid;gap:5px;margin-top:8px;max-height:200px;overflow-y:auto}
+.log-row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:6px 8px;border:1px solid #232730;border-radius:6px;background:#14181f;font-size:11px}
+
+.ota-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+.modal{position:fixed;left:0;right:0;top:0;bottom:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:60;padding:16px}
+.modal.show{display:flex}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.modal .msg{font-size:14px;margin-bottom:14px;white-space:pre-line}
+.modal .acts{display:flex;gap:8px;justify-content:flex-end}
+
+@media(max-width:760px){
+  .shell{padding:0 12px 10px}
+  .s-grid{grid-template-columns:1fr}
+  .cv-quick{grid-template-columns:1fr 1fr}
+  .fn-grid{grid-template-columns:repeat(auto-fill,minmax(72px,1fr))}
+}
+@media(max-width:600px){
+  .brand small{display:block;margin-left:0}
+}
+.fnmap-row{display:grid;grid-template-columns:14px 1fr 1fr 62px 58px;gap:5px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.fnmap-col{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fnmap-lbl{font-size:10px;color:var(--muted)}
+.fnmap-cbs{display:grid;gap:1px 6px;min-width:0}
+.fnmap-cbs.slots,.fnmap-cbs.outs{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fnmap-cbs.one{grid-template-columns:1fr}
+.cb{display:flex;align-items:center;gap:3px;font-size:11px;white-space:nowrap;min-width:0;overflow:hidden}
+.cb input{margin:0;width:12px;height:12px;flex:0 0 auto}
+.fnmap-fn{font-weight:600;font-size:12px;padding-top:12px}
+.auxpwm-row{display:grid;grid-template-columns:36px 70px 1fr;gap:6px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.auxpwm-row .num{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px;font-size:12px;text-align:center}
+.auxpwm-row .num:disabled{background:var(--panel2);color:var(--muted);opacity:.55}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="hd">
+    <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
+    <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Имя устройства</h2>
+    <div class="bd">
+      <div class="row">
+        <div class="field grow">
+          <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ">
+        </div>
+        <button class="btn primary" id="device_save" onclick="saveDeviceName()" style="display:none">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Управление через</h2>
+    <div class="bd">
+      <div class="seg">
+        <button class="btn" id="src_rails" onclick="setControlSource('rails')">Рельсы</button>
+        <button class="btn" id="src_web" onclick="setControlSource('web')">Веб</button>
+      </div>
+      <div class="row" style="margin-top:2px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+          <input type="checkbox" id="mode_dc" style="width:auto" onchange="toggleMode()">DC — аналоговое управление
+        </label>
+      </div>
+      <div class="hint" id="src_hint">Управление скоростью и функциями — с выбранного источника.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Управление</h2>
+    <div class="bd" id="control_body">
+      <div class="speed-row">
+        <label>Скорость</label>
+        <input type="range" id="speed" min="0" max="126" value="0" oninput="onSpeedInput()">
+        <span class="val" id="speed_v">0</span>
+      </div>
+      <div class="dir-row">
+        <button class="btn" id="btn_rev" onclick="setDir(false)">Назад</button>
+        <button class="btn danger" id="btn_stop" onclick="setStop()">Стоп</button>
+        <button class="btn" id="btn_fwd" onclick="setDir(true)">Вперёд</button>
+      </div>
+      <div class="fn-grid" id="fn_grid"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_bemf">
+    <div class="panel-hd" id="hd_bemf" onclick="togglePanel('bemf')">
+      <h2>Калибровка BEMF</h2>
+      <span class="chev" id="chev_bemf">▸</span>
+    </div>
+    <div class="bd" id="bd_bemf" style="display:none">
+      <div class="row" style="margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+          <input type="checkbox" id="bemf_use" style="width:auto" onchange="setBemfUse()">Использовать BEMF для двигателя
+        </label>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()">Калибровать</button>
+        <button class="btn danger" id="bemf_clear_btn" onclick="clearBemfCal()">Сброс</button>
+      </div>
+      <div class="muted" id="bemf_status">Статус: —</div>
+      <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
+      <div class="up-meta" id="bemf_meta"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_snd">
+    <div class="panel-hd" id="hd_snd" onclick="togglePanel('snd')">
+      <h2>Загрузка звуков</h2>
+      <span class="chev" id="chev_snd">▸</span>
+    </div>
+    <div class="bd" id="bd_snd" style="display:none">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <span class="chip" id="free_space">Свободно: —</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm ghost" onclick="loadTracks()">Обновить</button>
+          <button class="btn sm danger" onclick="stopAudio()">■ Стоп</button>
+        </div>
+      </div>
+      <div class="vol"><label>Общая</label><input type="range" min="0" max="100" value="20" id="vol_master" oninput="onVolInput('master')"><span class="val" id="vol_master_v">20</span></div>
+      <div class="vol"><label>Двигатель</label><input type="range" min="0" max="100" value="20" id="vol_engine" oninput="onVolInput('engine')"><span class="val" id="vol_engine_v">20</span></div>
+      <div class="vol"><label>Эффекты</label><input type="range" min="0" max="100" value="20" id="vol_effects" oninput="onVolInput('effects')"><span class="val" id="vol_effects_v">20</span></div>
+      <div class="s-grid" id="sound_grid" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_fnmap">
+    <div class="panel-hd" id="hd_fnmap" onclick="togglePanel('fnmap')">
+      <h2>Настройка функции F</h2>
+      <span class="chev" id="chev_fnmap">▸</span>
+    </div>
+    <div class="bd" id="bd_fnmap" style="display:none">
+      <div id="fnmap_rows"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_auxpwm">
+    <div class="panel-hd" id="hd_auxpwm" onclick="togglePanel('auxpwm')">
+      <h2>PWM и эффекты AUX</h2>
+      <span class="chev" id="chev_auxpwm">▸</span>
+    </div>
+    <div class="bd" id="bd_auxpwm" style="display:none">
+      <div id="auxpwm_rows"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_cv">
+    <div class="panel-hd" id="hd_cv" onclick="togglePanel('cv')">
+      <h2>CV</h2>
+      <span class="chev" id="chev_cv">▸</span>
+    </div>
+    <div class="bd" id="bd_cv" style="display:none">
+      <div class="cv-quick">
+        <div class="field"><label>Номер CV</label><input id="cv_quick_index" type="number" min="1" max="1024" value="1" oninput="jumpToCv()"></div>
+        <div class="field"><label>Значение</label><input id="cv_quick_value" type="number" min="0" max="255" value="0" oninput="setActiveValue(this.value)"></div>
+        <button class="btn sm ghost" onclick="stepCv(-1)">◀</button>
+        <button class="btn sm ghost" onclick="stepCv(1)">▶</button>
+        <button class="btn primary" onclick="writeActiveCv()">Записать</button>
+      </div>
+      <div class="muted" id="cv_active_name" style="margin-bottom:8px">CV 1</div>
+      <div class="cv-list" id="cv_list"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn danger" onclick="cvFactoryReset()">К заводским параметрам CV</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_wifi">
+    <div class="panel-hd" id="hd_wifi" onclick="togglePanel('wifi')">
+      <h2>Настройки WiFi</h2>
+      <span class="chev" id="chev_wifi">▸</span>
+    </div>
+    <div class="bd" id="bd_wifi" style="display:none">
+      <div class="field"><label>IP-адрес точки доступа</label><input id="wifi_ap_ip" type="text" inputmode="decimal" maxlength="15" placeholder="192.168.100.1"></div>
+      <div class="field"><label>Имя точки доступа (SSID)</label><input id="wifi_ap_ssid" type="text" maxlength="32"></div>
+      <div class="field"><label>Пароль точки доступа (≥8 символов, пусто = без пароля)</label><input id="wifi_ap_password" type="password" placeholder="пусто = без пароля"></div>
+      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_auto_off" style="width:auto">Автовыключение WiFi через 3 минуты без подключения</label></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" onclick="saveWifi()">Сохранить и перезагрузить</button>
+        <button class="btn danger" onclick="resetWifi()">Сброс настроек</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_ota">
+    <div class="panel-hd" id="hd_ota" onclick="togglePanel('ota')">
+      <h2>Обновление</h2>
+      <span class="chev" id="chev_ota">▸</span>
+    </div>
+    <div class="bd" id="bd_ota" style="display:none">
+      <div class="ota-row">
+        <label class="btn ghost" for="ota_file">Выбрать bin файл и прошить</label>
+        <input type="file" id="ota_file" accept=".bin" onchange="uploadOta(this)" style="display:none">
+        <span class="hint" id="ota_hint">Прошивка или комбинированный файл «прошивка + звуки»</span>
+      </div>
+      <div class="up-bar" id="ota_bar" style="margin-top:8px"><i id="otabar"></i></div>
+      <div class="up-meta" id="ota_meta"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_bemf_base">
+    <div class="panel-hd" id="hd_bemf_base" onclick="togglePanel('bemf_base')">
+      <h2>Базовые настройки</h2>
+      <span class="chev" id="chev_bemf_base">▸</span>
+    </div>
+    <div class="bd" id="bd_bemf_base" style="display:none">
+      <div class="row">
+        <button class="btn danger" id="factory_reset_btn" onclick="factoryReset()">Сброс к заводским</button>
+      </div>
+      <div class="hint" style="margin-top:6px">Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Журнал</h2>
+    <div class="bd">
+      <div class="row" style="justify-content:flex-end;margin-bottom:6px">
+        <button class="btn sm ghost" onclick="clearLog()">Очистить</button>
+      </div>
+      <div class="log" id="app_log"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="box">
+      <div class="msg" id="modal_msg"></div>
+      <div class="acts">
+        <button class="btn" id="modal_no" onclick="dlgAnswer(false)">Нет</button>
+        <button class="btn primary" id="modal_yes" onclick="dlgAnswer(true)">Да</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Report client-side JS errors to the board log so they are visible on the
+   serial console (the phone has no devtools here). */
+window.onerror=function(msg,src,line,col){
+  try{fetch('/api/clientlog?m='+encodeURIComponent(msg+' @'+line+':'+col));}catch(e){}
+};
+window.addEventListener('unhandledrejection',function(ev){
+  try{var r=ev&&ev.reason;fetch('/api/clientlog?m='+encodeURIComponent('promise: '+((r&&r.message)||r)));}catch(e){}
+});
+/* helpers */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});}
+function clamp(v,a,b){v=Number(v);if(isNaN(v))return a;return Math.max(a,Math.min(b,v));}
+function byId(id){return document.getElementById(id);}
+function setText(id,text){var el=byId(id);if(el)el.textContent=text;}
+function fmtTime(){return new Date().toLocaleTimeString();}
+/* Modal Да/Нет: Promise<boolean>, resolves true on "Да". */
+var dlgResolve=null;
+function confirmDialog(msg){
+  return new Promise(function(resolve){
+    dlgResolve=resolve;
+    byId('modal_msg').textContent=msg;
+    byId('modal').classList.add('show');
+  });
+}
+function dlgAnswer(ok){
+  byId('modal').classList.remove('show');
+  if(dlgResolve){var r=dlgResolve;dlgResolve=null;r(ok);}
+}
+
+/* journal */
+var isOffline=false;
+function log(title,msg){
+  if(isOffline)return;
+  var logEl=byId('app_log');if(!logEl)return;
+  var row=document.createElement('div');
+  row.className='log-row';
+  row.innerHTML='<div><strong>'+esc(title)+'</strong><div class="muted">'+esc(msg)+'</div></div><div class="muted">'+fmtTime()+'</div>';
+  logEl.prepend(row);
+  while(logEl.children.length>40){logEl.removeChild(logEl.lastChild);}
+}
+function clearLog(){var l=byId('app_log');if(l)l.innerHTML='';}
+
+/* connection: the page only loads when the link is up, so start online and
+   switch to offline only after several consecutive failed polls (a single
+   transient request failure during the initial connection churn must not
+   flash the red "Офлайн"). */
+var connFail=0;
+function setConnected(ok){
+  if(ok){
+    connFail=0;
+    isOffline=false;
+  }else{
+    connFail++;
+    isOffline=true;
+  }
+  if(ok||connFail>=3){
+    var dot=byId('link_dot');
+    if(dot)dot.classList.toggle('ok',ok);
+    setText('connection',ok?'Онлайн':'Офлайн');
+  }
+}
+
+/* api wrapper */
+async function api(path,opts){
+  var o=opts||{};
+  var timeout=(o.timeout==null)?10000:Number(o.timeout);
+  var ctrl=new AbortController();
+  var timer=null;
+  if(timeout>0)timer=setTimeout(function(){ctrl.abort();},timeout);
+  o=Object.assign({},o,{signal:ctrl.signal});
+  try{
+    var r=await fetch(path,o);
+    if(timer)clearTimeout(timer);
+    var ct=(r.headers.get('content-type')||'').toLowerCase();
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    if(ct.indexOf('json')<0)throw new Error('не JSON ('+(ct||'нет content-type')+')');
+    return await r.json();
+  }catch(e){
+    if(timer)clearTimeout(timer);
+    var kind=(e&&e.name==='AbortError')?('ТАЙМАУТ '+(timeout/1000)+' с')
+      :(e&&e.name==='TypeError')?'СЕТЬ (нет связи)'
+      :((e&&e.message)||String(e));
+    throw new Error(kind);
+  }
+}
+
+/* state */
+var SOUND_SLOTS=20;
+var state={
+  control_source:'rails',
+  mode:'dcc',
+  motor:{speed:0,forward:true},
+  fnStates:{},
+  audio:{playing:false,active_slot:0,master:20,engine:20,effects:20}
+};
+var tracks=[];
+var slotCats=[];
+var savedDeviceName='ТЕПЛОВОЗ';
+var volTimers={master:null,engine:null,effects:null};
+var speedTimer=null;
+var activeCv=1;
+var cvValues={};
+var statusTimer=null;
+var statusBusy=false;
+var lastSlotsSig='';
+var logSeq=0;
+
+/* status poll */
+async function refreshStatus(){
+  if(statusBusy)return;
+  statusBusy=true;
+  try{
+    var d=await api('/api/control/source');
+    if(d&&d.ok){
+      state.control_source=d.source||state.control_source;
+      setConnected(true);
+    }
+  }catch(e){setConnected(false);}
+  try{
+    var dm=await api('/api/mode');
+    if(dm&&dm.ok){
+      state.mode=dm.mode||state.mode;
+      renderMode();
+    }
+  }catch(e){}
+  try{
+    var d2=await api('/api/motor');
+    if(d2&&d2.ok){
+      state.motor.speed=Number(d2.speed)||0;
+      state.motor.forward=d2.forward===true||d2.forward==='true';
+      renderMotor();
+    }
+  }catch(e){}
+  try{
+    var d3=await api('/api/functions');
+    if(d3&&d3.ok&&d3.states){
+      for(var i=0;i<d3.states.length;i++)state.fnStates[i]=d3.states[i]===1;
+      renderFunctions();
+    }
+  }catch(e){}
+  try{
+    var d4=await api('/api/audio/status');
+    if(d4&&d4.ok)applyAudioStatus(d4);
+  }catch(e){}
+  try{
+    var dl=await api('/api/log?since='+logSeq,{timeout:8000});
+    if(dl&&dl.ok){
+      if(dl.entries){
+        for(var j=0;j<dl.entries.length;j++){
+          var ev=dl.entries[j];
+          log(ev.tag||'Событие',ev.text||'');
+        }
+      }
+      if(typeof dl.seq==='number')logSeq=dl.seq;
+    }
+  }catch(e){}
+  try{
+    renderControlSource();
+  }finally{
+    statusBusy=false;
+  }
+}
+function startStatusPoll(){if(statusTimer)clearInterval(statusTimer);statusTimer=setInterval(refreshStatus,3000);}
+function stopStatusPoll(){if(statusTimer)clearInterval(statusTimer);statusTimer=null;}
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden)stopStatusPoll();else{startStatusPoll();refreshStatus();}
+});
+
+function fmtBytes(n){
+  n=Number(n);
+  if(!isFinite(n)||n<0)return '—';
+  if(n>=1024*1024)return (n/(1024*1024)).toFixed(1)+' МБ';
+  if(n>=1024)return Math.round(n/1024)+' КБ';
+  return n+' Б';
+}
+/* Free space on the audio storage. Fetched on demand (panel open, after
+   upload/delete) instead of on the 3 s poll: the LittleFS free-size scan on
+   the external NOR takes ~100 ms. */
+async function loadFreeSpace(){
+  try{
+    var d=await api('/api/storage');
+    if(d&&d.ok)setText('free_space','Свободно: '+fmtBytes(d.free));
+  }catch(e){}
+}
+
+/* control source */
+async function setControlSource(src){
+  try{
+    var d=await api('/api/control/source?source='+src,{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    state.control_source=d.source||src;
+    log('Управление','источник: '+(state.control_source==='web'?'Веб':'Рельсы')+' (мотор остановлен)');
+  }catch(e){log('Управление','ошибка: '+e.message);}
+  renderControlSource();
+}
+function renderControlSource(){
+  var web=state.control_source==='web';
+  var sr=byId('src_rails'),sw=byId('src_web');
+  if(sr){sr.classList.toggle('active',!web);}
+  if(sw){sw.classList.toggle('active',web);}
+  setText('src_hint',web?'Управление мотором и функциями — с веб-интерфейса.':'Управление — с рельс. По умолчанию режим DCC; включите «DC», чтобы управлять от напряжения на рельсах.');
+  var body=byId('control_body');
+  if(body)body.classList.toggle('locked',!web);
+  var els=[byId('speed'),byId('btn_rev'),byId('btn_stop'),byId('btn_fwd')];
+  for(var i=0;i<els.length;i++){if(els[i])els[i].disabled=!web;}
+  var grid=byId('fn_grid');
+  if(grid){var btns=grid.querySelectorAll('button');for(var j=0;j<btns.length;j++)btns[j].disabled=!web;}
+  renderMode();
+}
+
+/* mode (DCC / DC) */
+async function setMode(mode){
+  try{
+    var d=await api('/api/mode?mode='+mode,{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    state.mode=d.mode||mode;
+    log('Режим','переключено: '+(state.mode==='dc'?'DC':'DCC'));
+  }catch(e){log('Режим','ошибка: '+e.message);}
+  renderMode();
+}
+function toggleMode(){
+  var cb=byId('mode_dc');
+  if(!cb||cb.disabled)return;
+  setMode(cb.checked?'dc':'dcc');
+}
+function renderMode(){
+  var cb=byId('mode_dc');
+  if(!cb)return;
+  var dc=state.mode==='dc';
+  if(document.activeElement!==cb)cb.checked=dc;
+  cb.disabled=state.control_source!=='rails';
+}
+
+/* bemf calibration */
+var bemfPollTimer=null;
+async function startBemfCal(){
+  try{
+    var d=await api('/api/bemf/calibrate?start=1',{method:'POST'});
+    if(!d||!d.ok){log('BEMF','калибровка: '+(d&&d.error?d.error:'не удалось'));loadBemfCal();return;}
+    log('BEMF','калибровка запущена, не трогайте мотор');
+    bemfStartPoll();
+  }catch(e){log('BEMF','калибровка: '+e.message);}
+}
+async function clearBemfCal(){
+  if(!confirm('Сбросить сохранённую калибровку BEMF?'))return;
+  try{
+    var d=await api('/api/bemf/calibrate?reset=1',{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    log('BEMF','калибровка сброшена');
+    loadBemfCal();
+  }catch(e){log('BEMF','сброс: '+e.message);}
+}
+function bemfStartPoll(){
+  if(bemfPollTimer)clearInterval(bemfPollTimer);
+  bemfPollTimer=setInterval(loadBemfCal,1000);
+  loadBemfCal();
+}
+async function loadBemfCal(){
+  try{
+    var d=await api('/api/bemf/cal');
+    if(!d||!d.ok)return;
+    var active=d.active===true||d.active==='true';
+    var bar=byId('bemf_bar'),barIn=byId('bemfbar');
+    if(active&&Number(d.total)>0){
+      bar.style.display='block';
+      barIn.style.width=Math.round((Number(d.progress)||0)/Number(d.total)*100)+'%';
+      setText('bemf_meta','Калибровка идёт, не трогайте мотор...');
+      setText('bemf_status','Калибровка: шаг '+(Number(d.progress)||0)+' из '+d.total);
+    }else{
+      bar.style.display='none';
+      setText('bemf_meta','');
+      setText('bemf_status',d.stored?'Калибровка сохранена':'Калибровка не выполнялась');
+    }
+    var useCb=byId('bemf_use');
+    if(useCb&&document.activeElement!==useCb&&typeof d.use!=='undefined'){
+      useCb.checked=(d.use===true||d.use==='true');
+    }
+    if(!active&&bemfPollTimer){clearInterval(bemfPollTimer);bemfPollTimer=null;}
+  }catch(e){}
+}
+async function setBemfUse(){
+  var cb=byId('bemf_use');if(!cb)return;
+  var on=cb.checked;
+  try{
+    var d=await api('/api/bemf/use?enabled='+(on?1:0),{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    log('BEMF',on?'регулятор включён':'регулятор выключен, движение только по ШИМ');
+  }catch(e){cb.checked=!on;log('BEMF','ошибка: '+e.message);}
+}
+
+/* After a save/reset the board reboots and its HTTP server disappears for a
+ * moment. Start the reload after `delayMs`, then poll until the board answers
+ * so the page actually comes back (a plain reload often lands on a server that
+ * is still booting). If the AP address changed, go to the new address. */
+function reloadAfterReboot(delayMs,newHost){
+  stopStatusPoll();
+  setTimeout(function(){
+    if(newHost&&newHost!==location.hostname){location.href='http://'+newHost+'/';return;}
+    var tries=0;
+    var t=setInterval(function(){
+      if(++tries>20){clearInterval(t);location.reload();return;}
+      fetch('/api/device',{cache:'no-store'})
+        .then(function(r){if(r&&r.ok){clearInterval(t);location.reload();}})
+        .catch(function(){});
+    },500);
+  },delayMs);
+}
+
+/* full factory reset */
+async function factoryReset(){
+  if(!confirm('Сбросить ВСЕ настройки устройства к заводским?\nБудут стёрты CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровка BEMF.\nЗвуковые файлы сохранятся.'))return;
+  try{
+    var d=await api('/api/reset',{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    log('Сброс','заводские настройки, перезагрузка...');
+    reloadAfterReboot(2000,null);
+  }catch(e){log('Сброс','ошибка: '+e.message);}
+}
+
+/* motor */
+function renderMotor(){
+  var el=byId('speed');
+  if(el&&document.activeElement!==el)el.value=state.motor.speed;
+  setText('speed_v',String(state.motor.speed));
+  var stopped=state.motor.speed===0;
+  var bf=byId('btn_fwd'),br=byId('btn_rev'),bs=byId('btn_stop');
+  if(bf)bf.classList.toggle('active',!stopped&&state.motor.forward);
+  if(br)br.classList.toggle('active',!stopped&&!state.motor.forward);
+  if(bs)bs.classList.toggle('active',stopped);
+}
+function onSpeedInput(){
+  var v=clamp(byId('speed').value,0,126);
+  setText('speed_v',String(v));
+  state.motor.speed=v;
+  renderMotor();
+  clearTimeout(speedTimer);
+  speedTimer=setTimeout(sendMotorSpeed,250);
+}
+function sendMotorSpeed(){
+  api('/api/motor?speed='+state.motor.speed+'&forward='+(state.motor.forward?1:0),{method:'POST'})
+    .catch(function(e){log('Мотор','ошибка: '+e.message);});
+}
+function setDir(fwd){
+  state.motor.forward=fwd;
+  api('/api/motor?forward='+(fwd?1:0)+'&speed='+state.motor.speed,{method:'POST'})
+    .then(function(d){if(d&&d.ok){state.motor.speed=Number(d.speed)||0;state.motor.forward=d.forward===true||d.forward==='true';renderMotor();}})
+    .catch(function(e){log('Мотор','ошибка: '+e.message);});
+}
+function setStop(){
+  api('/api/motor?speed=0',{method:'POST'})
+    .then(function(d){if(d&&d.ok){state.motor.speed=0;renderMotor();}})
+    .catch(function(e){log('Мотор','ошибка: '+e.message);});
+}
+
+/* functions — buttons come from the F map (no hard-coded bindings) */
+function renderFunctions(){
+  var host=byId('fn_grid');if(!host)return;
+  var html=[];
+  for(var f=0;f<=10;f++){
+    var on=!!state.fnStates[f];
+    html.push('<button class="btn'+(on?' active':'')+'" id="fn_'+f+'" onclick="toggleFn('+f+')">F'+f+'</button>');
+  }
+  host.innerHTML=html.join('');
+  renderControlSource();
+}
+function toggleFn(fn){
+  var next=!state.fnStates[fn];
+  state.fnStates[fn]=next;
+  renderFunctions();
+  api('/api/function?fn='+fn+'&state='+(next?1:0),{method:'POST'})
+    .then(function(d){
+      if(!d||!d.ok){state.fnStates[fn]=!next;renderFunctions();log('Функции','ошибка: '+(d&&d.error?d.error:'не удалось'));}
+    })
+    .catch(function(e){state.fnStates[fn]=!next;renderFunctions();log('Функции','ошибка: '+e.message);});
+}
+
+/* volume */
+function onVolInput(k){
+  var v=clamp(byId('vol_'+k).value,0,100);
+  setText('vol_'+k+'_v',String(v));
+  clearTimeout(volTimers[k]);
+  volTimers[k]=setTimeout(applyVolume,300);
+}
+async function applyVolume(){
+  var m=byId('vol_master').value,e=byId('vol_engine').value,f=byId('vol_effects').value;
+  try{
+    var d=await api('/api/audio/volume?master='+m+'&engine='+e+'&effects='+f,{method:'POST'});
+    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
+    state.audio.master=Number(m);state.audio.engine=Number(e);state.audio.effects=Number(f);
+  }catch(e){log('Звук','громкость: '+e.message);}
+}
+function applyAudioStatus(d){
+  state.audio.playing=d.playing===true||d.playing==='true';
+  state.audio.active_slot=Number(d.active_slot)||0;
+  state.audio.master=Number(d.master_volume);
+  state.audio.engine=Number(d.engine_volume);
+  state.audio.effects=Number(d.effects_volume);
+  renderVolumes();
+  renderSlots();
+}
+function renderVolumes(){
+  var keys=['master','engine','effects'];
+  for(var i=0;i<keys.length;i++){
+    var k=keys[i];
+    var el=byId('vol_'+k);
+    if(!el||document.activeElement===el)continue;
+    var v=clamp(state.audio[k],0,100);
+    el.value=v;
+    setText('vol_'+k+'_v',String(v));
+  }
+}
+/* Fetch the real volumes from the board at page load so the sliders are
+   never left showing stale values (e.g. after the board rebooted). */
+async function loadVolumes(){
+  try{
+    var d=await api('/api/audio/status');
+    if(d&&d.ok)applyAudioStatus(d);
+  }catch(e){}
+}
+
+/* sound slots */
+function slotsSig(){
+  var s='';
+  for(var i=0;i<tracks.length;i++){s+=tracks[i].slot+':'+tracks[i].label+':'+tracks[i].file+';';}
+  return s+'|'+state.audio.playing+'|'+state.audio.active_slot+'|'+slotCats.join(',');
+}
+function renderSlots(){
+  var sig=slotsSig();
+  if(sig===lastSlotsSig)return;
+  lastSlotsSig=sig;
+  var grid=byId('sound_grid');if(!grid)return;
+  var rows=[];
+  for(var s=1;s<=SOUND_SLOTS;s++){
+    var t=null;
+    for(var i=0;i<tracks.length;i++){if(tracks[i].slot===s){t=tracks[i];break;}}
+    var playing=state.audio.playing&&state.audio.active_slot===s;
+    var file=t?t.file:'';
+    var disp=(t&&t.label)?t.label:(file?file.replace(/^audio\//,'').replace(/\.wav$/i,''):'');
+    var isEngine=(slotCats[s-1]||0)===0;
+    rows.push('<div class="slot'+(playing?' playing':'')+'">'
+      +'<div class="head"><span class="idx">Слот '+s+'</span><span class="name"><span class="ni">'+esc(disp)+'</span></span></div>'
+      +'<div class="acts">'
+      +(playing?'<button class="btn sm danger" onclick="stopAudio()">■</button>':'<button class="btn sm primary" onclick="playSlot('+s+')">▶</button>')
+      +'<button class="btn sm '+(isEngine?'':'ghost')+'" title="'+(isEngine?'Двигатель (громкость «Двигатель»)':'Эффект (громкость «Эффекты»)')+'" onclick="toggleSlotCat('+s+')">'+(isEngine?'ДВ':'ЭФ')+'</button>'
+      +'<label class="btn sm ghost" for="file_'+s+'">Загрузить WAV</label>'
+      +'<input type="file" id="file_'+s+'" accept=".wav,audio/wav" onchange="uploadTrack('+s+',this)">'
+      +(t?'<button class="btn x" title="Удалить трек" onclick="deleteTrack('+s+')">✕</button>':'')
+      +'</div>'
+      +'<div class="up-bar" id="up_'+s+'"><i id="upbar_'+s+'"></i></div>'
+      +'<div class="up-meta" id="upmeta_'+s+'"></div>'
+      +'</div>');
+  }
+  grid.innerHTML=rows.join('');
+}
+async function loadTracks(){
+  try{
+    var d=await api('/api/audio/tracks');
+    if(!d||!d.ok)throw new Error('загрузка не удалась');
+    tracks=d.tracks||[];
+    if(d.cats&&d.cats.length)slotCats=d.cats;
+    log('Звук','треков получено: '+tracks.length);
+    renderSlots();
+  }catch(e){log('Звук','треки: '+e.message);}
+}
+async function toggleSlotCat(slot){
+  var cur=(slotCats[slot-1]||0);
+  var next=cur===0?1:0;
+  try{
+    var d=await api('/api/track/category?slot='+slot+'&cat='+next,{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    slotCats[slot-1]=next;
+    renderSlots();
+    log('Звук','слот '+slot+': '+(next===0?'двигатель':'эффекты'));
+  }catch(e){log('Звук','категория слота '+slot+': '+e.message);}
+}
+async function playSlot(s){
+  if(state.audio.playing&&state.audio.active_slot===s){stopAudio();return;}
+  try{
+    var d=await api('/api/audio/play?slot='+s,{method:'POST'});
+    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
+    log('Звук','Play #'+s+' запущен');
+    refreshStatus();
+  }catch(e){log('Звук','Play #'+s+': '+e.message);}
+}
+async function stopAudio(){
+  try{
+    var d=await api('/api/audio/stop',{method:'POST'});
+    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
+    log('Звук','остановлен');
+    refreshStatus();
+  }catch(e){log('Звук','Стоп: '+e.message);}
+}
+async function deleteTrack(slot){
+  if(!confirm('Удалить трек из слота '+slot+'? Файл будет удалён с платы.'))return;
+  try{
+    var d=await api('/api/audio/delete?slot='+slot,{method:'POST'});
+    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
+    log('Звук','трек слота #'+slot+' удалён');
+    var nt=[];
+    for(var i=0;i<tracks.length;i++){if(tracks[i].slot!==slot)nt.push(tracks[i]);}
+    tracks=nt;
+    renderSlots();
+    loadTracks();
+    loadFreeSpace();
+  }catch(e){log('Звук','удаление слота '+slot+': '+e.message);}
+}
+/* audio upload */
+var upPollTimer=null,upPollBusy=false,upServerOk=false,upStarted=0,upSlot=0,upOta=false;
+var uploadBusy=false;
+function stopUpPoll(){if(upPollTimer){clearInterval(upPollTimer);upPollTimer=null;}}
+function startUpPoll(){
+  stopUpPoll();upServerOk=false;
+  upPollTimer=setInterval(function(){
+    if(upPollBusy)return;
+    upPollBusy=true;
+    var ctrl=new AbortController();
+    var t=setTimeout(function(){ctrl.abort();},2000);
+    fetch('http://'+location.hostname+':81/progress',{cache:'no-store',signal:ctrl.signal})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        clearTimeout(t);
+        if(!d||!d.ok||!d.active||d.total<=0)return;
+        var pct=Math.round(d.received/d.total*100);
+        var sec=Math.max(0.1,(Date.now()-upStarted)/1000);
+        var speed=Math.round((d.received/1024)/sec);
+        if(upOta){
+          var ob=byId('otabar');
+          if(ob)ob.style.width=pct+'%';
+          setText('ota_meta','Записано: '+d.received+' из '+d.total+' Б · '+speed+' КБ/с');
+          upServerOk=true;
+        }else{
+          var barIn=byId('upbar_'+upSlot),meta=byId('upmeta_'+upSlot);
+          if(!barIn||!meta)return;
+          upServerOk=true;
+          barIn.style.width=pct+'%';
+          meta.textContent='Записано: '+d.received+' из '+d.total+' Б · '+speed+' КБ/с';
+        }
+      })
+      .catch(function(){clearTimeout(t);})
+      .then(function(){upPollBusy=false;});
+  },400);
+}
+function uploadTrack(slot,input){
+  var file=input.files&&input.files[0];
+  if(!file)return;
+  if(uploadBusy){log('Загрузка','уже идёт загрузка, подождите');input.value='';return;}
+  var label='Слот '+slot;
+  if(file.size>2*1024*1024){log('Звук','файл > 2 МБ: '+file.name);input.value='';return;}
+  uploadBusy=true;
+  var bar=byId('up_'+slot),barIn=byId('upbar_'+slot),meta=byId('upmeta_'+slot);
+  bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
+  meta.textContent='Записано: 0 из '+file.size+' Б · 0 КБ/с';
+  log('Загрузка','слот '+slot+': '+file.name+' ('+file.size+' Б)');
+  var started=Date.now();
+  stopStatusPoll();
+  upSlot=slot;upOta=false;upStarted=Date.now();startUpPoll();
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/api/audio/upload?slot='+slot+'&enabled=1',true);
+  xhr.setRequestHeader('X-File-Name',encodeURIComponent(file.name));
+  xhr.setRequestHeader('X-Label',encodeURIComponent(label));
+  function finishUp(){
+    uploadBusy=false;
+    stopUpPoll();
+    startStatusPoll();refreshStatus();
+    loadFreeSpace();
+  }
+  xhr.onload=function(){
+    var res=null;
+    try{res=JSON.parse(xhr.responseText);}catch(err){}
+    var ok=xhr.status===200&&res&&res.ok;
+    bar.style.display='none';meta.style.display='none';
+    finishUp();
+    if(ok){
+      log('Загрузка','ГОТОВО: '+file.name+' за '+Math.round((Date.now()-started)/1000)+' с');
+      input.value='';
+      var upFile=res&&res.file?res.file:('audio/'+file.name);
+      var upLabel=res&&res.label?res.label:label;
+      /* The server response is authoritative: drop any stale entry for this
+         slot (a leftover duplicate would keep the old name visible) and add
+         the fresh one, then re-sync with the board. */
+      var nt=[];
+      for(var i=0;i<tracks.length;i++){if(tracks[i].slot!==slot)nt.push(tracks[i]);}
+      nt.push({slot:slot,file:upFile,label:upLabel,enabled:true});
+      tracks=nt;
+      renderSlots();
+      loadTracks();
+    }else{
+      log('Загрузка','ОШИБКА: '+file.name+': '+(res&&res.error?res.error:('HTTP '+xhr.status)));
+      input.value='';
+    }
+  };
+  xhr.onerror=function(){
+    bar.style.display='none';meta.style.display='none';
+    finishUp();
+    log('Загрузка','ОШИБКА: '+file.name+': СЕТЬ (нет связи)');
+    input.value='';
+  };
+  xhr.send(file);
+}
+
+/* CV */
+var cvDB=[
+  {index:1,name:'Основной адрес',value:3,desc:'Короткий адрес локомотива (1..127)'},
+  {index:2,name:'Стартовая скорость',value:0,desc:'Уровень ШИМ на 1-й ступени (0..255)'},
+  {index:3,name:'Разгон',value:0,desc:'Время разгона 0..max, секунды (0=без инерции)'},
+  {index:4,name:'Торможение',value:0,desc:'Время торможения max..0, секунды (0=без инерции)'},
+  {index:5,name:'Максимальная скорость',value:255,desc:'Максимальный уровень ШИМ (255=полная)'},
+  {index:6,name:'Средняя скорость',value:128,desc:'Уровень ШИМ в середине кривой (по умолчанию 128 = половина)'},
+  {index:7,name:'Версия',value:1,desc:'Версия декодера (только чтение)'},
+  {index:8,name:'Производитель',value:0,desc:'Чтение: ID производителя. Запись значения 8 = сброс CV к заводским'},
+  {index:11,name:'Таймаут пакетов',value:0,desc:'Остановка при пропаже DCC-пакетов: значение x 20 мс (0=выкл)'},
+  {index:17,name:'Длинный адрес, старший байт',value:0,desc:'CV17 (действует при CV29 бит 5 = 1)'},
+  {index:18,name:'Длинный адрес, младший байт',value:0,desc:'CV18'},
+  {index:19,name:'Адрес состава',value:0,desc:'Адрес при движении в составе (1..127), бит 7 = реверс'},
+  {index:29,name:'Конфигурация (CV29)',value:2,desc:'Биты: 2=28/128 шагов, 4=DC, 16=таблица CV67..94, 32=длинный адрес'},
+  {index:54,name:'BEMF PID — Kp',value:128,desc:'Пропорциональный коэффициент регулятора BEMF (0=BEMF выкл, 255=максимум)'},
+  {index:55,name:'BEMF PID — Ki',value:60,desc:'Интегральный коэффициент регулятора BEMF'},
+  {index:56,name:'BEMF PID — Kd',value:32,desc:'Дифференциальный коэффициент регулятора BEMF'},
+  {index:65,name:'Кикстарт',value:0,desc:'Импульс ШИМ при трогании (0=выкл, 255=максимум)'}
+];
+for(var cvs=0;cvs<28;cvs++){cvDB.push({index:67+cvs,name:'Таблица скоростей CV'+(67+cvs),value:Math.round(cvs*255/27),desc:'Уровень ШИМ для внутренней ступени '+(cvs+1)+' из 28 (действует при CV29 бит 4 = 1)'});}
+var readOnlyCv={7:1};
+function cvByIndex(index){for(var i=0;i<cvDB.length;i++){if(cvDB[i].index===index)return cvDB[i];}return null;}
+function setActiveCaption(index){
+  var def=cvByIndex(index);
+  setText('cv_active_name',def?('CV '+index+' — '+def.name):('CV '+index));
+}
+function filteredCv(){
+  return cvDB;
+}
+function setActiveCv(index){
+  activeCv=clamp(Number(index)||1,1,1024);
+  byId('cv_quick_index').value=activeCv;
+  var f=byId('cv_value_'+activeCv);
+  byId('cv_quick_value').value=f?f.value:cvValueOf(activeCv);
+  setActiveCaption(activeCv);
+  var cards=document.querySelectorAll('.cv-card');
+  for(var i=0;i<cards.length;i++){
+    cards[i].classList.toggle('active',Number(cards[i].getAttribute('data-cv'))===activeCv);
+  }
+}
+function setActiveValue(v){var f=byId('cv_value_'+activeCv);if(f)f.value=v;}
+function stepCv(delta){
+  var rows=filteredCv();
+  if(!rows.length)return;
+  var pos=-1;
+  for(var i=0;i<rows.length;i++){if(rows[i].index===activeCv){pos=i;break;}}
+  if(pos<0)pos=0;
+  pos=pos+delta;
+  if(pos<0)pos=0;
+  if(pos>=rows.length)pos=rows.length-1;
+  setActiveCv(rows[pos].index);
+}
+function jumpToCv(){setActiveCv(Number(byId('cv_quick_index').value)||1);}
+function renderCvList(){
+  var list=byId('cv_list');
+  var rows=filteredCv();
+  if(!rows.length){list.innerHTML='<div class="muted">Ничего не найдено</div>';return;}
+  var html=[];
+  for(var i=0;i<rows.length;i++){
+    var cv=rows[i];
+    var ro=readOnlyCv[cv.index];
+    html.push('<div class="cv-card '+(cv.index===activeCv?'active':'')+'" data-cv="'+cv.index+'" onclick="setActiveCv('+cv.index+')">'
+      +'<div class="head"><div class="name">'+esc(cv.name)+'</div><div class="idx">CV '+cv.index+'</div></div>'
+      +'<div class="desc">'+esc(cv.desc)+'</div>'
+      +'<div class="ctrl">'
+      +'<input id="cv_value_'+cv.index+'" type="number" min="0" max="255" value="'+cvValueOf(cv.index)+'" onclick="event.stopPropagation()" oninput="if('+cv.index+'===activeCv)byId(\'cv_quick_value\').value=this.value">'
+      +(ro?'<button class="btn sm primary" disabled>Записать</button>':'<button class="btn sm primary" onclick="event.stopPropagation();writeCv('+cv.index+')">Записать</button>')
+      +'</div></div>');
+  }
+  list.innerHTML=html.join('');
+}
+function cvValueOf(index){
+  if(cvValues[index]!=null)return cvValues[index];
+  var def=cvByIndex(index);
+  return (def&&def.value!=null)?def.value:0;
+}
+async function loadCvValues(){
+  try{
+    var d=await api('/api/cv/all');
+    if(!d||!d.ok||!d.values)throw new Error('чтение не удалось');
+    cvValues={};
+    for(var i=0;i<d.values.length;i++){cvValues[i+1]=Number(d.values[i])||0;}
+    renderCvList();
+    var f=byId('cv_value_'+activeCv);
+    byId('cv_quick_value').value=f?f.value:cvValueOf(activeCv);
+  }catch(e){log('CV','значения: '+e.message);}
+}
+async function writeCv(index){
+  var target=Number(index)||activeCv;
+  if(readOnlyCv[target]){log('CV','CV '+target+' только чтение');return;}
+  var f=byId('cv_value_'+target);
+  var value=f?f.value:byId('cv_quick_value').value;
+  var oldv=(cvValues[target]!=null)?cvValues[target]:cvValueOf(target);
+  var msg='CV '+target+': было '+oldv+', станет '+Number(value)+'.\n\nЗаписать?';
+  if(target===8&&Number(value)===8)msg='ВНИМАНИЕ: запись CV8 = 8 сбросит ВСЕ CV к заводским.\n\n'+msg;
+  if(!await confirmDialog(msg))return;
+  try{
+    var d=await api('/api/cv/write?index='+target+'&value='+encodeURIComponent(value)+'&commit=1',{method:'POST'});
+    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'запись не удалась');
+    cvValues[target]=Number(value)||0;
+    var wf=byId('cv_value_'+target);
+    if(wf)wf.value=cvValues[target];
+    if(target===activeCv)byId('cv_quick_value').value=cvValues[target];
+    log('CV','Записать CV '+target+' = '+value+' OK');
+  }catch(e){log('CV','Записать CV '+target+': '+e.message);}
+}
+function writeActiveCv(){writeCv(activeCv);}
+async function cvFactoryReset(){
+  if(!await confirmDialog('Сбросить ВСЕ CV к заводским значениям (адрес, кривая скорости, BEMF, таймаут)? Настройки Wi-Fi и звуки сохранятся.'))return;
+  try{
+    var d=await api('/api/cv/write?index=8&value=8&commit=1',{method:'POST'});
+    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'не удалось');
+    log('CV','все CV сброшены к заводским');
+    await loadCvValues();
+  }catch(e){log('CV','сброс к заводским: '+e.message);}
+}
+
+/* F function mapping */
+var funcMap=[];
+var fnOutOpts=[{bit:0,t:'F0F'},{bit:1,t:'F0R'},{bit:2,t:'1'},{bit:3,t:'2'},{bit:4,t:'3'},{bit:5,t:'4'},{bit:6,t:'5'},{bit:7,t:'6'},{bit:8,t:'7'}];
+function dirChecks(fn,dir){
+  var f=(dir===1)?' checked':'';
+  var r=(dir===2)?' checked':'';
+  return '<label class="cb"><input type="checkbox" data-dir="1"'+f+' onclick="dirToggle('+fn+',this)">Впер.</label>'
+    +'<label class="cb"><input type="checkbox" data-dir="2"'+r+' onclick="dirToggle('+fn+',this)">Назад</label>';
+}
+function spdChecks(fn,spd){
+  var m=(spd===1)?' checked':'';
+  var s=(spd===2)?' checked':'';
+  return '<label class="cb"><input type="checkbox" data-spd="1"'+m+' onclick="spdToggle('+fn+',this)">Движ.</label>'
+    +'<label class="cb"><input type="checkbox" data-spd="2"'+s+' onclick="spdToggle('+fn+',this)">Стоп</label>';
+}
+function dirToggle(fn,cb){
+  var host=byId('fnmap_rows');if(!host)return;
+  var row=host.children[fn];if(!row)return;
+  var b=row.querySelectorAll('input[type=checkbox][data-dir]');
+  for(var i=0;i<b.length;i++){if(b[i]!==cb)b[i].checked=false;}
+  saveFuncMap(fn);
+}
+function spdToggle(fn,cb){
+  var host=byId('fnmap_rows');if(!host)return;
+  var row=host.children[fn];if(!row)return;
+  var b=row.querySelectorAll('input[type=checkbox][data-spd]');
+  for(var i=0;i<b.length;i++){if(b[i]!==cb)b[i].checked=false;}
+  saveFuncMap(fn);
+}
+function fnSlotChecks(fn,a,b){
+  var h='';
+  for(var s=1;s<=SOUND_SLOTS;s++){
+    var on=(a===s||b===s)?' checked':'';
+    h+='<label class="cb"><input type="checkbox" data-slot="'+s+'"'+on+' onclick="slotToggle('+fn+',this)">'+s+'</label>';
+  }
+  return h;
+}
+function fnOutChecks(fn,aux){
+  var h='';
+  for(var i=0;i<fnOutOpts.length;i++){
+    var on=(aux&(1<<fnOutOpts[i].bit))?' checked':'';
+    h+='<label class="cb"><input type="checkbox" data-bit="'+fnOutOpts[i].bit+'"'+on+' onclick="saveFuncMap('+fn+')">'+esc(fnOutOpts[i].t)+'</label>';
+  }
+  return h;
+}
+function renderFnMap(){
+  var host=byId('fnmap_rows');if(!host)return;
+  var rows=[];
+  for(var f=0;f<=10;f++){
+    var m=funcMap[f]||{a:0,b:0,aux:0,dir:0,speed:0};
+    rows.push('<div class="fnmap-row"><div class="fnmap-fn">F'+f+'</div>'
+      +'<div class="fnmap-col"><span class="fnmap-lbl">Звук</span><div class="fnmap-cbs slots">'+fnSlotChecks(f,m.a,m.b)+'</div></div>'
+      +'<div class="fnmap-col"><span class="fnmap-lbl">AUX</span><div class="fnmap-cbs outs">'+fnOutChecks(f,m.aux)+'</div></div>'
+      +'<div class="fnmap-col"><span class="fnmap-lbl">Напр.</span><div class="fnmap-cbs one">'+dirChecks(f,m.dir)+'</div></div>'
+      +'<div class="fnmap-col"><span class="fnmap-lbl">Ск.</span><div class="fnmap-cbs one">'+spdChecks(f,m.speed)+'</div></div>'
+      +'</div>');
+  }
+  host.innerHTML=rows.join('');
+}
+function slotToggle(fn,cb){
+  var host=byId('fnmap_rows');if(!host)return;
+  var row=host.children[fn];if(!row)return;
+  var boxes=row.querySelectorAll('input[type=checkbox][data-slot]');
+  var checked=[];
+  for(var i=0;i<boxes.length;i++){if(boxes[i].checked)checked.push(boxes[i]);}
+  for(var i=0;i<checked.length&&checked.length>2;i++){
+    if(checked[i]!==cb){checked[i].checked=false;checked.splice(i,1);i--;}
+  }
+  saveFuncMap(fn);
+}
+async function loadFuncMap(){
+  try{
+    var d=await api('/api/func-map');
+    if(!d||!d.ok||!d.map)throw new Error('не удалось');
+    funcMap=d.map;
+    renderFnMap();
+    renderFunctions();
+  }catch(e){log('Функции','настройка: '+e.message);}
+}
+async function saveFuncMap(fn){
+  var host=byId('fnmap_rows');if(!host)return;
+  var row=host.children[fn];if(!row)return;
+  var slots=[];
+  var sb=row.querySelectorAll('input[type=checkbox][data-slot]');
+  for(var i=0;i<sb.length;i++){if(sb[i].checked)slots.push(Number(sb[i].getAttribute('data-slot')));}
+  var a=slots[0]||0,b=slots[1]||0;
+  var aux=0;
+  var ob=row.querySelectorAll('input[type=checkbox][data-bit]');
+  for(var i=0;i<ob.length;i++){if(ob[i].checked)aux|=(1<<Number(ob[i].getAttribute('data-bit')));}
+  var dir=0,df=false,dr=false;
+  var db=row.querySelectorAll('input[type=checkbox][data-dir]');
+  for(var i=0;i<db.length;i++){if(db[i].checked){if(Number(db[i].getAttribute('data-dir'))===1)df=true;else dr=true;}}
+  if(df&&!dr)dir=1;else if(dr&&!df)dir=2;else dir=0;
+  var spd=0,mv=false,st=false;
+  var pb=row.querySelectorAll('input[type=checkbox][data-spd]');
+  for(var i=0;i<pb.length;i++){if(pb[i].checked){if(Number(pb[i].getAttribute('data-spd'))===1)mv=true;else st=true;}}
+  if(mv&&!st)spd=1;else if(st&&!mv)spd=2;else spd=0;
+  var q='/api/func-map?fn='+fn+'&a='+a+'&b='+b+'&aux='+aux+'&dir='+dir+'&speed='+spd;
+  try{
+    var d=await api(q,{method:'POST'});
+    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'не удалось');
+    funcMap[fn]={a:a,b:b,aux:aux,dir:dir,speed:spd};
+    renderFunctions();
+    log('Функции','F'+fn+' сохранено');
+  }catch(e){log('Функции','F'+fn+': '+e.message);}
+}
+
+/* AUX PWM / light effects */
+var auxCfg=[];
+var auxOutNames=['F0F','F0R','1','2','3','4','5','6','7'];
+var auxFxOpts=[{v:1,t:'Лампа'},{v:2,t:'Mars'},{v:3,t:'Ditch'},{v:4,t:'Маяк'},{v:5,t:'Строб'},{v:6,t:'Топка'}];
+function auxFxChecks(ch,eff){
+  var h='';
+  for(var i=0;i<auxFxOpts.length;i++){
+    var on=(eff===auxFxOpts[i].v)?' checked':'';
+    h+='<label class="cb"><input type="checkbox" data-fx="'+auxFxOpts[i].v+'"'+on+' onclick="auxFxToggle('+ch+',this)">'+esc(auxFxOpts[i].t)+'</label>';
+  }
+  return h;
+}
+function renderAuxPwm(){
+  var host=byId('auxpwm_rows');if(!host)return;
+  var rows=[];
+  for(var c=0;c<9;c++){
+    var m=auxCfg[c]||{level:100,effect:0};
+    rows.push('<div class="auxpwm-row"><div class="fnmap-fn">'+esc(auxOutNames[c])+'</div>'
+      +'<div class="fnmap-col"><span class="fnmap-lbl">% ШИМ</span><input class="num" type="number" min="0" max="100" value="'+m.level+'"'+(m.effect?' disabled':'')+' onchange="saveAuxPwm('+c+')"></div>'
+      +'<div class="fnmap-col"><span class="fnmap-lbl">Эффект</span><div class="fnmap-cbs outs">'+auxFxChecks(c,m.effect)+'</div></div>'
+      +'</div>');
+  }
+  host.innerHTML=rows.join('');
+}
+function auxFxToggle(ch,cb){
+  var host=byId('auxpwm_rows');if(!host)return;
+  var row=host.children[ch];if(!row)return;
+  var b=row.querySelectorAll('input[type=checkbox][data-fx]');
+  for(var i=0;i<b.length;i++){if(b[i]!==cb)b[i].checked=false;}
+  var fx=0;
+  for(var i=0;i<b.length;i++){if(b[i].checked){fx=Number(b[i].getAttribute('data-fx'));break;}}
+  var num=row.querySelector('input.num');
+  if(num)num.disabled=(fx!==0);
+  saveAuxPwm(ch);
+}
+async function loadAuxPwm(){
+  try{
+    var d=await api('/api/aux/cfg');
+    if(!d||!d.ok||!d.aux)throw new Error('не удалось');
+    auxCfg=d.aux;
+    renderAuxPwm();
+  }catch(e){log('AUX','PWM: '+e.message);}
+}
+async function saveAuxPwm(ch){
+  var host=byId('auxpwm_rows');if(!host)return;
+  var row=host.children[ch];if(!row)return;
+  var num=row.querySelector('input.num');
+  var level=num?clamp(Number(num.value)||0,0,100):0;
+  var fx=0;
+  var b=row.querySelectorAll('input[type=checkbox][data-fx]');
+  for(var i=0;i<b.length;i++){if(b[i].checked){fx=Number(b[i].getAttribute('data-fx'));break;}}
+  try{
+    var d=await api('/api/aux/cfg?ch='+ch+'&level='+level+'&effect='+fx,{method:'POST'});
+    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'не удалось');
+    auxCfg[ch]={level:level,effect:fx};
+    if(num)num.value=level;
+    log('AUX',auxOutNames[ch]+': '+level+'%, эффект '+(fx?fx:'нет'));
+  }catch(e){log('AUX',auxOutNames[ch]+': '+e.message);}
+}
+
+/* wifi settings */
+var wifiLoaded=false;
+async function loadWifi(){
+  try{
+    var d=await api('/api/wifi');
+    if(!d||!d.ok){log('Wi-Fi','не удалось загрузить настройки');return;}
+    byId('wifi_ap_ip').value=(d.ap_ip&&d.ap_ip!=='0.0.0.0')?d.ap_ip:'192.168.100.1';
+    if(d.ap_ssid)byId('wifi_ap_ssid').value=d.ap_ssid;
+    byId('wifi_auto_off').checked=(Number(d.auto_off_min)||0)>0;
+    byId('wifi_ap_password').value='';
+    wifiLoaded=true;
+  }catch(e){log('Wi-Fi','ошибка: '+e.message);}
+}
+function wifiQuery(){
+  var p='mode=1&port=80';
+  var ap=byId('wifi_ap_ssid').value.trim();
+  if(ap)p+='&ap_ssid='+encodeURIComponent(ap);
+  var ip=byId('wifi_ap_ip').value.trim();
+  if(ip)p+='&ap_ip='+encodeURIComponent(ip);
+  var apPw=byId('wifi_ap_password').value;
+  if(apPw)p+='&ap_password='+encodeURIComponent(apPw);
+  else p+='&ap_password_clear=1';
+  p+='&auto_off_min='+(byId('wifi_auto_off').checked?3:0);
+  return p;
+}
+async function saveWifi(){
+  if(byId('wifi_ap_password').value&&byId('wifi_ap_password').value.length<8){log('Wi-Fi','пароль точки доступа должен быть ≥ 8 символов');return;}
+  try{
+    var p=wifiQuery();
+    log('Wi-Fi','сохраняю настройки и перезагружаю...');
+    var d=await api('/api/wifi?'+p,{method:'POST',timeout:15000});
+    if(!d||!d.ok)throw new Error('не сохранено');
+    log('Wi-Fi','настройки сохранены, перезагрузка...');
+    reloadAfterReboot(2000,byId('wifi_ap_ip').value.trim());
+  }catch(e){log('Wi-Fi','ошибка: '+e.message);}
+}
+async function resetWifi(){
+  if(!confirm('Сбросить настройки WiFi к заводским и перезагрузить?'))return;
+  try{
+    log('Wi-Fi','сброс настроек и перезагрузка...');
+    var d=await api('/api/wifi/reset',{method:'POST',timeout:15000});
+    if(!d||!d.ok)throw new Error('не сброшено');
+    log('Wi-Fi','настройки сброшены, перезагрузка...');
+    reloadAfterReboot(2000,null);
+  }catch(e){log('Wi-Fi','ошибка: '+e.message);}
+}
+
+/* device name */
+async function loadDevice(){
+  try{
+    var d=await api('/api/device');
+    if(d&&d.ok){
+      savedDeviceName=d.name||'ТЕПЛОВОЗ';
+      byId('device_name').value=savedDeviceName;
+    }
+  }catch(e){log('Имя','ошибка: '+e.message);}
+}
+function onDeviceNameInput(){
+  var btn=byId('device_save');
+  var changed=(byId('device_name').value||'').trim()!==savedDeviceName;
+  btn.style.display=changed?'inline-block':'none';
+}
+async function saveDeviceName(){
+  var name=(byId('device_name').value||'').trim();
+  if(!name){log('Имя','имя не может быть пустым');return;}
+  try{
+    var d=await api('/api/device?name='+encodeURIComponent(name),{method:'POST'});
+    if(!d||!d.ok)throw new Error('не удалось');
+    savedDeviceName=d.name;
+    byId('device_name').value=d.name;
+    onDeviceNameInput();
+    log('Имя','сохранено: '+d.name);
+  }catch(e){log('Имя','ошибка: '+e.message);}
+}
+
+/* ota */
+function uploadOta(input){
+  var file=input.files&&input.files[0];
+  if(!file)return;
+  if(!/\.bin$/i.test(file.name)){log('OTA','только .bin файлы');input.value='';return;}
+  if(uploadBusy){log('OTA','уже идёт загрузка, подождите');input.value='';return;}
+  if(file.size>8*1024*1024){log('OTA','файл > 8 МБ');input.value='';return;}
+  uploadBusy=true;
+  var bar=byId('ota_bar'),barIn=byId('otabar'),meta=byId('ota_meta');
+  bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
+  meta.textContent='Записано: 0 из '+file.size+' Б · 0 КБ/с';
+  setText('ota_hint','Загрузка '+file.name+'...');
+  log('OTA','загрузка '+file.name+' ('+file.size+' Б)');
+  var started=Date.now();
+  stopStatusPoll();
+  upOta=true;upStarted=Date.now();startUpPoll();
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/api/ota/update',true);
+  xhr.upload.onprogress=function(e){
+    if(!e.lengthComputable)return;
+    var sec=Math.max(0.1,(Date.now()-started)/1000);
+    if(!upServerOk){
+      var cp=Math.round(e.loaded/e.total*100);
+      if(cp>=100)cp=99; /* реальный приём подтверждает только сервер */
+      barIn.style.width=cp+'%';
+      meta.textContent='Передано: '+e.loaded+' из '+e.total+' Б · '+Math.round((e.loaded/1024)/sec)+' КБ/с';
+    }
+  };
+  function finishUp(){
+    uploadBusy=false;
+    stopUpPoll();
+  }
+  function resumePoll(){
+    startStatusPoll();refreshStatus();
+  }
+  xhr.onload=function(){
+    var res=null;
+    try{res=JSON.parse(xhr.responseText);}catch(err){}
+    var ok=xhr.status===200&&res&&res.ok;
+    bar.style.display='none';meta.style.display='none';
+    finishUp();
+    if(ok){
+      log('OTA','прошивка загружена ('+res.bytes+' Б)');
+      input.value='';
+      setText('ota_hint','Прошивка записана, идёт перезагрузка...');
+      reloadAfterReboot(2000,null);
+    }else{
+      setText('ota_hint','Ошибка: '+(res&&res.error?res.error:'HTTP '+xhr.status));
+      log('OTA','ошибка: '+(res&&res.error?res.error:'HTTP '+xhr.status));
+      input.value='';
+      resumePoll();
+    }
+  };
+  xhr.onerror=function(){
+    bar.style.display='none';meta.style.display='none';
+    setText('ota_hint','Ошибка: СЕТЬ (нет связи)');
+    finishUp();
+    log('OTA','ошибка: СЕТЬ (нет связи)');
+    input.value='';
+    resumePoll();
+  };
+  xhr.send(file);
+}
+
+/* collapsible panels */
+function togglePanel(name){
+  var bd=byId('bd_'+name);
+  var hd=byId('hd_'+name);
+  if(!bd)return;
+  var show=bd.style.display==='none';
+  bd.style.display=show?'block':'none';
+  if(hd)hd.classList.toggle('open',show);
+  if(show&&name==='snd'){loadTracks();refreshStatus();loadFreeSpace();}
+  if(show&&name==='wifi'&&!wifiLoaded){loadWifi();}
+  if(show&&name==='bemf'){loadBemfCal();}
+  if(show&&name==='cv'){loadCvValues();}
+  if(show&&name==='fnmap'){loadFuncMap();}
+  if(show&&name==='auxpwm'){loadAuxPwm();}
+}
+
+/* init */
+function init(){
+  byId('device_name').addEventListener('input',onDeviceNameInput);
+  renderCvList();
+  setActiveCv(1);
+  loadCvValues();
+  renderMotor();
+  loadFuncMap();
+  renderMode();
+  loadDevice();
+  loadWifi();
+  loadVolumes();
+  loadTrackList();
+  refreshStatus();
+  startStatusPoll();
+}
+/* Load the track list once at startup so the sound grid and the function-map
+ * sound names are populated even before/without opening the sounds panel. */
+function loadTrackList(){
+  api('/api/audio/tracks').then(function(d){
+    if(d&&d.ok){
+      tracks=d.tracks||[];
+      if(d.cats&&d.cats.length)slotCats=d.cats;
+      log('Звук','треков получено: '+tracks.length);
+      renderSlots();
+    }
+  }).catch(function(e){log('Звук','треки: '+e.message);});
+}
+init();
+</script>
+</body>
+</html>

@@ -285,13 +285,10 @@ static void recover_tracks_from_storage(void)
     }
 
     if (n == 0) {
-        web_log_event("Звуки", "найдено %u файл(ов), но ни один не удалось привязать",
-                      (unsigned)nf);
+        ESP_LOGW(TAG, "Track rebuild: %u file(s), none bindable", (unsigned)nf);
         return;
     }
     esp_err_t err = settings_tracks_save(tracks, n);
-    web_log_event("Звуки", "найдено %u файл(ов), список восстановлен (%s)",
-                  (unsigned)n, err == ESP_OK ? "сохранён" : esp_err_to_name(err));
     ESP_LOGW(TAG, "Track list rebuilt from storage: %u file(s), save=%s",
              (unsigned)n, esp_err_to_name(err));
 }

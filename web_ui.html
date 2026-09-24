@@ -787,7 +787,6 @@ async function loadTracks(){
     if(!d||!d.ok)throw new Error('загрузка не удалась');
     tracks=d.tracks||[];
     if(d.cats&&d.cats.length)slotCats=d.cats;
-    log('Звук','треков получено: '+tracks.length);
     renderSlots();
   }catch(e){log('Звук','треки: '+e.message);}
 }
@@ -1390,7 +1389,6 @@ function loadTrackList(){
     if(d&&d.ok){
       tracks=d.tracks||[];
       if(d.cats&&d.cats.length)slotCats=d.cats;
-      log('Звук','треков получено: '+tracks.length);
       renderSlots();
     }
   }).catch(function(e){log('Звук','треки: '+e.message);});

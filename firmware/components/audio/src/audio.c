@@ -319,11 +319,15 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     return ESP_OK;
 }
 
+/* Test hook: 0 runs forever (production); host tests set a small cap. */
+static uint32_t s_mix_iter_cap;
+
 static void mixer_task(void *arg)
 {
     (void)arg;
     int16_t mix[MIX_BLOCK];
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_mix_iter_cap == 0U || iters < s_mix_iter_cap) {
         /* Apply pending play/stop requests, then mix one block. */
         for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
             voice_t *vo = &s_voice[v];
@@ -368,6 +372,7 @@ static void mixer_task(void *arg)
         }
         size_t written = 0;
         (void)i2s_channel_write(s_tx, mix, sizeof(mix), &written, pdMS_TO_TICKS(1000));
+        iters++;
     }
 }
 

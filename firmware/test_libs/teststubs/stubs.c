@@ -177,7 +177,7 @@ BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
     if (handle != NULL) {
         *handle = NULL;
     }
-    return pdPASS;
+    return mock_task_create_ok ? pdPASS : pdFAIL;
 }
 
 void vTaskDelay(const TickType_t ticks)
@@ -577,6 +577,8 @@ void esp_rom_delay_us(uint32_t us)
 /* ---- I2S std ---- */
 static int s_i2s_dummy_channel;
 
+int mock_i2s_new_channel_err = 0;
+int mock_i2s_init_std_err = 0;
 int mock_i2s_write_count = 0;
 
 esp_err_t i2s_new_channel(const i2s_chan_config_t *chan_cfg,
@@ -584,6 +586,9 @@ esp_err_t i2s_new_channel(const i2s_chan_config_t *chan_cfg,
 {
     (void)chan_cfg;
     (void)rx_handle;
+    if (mock_i2s_new_channel_err) {
+        return (esp_err_t)mock_i2s_new_channel_err;
+    }
     if (tx_handle != NULL) {
         *tx_handle = (i2s_chan_handle_t)&s_i2s_dummy_channel;
     }
@@ -594,7 +599,7 @@ esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t handle, const i2s_std_conf
 {
     (void)handle;
     (void)std_cfg;
-    return ESP_OK;
+    return (esp_err_t)mock_i2s_init_std_err;
 }
 
 esp_err_t i2s_channel_enable(i2s_chan_handle_t handle)

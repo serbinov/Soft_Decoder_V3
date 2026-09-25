@@ -106,6 +106,10 @@ void setUp(void)
     memset(s_voice, 0, sizeof(s_voice));
     s_volume = 100;
     mock_i2s_write_count = 0;
+    mock_i2s_new_channel_err = 0;
+    mock_i2s_init_std_err = 0;
+    mock_task_create_ok = 1;
+    s_mix_iter_cap = 0;
     TEST_ASSERT_EQUAL(ESP_OK, audio_init());
 }
 
@@ -293,6 +297,256 @@ static void test_volume_clamp_and_playing(void)
     TEST_ASSERT_FALSE(audio_is_playing());
 }
 
+/* ---- error / edge paths ---- */
+
+static void test_audio_init_error_paths(void)
+{
+    mock_i2s_new_channel_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
+    mock_i2s_new_channel_err = 0;
+
+    mock_i2s_init_std_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
+    mock_i2s_init_std_err = 0;
+
+    mock_task_create_ok = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, audio_init());
+    mock_task_create_ok = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_init()); /* restore */
+}
+
+static void test_validate_wav_short_and_empty(void)
+{
+    FILE *f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f); /* shorter than the RIFF header */
+    fclose(f);
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_validate_wav(s_path_bad));
+
+    f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 4);
+    fwrite("WAVE", 1, 4, f); /* valid header, no chunks */
+    fclose(f);
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_validate_wav(s_path_bad));
+}
+
+/* Write a WAV whose fmt chunk is 18 bytes (extended), with a data chunk. */
+static void make_wav_ext_fmt(const char *path, uint16_t channels, size_t frames)
+{
+    FILE *f = fopen(path, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 100);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 18);
+    put_u16(f, 1);
+    put_u16(f, channels);
+    put_u32(f, 22050);
+    put_u32(f, 44100);
+    put_u16(f, (uint16_t)(channels * 2));
+    put_u16(f, 16);
+    put_u16(f, 0); /* one extra fmt byte pair -> 18-byte fmt chunk */
+    fwrite("data", 1, 4, f);
+    put_u32(f, (uint32_t)(frames * channels * 2));
+    for (size_t i = 0; i < frames * channels; ++i) {
+        put_u16(f, (uint16_t)(1000 + i * 10));
+    }
+    fclose(f);
+}
+
+static void test_validate_wav_extended_fmt(void)
+{
+    make_wav_ext_fmt(s_path_bad, 1, 8);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_validate_wav(s_path_bad));
+}
+
+static void test_voice_start_reopens_and_skips_chunks(void)
+{
+    make_wav(s_path_mono, 1, 22050, 1, 16, 8, true); /* LIST before fmt */
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
+    /* Second start closes the previous FILE first. */
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
+    fclose(st.f);
+}
+
+static void test_voice_start_bad_riff(void)
+{
+    FILE *f = fopen(s_path_bad, "wb");
+    fwrite("NOPEnopeNOPEdata", 1, 16, f);
+    fclose(f);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+    TEST_ASSERT_NULL(st.f);
+}
+
+static void test_voice_start_extended_fmt(void)
+{
+    make_wav_ext_fmt(s_path_bad, 1, 8);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_bad, false, 100));
+    fclose(st.f);
+}
+
+static void test_voice_start_truncated_data(void)
+{
+    /* Mono: data claims 2 samples but no bytes follow -> first read fails. */
+    FILE *f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 100);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 16);
+    put_u16(f, 1);
+    put_u16(f, 1);
+    put_u32(f, 22050);
+    put_u32(f, 44100);
+    put_u16(f, 2);
+    put_u16(f, 16);
+    fwrite("data", 1, 4, f);
+    put_u32(f, 4);
+    fclose(f);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+
+    /* Mono: data claims 4 samples but only one is present -> second read fails. */
+    f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 100);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 16);
+    put_u16(f, 1);
+    put_u16(f, 1);
+    put_u32(f, 22050);
+    put_u32(f, 44100);
+    put_u16(f, 2);
+    put_u16(f, 16);
+    fwrite("data", 1, 4, f);
+    put_u32(f, 8);
+    put_u16(f, 1000);
+    fclose(f);
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_bad, false, 100));
+    TEST_ASSERT_EQUAL_INT16(1000, st.s_next); /* fell back to s_cur */
+    fclose(st.f);
+
+    /* Stereo: data claims 2 frames but the right channel is missing. */
+    f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 100);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 16);
+    put_u16(f, 1);
+    put_u16(f, 2);
+    put_u32(f, 22050);
+    put_u32(f, 88200);
+    put_u16(f, 4);
+    put_u16(f, 16);
+    fwrite("data", 1, 4, f);
+    put_u32(f, 8);
+    put_u16(f, 1000);
+    fclose(f);
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+}
+
+static void test_voice_fill_negative_clip(void)
+{
+    make_wav(s_path_mono, 1, 22050, 1, 16, 8, false);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
+    st.s_cur = -30000;
+    st.s_next = -30000;
+    st.volume = 100;
+    s_volume = 100;
+    int16_t mix[1] = { -30000 };
+    (void)voice_fill(&st, mix, 1);
+    TEST_ASSERT_EQUAL_INT16(-32768, mix[0]);
+    fclose(st.f);
+}
+
+static void test_voice_fill_ends_midway(void)
+{
+    make_wav(s_path_mono, 1, 22050, 1, 16, 2, false);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
+    int16_t mix[64] = { 0 };
+    int produced = voice_fill(&st, mix, 64);
+    TEST_ASSERT_FALSE(st.active);
+    TEST_ASSERT_TRUE(produced > 0 && produced < 64);
+    fclose(st.f);
+}
+
+static void test_mixer_task_processes_requests(void)
+{
+    /* Longer than one MIX_BLOCK so the voice is still active after a block. */
+    make_wav(s_path_mono, 1, 22050, 1, 16, 5000, false);
+    strncpy(s_voice[0].req_path, s_path_mono, sizeof(s_voice[0].req_path) - 1);
+    s_voice[0].req_play = true;
+    s_voice[0].req_loop = false;
+    s_voice[0].req_volume = 100;
+
+    s_mix_iter_cap = 1;
+    mixer_task(NULL); /* one iteration: start voice, mix, i2s write */
+    TEST_ASSERT_TRUE(s_voice[0].st.active);
+    TEST_ASSERT_TRUE(mock_i2s_write_count >= 1);
+
+    s_voice[0].req_stop = true;
+    s_mix_iter_cap = 1;
+    mixer_task(NULL); /* stop request closes the file */
+    TEST_ASSERT_FALSE(s_voice[0].st.active);
+    TEST_ASSERT_NULL(s_voice[0].st.f);
+}
+
+static void test_audio_play_stop_wrappers(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, audio_play("audio/slot1.wav"));
+    TEST_ASSERT_TRUE(s_voice[0].req_play);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_stop());
+}
+
+static void test_voice_next_sample_loops(void)
+{
+    make_wav(s_path_mono, 1, 22050, 1, 16, 2, false);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, true, 100));
+    int16_t out = 0;
+    /* samples_left is 0 after the two startup reads -> wraps around. */
+    for (int i = 0; i < 4; ++i) {
+        TEST_ASSERT_TRUE(voice_next_sample(&st, &out));
+    }
+    fclose(st.f);
+}
+
+static void test_voice_start_no_data_chunk(void)
+{
+    FILE *f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 100);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 16);
+    put_u16(f, 1);
+    put_u16(f, 1);
+    put_u32(f, 22050);
+    put_u32(f, 44100);
+    put_u16(f, 2);
+    put_u16(f, 16);
+    fclose(f);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -310,5 +564,18 @@ int main(void)
     RUN_TEST(test_voice_fill_applies_volume);
     RUN_TEST(test_voice_play_stop_requests);
     RUN_TEST(test_volume_clamp_and_playing);
+    RUN_TEST(test_audio_init_error_paths);
+    RUN_TEST(test_validate_wav_short_and_empty);
+    RUN_TEST(test_validate_wav_extended_fmt);
+    RUN_TEST(test_voice_start_reopens_and_skips_chunks);
+    RUN_TEST(test_voice_start_bad_riff);
+    RUN_TEST(test_voice_start_extended_fmt);
+    RUN_TEST(test_voice_start_truncated_data);
+    RUN_TEST(test_voice_fill_negative_clip);
+    RUN_TEST(test_voice_fill_ends_midway);
+    RUN_TEST(test_mixer_task_processes_requests);
+    RUN_TEST(test_audio_play_stop_wrappers);
+    RUN_TEST(test_voice_next_sample_loops);
+    RUN_TEST(test_voice_start_no_data_chunk);
     return UNITY_END();
 }

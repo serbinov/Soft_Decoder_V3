@@ -240,10 +240,22 @@ Unity и гоняет на ПК. Компоненты подключаются �
 
 ```
 powershell -ExecutionPolicy Bypass -File test\run_tests.ps1
+powershell -ExecutionPolicy Bypass -File test\coverage.ps1            # gcov, union по строкам
+powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 ```
 
-Наборы: `test_dcc`, `test_settings`, `test_motor`, `test_auxio`, `test_web_util`,
-`test_track`, `test_audio`, `test_pinmap`. Всего ~165 тестов.
+Наборы (13): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
+`test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
+`test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
+`test_web`. Всего ~570 тестов; покрытие first-party (`components/` + `main/`) —
+**100 % строк** (union по строкам, gcov).
+
+`test_web` использует host-shim `esp_http_server` (скриптованные запросы и
+захват ответов), заглушки `esp_wifi`/`esp_netif`/`esp_event`/`lwip` и
+инъецируемые отказы (OOM, `fsync`, `fwrite`, ошибки OTA/очередей). Попутно
+найдены и исправлены два бага: `ota_safe_name` сравнивал расширение до
+терминации строки (мог добавить лишний `.wav`), а обработчик аплоада при
+ошибке `fsync` не закрывал файл (утечка дескриптора и неудачный `remove`).
 
 ---
 

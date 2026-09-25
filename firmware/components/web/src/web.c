@@ -15,6 +15,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -36,8 +37,28 @@
 static const char *TAG = "web";
 
 #define WEB_FN_COUNT 29
-#define AUDIO_DIR "/userdata/audio"
+/* Storage roots are overridable so the host tests can point them at a
+ * temporary directory (production uses /userdata). */
+#ifndef WEB_USERDATA_DIR
+#define WEB_USERDATA_DIR "/userdata"
+#endif
+#ifndef WEB_AUDIO_DIR
+#define WEB_AUDIO_DIR WEB_USERDATA_DIR "/audio"
+#endif
+#define AUDIO_DIR WEB_AUDIO_DIR
 #define UPLOAD_MAX (2 * 1024 * 1024)
+
+/* File-I/O wrappers used by the combined-OTA sound writer; overridable so the
+ * host tests can inject fwrite/fflush/fclose failures. */
+#ifndef WEB_FWRITE
+#define WEB_FWRITE(p, sz, n, f) fwrite((p), (sz), (n), (f))
+#endif
+#ifndef WEB_FFLUSH
+#define WEB_FFLUSH(f) fflush(f)
+#endif
+#ifndef WEB_FCLOSE
+#define WEB_FCLOSE(f) fclose(f)
+#endif
 
 static httpd_handle_t s_server;
 static httpd_handle_t s_progress_server;
@@ -53,6 +74,15 @@ static volatile int s_up_total;
 static volatile int s_up_received;
 static volatile bool s_up_active;
 static volatile uint8_t s_up_slot;
+
+/* Test hooks for the otherwise unbounded background loops: 0 runs forever
+ * (production); the host tests set a small cap so the loop body can be
+ * exercised deterministically. */
+static uint32_t s_autooff_iter_cap;
+static uint32_t s_dns_iter_cap;
+static uint32_t s_pipe_iter_cap;
+/* Test hook: make pipe_upload observe a writer write error. */
+static bool s_pipe_write_err_inject;
 
 static bool s_fn[WEB_FN_COUNT];
 
@@ -347,7 +377,7 @@ void web_apply_function(uint8_t fn, bool state)
                                 s_func_tracks[i].enabled &&
                                 s_func_tracks[i].file[0] != '\0') {
                                 char abs_path[160];
-                                snprintf(abs_path, sizeof(abs_path), "/userdata/%s",
+                                snprintf(abs_path, sizeof(abs_path), WEB_USERDATA_DIR "/%s",
                                          s_func_tracks[i].file);
                                 (void)audio_voice_play(voice[k], abs_path, true,
                                                        web_get_voice_volume(fn));
@@ -571,7 +601,9 @@ static uint8_t wifi_pick_channel(void)
 static void wifi_auto_off_task(void *arg)
 {
     (void)arg;
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_autooff_iter_cap == 0U || iters < s_autooff_iter_cap) {
+        iters++;
         vTaskDelay(pdMS_TO_TICKS(10000));
         uint8_t minutes = s_cfg.auto_off_min;
         if (!s_wifi_started || minutes == 0U || s_ap_sta_count != 0U) {
@@ -746,7 +778,9 @@ static void dns_server_task(void *arg)
 
     uint8_t q[DNS_MSG_MAX];
     uint8_t r[DNS_MSG_MAX];
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_dns_iter_cap == 0U || iters < s_dns_iter_cap) {
+        iters++;
         struct sockaddr_in from = { 0 };
         socklen_t flen = sizeof(from);
         int n = recvfrom(sock, q, sizeof(q), 0, (struct sockaddr *)&from, &flen);
@@ -1106,7 +1140,7 @@ static esp_err_t audio_play_post(httpd_req_t *req)
             s_cfg.active_slot = slot;
             (void)settings_save_deferred(&s_cfg);
             char abs_path[160];
-            snprintf(abs_path, sizeof(abs_path), "/userdata/%s", tracks[i].file);
+            snprintf(abs_path, sizeof(abs_path), WEB_USERDATA_DIR "/%s", tracks[i].file);
             esp_err_t err = audio_voice_play(0, abs_path, false, web_get_voice_volume(slot));
             if (err == ESP_OK) {
                 web_log_event("Звук", "слот %u", (unsigned)slot);
@@ -1163,6 +1197,10 @@ static esp_err_t audio_volume_post(httpd_req_t *req)
 #define PIPE_WRITER_PRIO   10
 #define PIPE_TIMEOUT_MS    30000
 #define PIPE_WR_POLL_MS    250
+/* Upload progress log cadence (bytes); overridable for host tests. */
+#ifndef WEB_UP_PROGRESS_STEP
+#define WEB_UP_PROGRESS_STEP 262144
+#endif
 
 typedef struct {
     int idx;
@@ -1184,7 +1222,9 @@ typedef struct {
 static void pipe_writer(void *arg)
 {
     pipe_ctx_t *ctx = (pipe_ctx_t *)arg;
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_pipe_iter_cap == 0U || iters < s_pipe_iter_cap) {
+        iters++;
         pipe_item_t it;
         /* Bounded receive so an aborted upload still terminates the writer
          * even if the end marker could not be queued. */
@@ -1213,6 +1253,9 @@ static void pipe_writer(void *arg)
 static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
 {
     pipe_ctx_t ctx = { .f = f, .write_err = ESP_OK };
+    if (s_pipe_write_err_inject) {
+        ctx.write_err = ESP_FAIL;
+    }
     ctx.write_q = xQueueCreate(PIPE_NUM_BUFS, sizeof(pipe_item_t));
     ctx.free_q = xQueueCreate(PIPE_NUM_BUFS, sizeof(int));
     ctx.done_sem = xSemaphoreCreateBinary();
@@ -1257,7 +1300,7 @@ static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
             total += r;
             remaining -= r;
             s_up_received = total;
-            if (total - (int)next_prog >= 262144) {
+            if (total - (int)next_prog >= WEB_UP_PROGRESS_STEP) {
                 next_prog = (uint32_t)total;
                 ESP_LOGI(TAG, "UP: progress %d/%d", total, req->content_len);
             }
@@ -1363,7 +1406,7 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
         for (size_t i = 0; i < count; ++i) {
             if (tracks[i].slot == slot && tracks[i].file[0] != '\0' &&
                 strcmp(tracks[i].file, rel_file) != 0) {
-                snprintf(old_path, sizeof(old_path), "/userdata/%s", tracks[i].file);
+                snprintf(old_path, sizeof(old_path), WEB_USERDATA_DIR "/%s", tracks[i].file);
                 break;
             }
         }
@@ -1387,7 +1430,13 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     esp_err_t perr = pipe_upload(req, f, &total);
     s_up_active = false;
 
-    if (fflush(f) != 0 || fsync(fileno(f)) != 0 || fclose(f) != 0) {
+    /* Always close the stream before removing the file: a short-circuit
+     * would leave the handle open and make remove() fail on the host and on
+     * LittleFS. */
+    int close_rc = fflush(f);
+    close_rc |= fsync(fileno(f));
+    close_rc |= fclose(f);
+    if (close_rc != 0) {
         ESP_LOGE(TAG, "UP: flush/close failed total=%d/%d", total, req->content_len);
         (void)remove(path);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
@@ -1516,7 +1565,7 @@ static esp_err_t audio_track_delete_post(httpd_req_t *req)
         }
         if (!in_use) {
             char path[160];
-            snprintf(path, sizeof(path), "/userdata/%s", del_file);
+            snprintf(path, sizeof(path), WEB_USERDATA_DIR "/%s", del_file);
             if (remove(path) == 0) {
                 ESP_LOGI(TAG, "UP: removed track file %s", path);
             }
@@ -1937,6 +1986,9 @@ static void ota_safe_name(const char *in, char *out, size_t out_len)
             out[w++] = '_';
         }
     }
+    /* Terminate before the extension check: the comparison must not read
+     * whatever stale bytes follow the copied name. */
+    out[w] = '\0';
     if (w < 4U || strcasecmp(out + (w - 4U), ".wav") != 0) {
         if (w + 4U < out_len) {
             out[w++] = '.';
@@ -2112,7 +2164,7 @@ static esp_err_t ota_update_post(httpd_req_t *req)
             char safe[80];
             ota_safe_name(raw, safe, sizeof(safe));
             char path[160];
-            snprintf(path, sizeof(path), "/userdata/audio/%s", safe);
+            snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s", safe);
             FILE *fp = safe[0] != '\0' ? fopen(path, "wb") : NULL;
             if (fp != NULL) {
                 (void)setvbuf(fp, NULL, _IOFBF, 4096);
@@ -2128,17 +2180,17 @@ static esp_err_t ota_update_post(httpd_req_t *req)
                     read_ok = false;
                     break;
                 }
-                if (fp != NULL && write_ok && fwrite(buf, 1, (size_t)r, fp) != (size_t)r) {
+                if (fp != NULL && write_ok && WEB_FWRITE(buf, 1, (size_t)r, fp) != (size_t)r) {
                     write_ok = false;
                 }
                 left -= (uint32_t)r;
                 s_up_received = req->content_len - st->remaining - (int)(st->len - st->pos);
             }
             if (fp != NULL) {
-                if (write_ok && fflush(fp) != 0) {
+                if (write_ok && WEB_FFLUSH(fp) != 0) {
                     write_ok = false;
                 }
-                if (fclose(fp) != 0) {
+                if (WEB_FCLOSE(fp) != 0) {
                     write_ok = false;
                 }
             }

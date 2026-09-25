@@ -120,12 +120,11 @@ void buf_appendf(char *buf, size_t cap, size_t *used, const char *fmt, ...)
     va_start(ap, fmt);
     int n = vsnprintf(buf + *used, cap - *used, fmt, ap);
     va_end(ap);
-    if (n < 0) {
-        return;
-    }
-    *used += (size_t)n;
-    if (*used > cap) {
-        *used = cap;
+    if (n > 0) {
+        *used += (size_t)n;
+        if (*used > cap) {
+            *used = cap;
+        }
     }
 }
 

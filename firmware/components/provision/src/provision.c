@@ -38,6 +38,11 @@ static const char *TAG = "prov";
 #define PROV_MKDIR(p) mkdir((p), 0755)
 #endif
 
+/* Overridable so host tests can inject a write failure. */
+#ifndef PROV_FWRITE
+#define PROV_FWRITE(p, sz, n, f) fwrite((p), (sz), (n), (f))
+#endif
+
 /* True while the boot-time provisioning window is open; the background
  * listener ignores "PROV" in that state so it cannot re-trigger a reboot. */
 static volatile bool s_provisioning = false;
@@ -138,10 +143,13 @@ static bool read_exact(uint8_t *buf, size_t len, uint32_t timeout_ms)
     return true;
 }
 
+/* File scope (not a function-local static) so the white-box host tests can
+ * observe the already-installed guard. */
+static bool s_uart_driver_installed = false;
+
 static void ensure_uart_driver(void)
 {
-    static bool installed = false;
-    if (installed) {
+    if (s_uart_driver_installed) {
         return;
     }
     /* The console uses the ROM-level UART driver on UART0; the standard UART
@@ -151,7 +159,7 @@ static void ensure_uart_driver(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "uart driver install: %s", esp_err_to_name(err));
     }
-    installed = true;
+    s_uart_driver_installed = true;
 }
 
 static void ensure_usbjtag_driver(void)
@@ -554,7 +562,7 @@ static void provision_run(void)
                 fclose(f);
                 return;
             }
-            if (fwrite(buf, 1, want, f) != want) {
+            if (PROV_FWRITE(buf, 1, want, f) != want) {
                 ESP_LOGE(TAG, "provision: write failed for slot %d", slot);
                 free(buf);
                 fclose(f);

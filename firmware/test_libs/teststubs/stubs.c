@@ -100,6 +100,9 @@ typedef struct {
 
 int mock_queue_create_fail = 0;
 int mock_queue_send_fail = 0;
+/* Allow the first N sends to succeed, then fail all later ones (-1 = off). */
+int mock_queue_send_fail_after = -1;
+int mock_queue_send_calls = 0;
 
 QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size)
 {
@@ -119,7 +122,10 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t ticks)
 {
     (void)ticks;
     mock_queue_t *mq = (mock_queue_t *)q;
-    if (mock_queue_send_fail || mq == NULL || mq->count >= 16) {
+    mock_queue_send_calls++;
+    if (mock_queue_send_fail || (mock_queue_send_fail_after >= 0 &&
+                                 mock_queue_send_calls > mock_queue_send_fail_after) ||
+        mq == NULL || mq->count >= 16) {
         return pdFALSE;
     }
     size_t idx = (mq->head + mq->count) % 16;
@@ -820,6 +826,9 @@ int mock_usbjtag_install_ok = 0; /* 0 -> USB-Serial-JTAG driver unavailable */
 int mock_usbjtag_byte = -1;      /* >=0 -> one byte available on the USB port */
 int mock_ota_begin_err = 0;
 int mock_ota_write_err = 0;
+/* Let the first N writes succeed, then fail the rest (-1 = off). */
+int mock_ota_write_fail_after = -1;
+int mock_ota_write_calls = 0;
 int mock_ota_end_err = 0;
 int mock_ota_set_boot_err = 0;
 int mock_ota_partition_absent = 0;
@@ -951,8 +960,10 @@ esp_err_t esp_ota_write(esp_ota_handle_t handle, const void *data, size_t size)
 {
     (void)handle;
     (void)data;
-    if (mock_ota_write_err) {
-        return (esp_err_t)mock_ota_write_err;
+    mock_ota_write_calls++;
+    if (mock_ota_write_err ||
+        (mock_ota_write_fail_after >= 0 && mock_ota_write_calls > mock_ota_write_fail_after)) {
+        return (esp_err_t)(mock_ota_write_err ? mock_ota_write_err : ESP_FAIL);
     }
     mock_ota_bytes += (uint32_t)size;
     return ESP_OK;

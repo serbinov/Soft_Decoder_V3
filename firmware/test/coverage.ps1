@@ -51,7 +51,8 @@ $inc = @(
 
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
-            "test_track_manifest", "test_storage", "test_track_recover", "test_provision")
+            "test_track_manifest", "test_storage", "test_track_recover", "test_provision",
+            "test_web")
 if ($Only) { $suites = @($Only) }
 
 $lineCov = @{}
@@ -86,7 +87,8 @@ foreach ($suite in $suites) {
                 continue
             }
             if (-not $src) { continue }
-            if ($line -match '^\s*([0-9]+|#####|=====|\*+|-)\s*:\s*([0-9]+):') {
+            # A gcov count may be "N" or "N*" (partially executed line).
+            if ($line -match '^\s*([0-9]+\*?|#####|=====|\*+|-)\s*:\s*([0-9]+):') {
                 $cnt = $Matches[1]
                 if ($cnt -eq '-') { continue }
                 $ln = [int]$Matches[2]

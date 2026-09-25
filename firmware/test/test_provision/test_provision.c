@@ -29,12 +29,25 @@ static void *mock_malloc(size_t n)
 }
 #define malloc(n) mock_malloc(n)
 
+/* fwrite failure injection for the PUT write-error branch. */
+static int g_prov_fwrite_fail = 0;
+static size_t mock_prov_fwrite(const void *p, size_t sz, size_t n, FILE *f);
+#define PROV_FWRITE(p, sz, n, f) mock_prov_fwrite((p), (sz), (n), (f))
+
 #define static
 #include "../../components/provision/src/provision.c"
 #undef static
 #undef malloc
 
 #include "../../test_libs/teststubs/stubs.c"
+
+static size_t mock_prov_fwrite(const void *p, size_t sz, size_t n, FILE *f)
+{
+    if (g_prov_fwrite_fail) {
+        return 0;
+    }
+    return fwrite(p, sz, n, f);
+}
 
 /* ---- collaborator stubs ---- */
 static esp_err_t g_cal_start_err = ESP_OK;
@@ -403,6 +416,26 @@ static void test_provision_run_put_and_done(void)
     TEST_ASSERT_EQUAL_INT(1, mock_esp_restart_calls);
 }
 
+static void test_provision_run_put_write_fail(void)
+{
+    g_prov_fwrite_fail = 1;
+    feed("PUT 1 4 Lbl\nABCD\nDONE\n");
+    provision_run();
+    g_prov_fwrite_fail = 0;
+    TEST_ASSERT_TRUE(tx_has("PUT-OK"));
+    TEST_ASSERT_FALSE(tx_has("FILE-OK"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+}
+
+static void test_ensure_uart_driver_idempotent(void)
+{
+    s_uart_driver_installed = false;
+    ensure_uart_driver();
+    ensure_uart_driver(); /* second call returns on the installed guard */
+    s_uart_driver_installed = false;
+    TEST_PASS();
+}
+
 static void test_provision_run_bad_put_slot(void)
 {
     feed("PUT 99 4 x\nDONE\n");
@@ -504,9 +537,13 @@ static void test_read_helpers_usbjtag_paths(void)
 
 static void test_uart_driver_install_failure_logged(void)
 {
+    s_uart_driver_installed = false; /* force the install path */
     mock_uart_driver_install_err = ESP_FAIL;
     provision_listener_start(); /* covers the ESP_LOGW branch */
     mock_uart_driver_install_err = 0;
+    /* The failed install does not set the installed flag; mark it so later
+     * tests do not retry the (now mocked) driver install. */
+    s_uart_driver_installed = true;
 }
 
 static void test_get_clear_prov_flag_errors(void)
@@ -608,6 +645,8 @@ int main(void)
     RUN_TEST(test_provision_fw_chunk_ack);
     RUN_TEST(test_provision_run_storage_fail);
     RUN_TEST(test_provision_run_put_and_done);
+    RUN_TEST(test_provision_run_put_write_fail);
+    RUN_TEST(test_ensure_uart_driver_idempotent);
     RUN_TEST(test_provision_run_bad_put_slot);
     RUN_TEST(test_provision_run_command_timeout);
     RUN_TEST(test_provision_run_fw_path);

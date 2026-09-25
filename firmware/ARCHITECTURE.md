@@ -255,11 +255,10 @@ firmware/
 ├─ partitions.csv            таблица разделов
 ├─ sdkconfig.defaults        базовые настройки IDF
 ├─ sdkconfig.esp32-s3-...    итоговый sdkconfig (генерируется)
-├─ version.txt               0.7 — единственный источник версии
+├─ version.txt               версия для сборки (зеркалится корневым VERSION)
 ├─ CMakeLists.txt            project(soft_decoder_v3)
 ├─ web_ui.html               исходник веб-страницы (single-file)
 ├─ ARCHITECTURE.md           референс-документ (этот файл)
-├─ CHANGELOG.md              журнал изменений
 ├─ main/
 │  ├─ CMakeLists.txt
 │  └─ app_main.c             точка входа, колбэки DCC, safety-задача
@@ -280,6 +279,10 @@ firmware/
 ├─ test_libs/teststubs/      заглушки ESP-IDF для тестов
 └─ *.bat / *.ps1             скрипты сборки/прошивки/провижининга
 ```
+
+В **корне репозитория** (`Soft_Decoder_V3/`): `VERSION` (версия проекта),
+`CHANGELOG.md` (хронология; строка за коммит добавляется автоматически хуком),
+`.githooks/` + `setup_git_hooks.bat` (git-хуки), `release/`, `web_flasher/`.
 
 ---
 
@@ -801,3 +804,7 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 5. Прогнать `test\run_tests.ps1` и `pio run -e esp32-s3-devkitc-1`.
 6. Проверить `pio run -t size` (RAM/Flash) перед коммитом.
 7. На железе — серийный лог 115200 и, для мотора, `BEMF-RAW`.
+8. Версия проекта — в `VERSION` (и `firmware/version.txt`); инкремент — `bump_version.bat`.
+9. Коммит — `CHANGELOG.md` пополняется автоматически (хук `.githooks/post-commit`).
+   После клона включить хуки один раз: `setup_git_hooks.bat` (или
+   `git config core.hooksPath .githooks`).

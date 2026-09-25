@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — docs: point changelog refs to repo root; note VERSION and git hooks
 - 2026-09-25 (v0.7) — Add root VERSION and auto-recorded CHANGELOG via git hook
 
 ---

@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — docs: exact host test count (427) in ARCHITECTURE/TESTS_HANDOFF
 - 2026-09-25 (v0.7) — test: add test_web with host shims; 100% first-party coverage
 - 2026-09-25 (v0.7) — docs: add TESTS_HANDOFF.md (coverage status, remaining step 4, gotchas)
 - 2026-09-25 (v0.7) — test: add test_provision (BEMF commands, FW upload, PUT flow, listener)

@@ -247,7 +247,7 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 Наборы (13): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_web`. Всего ~570 тестов; покрытие first-party (`components/` + `main/`) —
+`test_web`. Всего **427 тестов**; покрытие first-party (`components/` + `main/`) —
 **100 % строк** (union по строкам, gcov).
 
 `test_web` использует host-shim `esp_http_server` (скриптованные запросы и

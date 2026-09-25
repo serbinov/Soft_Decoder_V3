@@ -19,9 +19,12 @@
 
 static const char *TAG = "storage";
 
+#ifndef STORAGE_MOUNT_POINT
+#define STORAGE_MOUNT_POINT "/userdata"
+#endif
 #define EXT_PARTITION_LABEL "ext_userdata"
 #define EXT_PARTITION_SIZE  (16 * 1024 * 1024)
-#define MOUNT_POINT         "/userdata"
+#define MOUNT_POINT         STORAGE_MOUNT_POINT
 
 static esp_flash_t *s_ext_flash = NULL;
 static const esp_partition_t *s_ext_partition = NULL;
@@ -303,7 +306,7 @@ esp_err_t storage_benchmark(void)
     }
 
     /* --- 6. LittleFS write on fresh FS --- */
-    const char *path = "/userdata/.bench.bin";
+    const char *path = MOUNT_POINT "/.bench.bin";
     FILE *f = fopen(path, "wb");
     if (f == NULL) {
         ESP_LOGE(TAG, "bench: open for write failed");

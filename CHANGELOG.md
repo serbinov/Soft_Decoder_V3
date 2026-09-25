@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — test: add test_storage (init/mount/format/free/benchmark); flash+littlefs stubs
 - 2026-09-25 (v0.7) — test: dcc.c to ~100% (ISR/task/init/parser edges); bounded task hook; queue stubs
 - 2026-09-25 (v0.7) — test: motor.c to ~100% (tick/pid/kickstart/cal-task/info); drop dead guards; bounded task hook
 - 2026-09-25 (v0.7) — test: audio.c to ~100% (init/parse/mixer paths); stubs for i2s/task failure

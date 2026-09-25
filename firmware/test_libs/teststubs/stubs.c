@@ -19,6 +19,12 @@
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "driver/spi_master.h"
+#include "esp_flash.h"
+#include "esp_flash_spi_init.h"
+#include "esp_partition.h"
+#include "esp_littlefs.h"
+
 
 int64_t mock_timer_now_us = 0;
 int mock_gpio_set_level_count = 0;
@@ -630,6 +636,166 @@ esp_err_t i2s_channel_write(i2s_chan_handle_t handle, const void *src, size_t si
     mock_i2s_write_count++;
     if (bytes_written != NULL) {
         *bytes_written = size;
+    }
+    return ESP_OK;
+}
+
+/* ---- external flash / partition / littlefs (storage.c tests) ---- */
+
+static uint8_t s_stub_flash_chip;
+static esp_partition_t s_stub_partition;
+
+int mock_spi_bus_init_err = 0;
+int mock_spi_add_flash_err = 0;
+int mock_flash_init_err = 0;
+int mock_partition_register_err = 0;
+int mock_lfs_register_err = 0;
+int mock_lfs_format_err = 0;
+int mock_lfs_info_err = 0;
+int mock_flash_read_err = 0;
+int mock_flash_write_err = 0;
+int mock_flash_erase_err = 0;
+uint32_t mock_flash_size = 16u * 1024u * 1024u;
+size_t mock_lfs_total = 1024u * 1024u;
+size_t mock_lfs_used = 256u * 1024u;
+int mock_lfs_register_calls = 0;
+int mock_lfs_unregister_calls = 0;
+int mock_lfs_format_calls = 0;
+
+esp_err_t spi_bus_initialize(spi_host_device_t host, const spi_bus_config_t *bus_config, int dma_chan)
+{
+    (void)host;
+    (void)bus_config;
+    (void)dma_chan;
+    return (esp_err_t)mock_spi_bus_init_err;
+}
+
+esp_err_t spi_bus_add_flash_device(esp_flash_t **out_chip, const esp_flash_spi_device_config_t *config)
+{
+    (void)config;
+    if (mock_spi_add_flash_err) {
+        return (esp_err_t)mock_spi_add_flash_err;
+    }
+    if (out_chip != NULL) {
+        *out_chip = (esp_flash_t *)&s_stub_flash_chip;
+    }
+    return ESP_OK;
+}
+
+esp_err_t esp_flash_init(esp_flash_t *chip)
+{
+    (void)chip;
+    return (esp_err_t)mock_flash_init_err;
+}
+
+esp_err_t esp_flash_get_size(esp_flash_t *chip, uint32_t *out_size)
+{
+    (void)chip;
+    if (out_size != NULL) {
+        *out_size = mock_flash_size;
+    }
+    return ESP_OK;
+}
+
+esp_err_t esp_flash_read(esp_flash_t *chip, void *buffer, uint32_t address, uint32_t length)
+{
+    (void)chip;
+    (void)address;
+    if (mock_flash_read_err) {
+        return (esp_err_t)mock_flash_read_err;
+    }
+    if (buffer != NULL) {
+        memset(buffer, 0, length);
+    }
+    return ESP_OK;
+}
+
+esp_err_t esp_flash_write(esp_flash_t *chip, const void *buffer, uint32_t address, uint32_t length)
+{
+    (void)chip;
+    (void)buffer;
+    (void)address;
+    (void)length;
+    return (esp_err_t)mock_flash_write_err;
+}
+
+esp_err_t esp_flash_erase_region(esp_flash_t *chip, uint32_t start_address, uint32_t size)
+{
+    (void)chip;
+    (void)start_address;
+    (void)size;
+    return (esp_err_t)mock_flash_erase_err;
+}
+
+esp_err_t esp_partition_register_external(esp_flash_t *flash_chip, size_t offset, size_t size,
+                                          const char *label, uint8_t type, uint8_t subtype,
+                                          const esp_partition_t **out_partition)
+{
+    (void)offset;
+    if (mock_partition_register_err) {
+        return (esp_err_t)mock_partition_register_err;
+    }
+    memset(&s_stub_partition, 0, sizeof(s_stub_partition));
+    s_stub_partition.flash = flash_chip;
+    s_stub_partition.address = 0;
+    s_stub_partition.size = (uint32_t)size;
+    s_stub_partition.type = type;
+    s_stub_partition.subtype = subtype;
+    if (label != NULL) {
+        strncpy(s_stub_partition.label, label, sizeof(s_stub_partition.label) - 1);
+    }
+    if (out_partition != NULL) {
+        *out_partition = &s_stub_partition;
+    }
+    return ESP_OK;
+}
+
+esp_err_t esp_vfs_littlefs_register(const esp_vfs_littlefs_conf_t *conf)
+{
+    (void)conf;
+    mock_lfs_register_calls++;
+    return (esp_err_t)mock_lfs_register_err;
+}
+
+esp_err_t esp_vfs_littlefs_unregister(const char *partition_label)
+{
+    (void)partition_label;
+    mock_lfs_unregister_calls++;
+    return ESP_OK;
+}
+
+esp_err_t esp_vfs_littlefs_unregister_partition(const esp_partition_t *partition)
+{
+    (void)partition;
+    mock_lfs_unregister_calls++;
+    return ESP_OK;
+}
+
+esp_err_t esp_littlefs_format(const char *partition_label)
+{
+    (void)partition_label;
+    return ESP_OK;
+}
+
+esp_err_t esp_littlefs_format_partition(const esp_partition_t *partition)
+{
+    (void)partition;
+    mock_lfs_format_calls++;
+    return (esp_err_t)mock_lfs_format_err;
+}
+
+esp_err_t esp_littlefs_partition_info(const esp_partition_t *partition, size_t *total_bytes,
+                                      size_t *used_bytes)
+{
+    (void)partition;
+    if (mock_lfs_info_err) {
+        return (esp_err_t)mock_lfs_info_err;
+    }
+    if (total_bytes != NULL) {
+        *total_bytes = mock_lfs_total;
+    }
+    if (used_bytes != NULL) {
+        *used_bytes = mock_lfs_used;
     }
     return ESP_OK;
 }

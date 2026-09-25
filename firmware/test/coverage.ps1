@@ -51,7 +51,7 @@ $inc = @(
 
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
-            "test_track_manifest")
+            "test_track_manifest", "test_storage")
 if ($Only) { $suites = @($Only) }
 
 $lineCov = @{}

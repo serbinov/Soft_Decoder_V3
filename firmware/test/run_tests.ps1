@@ -55,12 +55,15 @@ $inc = @(
     "-I$root\components\auxio\include",
     "-I$root\components\audio\include",
     "-I$root\components\track\include",
-    "-I$root\components\web\include"
+    "-I$root\components\web\include",
+    "-I$root\components\storage\include",
+    "-I$root\components\provision\include",
+    "-I$root\main"
 )
 
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
-            "test_track_manifest")
+            "test_track_manifest", "test_storage")
 $failed = 0
 
 foreach ($suite in $suites) {

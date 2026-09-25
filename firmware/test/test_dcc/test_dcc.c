@@ -743,6 +743,168 @@ static void test_dcc_service_ack_pulses_gpio(void)
     TEST_ASSERT_EQUAL_INT(1, mock_vtask_delay_count);
 }
 
+/* ---- coverage: remaining branches (ISR / task / init / parser edges) ---- */
+
+static void test_dcc_read_cv_null_callback(void)
+{
+    /* Ops-mode long-form bit manipulation, write, value=1, bit 0, CV4. */
+    const uint8_t pkt[] = { 0x03, 0xE8, 0x03, 0x18, 0x03 ^ 0xE8 ^ 0x03 ^ 0x18 };
+    s_cv_read_cb = NULL; /* read_cv() cannot read -> no write */
+    feed_packet(pkt, sizeof(pkt), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+}
+
+static void test_dcc_service_short_packet(void)
+{
+    const uint8_t pkt[] = { 0xFF, 0xFF }; /* service mode, no room for instr */
+    feed_packet(pkt, sizeof(pkt), 20);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+}
+
+static void test_dcc_service_bit_manip_clear(void)
+{
+    g_read_ok = true;
+    g_read_returns = 0xFF;
+    /* Service bit manipulation: write 0 to bit 0 of CV4 -> clear the bit. */
+    const uint8_t pkt[] = { 0xFF, 0x78, 0x03, 0x10, 0xFF ^ 0x78 ^ 0x03 ^ 0x10 };
+    feed_packet(pkt, sizeof(pkt), 20);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
+    TEST_ASSERT_EQUAL_UINT8(0xFE, g_cv_value);
+    TEST_ASSERT_TRUE(g_cv_service);
+}
+
+static void test_dcc_ops_bit_manip_clear(void)
+{
+    g_read_ok = true;
+    g_read_returns = 0xFF;
+    const uint8_t pkt[] = { 0x03, 0xE8, 0x03, 0x10, 0x03 ^ 0xE8 ^ 0x03 ^ 0x10 };
+    feed_packet(pkt, sizeof(pkt), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_UINT8(0xFE, g_cv_value);
+}
+
+static void test_dcc_addressed_packet_too_short(void)
+{
+    /* Long address, 3-byte packet: room for the address but no instruction. */
+    s_decoder_addr = 10;
+    s_decoder_long_addr = true;
+    const uint8_t pkt[] = { 0xC0, 0x0A, 0xC0 ^ 0x0A };
+    feed_packet(pkt, sizeof(pkt), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_fn_calls);
+}
+
+static void test_dcc_consist_reverse_128_step(void)
+{
+    s_decoder_addr = 3;
+    s_consist_addr = 7; /* matches via the consist */
+    s_consist_reverse = true;
+    /* 128-step: addr 7, 0x3F, ext=0x8A (forward, speed 10). */
+    const uint8_t pkt[] = { 0x07, 0x3F, 0x8A, 0x07 ^ 0x3F ^ 0x8A };
+    feed_packet(pkt, sizeof(pkt), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+    TEST_ASSERT_FALSE(g_forward); /* flipped by the consist reverse flag */
+}
+
+static void test_dcc_feed_half_period_kind_change(void)
+{
+    reset_parser();
+    feed_half_period(58);  /* ONE pending */
+    feed_half_period(100); /* ZERO -> kind change -> re-arm */
+    TEST_ASSERT_EQUAL(DCC_HALF_ZERO, s_pending_half);
+}
+
+static void test_dcc_isr_paths(void)
+{
+    mock_queue_create_fail = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+
+    /* prev <= 0 -> just store the reference time. */
+    s_last_edge_us = 0;
+    mock_timer_now_us = 1000;
+    dcc_isr(NULL);
+    TEST_ASSERT_EQUAL_INT64(1000, s_last_edge_us);
+
+    /* dt > MAX -> re-acquire. */
+    s_last_edge_us = 1000;
+    mock_timer_now_us = 1000 + DCC_MAX_EDGE_GAP_US + 1;
+    dcc_isr(NULL);
+    TEST_ASSERT_EQUAL_INT64(mock_timer_now_us, s_last_edge_us);
+
+    /* dt < MIN -> ignore the edge, keep the reference time. */
+    s_last_edge_us = 5000;
+    mock_timer_now_us = 5000 + (DCC_MIN_HALF_PERIOD_US - 1);
+    dcc_isr(NULL);
+    TEST_ASSERT_EQUAL_INT64(5000, s_last_edge_us);
+
+    /* Valid edge -> enqueued. */
+    s_last_edge_us = 100;
+    mock_timer_now_us = 200;
+    dcc_isr(NULL);
+    TEST_ASSERT_EQUAL_INT64(200, s_last_edge_us);
+
+    /* Queue send failure -> overrun counter. */
+    s_last_edge_us = 300;
+    mock_timer_now_us = 400;
+    s_isr_overruns = 0;
+    mock_queue_send_fail = 1;
+    dcc_isr(NULL);
+    TEST_ASSERT_TRUE(s_isr_overruns != 0U);
+    mock_queue_send_fail = 0;
+}
+
+static void test_dcc_task_processes_queue(void)
+{
+    mock_queue_create_fail = 0;
+    mock_gpio_isr_install_err = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+    dcc_half_t hp = { .dt_us = 58 };
+    TEST_ASSERT_TRUE(xQueueSend(s_queue, &hp, 0) == pdTRUE);
+
+    s_dcc_iter_cap = 1;
+    s_isr_overruns = 1; /* forces the reset-on-overrun path */
+    dcc_task(NULL);
+    s_dcc_iter_cap = 0;
+}
+
+static void test_dcc_task_isr_install_failure(void)
+{
+    mock_gpio_isr_install_err = ESP_FAIL; /* covers the ESP_LOGE branch */
+    mock_queue_create_fail = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+    s_dcc_iter_cap = 1;
+    dcc_task(NULL);
+    s_dcc_iter_cap = 0;
+    mock_gpio_isr_install_err = 0;
+}
+
+static void test_dcc_init_failures(void)
+{
+    mock_queue_create_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, dcc_init());
+    mock_queue_create_fail = 0;
+
+    mock_task_create_ok = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, dcc_init());
+    mock_task_create_ok = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+}
+
+static void test_dcc_register_callbacks(void)
+{
+    dcc_register_speed_cb(on_speed);
+    dcc_register_function_cb(on_function);
+    dcc_register_cv_write_cb(on_cv_write);
+    dcc_register_cv_read_cb(on_cv_read);
+    dcc_register_reset_cb(on_reset);
+    TEST_ASSERT_TRUE(s_speed_cb == on_speed);
+    TEST_ASSERT_TRUE(s_function_cb == on_function);
+    TEST_ASSERT_TRUE(s_cv_write_cb == on_cv_write);
+    TEST_ASSERT_TRUE(s_cv_read_cb == on_cv_read);
+    TEST_ASSERT_TRUE(s_reset_cb == on_reset);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -789,5 +951,17 @@ int main(void)
     RUN_TEST(test_dcc_broadcast_reset_len3_only);
     RUN_TEST(test_dcc_broadcast_unknown_instruction);
     RUN_TEST(test_dcc_broadcast_estop);
+    RUN_TEST(test_dcc_read_cv_null_callback);
+    RUN_TEST(test_dcc_service_short_packet);
+    RUN_TEST(test_dcc_service_bit_manip_clear);
+    RUN_TEST(test_dcc_ops_bit_manip_clear);
+    RUN_TEST(test_dcc_addressed_packet_too_short);
+    RUN_TEST(test_dcc_consist_reverse_128_step);
+    RUN_TEST(test_dcc_feed_half_period_kind_change);
+    RUN_TEST(test_dcc_isr_paths);
+    RUN_TEST(test_dcc_task_processes_queue);
+    RUN_TEST(test_dcc_task_isr_install_failure);
+    RUN_TEST(test_dcc_init_failures);
+    RUN_TEST(test_dcc_register_callbacks);
     return UNITY_END();
 }

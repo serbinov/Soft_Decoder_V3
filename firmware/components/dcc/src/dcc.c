@@ -157,9 +157,7 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     /* Service mode (NMRA S-9.2.3, Direct Mode): 0b0111CCAA. */
     if (service_mode) {
         s_last_packet_us = esp_timer_get_time();
-        if (idx >= (uint8_t)(len - 1)) {
-            return;
-        }
+        /* dispatch() guarantees len >= 3 and service packets use idx == 1. */
         uint8_t instr = packet[idx];
 
         if ((instr & 0xFCU) == 0x7CU) { /* Write Byte */
@@ -463,6 +461,9 @@ static void IRAM_ATTR dcc_isr(void *arg)
     }
 }
 
+/* Test hook: 0 runs forever (production); host tests set a small cap. */
+static uint32_t s_dcc_iter_cap;
+
 static void dcc_task(void *arg)
 {
     (void)arg;
@@ -478,7 +479,8 @@ static void dcc_task(void *arg)
     }
 
     reset_parser();
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_dcc_iter_cap == 0U || iters < s_dcc_iter_cap) {
         dcc_half_t hp;
         if (xQueueReceive(s_queue, &hp, portMAX_DELAY) == pdTRUE) {
             if (s_isr_overruns != 0U) {
@@ -491,6 +493,7 @@ static void dcc_task(void *arg)
             }
             feed_half_period(hp.dt_us);
         }
+        iters++;
     }
 }
 

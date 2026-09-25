@@ -43,10 +43,12 @@ esp_err_t gpio_config(const gpio_config_t *cfg)
     return ESP_OK;
 }
 
+int mock_gpio_isr_install_err = 0;
+
 esp_err_t gpio_install_isr_service(int flags)
 {
     (void)flags;
-    return ESP_OK;
+    return (esp_err_t)mock_gpio_isr_install_err;
 }
 
 esp_err_t gpio_isr_handler_add(gpio_num_t gpio, void (*isr)(void *), void *arg)
@@ -85,9 +87,15 @@ typedef struct {
     size_t item_size;
 } mock_queue_t;
 
+int mock_queue_create_fail = 0;
+int mock_queue_send_fail = 0;
+
 QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size)
 {
     (void)len;
+    if (mock_queue_create_fail) {
+        return NULL;
+    }
     mock_queue_t *q = (mock_queue_t *)calloc(1, sizeof(*q));
     if (q == NULL) {
         return NULL;
@@ -100,7 +108,7 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t ticks)
 {
     (void)ticks;
     mock_queue_t *mq = (mock_queue_t *)q;
-    if (mq == NULL || mq->count >= 16) {
+    if (mock_queue_send_fail || mq == NULL || mq->count >= 16) {
         return pdFALSE;
     }
     size_t idx = (mq->head + mq->count) % 16;
@@ -115,7 +123,12 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t ticks)
 
 BaseType_t xQueueSendFromISR(QueueHandle_t q, const void *item, BaseType_t *woken)
 {
-    (void)woken;
+    if (woken != NULL) {
+        *woken = pdTRUE;
+    }
+    if (mock_queue_send_fail) {
+        return pdFALSE;
+    }
     return xQueueSend(q, item, 0);
 }
 

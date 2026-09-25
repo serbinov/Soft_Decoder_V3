@@ -54,7 +54,7 @@ $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_track_manifest")
 if ($Only) { $suites = @($Only) }
 
-$agg = @{}
+$lineCov = @{}
 
 foreach ($suite in $suites) {
     $dir = Join-Path $root "test\$suite"
@@ -71,36 +71,49 @@ foreach ($suite in $suites) {
     & $exe *> $null
     $notes = @(Get-ChildItem $work -Filter "*.gcno" | Where-Object { $_.Name -notlike "*unity*" })
     if ($notes.Count -eq 0) { Pop-Location; Write-Host "no gcov notes: $suite"; continue }
-    $out = & $gcov -b ($notes | ForEach-Object { $_.Name }) 2>&1 | Out-String
+    & $gcov -b ($notes | ForEach-Object { $_.Name }) *> $null
     Pop-Location
-    $cur = $null
-    foreach ($line in ($out -split "`n")) {
-        $l = $line.Trim()
-        if ($l -match "^File '(.+)'$") { $cur = $Matches[1] }
-        elseif ($cur -and $l -match '^Lines executed:([\d.]+)% of (\d+)') {
-            $pct = [double]$Matches[1]
-            $tot = [int]$Matches[2]
-            $cov = [int][math]::Round($pct / 100.0 * $tot)
-            if (-not $agg.ContainsKey($cur)) { $agg[$cur] = @{ cov = 0; tot = 0 } }
-            $agg[$cur].cov += $cov
-            $agg[$cur].tot += $tot
-            $cur = $null
+
+    # Union the per-line coverage of the .gcov files this suite produced.
+    foreach ($g in (Get-ChildItem $work -Filter "*.gcov" -ErrorAction SilentlyContinue)) {
+        $src = $null
+        foreach ($line in (Get-Content -LiteralPath $g.FullName)) {
+            if ($line -match ':\s*0:Source:(.+)$') {
+                $src = $Matches[1].Trim()
+                if (-not $lineCov.ContainsKey($src)) { $lineCov[$src] = @{} }
+                continue
+            }
+            if (-not $src) { continue }
+            if ($line -match '^\s*([0-9]+|#####|=====|\*+|-)\s*:\s*([0-9]+):') {
+                $cnt = $Matches[1]
+                if ($cnt -eq '-') { continue }
+                $ln = [int]$Matches[2]
+                $covered = $false
+                if ($cnt -match '^\d') { $covered = ([int64]($cnt -replace '\*', '')) -gt 0 }
+                elseif ($cnt -match '\*') { $covered = $true }
+                if (-not $lineCov[$src].ContainsKey($ln) -or $covered) {
+                    $lineCov[$src][$ln] = $covered
+                }
+            }
         }
     }
 }
 
 Write-Host ""
-Write-Host "=== COVERAGE (per file, lines) ==="
+Write-Host "=== COVERAGE: first-party sources (components/ + main/) ==="
 $tc = 0
 $tt = 0
-foreach ($f in ($agg.Keys | Sort-Object)) {
-    $a = $agg[$f]
-    $p = if ($a.tot) { 100.0 * $a.cov / $a.tot } else { 0 }
-    $short = $f.Replace($root, "").TrimStart('\', '/')
-    "{0,6:N1}%  {1,5}/{2,-5}  {3}" -f $p, $a.cov, $a.tot, $short
-    $tc += $a.cov
-    $tt += $a.tot
+foreach ($src in ($lineCov.Keys | Sort-Object)) {
+    if ($src -notmatch '[\\/](components|main)[\\/]') { continue }
+    $m = $lineCov[$src]
+    $tot = $m.Count
+    $cov = (@($m.Values | Where-Object { $_ -eq $true })).Count
+    $p = if ($tot) { 100.0 * $cov / $tot } else { 0 }
+    $short = $src.Replace($root, "").TrimStart('\', '/')
+    "{0,6:N1}%  {1,5}/{2,-5}  {3}" -f $p, $cov, $tot, $short
+    $tc += $cov
+    $tt += $tot
 }
 $tp = if ($tt) { 100.0 * $tc / $tt } else { 0 }
 Write-Host ""
-"TOTAL: {0:N1}%  ({1}/{2})" -f $tp, $tc, $tt
+"TOTAL (first-party): {0:N1}%  ({1}/{2})" -f $tp, $tc, $tt

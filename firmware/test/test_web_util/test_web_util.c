@@ -436,6 +436,20 @@ static void test_ota_file_hdr_parse(void)
     TEST_ASSERT_FALSE(ota_file_hdr_parse(buf, sizeof(buf), &f));
 }
 
+/* Defensive guards: early return on bad arguments / missing keys. */
+static void test_guards_and_bad_args(void)
+{
+    uint16_t v16 = 0;
+    TEST_ASSERT_FALSE(parse_u16("a=1", "missing", &v16));
+
+    char out[8] = "x";
+    url_decode("a", NULL, sizeof(out));    /* output == NULL */
+    url_decode("a", out, 0);               /* out_len == 0 */
+    sanitize_name("a", NULL, sizeof(out)); /* out == NULL */
+    sanitize_name("a", out, 0);            /* out_len == 0 */
+    TEST_ASSERT_EQUAL_STRING("x", out);    /* unchanged by the guard paths */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -464,5 +478,6 @@ int main(void)
     RUN_TEST(test_voice_volume_categories_override);
     RUN_TEST(test_ota_container_parse);
     RUN_TEST(test_ota_file_hdr_parse);
+    RUN_TEST(test_guards_and_bad_args);
     return UNITY_END();
 }

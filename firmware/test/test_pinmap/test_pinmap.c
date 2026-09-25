@@ -6,7 +6,9 @@
 
 #include "pinmap.h"
 
+#define static
 #include "../../components/pinmap/src/pinmap.c"
+#undef static
 #include "../../test_libs/teststubs/stubs.c"
 
 void setUp(void)
@@ -60,11 +62,31 @@ static void test_pinmap_no_duplicates(void)
     }
 }
 
+/* pinmap_check must reject GPIO23/24/25. */
+static void test_pinmap_check_rejects_reserved(void)
+{
+    int bad23[] = { 1, 23, 5 };
+    int bad24[] = { 24 };
+    int bad25[] = { 7, 8, 25 };
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(bad23, 3));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(bad24, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(bad25, 3));
+}
+
+static void test_pinmap_check_accepts_valid(void)
+{
+    int ok[] = { 1, 2, 3, 4 };
+    TEST_ASSERT_EQUAL(ESP_OK, pinmap_check(ok, 4));
+    TEST_ASSERT_EQUAL(ESP_OK, pinmap_check(ok, 0));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_pinmap_valid);
     RUN_TEST(test_pinmap_no_reserved_gpio);
     RUN_TEST(test_pinmap_no_duplicates);
+    RUN_TEST(test_pinmap_check_rejects_reserved);
+    RUN_TEST(test_pinmap_check_accepts_valid);
     return UNITY_END();
 }

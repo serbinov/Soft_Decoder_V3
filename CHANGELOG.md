@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — test: union-per-line coverage; track/pinmap/manifest to 100%
 - 2026-09-25 (v0.7) — test: add gcov coverage tooling and a track_manifest suite
 - 2026-09-25 (v0.7) — bump_version: also mirror the version into the root VERSION file
 - 2026-09-25 (v0.7) — docs: point changelog refs to repo root; note VERSION and git hooks

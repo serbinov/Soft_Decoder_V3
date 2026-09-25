@@ -147,6 +147,8 @@ void vQueueDelete(QueueHandle_t q)
     free(mq);
 }
 
+int mock_task_create_ok = 1;
+
 BaseType_t xTaskCreate(void (*task)(void *), const char *name, uint32_t stack,
                        void *param, UBaseType_t prio, TaskHandle_t *handle)
 {
@@ -158,7 +160,7 @@ BaseType_t xTaskCreate(void (*task)(void *), const char *name, uint32_t stack,
     if (handle != NULL) {
         *handle = NULL;
     }
-    return pdPASS;
+    return mock_task_create_ok ? pdPASS : pdFAIL;
 }
 
 BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
@@ -453,17 +455,20 @@ esp_err_t nvs_erase_all(nvs_handle_t h)
 int mock_adc_raw[16];
 int mock_adc_ok = 1;
 
+int mock_adc1_config_width_ok = 1;
+int mock_adc1_config_atten_ok = 1;
+
 esp_err_t adc1_config_width(adc_bits_width_t width)
 {
     (void)width;
-    return ESP_OK;
+    return mock_adc1_config_width_ok ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t adc1_config_channel_atten(adc1_channel_t channel, adc_atten_t atten)
 {
     (void)channel;
     (void)atten;
-    return ESP_OK;
+    return mock_adc1_config_atten_ok ? ESP_OK : ESP_FAIL;
 }
 
 int adc1_get_raw(adc1_channel_t channel)

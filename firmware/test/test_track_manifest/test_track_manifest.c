@@ -276,6 +276,27 @@ static void test_manifest_sync_without_dir_no_crash(void)
     TEST_ASSERT_EQUAL_UINT32(1, n);
 }
 
+/* A track whose slot is beyond the stored categories must fall back to the
+ * default category (no out-of-range read). */
+static void test_manifest_track_slot_without_category(void)
+{
+    uint8_t cats[5] = { 1, 0, 1, 0, 1 };
+    TEST_ASSERT_EQUAL(ESP_OK, settings_track_cats_save(cats, 5));
+
+    settings_track_t t;
+    seed_track(&t, 10, "audio/slot10.wav", "Ten", true);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_save(&t, 1));
+
+    mock_nvs_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manifest_load());
+
+    settings_track_t back[SETTINGS_MAX_TRACKS];
+    size_t n = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_load(back, &n));
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL_UINT8(10, back[0].slot);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -290,5 +311,6 @@ int main(void)
     RUN_TEST(test_manifest_without_magic_returns_not_found);
     RUN_TEST(test_manifest_bad_track_lines_are_skipped);
     RUN_TEST(test_manifest_sync_without_dir_no_crash);
+    RUN_TEST(test_manifest_track_slot_without_category);
     return UNITY_END();
 }

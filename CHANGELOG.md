@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — test: motor.c to ~100% (tick/pid/kickstart/cal-task/info); drop dead guards; bounded task hook
 - 2026-09-25 (v0.7) — test: audio.c to ~100% (init/parse/mixer paths); stubs for i2s/task failure
 - 2026-09-25 (v0.7) — test: auxio and settings to ~100% coverage
 - 2026-09-25 (v0.7) — test: union-per-line coverage; track/pinmap/manifest to 100%

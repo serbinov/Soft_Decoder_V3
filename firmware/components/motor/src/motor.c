@@ -331,10 +331,8 @@ static void motor_tick(void)
             applied = target;
             s_ramp_acc = 0;
         } else {
+            /* cv != 0 here (checked above), so ticks >= 100. */
             uint32_t ticks = (uint32_t)cv * 100U;
-            if (ticks == 0U) {
-                ticks = 1U;
-            }
             s_ramp_acc += 126U;
             while (s_ramp_acc >= ticks && applied != target) {
                 s_ramp_acc -= ticks;
@@ -374,10 +372,7 @@ static void motor_tick(void)
             uint8_t cv5 = 0;
             (void)settings_cv_read(5, &cv5);
             uint32_t vh = (cv5 != 0U) ? (uint32_t)cv5 * 4U : LEDC_MAX;
-            s_kick_duty = vh * cv65 / 255U;
-            if (s_kick_duty > LEDC_MAX) {
-                s_kick_duty = LEDC_MAX;
-            }
+            s_kick_duty = (vh * cv65 / 255U > LEDC_MAX) ? LEDC_MAX : vh * cv65 / 255U;
             s_kick_left = KICK_TICKS;
         }
     }
@@ -465,13 +460,18 @@ static void motor_tick(void)
     }
 }
 
+/* Test hook: 0 runs forever (production); host tests set a small cap. */
+static uint32_t s_motor_iter_cap;
+
 static void motor_task(void *arg)
 {
     (void)arg;
     TickType_t last = xTaskGetTickCount();
-    while (true) {
+    uint32_t iters = 0;
+    while (s_motor_iter_cap == 0U || iters < s_motor_iter_cap) {
         vTaskDelayUntil(&last, pdMS_TO_TICKS(MOTOR_TICK_MS));
         motor_tick();
+        iters++;
     }
 }
 
@@ -622,10 +622,8 @@ static void bemf_cal_task(void *arg)
         s_cal_speed[i] = spd;
         if (n > 0U && s_rail_mv > 0U) {
             uint32_t frac = (sum / n) * BEMF_CAL_FRAC_SCALE / s_rail_mv;
-            if (frac > BEMF_CAL_FRAC_SCALE) {
-                frac = BEMF_CAL_FRAC_SCALE;
-            }
-            s_cal_frac[i] = (uint16_t)frac;
+            s_cal_frac[i] = (frac > BEMF_CAL_FRAC_SCALE) ? (uint16_t)BEMF_CAL_FRAC_SCALE
+                                                          : (uint16_t)frac;
         } else {
             s_cal_frac[i] = 0;
         }
@@ -810,10 +808,8 @@ void motor_bemf_base_info(motor_bemf_base_info_t *info)
         return;
     }
     memset(info, 0, sizeof(*info));
-    uint8_t n = BEMF_CAL_BASE.count;
-    if (n > MOTOR_BEMF_BASE_MAX_POINTS) {
-        n = MOTOR_BEMF_BASE_MAX_POINTS;
-    }
+    uint8_t n = (BEMF_CAL_BASE.count > MOTOR_BEMF_BASE_MAX_POINTS)
+                    ? MOTOR_BEMF_BASE_MAX_POINTS : BEMF_CAL_BASE.count;
     info->count = n;
     for (uint8_t i = 0; i < n; ++i) {
         info->speed[i] = BEMF_CAL_BASE.speed[i];

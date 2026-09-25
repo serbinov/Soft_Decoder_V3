@@ -1,0 +1,6 @@
+#!/bin/sh
+# post-commit hook: record the just-made commit as a line in the root
+# CHANGELOG.md (logic in changelog.ps1). The entry is folded into the commit
+# with --amend (guarded against recursion). Errors never block anything.
+dir=$(dirname "$0")
+exec powershell -NoProfile -ExecutionPolicy Bypass -File "$dir/changelog.ps1"

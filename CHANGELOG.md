@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — test: add test_provision (BEMF commands, FW upload, PUT flow, listener)
 - 2026-09-25 (v0.7) — chore: refresh release artifacts after track_recover refactor
 - 2026-09-25 (v0.7) — refactor: extract track recovery into track_recover.c (100% covered)
 - 2026-09-25 (v0.7) — test: fuzz/robustness tests (web_util, dcc); optional -Sanitize flags in runners

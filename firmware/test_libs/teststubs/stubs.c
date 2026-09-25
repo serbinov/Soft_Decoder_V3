@@ -20,10 +20,15 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "driver/spi_master.h"
+#include "driver/uart.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_flash.h"
 #include "esp_flash_spi_init.h"
 #include "esp_partition.h"
 #include "esp_littlefs.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_vfs_dev.h"
 
 
 int64_t mock_timer_now_us = 0;
@@ -201,14 +206,16 @@ BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
 
 void vTaskDelay(const TickType_t ticks)
 {
-    (void)ticks;
+    /* 1 tick == 1 ms in this mock: advance the virtual clock so read loops
+     * that poll against a deadline terminate once input runs out. */
+    mock_timer_now_us += (int64_t)ticks * 1000;
     mock_vtask_delay_count++;
 }
 
 void vTaskDelayUntil(TickType_t *pxPreviousWakeTime, TickType_t xTimeIncrement)
 {
     (void)pxPreviousWakeTime;
-    (void)xTimeIncrement;
+    mock_timer_now_us += (int64_t)xTimeIncrement * 1000;
     mock_vtask_delay_count++;
 }
 
@@ -798,4 +805,178 @@ esp_err_t esp_littlefs_partition_info(const esp_partition_t *partition, size_t *
         *used_bytes = mock_lfs_used;
     }
     return ESP_OK;
+}
+
+/* ---- UART / USB-Serial-JTAG / OTA (provision.c tests) ---- */
+
+uint8_t mock_uart_rx[16384];
+size_t mock_uart_rx_len = 0;
+size_t mock_uart_rx_pos = 0;
+char mock_uart_tx[65536];
+size_t mock_uart_tx_len = 0;
+
+int mock_uart_driver_install_err = 0;
+int mock_usbjtag_install_ok = 0; /* 0 -> USB-Serial-JTAG driver unavailable */
+int mock_usbjtag_byte = -1;      /* >=0 -> one byte available on the USB port */
+int mock_ota_begin_err = 0;
+int mock_ota_write_err = 0;
+int mock_ota_end_err = 0;
+int mock_ota_set_boot_err = 0;
+int mock_ota_partition_absent = 0;
+int mock_esp_restart_calls = 0;
+uint32_t mock_ota_bytes = 0;
+uint32_t mock_ota_next_size = 4u * 1024u * 1024u;
+
+static esp_partition_t s_ota_partition;
+
+void mock_uart_reset(void)
+{
+    mock_uart_rx_len = 0;
+    mock_uart_rx_pos = 0;
+    mock_uart_tx_len = 0;
+    mock_uart_tx[0] = '\0';
+}
+
+void mock_uart_feed(const void *data, size_t n)
+{
+    if (mock_uart_rx_len + n <= sizeof(mock_uart_rx)) {
+        memcpy(mock_uart_rx + mock_uart_rx_len, data, n);
+        mock_uart_rx_len += n;
+    }
+}
+
+esp_err_t uart_driver_install(uart_port_t uart_num, int rx, int tx, int q, void *queue, int flags)
+{
+    (void)uart_num;
+    (void)rx;
+    (void)tx;
+    (void)q;
+    (void)queue;
+    (void)flags;
+    return (esp_err_t)mock_uart_driver_install_err;
+}
+
+int uart_read_bytes(uart_port_t uart_num, uint8_t *buf, uint32_t length, TickType_t ticks)
+{
+    (void)uart_num;
+    (void)ticks;
+    size_t avail = mock_uart_rx_len - mock_uart_rx_pos;
+    size_t n = length < avail ? length : avail;
+    if (n > 0 && buf != NULL) {
+        memcpy(buf, mock_uart_rx + mock_uart_rx_pos, n);
+        mock_uart_rx_pos += n;
+    }
+    return (int)n;
+}
+
+int uart_write_bytes(uart_port_t uart_num, const void *src, size_t size)
+{
+    (void)uart_num;
+    if (mock_uart_tx_len + size < sizeof(mock_uart_tx) && src != NULL) {
+        memcpy(mock_uart_tx + mock_uart_tx_len, src, size);
+        mock_uart_tx_len += size;
+        mock_uart_tx[mock_uart_tx_len] = '\0';
+    }
+    return (int)size;
+}
+
+esp_err_t uart_flush_input(uart_port_t uart_num)
+{
+    (void)uart_num;
+    return ESP_OK;
+}
+
+esp_err_t uart_set_baudrate(uart_port_t uart_num, uint32_t baud)
+{
+    (void)uart_num;
+    (void)baud;
+    return ESP_OK;
+}
+
+esp_err_t usb_serial_jtag_driver_install(const usb_serial_jtag_driver_config_t *cfg)
+{
+    (void)cfg;
+    return mock_usbjtag_install_ok ? ESP_OK : ESP_FAIL;
+}
+
+int usb_serial_jtag_read_bytes(void *buf, uint32_t length, uint32_t ticks)
+{
+    (void)length;
+    (void)ticks;
+    if (mock_usbjtag_byte >= 0 && buf != NULL) {
+        *(uint8_t *)buf = (uint8_t)mock_usbjtag_byte;
+        mock_usbjtag_byte = -1;
+        return 1;
+    }
+    return 0;
+}
+
+int usb_serial_jtag_write_bytes(const void *src, size_t size, uint32_t ticks)
+{
+    (void)src;
+    (void)ticks;
+    return (int)size;
+}
+
+void esp_vfs_usb_serial_jtag_use_driver(void)
+{
+}
+
+const esp_partition_t *esp_ota_get_next_update_partition(const esp_partition_t *start_from)
+{
+    (void)start_from;
+    if (mock_ota_partition_absent) {
+        return NULL;
+    }
+    memset(&s_ota_partition, 0, sizeof(s_ota_partition));
+    s_ota_partition.size = mock_ota_next_size;
+    return &s_ota_partition;
+}
+
+esp_err_t esp_ota_begin(const esp_partition_t *partition, size_t image_size, esp_ota_handle_t *out)
+{
+    (void)partition;
+    (void)image_size;
+    if (mock_ota_begin_err) {
+        return (esp_err_t)mock_ota_begin_err;
+    }
+    if (out != NULL) {
+        *out = 1;
+    }
+    mock_ota_bytes = 0;
+    return ESP_OK;
+}
+
+esp_err_t esp_ota_write(esp_ota_handle_t handle, const void *data, size_t size)
+{
+    (void)handle;
+    (void)data;
+    if (mock_ota_write_err) {
+        return (esp_err_t)mock_ota_write_err;
+    }
+    mock_ota_bytes += (uint32_t)size;
+    return ESP_OK;
+}
+
+esp_err_t esp_ota_end(esp_ota_handle_t handle)
+{
+    (void)handle;
+    return (esp_err_t)mock_ota_end_err;
+}
+
+esp_err_t esp_ota_abort(esp_ota_handle_t handle)
+{
+    (void)handle;
+    return ESP_OK;
+}
+
+esp_err_t esp_ota_set_boot_partition(const esp_partition_t *partition)
+{
+    (void)partition;
+    return (esp_err_t)mock_ota_set_boot_err;
+}
+
+void esp_restart(void)
+{
+    mock_esp_restart_calls++;
 }

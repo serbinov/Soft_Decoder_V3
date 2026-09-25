@@ -27,6 +27,16 @@ static const char *TAG = "prov";
 #define PROV_BAUD        921600
 #define PROV_CHUNK       4096
 #define PROV_WINDOW_MS   20000
+#ifndef PROV_AUDIO_DIR
+#define PROV_AUDIO_DIR   "/userdata/audio"
+#endif
+
+#ifdef _WIN32
+#include <direct.h>
+#define PROV_MKDIR(p) _mkdir(p)
+#else
+#define PROV_MKDIR(p) mkdir((p), 0755)
+#endif
 
 /* True while the boot-time provisioning window is open; the background
  * listener ignores "PROV" in that state so it cannot re-trigger a reboot. */
@@ -481,7 +491,7 @@ static void provision_run(void)
         send_line("PROV-ERR storage");
         return;
     }
-    (void)mkdir("/userdata/audio", 0755);
+    (void)PROV_MKDIR(PROV_AUDIO_DIR);
 
     settings_track_t tracks[SETTINGS_MAX_TRACKS];
     memset(tracks, 0, sizeof(tracks));
@@ -521,7 +531,7 @@ static void provision_run(void)
         }
 
         char path[64];
-        snprintf(path, sizeof(path), "/userdata/audio/slot%d.wav", slot);
+        snprintf(path, sizeof(path), PROV_AUDIO_DIR "/slot%d.wav", slot);
         FILE *f = fopen(path, "wb");
         if (f == NULL) {
             ESP_LOGE(TAG, "provision: cannot create %s", path);
@@ -604,12 +614,16 @@ bool provision_try(void)
 
 /* ---- background listener ---------------------------------------------- */
 
+/* Test hook: 0 runs forever (production); host tests set a small cap. */
+static uint32_t s_listen_iter_cap;
+
 static void listener_task(void *arg)
 {
     (void)arg;
     char line[256];
     size_t len = 0;
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_listen_iter_cap == 0U || iters < s_listen_iter_cap) {
         uint8_t c;
         int64_t deadline = esp_timer_get_time() + 1000000;
         if (read_byte_any(&c, deadline)) {
@@ -633,6 +647,7 @@ static void listener_task(void *arg)
                 line[len++] = (char)c;
             }
         }
+        iters++;
     }
 }
 

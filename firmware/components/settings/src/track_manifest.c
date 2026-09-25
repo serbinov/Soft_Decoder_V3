@@ -22,7 +22,10 @@
 
 static const char *TAG = "manifest";
 
-#define MANIFEST_PATH    "/userdata/audio/tracks.txt"
+#ifndef MANIFEST_DIR
+#define MANIFEST_DIR     "/userdata/audio"
+#endif
+#define MANIFEST_PATH    MANIFEST_DIR "/tracks.txt"
 #define MANIFEST_MAGIC   "AURA-TRACKS"
 #define MANIFEST_VERSION 1
 #define MANIFEST_LINE_MAX 256

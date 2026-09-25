@@ -450,6 +450,56 @@ static void test_guards_and_bad_args(void)
     TEST_ASSERT_EQUAL_STRING("x", out);    /* unchanged by the guard paths */
 }
 
+/* Fuzz / robustness: random and truncated inputs must never crash. */
+static void test_fuzz_random_inputs(void)
+{
+    uint32_t seed = 0x12345678u;
+    for (int iter = 0; iter < 3000; ++iter) {
+        char q[64];
+        char out[64];
+        seed = seed * 1103515245u + 12345u;
+        size_t qlen = seed % sizeof(q);
+        for (size_t i = 0; i < qlen; ++i) {
+            seed = seed * 1103515245u + 12345u;
+            q[i] = (char)(seed >> 16);
+        }
+        q[qlen] = '\0';
+
+        char key[6];
+        for (size_t i = 0; i < sizeof(key) - 1; ++i) {
+            key[i] = (char)('a' + (seed % 26u));
+        }
+        key[sizeof(key) - 1] = '\0';
+
+        uint8_t u8 = 0;
+        uint16_t u16 = 0;
+        (void)parse_query(q, key, out, sizeof(out));
+        (void)parse_query(q, key, out, 0);
+        (void)parse_u8(q, key, &u8);
+        (void)parse_u16(q, key, &u16);
+        (void)parse_bool(q, key, true);
+        (void)json_escape(q, out, sizeof(out));
+        (void)json_escape(q, out, 0);
+        (void)url_decode(q, out, sizeof(out));
+        (void)sanitize_name(q, out, sizeof(out));
+
+        uint8_t bytes[64];
+        size_t blen = seed % sizeof(bytes);
+        for (size_t i = 0; i < blen; ++i) {
+            seed = seed * 1103515245u + 12345u;
+            bytes[i] = (uint8_t)(seed >> 16);
+        }
+        uint8_t resp[128];
+        const uint8_t ip[4] = { 1, 2, 3, 4 };
+        (void)dns_build_response(bytes, (int)blen, resp, ip);
+        ota_container_hdr_t ch;
+        ota_file_hdr_t fh;
+        (void)ota_container_parse(bytes, blen, &ch);
+        (void)ota_file_hdr_parse(bytes, blen, &fh);
+    }
+    TEST_ASSERT_TRUE(true);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -479,5 +529,6 @@ int main(void)
     RUN_TEST(test_ota_container_parse);
     RUN_TEST(test_ota_file_hdr_parse);
     RUN_TEST(test_guards_and_bad_args);
+    RUN_TEST(test_fuzz_random_inputs);
     return UNITY_END();
 }

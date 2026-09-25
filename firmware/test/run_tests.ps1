@@ -5,6 +5,11 @@
 #   1) $env:DCC_TEST_CC   - explicit path to a C compiler
 #   2) $env:TEMP\tcc\tcc\tcc.exe  - portable Tiny C Compiler
 #   3) gcc / clang / cc in PATH
+#
+# -Sanitize adds -fsanitize=address,undefined (needs a toolchain that ships
+# libasan/libubsan; the MinGW gcc used here does not, so it is opt-in).
+
+param([switch]$Sanitize)
 
 $ErrorActionPreference = "Stop"
 
@@ -78,7 +83,9 @@ foreach ($suite in $suites) {
         # No global -Dstatic=: the white-box tests strip `static` for the
         # component translation unit only, so Unity keeps its own statics.
         $names = $srcs | ForEach-Object { $_.FullName }
-        & $cc $inc $names "$unitySrc\unity.c" -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
+        $extra = @()
+if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
+& $cc $inc $names "$unitySrc\unity.c" $extra -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
     } catch {
         Write-Host "BUILD FAILED: $_"
     } finally {

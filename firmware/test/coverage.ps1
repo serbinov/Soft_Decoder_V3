@@ -6,7 +6,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File test\coverage.ps1
 #   powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_settings
-param([string]$Only = "")
+param([string]$Only = "", [switch]$Sanitize)
 
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
@@ -66,7 +66,9 @@ foreach ($suite in $suites) {
     $names = $srcs | ForEach-Object { $_.FullName }
     $exe = Join-Path $work "$suite.exe"
     Push-Location $work
-    & $cc $inc $names "$unitySrc\unity.c" --coverage -w -o $exe *> $null
+    $extra = @()
+    if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
+    & $cc $inc $names "$unitySrc\unity.c" $extra --coverage -w -o $exe *> $null
     if (-not (Test-Path $exe)) { Pop-Location; Write-Host "BUILD FAILED: $suite"; continue }
     & $exe *> $null
     $notes = @(Get-ChildItem $work -Filter "*.gcno" | Where-Object { $_.Name -notlike "*unity*" })

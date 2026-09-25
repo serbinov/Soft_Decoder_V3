@@ -905,6 +905,17 @@ static void test_dcc_register_callbacks(void)
     TEST_ASSERT_TRUE(s_reset_cb == on_reset);
 }
 
+/* Fuzz / robustness: a long stream of random bits must never crash. */
+static void test_fuzz_random_bits(void)
+{
+    uint32_t seed = 0xC0FFEEu;
+    for (int iter = 0; iter < 50000; ++iter) {
+        seed = seed * 1103515245u + 12345u;
+        consume_bit((uint8_t)(seed >> 31));
+    }
+    TEST_ASSERT_TRUE(true);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -963,5 +974,6 @@ int main(void)
     RUN_TEST(test_dcc_task_isr_install_failure);
     RUN_TEST(test_dcc_init_failures);
     RUN_TEST(test_dcc_register_callbacks);
+    RUN_TEST(test_fuzz_random_bits);
     return UNITY_END();
 }

@@ -148,159 +148,24 @@ static void ensure_audio_dir(void)
     mkdir("/userdata/audio", 0755);
 }
 
-static bool name_is_wav(const char *n)
-{
-    size_t l = strlen(n);
-    if (l <= 4U) {
-        return false;
-    }
-    const char *e = n + l - 4U;
-    return e[0] == '.' &&
-           (e[1] == 'w' || e[1] == 'W') &&
-           (e[2] == 'a' || e[2] == 'A') &&
-           (e[3] == 'v' || e[3] == 'V');
-}
-
-/* Slot number encoded in "slotN.wav", else 0. */
-static int slot_from_name(const char *n)
-{
-    if (strncmp(n, "slot", 4) != 0) {
-        return 0;
-    }
-    char *end = NULL;
-    long s = strtol(n + 4, &end, 10);
-    if (end == n + 4 || *end != '.' || s < 1 || s > SETTINGS_MAX_TRACKS) {
-        return 0;
-    }
-    return (int)s;
-}
-
-static int cmp_names(const void *a, const void *b)
-{
-    return strcmp((const char *)a, (const char *)b);
-}
-
-/* Collect .wav file paths from one directory; `prefix` is prepended to build
- * the storage-relative path (e.g. "audio/"). */
-static size_t scan_wavs(const char *dirpath, const char *prefix,
-                        char rel[][SETTINGS_TRACK_FILE_MAX], size_t cap)
-{
-    DIR *dir = opendir(dirpath);
-    if (dir == NULL) {
-        return 0;
-    }
-    size_t n = 0;
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && n < cap) {
-        if (!name_is_wav(ent->d_name)) {
-            continue;
-        }
-        snprintf(rel[n], SETTINGS_TRACK_FILE_MAX, "%s%.120s", prefix, ent->d_name);
-        n++;
-    }
-    closedir(dir);
-    return n;
-}
-
-/* If the stored track list is gone (e.g. NVS was erased after a firmware
- * update) but the WAV files are still on the external storage, rebuild the
- * list from the files on disk so the sounds are usable again. Only runs when
- * there is no metadata at all, so an intentionally emptied list stays empty.
- * Reports the result to the web journal so the cause is visible without a
- * serial console. */
+/* Rebuild the track list from storage (moved to the track component so it can
+ * be unit-tested); this wrapper maps the result onto the web journal. */
 static void recover_tracks_from_storage(void)
 {
-    settings_track_t existing[SETTINGS_MAX_TRACKS];
-    size_t count = 0;
-    esp_err_t lerr = settings_tracks_load(existing, &count);
-
-    /* Always list what is actually on the storage, for diagnosis. */
-    char rel[SETTINGS_MAX_TRACKS][SETTINGS_TRACK_FILE_MAX];
-    size_t na = scan_wavs("/userdata/audio", "audio/", rel, SETTINGS_MAX_TRACKS);
-    size_t nr = 0;
-    if (na == 0) {
-        nr = scan_wavs("/userdata", "", rel, SETTINGS_MAX_TRACKS);
-    }
-    size_t nf = na > 0 ? na : nr;
-    ESP_LOGI(TAG, "recover: nvs=%s count=%u | files: audio_dir=%u root_dir=%u",
-             esp_err_to_name(lerr), (unsigned)count, (unsigned)na, (unsigned)nr);
-    for (size_t i = 0; i < nf; ++i) {
-        ESP_LOGI(TAG, "recover: file %u/%u %s", (unsigned)(i + 1), (unsigned)nf, rel[i]);
-    }
-
-    if (lerr == ESP_OK && count > 0) {
-        ESP_LOGI(TAG, "track list present in NVS (%u slots)", (unsigned)count);
-        return;
-    }
-    /* NVS track list is gone (e.g. a full chip erase) but the sounds survived:
-     * restore the full metadata (names, categories, function map) from the
-     * manifest on the external storage before falling back to file names. */
-    if (settings_manifest_load() == ESP_OK) {
-        size_t rc = 0;
-        (void)settings_tracks_load(existing, &rc);
+    track_recover_result_t r;
+    track_recover_from_storage("/userdata/audio", "/userdata", &r);
+    if (r.had_nvs) {
+        ESP_LOGI(TAG, "track list present in NVS (%u slots)", (unsigned)r.count);
+    } else if (r.from_manifest) {
         web_log_event("Звуки", "метаданные восстановлены из манифеста (%u слотов)",
-                      (unsigned)rc);
-        return;
-    }
-    if (nf == 0) {
+                      (unsigned)r.count);
+    } else if (r.files_found == 0) {
         web_log_event("Звуки", "список в NVS пуст, .wav файлы на хранилище не найдены");
-        return;
+    } else if (r.rebuilt) {
+        ESP_LOGW(TAG, "Track list rebuilt from storage: %u file(s)", (unsigned)r.count);
+    } else {
+        ESP_LOGW(TAG, "Track rebuild: %u file(s), none bindable", (unsigned)r.files_found);
     }
-    qsort(rel, nf, sizeof(rel[0]), cmp_names); /* deterministic slots */
-
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
-    bool used[SETTINGS_MAX_TRACKS + 1];
-    memset(used, 0, sizeof(used));
-    size_t n = 0;
-
-    /* Pass 1: honour a slot number encoded in the file name (provisioning). */
-    for (size_t i = 0; i < nf && n < SETTINGS_MAX_TRACKS; ++i) {
-        const char *base = strrchr(rel[i], '/');
-        base = base ? base + 1 : rel[i];
-        int s = slot_from_name(base);
-        if (s == 0 || used[s]) {
-            continue;
-        }
-        used[s] = true;
-        tracks[n].slot = (uint8_t)s;
-        snprintf(tracks[n].file, sizeof(tracks[n].file), "%.120s", rel[i]);
-        snprintf(tracks[n].label, sizeof(tracks[n].label), "Слот %d", s);
-        tracks[n].enabled = true;
-        n++;
-    }
-    /* Pass 2: files without a slot prefix get the lowest free slots. */
-    for (size_t i = 0; i < nf && n < SETTINGS_MAX_TRACKS; ++i) {
-        const char *base = strrchr(rel[i], '/');
-        base = base ? base + 1 : rel[i];
-        if (slot_from_name(base) != 0) {
-            continue;
-        }
-        int s = 1;
-        while (s <= SETTINGS_MAX_TRACKS && used[s]) {
-            s++;
-        }
-        if (s > SETTINGS_MAX_TRACKS) {
-            break;
-        }
-        used[s] = true;
-        tracks[n].slot = (uint8_t)s;
-        snprintf(tracks[n].file, sizeof(tracks[n].file), "%.120s", rel[i]);
-        snprintf(tracks[n].label, sizeof(tracks[n].label), "%.63s", base);
-        char *dot = strrchr(tracks[n].label, '.');
-        if (dot != NULL) {
-            *dot = '\0';
-        }
-        tracks[n].enabled = true;
-        n++;
-    }
-
-    if (n == 0) {
-        ESP_LOGW(TAG, "Track rebuild: %u file(s), none bindable", (unsigned)nf);
-        return;
-    }
-    esp_err_t err = settings_tracks_save(tracks, n);
-    ESP_LOGW(TAG, "Track list rebuilt from storage: %u file(s), save=%s",
-             (unsigned)n, esp_err_to_name(err));
 }
 
 void app_main(void)

@@ -31,6 +31,10 @@ void setUp(void)
             }
         }
     }
+    mock_mutex_create_fail = 0;
+    mock_sem_take_fail = 0;
+    mock_task_create_ok = 1;
+    s_fx_iter_cap = 0;
     TEST_ASSERT_EQUAL(ESP_OK, auxio_init());
 }
 
@@ -263,6 +267,84 @@ static void test_auxio_config_validation_and_state(void)
     TEST_ASSERT_FALSE(s_ch[0].enabled);
 }
 
+/* ---- remaining branches ---- */
+
+static void test_ch_step_steady_resets_cur(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->enabled = true;
+    ch->mode = AUXIO_EFFECT_STEADY;
+    ch->pwm_on = 200;
+    ch->pwm_off = 0;
+    ch->cur = 77;
+    (void)ch_step(ch, 0, 0);
+    TEST_ASSERT_EQUAL_UINT8(0, ch->cur);
+}
+
+static void test_ch_duty_unknown_mode_default(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->enabled = true;
+    ch->mode = (auxio_effect_t)99; /* out of range -> switch default */
+    ch->pwm_on = 222;
+    ch->pwm_off = 0;
+    ch->period_ms = 800;
+    TEST_ASSERT_EQUAL_UINT8(222, ch_duty(ch, 0, 0));
+}
+
+static void test_apply_now_and_api_timeouts(void)
+{
+    s_ch[0].enabled = true;
+    s_ch[0].mode = AUXIO_EFFECT_STEADY;
+    s_ch[0].pwm_on = 100;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, apply_now(0));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_set_enabled(0, true));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_set_output(0, true, 10));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT,
+                      auxio_set_effect(0, true, 10, 0, AUXIO_EFFECT_MARS, 800));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_config(0, 10, 0, AUXIO_EFFECT_BEACON, 800));
+}
+
+static void test_apply_now_null_lock(void)
+{
+    SemaphoreHandle_t saved = s_lock;
+    s_lock = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, apply_now(0));
+    s_lock = saved;
+}
+
+static void test_auxio_set_enabled_applies(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(0, true));
+    TEST_ASSERT_TRUE(s_ch[0].enabled);
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(0, false));
+    TEST_ASSERT_FALSE(s_ch[0].enabled);
+}
+
+static void test_auxio_init_mutex_fail(void)
+{
+    mock_mutex_create_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, auxio_init());
+    mock_mutex_create_fail = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_init()); /* restore s_lock */
+}
+
+static void test_auxio_init_task_fail(void)
+{
+    mock_task_create_ok = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, auxio_init());
+    mock_task_create_ok = 1;
+}
+
+static void test_effect_task_runs_once(void)
+{
+    s_fx_iter_cap = 1;
+    mock_ledc_update_count = 0;
+    effect_task(NULL);
+    TEST_ASSERT_EQUAL_INT(6, mock_ledc_update_count); /* 6 LEDC channels */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -281,5 +363,13 @@ int main(void)
     RUN_TEST(test_auxio_set_enabled_validation);
     RUN_TEST(test_auxio_set_effect_validation);
     RUN_TEST(test_auxio_config_validation_and_state);
+    RUN_TEST(test_ch_step_steady_resets_cur);
+    RUN_TEST(test_ch_duty_unknown_mode_default);
+    RUN_TEST(test_apply_now_and_api_timeouts);
+    RUN_TEST(test_apply_now_null_lock);
+    RUN_TEST(test_auxio_set_enabled_applies);
+    RUN_TEST(test_auxio_init_mutex_fail);
+    RUN_TEST(test_auxio_init_task_fail);
+    RUN_TEST(test_effect_task_runs_once);
     return UNITY_END();
 }

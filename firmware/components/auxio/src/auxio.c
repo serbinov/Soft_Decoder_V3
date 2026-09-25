@@ -127,11 +127,9 @@ static uint8_t ch_duty(const auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
             /* sharp flash at phase 0, then quadratic decay to a non-zero floor */
             uint8_t floor = (uint8_t)(maxv / 5U);
             uint32_t remain = period - phase;
+            /* remain <= period, so t <= 255 by construction. */
             uint32_t t = (uint32_t)((255ULL * remain * remain) /
                                     ((uint64_t)period * period));
-            if (t > 255U) {
-                t = 255U;
-            }
             return (uint8_t)(floor + (((uint32_t)(maxv - floor) * t) / 255U));
         }
         case AUXIO_EFFECT_STROBE:
@@ -178,10 +176,14 @@ static uint8_t ch_step(auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
     return ch_duty(ch, idx, now_ms);
 }
 
+/* Test hook: 0 runs forever (production); host tests set a small cap. */
+static uint32_t s_fx_iter_cap;
+
 static void effect_task(void *arg)
 {
     (void)arg;
-    for (;;) {
+    uint32_t iters = 0;
+    while (s_fx_iter_cap == 0U || iters < s_fx_iter_cap) {
         if (s_lock != NULL) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
         }
@@ -193,6 +195,7 @@ static void effect_task(void *arg)
             xSemaphoreGive(s_lock);
         }
         vTaskDelay(pdMS_TO_TICKS(20));
+        iters++;
     }
 }
 

@@ -600,6 +600,127 @@ static void test_factory_reset_clears_all_stores(void)
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_TRACK_CAT_EFFECTS, got_cats[1]);
 }
 
+/* ---- settings_init / deferred write / error branches ---- */
+
+static void test_nvs_read_u8_error(void)
+{
+    uint8_t v = 0;
+    mock_nvs_get_u8_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, nvs_read_u8("k", &v, 0));
+    mock_nvs_get_u8_err = 0;
+}
+
+static void test_settings_init_branches(void)
+{
+    mock_nvs_reset();
+    mock_nvs_flash_init_err = 0;
+    mock_nvs_open_fail = 0;
+    mock_mutex_create_fail = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init()); /* fresh NVS -> defaults */
+
+    mock_nvs_flash_init_err = ESP_ERR_NVS_NO_FREE_PAGES;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init()); /* erase + reinit */
+    TEST_ASSERT_EQUAL_INT(0, mock_nvs_flash_init_err);
+
+    mock_nvs_flash_init_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_init());
+    mock_nvs_flash_init_err = 0;
+
+    mock_nvs_open_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_init());
+    mock_nvs_open_fail = 0;
+
+    mock_mutex_create_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, settings_init());
+    mock_mutex_create_fail = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init()); /* restore s_lock */
+}
+
+static void test_settings_init_loads_valid_cv(void)
+{
+    mock_nvs_reset();
+    s_lock = (SemaphoreHandle_t)1;
+    memset(&s_cv, 0, sizeof(s_cv));
+    cv_set_defaults();
+    s_cv[1] = 42;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_commit()); /* writes cv + crc */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());      /* valid blob -> loaded */
+    TEST_ASSERT_EQUAL_UINT8(42, s_cv[1]);
+}
+
+static void test_settings_save_deferred_and_flush(void)
+{
+    settings_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.wifi_mode = 1;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_save_deferred(NULL));
+
+    mock_timer_now_us = 1000000;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save_deferred(&cfg));
+    settings_pending_flush(); /* fresh -> no-op */
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    settings_pending_flush(); /* idle reached -> commit */
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    settings_pending_flush(); /* nothing pending -> early return */
+
+    /* Timeout paths. */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save_deferred(&cfg));
+    mock_sem_take_fail = 1;
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    settings_pending_flush(); /* take fails -> early return */
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_save(&cfg));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_save_deferred(&cfg));
+    mock_sem_take_fail = 0;
+}
+
+static void test_settings_save_api_invalid_args(void)
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_track_cats_load(NULL, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_map_load(NULL, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_aux_cfg_load(NULL, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_track_cats_save(NULL, 3));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_map_save(NULL, 3));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_aux_cfg_save(NULL, 3));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_save(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_load(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_use_load(NULL));
+}
+
+static void test_settings_save_api_timeouts(void)
+{
+    settings_track_t t;
+    memset(&t, 0, sizeof(t));
+    t.slot = 1;
+    uint8_t cats[1] = { 1 };
+    settings_func_map_t m[SETTINGS_FUNC_MAP_COUNT];
+    memset(m, 0, sizeof(m));
+    settings_aux_cfg_t a[SETTINGS_AUX_COUNT];
+    memset(a, 0, sizeof(a));
+    settings_bemf_cal_t cal;
+    memset(&cal, 0, sizeof(cal));
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_cv_commit());
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_tracks_save(&t, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_track_cats_save(cats, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_func_map_save(m, SETTINGS_FUNC_MAP_COUNT));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_aux_cfg_save(a, SETTINGS_AUX_COUNT));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_cal_save(&cal));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_cal_clear());
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_use_save(true));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_factory_reset());
+    mock_sem_take_fail = 0;
+}
+
+static void test_bemf_cal_clear_missing_key_is_ok(void)
+{
+    mock_nvs_reset();
+    s_lock = (SemaphoreHandle_t)1;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_clear());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -637,5 +758,12 @@ int main(void)
     RUN_TEST(test_bemf_use_null_arg);
     RUN_TEST(test_factory_reset);
     RUN_TEST(test_factory_reset_clears_all_stores);
+    RUN_TEST(test_nvs_read_u8_error);
+    RUN_TEST(test_settings_init_branches);
+    RUN_TEST(test_settings_init_loads_valid_cv);
+    RUN_TEST(test_settings_save_deferred_and_flush);
+    RUN_TEST(test_settings_save_api_invalid_args);
+    RUN_TEST(test_settings_save_api_timeouts);
+    RUN_TEST(test_bemf_cal_clear_missing_key_is_ok);
     return UNITY_END();
 }

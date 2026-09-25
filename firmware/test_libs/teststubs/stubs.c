@@ -209,9 +209,12 @@ uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t task)
     return 4096;
 }
 
+int mock_mutex_create_fail = 0;
+int mock_sem_take_fail = 0;
+
 SemaphoreHandle_t xSemaphoreCreateMutex(void)
 {
-    return (SemaphoreHandle_t)1;
+    return mock_mutex_create_fail ? NULL : (SemaphoreHandle_t)1;
 }
 
 SemaphoreHandle_t xSemaphoreCreateBinary(void)
@@ -228,7 +231,7 @@ BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t t)
 {
     (void)s;
     (void)t;
-    return pdTRUE;
+    return mock_sem_take_fail ? pdFALSE : pdTRUE;
 }
 
 BaseType_t xSemaphoreGive(SemaphoreHandle_t s)
@@ -331,21 +334,29 @@ esp_err_t mock_nvs_force_blob(const char *key, const void *value, size_t len)
     return mock_nvs_put(key, MOCK_NVS_BLOB, value, len) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
+int mock_nvs_flash_init_err = 0;
+
 esp_err_t nvs_flash_init(void)
 {
-    return ESP_OK;
+    return (esp_err_t)mock_nvs_flash_init_err;
 }
 
 esp_err_t nvs_flash_erase(void)
 {
     mock_nvs_reset();
+    mock_nvs_flash_init_err = 0; /* after erasing, init succeeds again */
     return ESP_OK;
 }
+
+int mock_nvs_open_fail = 0;
 
 esp_err_t nvs_open(const char *name, int open_mode, nvs_handle_t *out_handle)
 {
     (void)name;
     (void)open_mode;
+    if (mock_nvs_open_fail) {
+        return ESP_FAIL;
+    }
     if (out_handle != NULL) {
         *out_handle = 1;
     }
@@ -357,9 +368,14 @@ void nvs_close(nvs_handle_t handle)
     (void)handle;
 }
 
+int mock_nvs_get_u8_err = 0;
+
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *out)
 {
     (void)h;
+    if (mock_nvs_get_u8_err) {
+        return (esp_err_t)mock_nvs_get_u8_err;
+    }
     size_t len = sizeof(*out);
     return mock_nvs_get(key, MOCK_NVS_U8, out, &len);
 }

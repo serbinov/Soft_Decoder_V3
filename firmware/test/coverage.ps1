@@ -46,13 +46,14 @@ $inc = @(
     "-I$root\components\web\include",
     "-I$root\components\storage\include",
     "-I$root\components\provision\include",
+    "-I$root\components\selftest\include",
     "-I$root\main"
 )
 
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
             "test_track_manifest", "test_storage", "test_track_recover", "test_provision",
-            "test_web")
+            "test_selftest", "test_web")
 if ($Only) { $suites = @($Only) }
 
 $lineCov = @{}

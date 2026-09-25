@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -236,6 +237,20 @@ void app_main(void)
     }
 
     provision_listener_start();
+
+    /* OTA rollback guard: after esp_ota_set_boot_partition() the new image boots
+     * as PENDING_VERIFY. Confirm it once every peripheral came up so the
+     * bootloader keeps it; if this firmware crashes before this point (or the
+     * watchdog reboots it), the previous image is restored automatically. On a
+     * plain USB flash the state is not PENDING_VERIFY and the call is a no-op. */
+    {
+        esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
+        if (ota_err == ESP_OK) {
+            ESP_LOGI(TAG, "OTA image confirmed");
+        } else if (ota_err != ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+            ESP_LOGW(TAG, "OTA confirm failed: %s", esp_err_to_name(ota_err));
+        }
+    }
 
     ESP_LOGI(TAG, "Boot complete");
 }

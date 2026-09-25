@@ -49,12 +49,17 @@ function ReadUntil([string]$marker, [int]$timeoutMs) {
 # 1. Send "PROV" to start provisioning in-place. The firmware's background
 #    listener accepts the command over UART0 or the native USB-Serial-JTAG
 #    port and runs the erase + format + upload flow without a reboot, so the
-#    host link never drops mid-protocol.
+#    host link never drops mid-protocol. Because the next step erases the
+#    external NOR, the firmware replies with "PROV-CONFIRM?" and waits for an
+#    explicit "PROV-CONFIRM" line; "PROV-OK" follows only after that.
 Write-Host "[INFO] Sending PROV (starting provisioning)..."
 $started = $false
 for ($i = 0; $i -lt 240 -and -not $started; $i++) {
     try { $sp.Write("PROV`n") } catch { }
-    if (ReadUntil "PROV-OK" 500) { $started = $true }
+    if (ReadUntil "PROV-CONFIRM?" 1500) {
+        try { $sp.Write("PROV-CONFIRM`n") } catch { }
+        if (ReadUntil "PROV-OK" 2000) { $started = $true }
+    }
 }
 if (-not $started) {
     Write-Host "[ERROR] Firmware did not enter provisioning (check power/port)." -ForegroundColor Red

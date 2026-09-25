@@ -11,8 +11,8 @@
 
 ## 2. Текущий статус
 
-Покрытие first-party: **100.0 % (4022/4022 строк)** — union по строкам (gcov).
-Тестовые наборы: **13, все зелёные** (427 тестов). Прошивка собирается.
+Покрытие first-party: **100.0 % (4271/4271 строк)** — union по строкам (gcov).
+Тестовые наборы: **14, все зелёные** (453 теста). Прошивка собирается.
 
 | Модуль | Покрытие |
 |---|---:|
@@ -28,6 +28,7 @@
 | `settings.c` | 100% |
 | `web/web_util.c` | 100% |
 | `provision.c` | 100% |
+| `selftest/selftest.c` | 100% |
 | **`web/web.c`** | **100%** |
 
 ## 3. Git
@@ -54,8 +55,10 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 
 ### Стабы с флагами отказа
 `stubs.c`: `mock_sem_take_fail`, `mock_mutex_create_fail`, `mock_nvs_*`,
-`mock_task_create_ok`, `mock_adc1_config_*`, `mock_i2s_*`, `mock_queue_create_fail`,
-`mock_queue_send_fail`, `mock_queue_send_fail_after`, `mock_gpio_isr_install_err`,
+`mock_task_create_ok`, `mock_task_create_fail_after`, `mock_adc1_config_*`,
+`mock_i2s_*`, `mock_queue_create_fail`, `mock_queue_create_fail_after`,
+`mock_queue_send_fail`, `mock_queue_send_fail_after`, `mock_nvs_get_u32_err`,
+`mock_nvs_set_u32_err`, `mock_nvs_u32_corrupt`, `mock_gpio_isr_install_err`,
 `mock_uart_*`, `mock_usbjtag_*`, `mock_ota_*` (включая `mock_ota_write_fail_after`),
 `mock_spi_*`, `mock_flash_*`, `mock_lfs_*`, `mock_partition_register_err`;
 мок UART (`mock_uart_feed`/`mock_uart_tx`/`mock_uart_reset`); `mock_timer_now_us`.
@@ -69,15 +72,16 @@ settings/audio/motor/auxio/storage/dcc.
 ### Тест-хуки в коде (ограничение бесконечных циклов)
 `track_adc_step`/`s_iter_cap` (track), `s_fx_iter_cap` (auxio),
 `s_mix_iter_cap` (audio), `s_motor_iter_cap` (motor), `s_dcc_iter_cap` (dcc),
-`s_listen_iter_cap` (provision), `s_autooff_iter_cap`/`s_dns_iter_cap`/
-`s_pipe_iter_cap` (web). В проде = 0 (вечно). Дополнительно в web:
-`s_pipe_write_err_inject`, макросы `WEB_UP_PROGRESS_STEP`, `WEB_FWRITE`,
-`WEB_FFLUSH`, `WEB_FCLOSE`; в provision: `PROV_FWRITE`.
+`s_ack_iter_cap` (dcc ACK), `s_listen_iter_cap` (provision),
+`s_autooff_iter_cap`/`s_dns_iter_cap`/`s_pipe_iter_cap` (web). В проде = 0
+(вечно). Дополнительно в web: `s_pipe_write_err_inject`, макросы
+`WEB_UP_PROGRESS_STEP`, `WEB_FWRITE`, `WEB_FFLUSH`, `WEB_FCLOSE`; в provision:
+`PROV_FWRITE`; в selftest: `SELFTEST_FOPEN`/`SELFTEST_FWRITE`/`SELFTEST_FREAD`.
 
 ### Переопределяемые пути (для host)
 `MANIFEST_DIR` (track_manifest), `STORAGE_MOUNT_POINT` (storage),
 `PROV_AUDIO_DIR`/`PROV_MKDIR` (provision), `WEB_USERDATA_DIR`/`WEB_AUDIO_DIR`
-(web).
+(web), `SELFTEST_TMP_PATH` (selftest).
 
 ## 5. Что сделано по шагам
 
@@ -89,6 +93,11 @@ settings/audio/motor/auxio/storage/dcc.
    deep-queue pipeline, все API-обработчики, Wi-Fi/AP, журнал, серверы.
 5. Логика восстановления треков вынесена в `track_recover.c`.
 6. Fuzz-тесты (`test_web_util`, `test_dcc`), флаг `-Sanitize` (для Linux/CI).
+7. **`test_selftest`** (14 тестов) — новый компонент `selftest`: неразрушающий
+   `SELFTEST` (heap/pinmap/CV/NVS/LittleFS/ADC/audio/AUX/DCC) и активирующие
+   команды `HIL-AUX/SOUND/MOTOR/FN` + прогоны `-FN-SWEEP`/`-AUX-SWEEP`.
+8. **HIL-раннеры по железу**: `test/hil/run_hil.ps1` (USB-Serial-JTAG/UART0) и
+   `test/hil/run_hil_web.ps1` (SoftAP, все safe REST-эндпоинты).
 
 ## 6. Найденные баги (исправлены)
 
@@ -110,7 +119,12 @@ powershell -File test\coverage.ps1
 
 # сборка прошивки (из firmware/)
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32-s3-devkitc-1
-# при изменениях CMake/sdkconfig/partitions:
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32-s3-devkitc-1 -t clean
+# при изменениях CMake/sdkconfig/partitions (или после смены REQUIRES):
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32-s3-devkitc-1 -t fullclean
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32-s3-devkitc-1
+
+# HIL на железе (нужна плата)
+powershell -File test\hil\run_hil.ps1 -Port COMx -Sweep            # все F и AUX
+powershell -File test\hil\run_hil.ps1 -Port COMx -Actuate -MotorSpeed 20
+powershell -File test\hil\run_hil_web.ps1 -RestoreSsid <домашний_SSID>  # REST
 ```

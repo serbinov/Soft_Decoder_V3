@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "storage.h"
 #include "motor.h"
+#include "selftest.h"
 
 static const char *TAG = "prov";
 
@@ -27,6 +28,9 @@ static const char *TAG = "prov";
 #define PROV_BAUD        921600
 #define PROV_CHUNK       4096
 #define PROV_WINDOW_MS   20000
+/* The provisioning entry point erases the external NOR, so the host must send
+ * an explicit confirmation after "PROV" before anything is destroyed. */
+#define PROV_CONFIRM_TIMEOUT_MS 10000
 #ifndef PROV_AUDIO_DIR
 #define PROV_AUDIO_DIR   "/userdata/audio"
 #endif
@@ -484,8 +488,29 @@ static esp_err_t provision_fw(const char *cmd)
     return ESP_OK;
 }
 
-static void provision_run(void)
+/* Returns true only when the session completed and the restart was issued. */
+static bool provision_run(void)
 {
+    /* Destructive step ahead (erase + format of the external NOR): require an
+     * explicit confirmation so a stray "PROV" line cannot wipe the sounds. */
+    send_line("PROV-CONFIRM?");
+    char confirm[32];
+    bool have_confirm = read_line(confirm, sizeof(confirm), PROV_CONFIRM_TIMEOUT_MS);
+    if (have_confirm) {
+        /* The host may terminate the line with CRLF (or CR): strip a trailing
+         * CR before the exact comparison, like the listener does when it reads
+         * a command line. */
+        size_t clen = strlen(confirm);
+        if (clen > 0U && confirm[clen - 1U] == '\r') {
+            confirm[clen - 1U] = '\0';
+        }
+    }
+    if (!have_confirm || strcmp(confirm, "PROV-CONFIRM") != 0) {
+        ESP_LOGW(TAG, "provision: no confirmation, aborting (nothing erased)");
+        send_line("PROV-ABORT");
+        return false;
+    }
+
     send_line("PROV-OK");
 
     /* Both sides switch to the fast baud for the bulk transfer. */
@@ -497,7 +522,7 @@ static void provision_run(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "provision: external NOR unavailable, aborting");
         send_line("PROV-ERR storage");
-        return;
+        return false;
     }
     (void)PROV_MKDIR(PROV_AUDIO_DIR);
 
@@ -509,7 +534,7 @@ static void provision_run(void)
         char cmd[96];
         if (!read_line(cmd, sizeof(cmd), 120000)) {
             ESP_LOGE(TAG, "provision: command timeout");
-            return;
+            return false;
         }
         if (strncmp(cmd, "DONE", 4) == 0) {
             break;
@@ -518,7 +543,7 @@ static void provision_run(void)
             esp_err_t ferr = provision_fw(cmd);
             if (ferr != ESP_OK) {
                 ESP_LOGE(TAG, "provision: FW failed (%s), aborting", esp_err_to_name(ferr));
-                return;
+                return false;
             }
             send_line("FW-DONE");
             continue;
@@ -535,7 +560,7 @@ static void provision_run(void)
         }
         if (slot < 1 || slot > SETTINGS_MAX_TRACKS || size < 0L || size > (4 * 1024 * 1024)) {
             ESP_LOGE(TAG, "provision: bad PUT %s", cmd);
-            return;
+            return false;
         }
 
         char path[64];
@@ -543,13 +568,13 @@ static void provision_run(void)
         FILE *f = fopen(path, "wb");
         if (f == NULL) {
             ESP_LOGE(TAG, "provision: cannot create %s", path);
-            return;
+            return false;
         }
 
         uint8_t *buf = (uint8_t *)malloc(PROV_CHUNK);
         if (buf == NULL) {
             fclose(f);
-            return;
+            return false;
         }
 
         long remaining = size;
@@ -560,13 +585,13 @@ static void provision_run(void)
                 ESP_LOGE(TAG, "provision: data timeout for slot %d", slot);
                 free(buf);
                 fclose(f);
-                return;
+                return false;
             }
             if (PROV_FWRITE(buf, 1, want, f) != want) {
                 ESP_LOGE(TAG, "provision: write failed for slot %d", slot);
                 free(buf);
                 fclose(f);
-                return;
+                return false;
             }
             remaining -= (long)want;
             if (remaining > 0L) {
@@ -596,6 +621,7 @@ static void provision_run(void)
 
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
+    return true;
 }
 
 bool provision_try(void)
@@ -616,14 +642,74 @@ bool provision_try(void)
         s_provisioning = false;
         return false;
     }
-    provision_run();
-    return true;
+    return provision_run();
 }
 
 /* ---- background listener ---------------------------------------------- */
 
 /* Test hook: 0 runs forever (production); host tests set a small cap. */
 static uint32_t s_listen_iter_cap;
+
+/* Print a machine-readable self-test report:
+ *   SELFTEST-BEGIN
+ *   TEST <name> <PASS|FAIL|SKIP>
+ *   SELFTEST-END <passed>/<total>
+ * test/hil/run_hil.ps1 parses these lines. The checks are non-destructive. */
+static void run_selftest_console(void)
+{
+    selftest_report_t rep;
+    uint8_t passed = selftest_run(&rep);
+    send_line("SELFTEST-BEGIN");
+    for (uint8_t i = 0; i < rep.count; ++i) {
+        char out[48];
+        snprintf(out, sizeof(out), "TEST %s %s", rep.items[i].name,
+                 selftest_state_name(rep.items[i].state));
+        send_line(out);
+    }
+    char end[48];
+    snprintf(end, sizeof(end), "SELFTEST-END %u/%u",
+             (unsigned)passed, (unsigned)rep.count);
+    send_line(end);
+}
+
+/* Actuating HIL commands (bounded; auto-restore/stop):
+ *   HIL-AUX <ch> <ms>      turn AUX ch on for ms, then restore its state
+ *   HIL-SOUND <slot> <ms>  play sound slot for ms, then stop
+ *   HIL-MOTOR <spd> <ms>   drive the motor at spd for ms, then stop
+ * Replies HIL-*-OK / HIL-*-ERR. Only reachable from an explicit serial line;
+ * test/hil/run_hil.ps1 sends them only with -Actuate / -Motor. */
+static void run_hil_act_console(const char *line)
+{
+    char out[64];
+    int a = 0, b = 0;
+    if (strncmp(line, "HIL-AUX-SWEEP ", 14) == 0 && sscanf(line, "HIL-AUX-SWEEP %d", &a) == 1) {
+        uint8_t n = selftest_act_aux_sweep((uint16_t)a);
+        snprintf(out, sizeof(out), n ? "HIL-AUX-SWEEP-OK %u" : "HIL-AUX-SWEEP-ERR", n);
+    } else if (strncmp(line, "HIL-AUX ", 8) == 0 && sscanf(line, "HIL-AUX %d %d", &a, &b) == 2) {
+        esp_err_t err = selftest_act_aux((uint8_t)a, (uint16_t)b);
+        snprintf(out, sizeof(out), err == ESP_OK ? "HIL-AUX-OK %d %d" : "HIL-AUX-ERR %d", a, b);
+    } else if (strncmp(line, "HIL-FN-SWEEP ", 13) == 0 && sscanf(line, "HIL-FN-SWEEP %d", &a) == 1) {
+        uint8_t n = selftest_act_fn_sweep((uint16_t)a);
+        snprintf(out, sizeof(out), n ? "HIL-FN-SWEEP-OK %u" : "HIL-FN-SWEEP-ERR", n);
+    } else if (strncmp(line, "HIL-FN ", 7) == 0 && sscanf(line, "HIL-FN %d %d", &a, &b) == 2) {
+        esp_err_t err = selftest_act_function((uint8_t)a, b != 0);
+        snprintf(out, sizeof(out), err == ESP_OK ? "HIL-FN-OK %d %d" : "HIL-FN-ERR %d", a, b);
+    } else if (strncmp(line, "HIL-SOUND ", 10) == 0 && sscanf(line, "HIL-SOUND %d %d", &a, &b) == 2) {
+        esp_err_t err = selftest_act_sound((uint8_t)a, (uint16_t)b);
+        if (err == ESP_OK) {
+            snprintf(out, sizeof(out), "HIL-SOUND-OK %d %d", a, b);
+        } else {
+            snprintf(out, sizeof(out), "HIL-SOUND-ERR %d %s", a,
+                     (err == ESP_ERR_NOT_FOUND) ? "no-track" : "bad-arg");
+        }
+    } else if (strncmp(line, "HIL-MOTOR ", 10) == 0 && sscanf(line, "HIL-MOTOR %d %d", &a, &b) == 2) {
+        esp_err_t err = selftest_act_motor((uint8_t)a, (uint16_t)b);
+        snprintf(out, sizeof(out), err == ESP_OK ? "HIL-MOTOR-OK %d %d" : "HIL-MOTOR-ERR %d", a, b);
+    } else {
+        snprintf(out, sizeof(out), "HIL-ERR");
+    }
+    send_line(out);
+}
 
 static void listener_task(void *arg)
 {
@@ -648,6 +734,10 @@ static void listener_task(void *arg)
                         s_provisioning = false;
                     } else if (strncmp(line, "BEMF", 4) == 0) {
                         handle_bemf_cmd(line);
+                    } else if (strncmp(line, "SELFTEST", 8) == 0) {
+                        run_selftest_console();
+                    } else if (strncmp(line, "HIL-", 4) == 0) {
+                        run_hil_act_console(line);
                     }
                 }
                 len = 0;

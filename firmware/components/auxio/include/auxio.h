@@ -52,4 +52,8 @@ esp_err_t auxio_set_effect(uint8_t channel, bool enabled,
 esp_err_t auxio_config(uint8_t channel, uint8_t pwm_on, uint8_t pwm_off,
                        auxio_effect_t mode, uint16_t period_ms);
 
+/* Read-only snapshot of a channel's on/off state. Used by the boot self-test;
+ * returns ESP_ERR_INVALID_ARG for a bad channel or NULL output. */
+esp_err_t auxio_get_enabled(uint8_t channel, bool *out_enabled);
+
 #endif

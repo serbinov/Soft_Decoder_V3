@@ -18,6 +18,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 # Core dump to the coredump partition.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
+# OTA rollback: a freshly OTA-updated image boots as PENDING_VERIFY and is only
+# kept once app_main confirms it (esp_ota_mark_app_valid_cancel_rollback). If it
+# crashes before that, the bootloader restores the previous image.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # Power management DISABLED: light sleep would put the softAP radio into a
 # ~830 ms sleep cycle and throttle uploads to ~2 KB/s.
 # CONFIG_PM_ENABLE is not set

@@ -322,6 +322,27 @@ static void test_auxio_set_enabled_applies(void)
     TEST_ASSERT_FALSE(s_ch[0].enabled);
 }
 
+static void test_auxio_get_enabled(void)
+{
+    bool en = true;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, auxio_get_enabled(AUXIO_CH_COUNT, &en));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, auxio_get_enabled(0, NULL));
+
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(0, true));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_get_enabled(0, &en));
+    TEST_ASSERT_TRUE(en);
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_get_enabled(0, &en));
+    mock_sem_take_fail = 0;
+
+    SemaphoreHandle_t saved = s_lock;
+    s_lock = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_get_enabled(0, &en));
+    s_lock = saved;
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_get_enabled(0, &en));
+}
+
 static void test_auxio_init_mutex_fail(void)
 {
     mock_mutex_create_fail = 1;
@@ -368,6 +389,7 @@ int main(void)
     RUN_TEST(test_apply_now_and_api_timeouts);
     RUN_TEST(test_apply_now_null_lock);
     RUN_TEST(test_auxio_set_enabled_applies);
+    RUN_TEST(test_auxio_get_enabled);
     RUN_TEST(test_auxio_init_mutex_fail);
     RUN_TEST(test_auxio_init_task_fail);
     RUN_TEST(test_effect_task_runs_once);

@@ -53,6 +53,9 @@ DCC-декодер для модели железной дороги с:
 - Аппаратная защита по току: `PIN_CURRENT_SENSE` (GPIO7) — вход внешнего
   компаратора; **кодом не читается** (защита чисто аппаратная).
 - Core dump включён в отдельный раздел (`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y`).
+- OTA rollback включён (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): новая
+  прошивка стартует как PENDING_VERIFY и подтверждается в конце `app_main`
+  (`esp_ota_mark_app_valid_cancel_rollback()`); аварийный старт откатывает её.
 - Power management выключен: light sleep «усыплял» бы радио AP
   (загрузка падала до ~2 КБ/с), см. `sdkconfig.defaults`.
 
@@ -244,11 +247,17 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1            # gcov, un
 powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 ```
 
-Наборы (13): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
+Наборы (14): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_web`. Всего **427 тестов**; покрытие first-party (`components/` + `main/`) —
-**100 % строк** (union по строкам, gcov).
+`test_selftest`, `test_web`. Всего **453 теста**; покрытие first-party
+(`components/` + `main/`) — **100 % строк** (union по строкам, gcov).
+
+HIL по железу (нужна подключённая плата): `test/hil/run_hil.ps1` шлёт
+`SELFTEST` через USB-Serial-JTAG/UART0 и парсит `TEST <name> PASS|FAIL|SKIP`;
+с `-Actuate` проверяет AUX и звук, `-Sweep` — все F0..F28 и все AUX,
+`-MotorSpeed N` — мотор. `test/hil/run_hil_web.ps1` дополнительно прогоняет
+веб/REST-эндпоинты через SoftAP. См. §6 `selftest` и §16.
 
 `test_web` использует host-shim `esp_http_server` (скриптованные запросы и
 захват ответов), заглушки `esp_wifi`/`esp_netif`/`esp_event`/`lwip` и
@@ -285,6 +294,7 @@ firmware/
 │  ├─ auxio/                 9 световых выходов + эффекты
 │  ├─ web/                   Wi-Fi AP, HTTP, REST API, журнал, веб-контент
 │  ├─ provision/             UART-провижининг звуков, BEMF-консоль
+│  ├─ selftest/              встроенный SELFTEST (консоль) для HIL по USB
 │  └─ esp_littlefs/          сторонний компонент LittleFS
 ├─ tools/                    gen_web_html.py, bump_version.ps1
 ├─ test/                     нативные тесты + run_tests.ps1
@@ -342,7 +352,9 @@ firmware/
 - API: `dcc_init`, `dcc_set_address/speed_step_mode/consist`, `dcc_reload_config`,
   `dcc_register_*_cb`, `dcc_last_packet_us`, `dcc_service_ack`.
 - Зависимости: `driver esp_timer pinmap`.
-- Задачи: **`dcc`**, стек 8192, prio 10, ядро 1.
+- Задачи: **`dcc`**, стек 8192, prio 10, ядро 1; **`dcc_ack`**, стек 2048,
+  prio 5 — выдаёт импульс service-mode ACK, чтобы задача разбора не блокировалась
+  на 6 мс; пин ACK конфигурируется один раз в `dcc_init()`.
 
 ### motor (`components/motor`)
 - Файлы: `src/motor.c`, `include/motor.h`, `include/bemf_cal_base.h`.
@@ -382,7 +394,7 @@ firmware/
 - Роль: 9 выходов (F0F, F0R, AUX1..AUX7) на LEDC/MCPWM, 8-битная гамма-таблица,
   эффекты: steady, incandescent, Mars, ditch, beacon, strobe, firebox.
 - API: `auxio_init`, `auxio_set_enabled`, `auxio_set_output`,
-  `auxio_set_effect`, `auxio_config`.
+  `auxio_set_effect`, `auxio_config`, `auxio_get_enabled`.
 - Зависимости: `driver pinmap`.
 - Задачи: **`aux_fx`**, стек 3072, prio 6, период 20 мс.
 
@@ -401,6 +413,27 @@ firmware/
   - **`pipe_wr`** (стек 16384, prio 10, ядро 1) — на время загрузки файла,
   - HTTP-задачи создаёт `esp_http_server`: основной сервер (стек 16384) и
     progress-сервер (стек 4096).
+
+### selftest (`components/selftest`)
+- Файлы: `src/selftest.c`, `include/selftest.h`.
+- Роль: встроенный самотест, запускаемый командой `SELFTEST` по UART/USB
+  (обрабатывается консолью `provision`). Проверки **неразрушающие**: heap,
+  pinmap, CV-хранилище (границы `settings_cv_read`), NVS (scratch-ключ),
+  LittleFS (scratch-файл), ADC-путь, громкость аудио, состояние AUX, DCC-API.
+  Мотор, звук и персистентные настройки не затрагиваются.
+- API: `selftest_run()` (заполняет `selftest_report_t`), `selftest_state_name()`
+  и act-команды `selftest_act_aux()/act_sound()/act_motor()/act_function()` плюс
+  прогоны `selftest_act_fn_sweep()` (все F0..F28) и `selftest_act_aux_sweep()`
+  (все 9 AUX). Активация ограничена по времени, по завершении возвращается
+  прежнее состояние AUX / останавливаются звук и мотор.
+- `selftest_act_function()` вызывает тот же `web_apply_function()`, что и кнопки
+  F в веб-UI и DCC, поэтому прогон F проверяет реальную цепочку маппинга.
+- Консольные команды: `SELFTEST` (read-only отчёт) и `HIL-AUX <ch> <ms>`,
+  `HIL-SOUND <slot> <ms>`, `HIL-MOTOR <spd> <ms>`, `HIL-FN <fn> <0|1>`,
+  `HIL-FN-SWEEP <ms>`, `HIL-AUX-SWEEP <ms>` (ответы `HIL-*-OK` / `HIL-*-ERR`).
+- Зависимости: `pinmap settings storage motor audio auxio dcc web nvs_flash esp_system`.
+- Задачи: нет (выполняется в задаче `prov_listen`).
+- Формат вывода и host-runner: `test/hil/run_hil.ps1` (см. §16).
 
 ### provision (`components/provision`)
 - Файлы: `src/provision.c`, `include/provision.h`.
@@ -430,6 +463,7 @@ firmware/
 | Задача | Стек, Б | Приоритет | Ядро | Период/событие | Источник |
 |---|---|---|---|---|---|
 | `dcc` | 8192 | 10 | 1 | очередь полупериодов | dcc.c |
+| `dcc_ack` | 2048 | 5 | — | запрос на ACK (service mode) | dcc.c |
 | `pipe_wr` | 16384 | 10 | 1 | загрузка файла (по запросу) | web.c |
 | `dns_hijack` | 4096 | 9 | — | UDP :53 | web.c |
 | `motor` | 3072 | 7 | — | 10 мс | motor.c |
@@ -666,6 +700,9 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 - **Провижининг по UART** (`provision.c`): после старта ~8 с слушается UART0;
   команда `PROV` → флаг в NVS → перезагрузка → стирание внешней NOR, приём WAV
   по протоколу `PUT <slot> <size> <label>` + ACK, запись списка треков, reboot.
+  Поскольку вход в провижининг стирает внешнюю NOR, перед стиранием прошивка
+  запрашивает подтверждение (`PROV-CONFIRM?` → хост отвечает `PROV-CONFIRM`),
+  иначе отвечает `PROV-ABORT` и ничего не стирает.
   Скрипт: `provision_sounds.ps1`, обёртка `flash_firmware_and_sounds.bat`.
 - **OTA**: `POST /api/ota/update`. Поддерживается составной контейнер
   (`AURAOTA2`: заголовок + прошивка + список файлов) — прошивка и звуки одним
@@ -692,6 +729,11 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | `BEMF-ADC` / `BEMF-COAST` | сырые ADC / mV на клеммах двигателя |
 | `BEMF-TEST <spd> [rev]` | прямой прогон мотора |
 | `BEMF?` / `BEMF-HDR` / `BEMF=` | чтение/генерация/запись кривой BEMF |
+| `SELFTEST` (UART/USB) | самотест подсистем: heap/pinmap/CV/NVS/LittleFS/ADC/audio/AUX/DCC; вывод `TEST <name> PASS|FAIL|SKIP` и `SELFTEST-END` |
+| `HIL-AUX/HIL-SOUND/HIL-MOTOR` (UART/USB) | активирующие команды: вкл. AUX/проигрыш слота/прогон мотора на `ms`, затем возврат состояния или стоп |
+| `HIL-FN/HIL-FN-SWEEP/HIL-AUX-SWEEP` (UART/USB) | нажатие функции F0..F28 (`web_apply_function`) и прогон всех 9 AUX |
+| `test/hil/run_hil.ps1` | HIL по USB: `SELFTEST`+`BEMF?`; с `-Actuate` — AUX/звук, `-Sweep` — все F и все AUX, `-MotorSpeed N` — мотор; код выхода 0/1 |
+| `test/hil/run_hil_web.ps1` | HIL по SoftAP: подключается к AP и прогоняет все safe REST-эндпоинты (F0..F28, AUX effect+cfg, звук, громкость, CV, func-map, мотор, mode, control source, device, BEMF, log); настройки возвращает |
 | `/api/log` + веб-журнал | события управления, ошибки, статусы |
 | `/api/storage` | свободное место |
 | core dump в разделе `coredump` | разбор падений |
@@ -705,8 +747,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 | Ресурс | Занято | Всего | % |
 |---|---|---|---|
-| RAM (DRAM, статически) | 50 392 Б | 327 680 Б | 15.4 % |
-| Flash (образ приложения) | 816 688 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 41.5 % |
+| RAM (DRAM, статически) | 50 384 Б | 327 680 Б | 15.4 % |
+| Flash (образ приложения) | 820 629 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 41.7 % |
 | Свободно в слоте приложения | ~1.1 МБ | | |
 
 > Запас в OTA-слоте большой (~1.1 МБ), поэтому рост кода не критичен. Дополнительно

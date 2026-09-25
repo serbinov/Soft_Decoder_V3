@@ -54,6 +54,7 @@ static esp_err_t g_cal_start_err = ESP_OK;
 static esp_err_t g_cal_clear_err = ESP_OK;
 static esp_err_t g_cal_save_err = ESP_OK;
 static esp_err_t g_storage_format_err = ESP_OK;
+static int g_storage_format_calls;
 static int g_tracks_save_calls;
 static int g_cv_write_calls;
 
@@ -148,7 +149,84 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
 
 esp_err_t storage_format(void)
 {
+    g_storage_format_calls++;
     return g_storage_format_err;
+}
+
+/* Self-test collaborators: the listener prints the report produced here. */
+uint8_t selftest_run(selftest_report_t *report)
+{
+    if (report == NULL) {
+        return 0;
+    }
+    memset(report, 0, sizeof(*report));
+    report->count = 2;
+    report->items[0].name = "fake_a";
+    report->items[0].state = SELFTEST_PASS;
+    report->items[1].name = "fake_b";
+    report->items[1].state = SELFTEST_FAIL;
+    return 1;
+}
+
+const char *selftest_state_name(selftest_state_t state)
+{
+    switch (state) {
+        case SELFTEST_PASS: return "PASS";
+        case SELFTEST_FAIL: return "FAIL";
+        default: return "SKIP";
+    }
+}
+
+static esp_err_t g_act_aux_err = ESP_OK;
+static esp_err_t g_act_sound_err = ESP_OK;
+static esp_err_t g_act_motor_err = ESP_OK;
+static uint8_t g_act_last_ch;
+static uint16_t g_act_last_ms;
+
+esp_err_t selftest_act_aux(uint8_t channel, uint16_t ms)
+{
+    g_act_last_ch = channel;
+    g_act_last_ms = ms;
+    return g_act_aux_err;
+}
+
+esp_err_t selftest_act_sound(uint8_t slot, uint16_t ms)
+{
+    (void)slot;
+    (void)ms;
+    return g_act_sound_err;
+}
+
+esp_err_t selftest_act_motor(uint8_t speed, uint16_t ms)
+{
+    (void)speed;
+    (void)ms;
+    return g_act_motor_err;
+}
+
+static esp_err_t g_act_fn_err = ESP_OK;
+static uint8_t g_fn_sweep_ret = 29;
+static uint8_t g_aux_sweep_ret = 9;
+static uint8_t g_act_last_fn;
+static bool g_act_last_on;
+
+esp_err_t selftest_act_function(uint8_t fn, bool on)
+{
+    g_act_last_fn = fn;
+    g_act_last_on = on;
+    return g_act_fn_err;
+}
+
+uint8_t selftest_act_fn_sweep(uint16_t ms)
+{
+    (void)ms;
+    return g_fn_sweep_ret;
+}
+
+uint8_t selftest_act_aux_sweep(uint16_t ms)
+{
+    (void)ms;
+    return g_aux_sweep_ret;
 }
 
 /* ---- helpers ---- */
@@ -187,8 +265,19 @@ void setUp(void)
     g_cal_clear_err = ESP_OK;
     g_cal_save_err = ESP_OK;
     g_storage_format_err = ESP_OK;
+    g_storage_format_calls = 0;
     g_tracks_save_calls = 0;
     g_cv_write_calls = 0;
+    g_act_aux_err = ESP_OK;
+    g_act_sound_err = ESP_OK;
+    g_act_motor_err = ESP_OK;
+    g_act_last_ch = 0;
+    g_act_last_ms = 0;
+    g_act_fn_err = ESP_OK;
+    g_fn_sweep_ret = 29;
+    g_aux_sweep_ret = 9;
+    g_act_last_fn = 0;
+    g_act_last_on = false;
     mock_uart_driver_install_err = 0;
     mock_usbjtag_install_ok = 0;
     mock_usbjtag_byte = -1;
@@ -396,18 +485,38 @@ static void test_provision_fw_chunk_ack(void)
 
 /* ---- provisioning run ---- */
 
+static void test_provision_run_requires_confirm(void)
+{
+    /* No PROV-CONFIRM -> abort before the destructive format. */
+    feed("DONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PROV-CONFIRM?"));
+    TEST_ASSERT_TRUE(tx_has("PROV-ABORT"));
+    TEST_ASSERT_FALSE(tx_has("PROV-OK"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+}
+
+static void test_provision_run_confirm_crlf(void)
+{
+    /* A CRLF-terminated confirmation must be accepted (trailing CR stripped). */
+    feed("PROV-CONFIRM\r\nDONE\n");
+    TEST_ASSERT_TRUE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("DONE-OK"));
+}
+
 static void test_provision_run_storage_fail(void)
 {
     g_storage_format_err = ESP_FAIL;
-    provision_run();
+    feed("PROV-CONFIRM\n");
+    TEST_ASSERT_FALSE(provision_run());
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_TRUE(tx_has("PROV-ERR storage"));
 }
 
 static void test_provision_run_put_and_done(void)
 {
-    feed("PUT 1 4 Lbl\nABCD\nDONE\n");
-    provision_run();
+    feed("PROV-CONFIRM\nPUT 1 4 Lbl\nABCD\nDONE\n");
+    TEST_ASSERT_TRUE(provision_run());
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_TRUE(tx_has("PUT-OK"));
     TEST_ASSERT_TRUE(tx_has("FILE-OK"));
@@ -419,7 +528,7 @@ static void test_provision_run_put_and_done(void)
 static void test_provision_run_put_write_fail(void)
 {
     g_prov_fwrite_fail = 1;
-    feed("PUT 1 4 Lbl\nABCD\nDONE\n");
+    feed("PROV-CONFIRM\nPUT 1 4 Lbl\nABCD\nDONE\n");
     provision_run();
     g_prov_fwrite_fail = 0;
     TEST_ASSERT_TRUE(tx_has("PUT-OK"));
@@ -438,7 +547,7 @@ static void test_ensure_uart_driver_idempotent(void)
 
 static void test_provision_run_bad_put_slot(void)
 {
-    feed("PUT 99 4 x\nDONE\n");
+    feed("PROV-CONFIRM\nPUT 99 4 x\nDONE\n");
     provision_run();
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
@@ -446,14 +555,15 @@ static void test_provision_run_bad_put_slot(void)
 
 static void test_provision_run_command_timeout(void)
 {
-    provision_run(); /* no input at all */
+    feed("PROV-CONFIRM\n"); /* confirmed, then no commands at all */
+    provision_run();
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
 }
 
 static void test_provision_run_fw_path(void)
 {
-    feed("FW 4\nABCD\nDONE\n");
+    feed("PROV-CONFIRM\nFW 4\nABCD\nDONE\n");
     provision_run();
     TEST_ASSERT_TRUE(tx_has("FW-OK"));
     TEST_ASSERT_TRUE(tx_has("FW-DONE"));
@@ -471,7 +581,7 @@ static void test_provision_try_paths(void)
     TEST_ASSERT_FALSE(provision_try()); /* flag but no PROV in window */
 
     set_prov_flag();
-    feed("PROV\nDONE\n");
+    feed("PROV\nPROV-CONFIRM\nDONE\n");
     TEST_ASSERT_TRUE(provision_try());
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_TRUE(tx_has("DONE-OK"));
@@ -497,7 +607,7 @@ static void test_provision_listener_task_paths(void)
 
     /* PROV line triggers provision_run. */
     mock_uart_reset();
-    feed("PROV\nDONE\n");
+    feed("PROV\nPROV-CONFIRM\nDONE\n");
     s_listen_iter_cap = 20;
     listener_task(NULL);
     s_listen_iter_cap = 0;
@@ -512,6 +622,98 @@ static void test_provision_listener_task_paths(void)
     s_listen_iter_cap = 0;
     s_provisioning = false;
     TEST_ASSERT_FALSE(tx_has("PROV-OK"));
+}
+
+static void test_provision_listener_selftest(void)
+{
+    provision_listener_start();
+    mock_uart_reset();
+    feed("SELFTEST\n");
+    s_listen_iter_cap = 16;
+    listener_task(NULL);
+    s_listen_iter_cap = 0;
+    TEST_ASSERT_TRUE(tx_has("SELFTEST-BEGIN"));
+    TEST_ASSERT_TRUE(tx_has("TEST fake_a PASS"));
+    TEST_ASSERT_TRUE(tx_has("TEST fake_b FAIL"));
+    TEST_ASSERT_TRUE(tx_has("SELFTEST-END 1/2"));
+}
+
+static void test_provision_listener_hil_cmd(void)
+{
+    provision_listener_start();
+    mock_uart_reset();
+    feed("HIL-AUX 2 300\n");
+    s_listen_iter_cap = 16;
+    listener_task(NULL);
+    s_listen_iter_cap = 0;
+    TEST_ASSERT_TRUE(tx_has("HIL-AUX-OK 2 300"));
+}
+
+static void test_provision_hil_act_commands(void)
+{
+    mock_uart_reset();
+    run_hil_act_console("HIL-AUX 2 300");
+    TEST_ASSERT_TRUE(tx_has("HIL-AUX-OK 2 300"));
+    TEST_ASSERT_EQUAL_UINT8(2, g_act_last_ch);
+    TEST_ASSERT_EQUAL_UINT16(300, g_act_last_ms);
+
+    run_hil_act_console("HIL-SOUND 1 500");
+    TEST_ASSERT_TRUE(tx_has("HIL-SOUND-OK 1 500"));
+
+    run_hil_act_console("HIL-MOTOR 30 800");
+    TEST_ASSERT_TRUE(tx_has("HIL-MOTOR-OK 30 800"));
+
+    run_hil_act_console("HIL-FN 5 1");
+    TEST_ASSERT_TRUE(tx_has("HIL-FN-OK 5 1"));
+    TEST_ASSERT_EQUAL_UINT8(5, g_act_last_fn);
+    TEST_ASSERT_TRUE(g_act_last_on);
+
+    run_hil_act_console("HIL-FN-SWEEP 100");
+    TEST_ASSERT_TRUE(tx_has("HIL-FN-SWEEP-OK 29"));
+
+    run_hil_act_console("HIL-AUX-SWEEP 100");
+    TEST_ASSERT_TRUE(tx_has("HIL-AUX-SWEEP-OK 9"));
+
+    run_hil_act_console("HIL-NONSENSE");
+    TEST_ASSERT_TRUE(tx_has("HIL-ERR"));
+}
+
+static void test_provision_hil_act_errors(void)
+{
+    mock_uart_reset();
+
+    g_act_aux_err = ESP_ERR_INVALID_ARG;
+    run_hil_act_console("HIL-AUX 99 300");
+    TEST_ASSERT_TRUE(tx_has("HIL-AUX-ERR 99"));
+    g_act_aux_err = ESP_OK;
+
+    g_act_sound_err = ESP_ERR_NOT_FOUND;
+    run_hil_act_console("HIL-SOUND 9 300");
+    TEST_ASSERT_TRUE(tx_has("HIL-SOUND-ERR 9 no-track"));
+    g_act_sound_err = ESP_FAIL;
+    run_hil_act_console("HIL-SOUND 9 300");
+    TEST_ASSERT_TRUE(tx_has("HIL-SOUND-ERR 9 bad-arg"));
+    g_act_sound_err = ESP_OK;
+
+    g_act_motor_err = ESP_FAIL;
+    run_hil_act_console("HIL-MOTOR 70 300");
+    TEST_ASSERT_TRUE(tx_has("HIL-MOTOR-ERR 70"));
+    g_act_motor_err = ESP_OK;
+
+    g_act_fn_err = ESP_ERR_INVALID_ARG;
+    run_hil_act_console("HIL-FN 99 1");
+    TEST_ASSERT_TRUE(tx_has("HIL-FN-ERR 99"));
+    g_act_fn_err = ESP_OK;
+
+    g_fn_sweep_ret = 0;
+    run_hil_act_console("HIL-FN-SWEEP 5");
+    TEST_ASSERT_TRUE(tx_has("HIL-FN-SWEEP-ERR"));
+    g_fn_sweep_ret = 29;
+
+    g_aux_sweep_ret = 0;
+    run_hil_act_console("HIL-AUX-SWEEP 5");
+    TEST_ASSERT_TRUE(tx_has("HIL-AUX-SWEEP-ERR"));
+    g_aux_sweep_ret = 9;
 }
 
 /* ---- UART/USB read helpers ---- */
@@ -582,7 +784,7 @@ static void test_provision_fw_no_mem(void)
 
 static void test_provision_run_fw_abort(void)
 {
-    feed("FW 0\nDONE\n"); /* provision_fw rejects size -> run aborts */
+    feed("PROV-CONFIRM\nFW 0\nDONE\n"); /* provision_fw rejects size -> run aborts */
     provision_run();
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
@@ -590,7 +792,7 @@ static void test_provision_run_fw_abort(void)
 
 static void test_provision_run_put_open_fail(void)
 {
-    feed("PUT\nPUT 1 4 x\n");
+    feed("PROV-CONFIRM\nPUT\nPUT 1 4 x\n");
     /* A directory where the WAV should go makes fopen("...slot1.wav","wb")
      * fail (provision_run recreates the parent dir, so removing it is not
      * enough). */
@@ -603,7 +805,7 @@ static void test_provision_run_put_open_fail(void)
 
 static void test_provision_run_put_no_mem(void)
 {
-    feed("PUT 1 4 x\n");
+    feed("PROV-CONFIRM\nPUT 1 4 x\n");
     g_malloc_fail = 1; /* 543-544: chunk buffer allocation fails */
     provision_run();
     g_malloc_fail = 0;
@@ -613,7 +815,7 @@ static void test_provision_run_put_no_mem(void)
 
 static void test_provision_run_put_timeout(void)
 {
-    feed("PUT 1 4 x\n"); /* claims 4 bytes, none follow */
+    feed("PROV-CONFIRM\nPUT 1 4 x\n"); /* claims 4 bytes, none follow */
     provision_run();
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_FALSE(tx_has("FILE-OK"));
@@ -623,7 +825,7 @@ static void test_provision_run_put_chunk_ack(void)
 {
     static char big[PROV_CHUNK + 1];
     memset(big, 'A', sizeof(big));
-    feed("PUT 1 4097 x\n");
+    feed("PROV-CONFIRM\nPUT 1 4097 x\n");
     mock_uart_feed(big, sizeof(big));
     feed("\nDONE\n");
     provision_run();
@@ -643,6 +845,8 @@ int main(void)
     RUN_TEST(test_provision_fw_errors);
     RUN_TEST(test_provision_fw_success_and_write_errors);
     RUN_TEST(test_provision_fw_chunk_ack);
+    RUN_TEST(test_provision_run_requires_confirm);
+    RUN_TEST(test_provision_run_confirm_crlf);
     RUN_TEST(test_provision_run_storage_fail);
     RUN_TEST(test_provision_run_put_and_done);
     RUN_TEST(test_provision_run_put_write_fail);
@@ -653,6 +857,10 @@ int main(void)
     RUN_TEST(test_provision_try_paths);
     RUN_TEST(test_provision_listener_start);
     RUN_TEST(test_provision_listener_task_paths);
+    RUN_TEST(test_provision_listener_selftest);
+    RUN_TEST(test_provision_listener_hil_cmd);
+    RUN_TEST(test_provision_hil_act_commands);
+    RUN_TEST(test_provision_hil_act_errors);
     RUN_TEST(test_read_helpers_usbjtag_paths);
     RUN_TEST(test_uart_driver_install_failure_logged);
     RUN_TEST(test_get_clear_prov_flag_errors);

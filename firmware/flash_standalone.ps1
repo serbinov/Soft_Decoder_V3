@@ -270,10 +270,15 @@ function Upload-Sounds($sp, [string]$dir) {
     if ($files.Count -eq 0) { Write-Warn "no WAV files in $dir"; return }
     Write-Info ("{0} sound files -> slots 1..{0}" -f $files.Count)
 
+    # The firmware erases the external NOR after PROV, so it first asks for a
+    # confirmation (PROV-CONFIRM?) that we must answer with PROV-CONFIRM.
     $started = $false
     for ($i = 0; $i -lt 240 -and -not $started; $i++) {
         try { $sp.Write("PROV`n") } catch { }
-        if (Read-Text-Until $sp "PROV-OK" 500) { $started = $true }
+        if (Read-Text-Until $sp "PROV-CONFIRM?" 1500) {
+            try { $sp.Write("PROV-CONFIRM`n") } catch { }
+            if (Read-Text-Until $sp "PROV-OK" 2000) { $started = $true }
+        }
     }
     if (-not $started) { Write-Err "firmware did not enter provisioning"; return }
 

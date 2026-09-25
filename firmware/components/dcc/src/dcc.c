@@ -25,6 +25,12 @@ static const char *TAG = "dcc";
 #define DCC_PACKET_MAX 8
 #define DCC_QUEUE_LEN  256
 
+/* Service-mode ACK pulse (NMRA S-9.2.3): ~6 ms. Emitted by a dedicated task so
+ * the DCC parser never blocks on it (a blocking delay could overflow the
+ * half-period queue during a burst of service-mode packets). */
+#define DCC_ACK_PULSE_MS   6
+#define DCC_ACK_QUEUE_LEN  8
+
 typedef struct {
     uint16_t dt_us;
 } dcc_half_t;
@@ -42,6 +48,11 @@ typedef enum {
 } dcc_state_t;
 
 static QueueHandle_t s_queue;
+/* ACK requests (one token each) drained by the dcc_ack task. The queue stays
+ * allocated for the process lifetime; s_ack_worker records whether the worker
+ * task is actually draining it. */
+static QueueHandle_t s_ack_queue;
+static bool s_ack_worker;
 static volatile int64_t s_last_edge_us;
 static volatile int64_t s_last_packet_us;
 /* Half-period samples dropped by the ISR because the parser task did not keep
@@ -70,6 +81,8 @@ static dcc_function_cb_t s_function_cb;
 static dcc_cv_write_cb_t s_cv_write_cb;
 static dcc_cv_read_cb_t s_cv_read_cb;
 static dcc_reset_cb_t s_reset_cb;
+
+static void dcc_ack_task(void *arg);
 
 static dcc_half_kind_t classify(uint16_t dt_us)
 {
@@ -263,7 +276,9 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         if (s_speed_mode_14) {
             uint8_t step14 = instr & 0x0FU;
             if (step14 >= 2U) {
-                speed = (uint8_t)(((uint16_t)(step14 - 1U) * 126U) / 13U);
+                /* step 15 scales to 135; clamp so callers never see > 126. */
+                uint16_t scaled = (uint16_t)(((uint16_t)(step14 - 1U) * 126U) / 13U);
+                speed = (scaled > 126U) ? 126U : (uint8_t)scaled;
             }
             if (s_function_cb != NULL) {
                 s_function_cb(0, (instr & 0x10U) != 0);
@@ -497,6 +512,17 @@ static void dcc_task(void *arg)
     }
 }
 
+/* Configure the ACK pin as an output. Idempotent; safe to call again if the
+ * inline fallback runs before dcc_init() configured it. */
+static void ack_pin_config(void)
+{
+    gpio_config_t ack = {
+        .pin_bit_mask = 1ULL << PIN_ACK_LOAD,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_ERROR_CHECK(gpio_config(&ack));
+}
+
 esp_err_t dcc_init(void)
 {
     s_queue = xQueueCreate(DCC_QUEUE_LEN, sizeof(dcc_half_t));
@@ -513,11 +539,33 @@ esp_err_t dcc_init(void)
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
 
+    /* ACK output is configured once here instead of on every pulse. */
+    ack_pin_config();
+    (void)gpio_set_level((gpio_num_t)PIN_ACK_LOAD, 0);
+
+    s_ack_queue = xQueueCreate(DCC_ACK_QUEUE_LEN, sizeof(uint8_t));
+    if (s_ack_queue == NULL) {
+        vQueueDelete(s_queue);
+        s_queue = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
     BaseType_t ok = xTaskCreatePinnedToCore(dcc_task, "dcc", 8192, NULL, 10, NULL, 1);
     if (ok != pdPASS) {
         vQueueDelete(s_queue);
         s_queue = NULL;
+        vQueueDelete(s_ack_queue);
+        s_ack_queue = NULL;
         return ESP_ERR_NO_MEM;
+    }
+
+    /* Non-blocking service-mode ACK worker. If it cannot start, fall back to
+     * the inline pulse in dcc_service_ack(). The queue is intentionally NOT
+     * freed here: dcc_task is already running and may hold a reference to it. */
+    if (xTaskCreate(dcc_ack_task, "dcc_ack", 2048, NULL, 5, NULL) == pdPASS) {
+        s_ack_worker = true;
+    } else {
+        ESP_LOGW(TAG, "ACK task create failed: service-mode ACK is inline");
     }
 
     ESP_LOGI(TAG, "DCC decoder started (GPIO%d, CPU1)", PIN_DCC_IN);
@@ -577,15 +625,43 @@ int64_t dcc_last_packet_us(void)
     return s_last_packet_us;
 }
 
+/* Test hook: 0 runs forever (production); host tests set a small cap. */
+static uint32_t s_ack_iter_cap;
+
+static void dcc_ack_task(void *arg)
+{
+    (void)arg;
+    uint32_t iters = 0;
+    while (s_ack_iter_cap == 0U || iters < s_ack_iter_cap) {
+        uint8_t token;
+        /* portMAX_DELAY: only returns once there is a request to serve. */
+        (void)xQueueReceive(s_ack_queue, &token, portMAX_DELAY);
+        gpio_set_level((gpio_num_t)PIN_ACK_LOAD, 1);
+        vTaskDelay(pdMS_TO_TICKS(DCC_ACK_PULSE_MS));
+        gpio_set_level((gpio_num_t)PIN_ACK_LOAD, 0);
+        iters++;
+    }
+    vTaskDelete(NULL);
+}
+
 esp_err_t dcc_service_ack(void)
 {
-    gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << PIN_ACK_LOAD,
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    ESP_ERROR_CHECK(gpio_config(&cfg));
+    /* Queue the pulse so the DCC parser keeps draining half-periods. The pin is
+     * configured once in dcc_init(). */
+    if (s_ack_worker && s_ack_queue != NULL) {
+        uint8_t token = 1U;
+        if (xQueueSend(s_ack_queue, &token, 0) != pdTRUE) {
+            return ESP_ERR_NO_MEM; /* queue full: a redundant ACK is dropped */
+        }
+        return ESP_OK;
+    }
+
+    /* Fallback for host tests / an early call before dcc_init(): configure the
+     * pin (idempotent) and emit the pulse inline (the historical blocking
+     * behaviour). */
+    ack_pin_config();
     gpio_set_level((gpio_num_t)PIN_ACK_LOAD, 1);
-    vTaskDelay(pdMS_TO_TICKS(6));
+    vTaskDelay(pdMS_TO_TICKS(DCC_ACK_PULSE_MS));
     gpio_set_level((gpio_num_t)PIN_ACK_LOAD, 0);
     return ESP_OK;
 }

@@ -103,6 +103,26 @@ void setUp(void)
     mock_gpio_set_level_count = 0;
     mock_vtask_delay_count = 0;
     mock_timer_now_us = 0;
+    mock_queue_create_fail = 0;
+    mock_queue_create_fail_after = -1;
+    mock_queue_create_calls = 0;
+    mock_task_create_ok = 1;
+    mock_task_create_fail_after = -1;
+    mock_task_create_calls = 0;
+    mock_queue_send_calls = 0;
+    mock_queue_send_fail = 0;
+    mock_queue_send_fail_after = -1;
+    /* Drop queues left over from a dcc_init() test so each test starts clean. */
+    if (s_queue != NULL) {
+        vQueueDelete(s_queue);
+        s_queue = NULL;
+    }
+    if (s_ack_queue != NULL) {
+        vQueueDelete(s_ack_queue);
+        s_ack_queue = NULL;
+    }
+    s_ack_worker = false;
+    s_ack_iter_cap = 0;
 
     s_decoder_addr = 3;
     s_decoder_long_addr = false;
@@ -743,6 +763,59 @@ static void test_dcc_service_ack_pulses_gpio(void)
     TEST_ASSERT_EQUAL_INT(1, mock_vtask_delay_count);
 }
 
+/* With the ACK worker available, dcc_service_ack() must only enqueue: the DCC
+ * parser task must not block on the pulse. */
+static void test_dcc_service_ack_queued(void)
+{
+    s_ack_queue = xQueueCreate(DCC_ACK_QUEUE_LEN, sizeof(uint8_t));
+    TEST_ASSERT_NOT_NULL(s_ack_queue);
+    s_ack_worker = true;
+    mock_queue_send_calls = 0;
+    mock_gpio_set_level_count = 0;
+    mock_vtask_delay_count = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_service_ack());
+    TEST_ASSERT_EQUAL_INT(1, mock_queue_send_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
+    TEST_ASSERT_EQUAL_INT(0, mock_vtask_delay_count);
+
+    vQueueDelete(s_ack_queue);
+    s_ack_queue = NULL;
+}
+
+/* A full ACK queue drops the redundant ACK without blocking. */
+static void test_dcc_service_ack_queue_full(void)
+{
+    s_ack_queue = xQueueCreate(DCC_ACK_QUEUE_LEN, sizeof(uint8_t));
+    TEST_ASSERT_NOT_NULL(s_ack_queue);
+    s_ack_worker = true;
+    mock_queue_send_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, dcc_service_ack());
+    mock_queue_send_fail = 0;
+    vQueueDelete(s_ack_queue);
+    s_ack_queue = NULL;
+}
+
+/* The worker turns a queued token into the 6 ms high/low pulse. */
+static void test_dcc_ack_task_pulse(void)
+{
+    s_ack_queue = xQueueCreate(DCC_ACK_QUEUE_LEN, sizeof(uint8_t));
+    TEST_ASSERT_NOT_NULL(s_ack_queue);
+    uint8_t token = 1U;
+    TEST_ASSERT_TRUE(xQueueSend(s_ack_queue, &token, 0) == pdTRUE);
+    mock_gpio_set_level_count = 0;
+    mock_vtask_delay_count = 0;
+
+    s_ack_iter_cap = 1;
+    dcc_ack_task(NULL);
+    s_ack_iter_cap = 0;
+
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
+    TEST_ASSERT_EQUAL_INT(1, mock_vtask_delay_count);
+    vQueueDelete(s_ack_queue);
+    s_ack_queue = NULL;
+}
+
 /* ---- coverage: remaining branches (ISR / task / init / parser edges) ---- */
 
 static void test_dcc_read_cv_null_callback(void)
@@ -891,6 +964,31 @@ static void test_dcc_init_failures(void)
     TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
 }
 
+/* First xQueueCreate (half periods) succeeds, second (ACK) fails. */
+static void test_dcc_init_ack_queue_fail(void)
+{
+    mock_queue_create_fail_after = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, dcc_init());
+    mock_queue_create_fail_after = -1;
+    TEST_ASSERT_NULL(s_ack_queue);
+}
+
+/* ACK task creation failure leaves the decoder running with the inline ACK.
+ * The queue stays allocated (dcc_task may still reference it). */
+static void test_dcc_init_ack_task_fail(void)
+{
+    mock_task_create_fail_after = 1; /* dcc task ok, ack task fails */
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+    mock_task_create_fail_after = -1;
+    TEST_ASSERT_NOT_NULL(s_ack_queue);
+    TEST_ASSERT_FALSE(s_ack_worker);
+
+    /* With no worker the inline path is used even though the queue exists. */
+    mock_gpio_set_level_count = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_service_ack());
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
+}
+
 static void test_dcc_register_callbacks(void)
 {
     dcc_register_speed_cb(on_speed);
@@ -953,6 +1051,9 @@ int main(void)
     RUN_TEST(test_dcc_oversized_packet_resets);
     RUN_TEST(test_dcc_last_packet_timestamp);
     RUN_TEST(test_dcc_service_ack_pulses_gpio);
+    RUN_TEST(test_dcc_service_ack_queued);
+    RUN_TEST(test_dcc_service_ack_queue_full);
+    RUN_TEST(test_dcc_ack_task_pulse);
     RUN_TEST(test_dcc_service_write_direct);
     RUN_TEST(test_dcc_service_verify_match);
     RUN_TEST(test_dcc_service_verify_no_match);
@@ -973,6 +1074,8 @@ int main(void)
     RUN_TEST(test_dcc_task_processes_queue);
     RUN_TEST(test_dcc_task_isr_install_failure);
     RUN_TEST(test_dcc_init_failures);
+    RUN_TEST(test_dcc_init_ack_queue_fail);
+    RUN_TEST(test_dcc_init_ack_task_fail);
     RUN_TEST(test_dcc_register_callbacks);
     RUN_TEST(test_fuzz_random_bits);
     return UNITY_END();

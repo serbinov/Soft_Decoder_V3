@@ -99,6 +99,9 @@ typedef struct {
 } mock_queue_t;
 
 int mock_queue_create_fail = 0;
+/* Allow the first N creates to succeed, then fail all later ones (-1 = off). */
+int mock_queue_create_fail_after = -1;
+int mock_queue_create_calls = 0;
 int mock_queue_send_fail = 0;
 /* Allow the first N sends to succeed, then fail all later ones (-1 = off). */
 int mock_queue_send_fail_after = -1;
@@ -107,7 +110,10 @@ int mock_queue_send_calls = 0;
 QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size)
 {
     (void)len;
-    if (mock_queue_create_fail) {
+    mock_queue_create_calls++;
+    if (mock_queue_create_fail ||
+        (mock_queue_create_fail_after >= 0 &&
+         mock_queue_create_calls > mock_queue_create_fail_after)) {
         return NULL;
     }
     mock_queue_t *q = (mock_queue_t *)calloc(1, sizeof(*q));
@@ -178,6 +184,23 @@ void vQueueDelete(QueueHandle_t q)
 }
 
 int mock_task_create_ok = 1;
+/* Allow the first N task creations to succeed, then fail all later ones
+ * (-1 = off). Shared by xTaskCreate and xTaskCreatePinnedToCore. */
+int mock_task_create_fail_after = -1;
+int mock_task_create_calls = 0;
+
+static BaseType_t mock_task_create_result(void)
+{
+    mock_task_create_calls++;
+    if (!mock_task_create_ok) {
+        return pdFAIL;
+    }
+    if (mock_task_create_fail_after >= 0 &&
+        mock_task_create_calls > mock_task_create_fail_after) {
+        return pdFAIL;
+    }
+    return pdPASS;
+}
 
 BaseType_t xTaskCreate(void (*task)(void *), const char *name, uint32_t stack,
                        void *param, UBaseType_t prio, TaskHandle_t *handle)
@@ -190,7 +213,7 @@ BaseType_t xTaskCreate(void (*task)(void *), const char *name, uint32_t stack,
     if (handle != NULL) {
         *handle = NULL;
     }
-    return mock_task_create_ok ? pdPASS : pdFAIL;
+    return mock_task_create_result();
 }
 
 BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
@@ -207,7 +230,7 @@ BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
     if (handle != NULL) {
         *handle = NULL;
     }
-    return mock_task_create_ok ? pdPASS : pdFAIL;
+    return mock_task_create_result();
 }
 
 void vTaskDelay(const TickType_t ticks)
@@ -401,6 +424,10 @@ void nvs_close(nvs_handle_t handle)
 }
 
 int mock_nvs_get_u8_err = 0;
+/* Self-test hooks: force nvs u32 read/write failures or a corrupted read. */
+int mock_nvs_get_u32_err = 0;
+int mock_nvs_set_u32_err = 0;
+int mock_nvs_u32_corrupt = 0;
 
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *out)
 {
@@ -422,8 +449,15 @@ esp_err_t nvs_get_u16(nvs_handle_t h, const char *key, uint16_t *out)
 esp_err_t nvs_get_u32(nvs_handle_t h, const char *key, uint32_t *out)
 {
     (void)h;
+    if (mock_nvs_get_u32_err) {
+        return (esp_err_t)mock_nvs_get_u32_err;
+    }
     size_t len = sizeof(*out);
-    return mock_nvs_get(key, MOCK_NVS_U32, out, &len);
+    esp_err_t err = mock_nvs_get(key, MOCK_NVS_U32, out, &len);
+    if (err == ESP_OK && mock_nvs_u32_corrupt && out != NULL) {
+        *out ^= 0xFFFFFFFFu;
+    }
+    return err;
 }
 
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *out, size_t *len)
@@ -453,6 +487,9 @@ esp_err_t nvs_set_u16(nvs_handle_t h, const char *key, uint16_t value)
 esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value)
 {
     (void)h;
+    if (mock_nvs_set_u32_err) {
+        return (esp_err_t)mock_nvs_set_u32_err;
+    }
     return mock_nvs_put(key, MOCK_NVS_U32, &value, sizeof(value)) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 

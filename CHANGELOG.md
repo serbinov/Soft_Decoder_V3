@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-25 (v0.7) — feat: review fixes (ACK/PROV/OTA) + SELFTEST/HIL hardware tests
 - 2026-09-25 (v0.7) — docs: exact host test count (427) in ARCHITECTURE/TESTS_HANDOFF
 - 2026-09-25 (v0.7) — test: add test_web with host shims; 100% first-party coverage
 - 2026-09-25 (v0.7) — docs: add TESTS_HANDOFF.md (coverage status, remaining step 4, gotchas)
@@ -28,6 +29,46 @@
 - 2026-09-25 (v0.7) — bump_version: also mirror the version into the root VERSION file
 - 2026-09-25 (v0.7) — docs: point changelog refs to repo root; note VERSION and git hooks
 - 2026-09-25 (v0.7) — Add root VERSION and auto-recorded CHANGELOG via git hook
+
+---
+
+## 2026-09-25 — Ревью архитектуры, safety-фиксы, самотест/HIL
+
+Версия прошивки: **0.7** (`version.txt`). Подробности — `firmware/FIXES_LOG.md`.
+
+### Исправления (по итогам ревью)
+- **FIX-1**: service-mode ACK вынесен в отдельную задачу `dcc_ack` — задача
+  разбора DCC больше не блокируется на 6 мс; пин ACK настраивается один раз.
+- **FIX-2**: перед стиранием внешней NOR провижининг требует подтверждение
+  (`PROV-CONFIRM?` → `PROV-CONFIRM`), иначе `PROV-ABORT`; скрипты обновлены.
+- **FIX-3**: включён OTA rollback (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`),
+  образ подтверждается в конце `app_main` (`esp_ota_mark_app_valid_cancel_rollback`).
+- **FIX-4**: `functions_get()` читает состояние функций под мьютексом;
+  `log_get()` не обрезает JSON внутри записи.
+- **FIX-5**: клэмп 14-step скорости до 126.
+- Правки по ревью: подтверждение PROV принимает CRLF; очередь ACK не
+  освобождается при работающей DCC-задаче; fallback-ACK конфигурирует пин.
+
+### Самотест и HIL
+- Новый компонент `selftest`: команда `SELFTEST` (неразрушающие проверки
+  heap/pinmap/CV/NVS/LittleFS/ADC/audio/AUX/DCC) и активирующие команды
+  `HIL-AUX/HIL-SOUND/HIL-MOTOR/HIL-FN/-SWEEP` (ограничены по времени,
+  авто-возврат состояния AUX / стоп звука и мотора).
+- `test/hil/run_hil.ps1` (USB: `SELFTEST`, `-Actuate`, `-Sweep`, `-MotorSpeed`)
+  и `test/hil/run_hil_web.ps1` (SoftAP: все safe REST-эндпоинты, все F0..F28,
+  все AUX, CV и настройки; изменённое возвращает обратно).
+- `auxio_get_enabled()` — read-only геттер для самотеста/диагностики.
+
+### Проверено на железе (ESP32-S3)
+- USB: `SELFTEST 9/9`, `BEMF-OK`, прогон **всех F0..F28** и **всех 9 AUX**,
+  AUX/звук/мотор по командам.
+- Web/REST по SoftAP: 45 проверок PASS — все эндпоинты, F0..F28 и AUX0..8
+  через веб, AUX cfg, CV write, func-map, аудио, mode, BEMF, control source.
+- OTA rollback: после сброса `OTA image confirmed`, образ не откатывается.
+
+### Тесты
+- 14 наборов, **453 теста**, покрытие first-party **100 %** (4271/4271 строк).
+- Flash 820 629 Б (41.7 %), RAM 50 384 Б (15.4 %).
 
 ---
 

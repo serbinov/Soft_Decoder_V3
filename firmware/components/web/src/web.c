@@ -1019,9 +1019,16 @@ static esp_err_t functions_get(httpd_req_t *req)
     char json[128];
     size_t used = 0;
     used += (size_t)snprintf(json + used, sizeof(json) - used, "{\"ok\":true,\"states\":[");
+    /* Snapshot under the same lock the DCC callback uses. */
+    if (s_func_mutex != NULL) {
+        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
     for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) {
         used += (size_t)snprintf(json + used, sizeof(json) - used, "%s%d",
                                  fn == 0 ? "" : ",", s_fn[fn] ? 1 : 0);
+    }
+    if (s_func_mutex != NULL) {
+        xSemaphoreGive(s_func_mutex);
     }
     (void)snprintf(json + used, sizeof(json) - used, "]}");
     return send_json(req, json);
@@ -2302,6 +2309,12 @@ static esp_err_t log_get(httpd_req_t *req)
         if (e->seq == 0U || e->seq <= since) {
             continue;
         }
+        /* Stop before starting an entry that might not fully fit: a partially
+         * appended entry would leave the JSON document malformed. 400 bytes
+         * covers the largest escaped tag+text entry. */
+        if (used >= sizeof(json) - 400U) {
+            break;
+        }
         char et[WEB_EVLOG_TAG_MAX * 2];
         char ex[WEB_EVLOG_TEXT_MAX * 2];
         json_escape(e->tag, et, sizeof(et));
@@ -2309,9 +2322,6 @@ static esp_err_t log_get(httpd_req_t *req)
         buf_appendf(json, sizeof(json), &used,
                     "%s{\"s\":%lu,\"tag\":\"%s\",\"text\":\"%s\"}",
                     emitted++ ? "," : "", (unsigned long)e->seq, et, ex);
-        if (used >= sizeof(json) - 320U) {
-            break; /* leave room to close the JSON document */
-        }
     }
     if (s_evlog_mutex != NULL) {
         xSemaphoreGive(s_evlog_mutex);

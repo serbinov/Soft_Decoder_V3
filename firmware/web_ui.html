@@ -123,6 +123,9 @@ select{cursor:pointer}
 .auxpwm-row{display:grid;grid-template-columns:36px 70px 1fr;gap:6px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .auxpwm-row .num{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px;font-size:12px;text-align:center}
 .auxpwm-row .num:disabled{background:var(--panel2);color:var(--muted);opacity:.55}
+.shell{padding-bottom:44px}
+.uptime-bar{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;gap:6px;justify-content:center;align-items:center;padding:7px 12px;background:#0d1018;border-top:1px solid var(--line);font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
+.uptime-bar #uptime{color:var(--good);font-weight:700}
 </style>
 </head>
 <body>
@@ -325,6 +328,8 @@ select{cursor:pointer}
       </div>
     </div>
   </div>
+
+  <div class="uptime-bar"><span>Устройство работает:</span> <span id="uptime">—</span></div>
 </div>
 
 <script>
@@ -1258,6 +1263,19 @@ async function resetWifi(){
   }catch(e){log('Wi-Fi','ошибка: '+e.message);}
 }
 
+/* uptime footer (bottom bar) */
+var uptimeBaseSec=0,uptimeAtMs=0;
+function fmtUptime(s){
+  s=Math.max(0,Math.floor(s));
+  var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60),x=s%60;
+  function p(n){return (n<10?'0':'')+n;}
+  return (d>0?d+' д ':'')+p(h)+':'+p(m)+':'+p(x);
+}
+function renderUptime(){
+  var el=byId('uptime');if(!el)return;
+  el.textContent=uptimeAtMs?fmtUptime(uptimeBaseSec+(Date.now()-uptimeAtMs)/1000):'—';
+}
+
 /* device name */
 async function loadDevice(){
   try{
@@ -1265,6 +1283,9 @@ async function loadDevice(){
     if(d&&d.ok){
       savedDeviceName=d.name||'ТЕПЛОВОЗ';
       byId('device_name').value=savedDeviceName;
+      uptimeBaseSec=Number(d.uptime)||0;
+      uptimeAtMs=Date.now();
+      renderUptime();
     }
   }catch(e){log('Имя','ошибка: '+e.message);}
 }
@@ -1381,6 +1402,8 @@ function init(){
   loadTrackList();
   refreshStatus();
   startStatusPoll();
+  renderUptime();
+  setInterval(renderUptime,1000);
 }
 /* Load the track list once at startup so the sound grid and the function-map
  * sound names are populated even before/without opening the sounds panel. */

@@ -1693,6 +1693,7 @@ static void test_device_get_post(void)
     snprintf(s_cfg.device_name, sizeof(s_cfg.device_name), "DEC");
     TEST_ASSERT_EQUAL(ESP_OK, device_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"name\":\"DEC\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"uptime\":"));
 
     set_query("name=NewName");
     reset_resp();

@@ -1966,9 +1966,11 @@ static esp_err_t device_get(httpd_req_t *req)
 {
     char esc[SETTINGS_NAME_MAX * 2];
     json_escape(s_cfg.device_name, esc, sizeof(esc));
+    int64_t uptime_s = esp_timer_get_time() / 1000000;
     char json[192];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"name\":\"%s\",\"version\":\"" WEB_FW_VERSION "\"}", esc);
+             "{\"ok\":true,\"name\":\"%s\",\"version\":\"" WEB_FW_VERSION "\",\"uptime\":%lld}",
+             esc, (long long)uptime_s);
     return send_json(req, json);
 }
 

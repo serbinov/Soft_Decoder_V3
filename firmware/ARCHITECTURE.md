@@ -635,7 +635,7 @@ flowchart TD
 | GET/POST | `/api/wifi` | параметры AP |
 | POST | `/api/wifi/reset` | сброс Wi-Fi |
 | POST | `/api/reset` | полный заводской сброс |
-| GET/POST | `/api/device` | имя/инфо устройства |
+| GET/POST | `/api/device` | имя/инфо устройства (имя, версия, аптайм) |
 | GET | `/api/storage` | свободное место |
 | POST | `/api/ota/update` | OTA (firmware или контейнер fw+звуки) |
 | GET | `/api/task-inputs` | диагностика входов |

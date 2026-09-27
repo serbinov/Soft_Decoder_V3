@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-27 (v0.8) — feat(web): show Additipus as the CV8 manufacturer name
 - 2026-09-27 (v0.8) — style(web): place device uptime after the Journal panel
 - 2026-09-27 (v0.8) — test(version): guard CV7 against version.txt; harden bump_version.ps1
 - 2026-09-27 (v0.8) — chore: bump to 0.8; changelog hook reads firmware/version.txt

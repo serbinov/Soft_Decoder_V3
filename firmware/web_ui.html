@@ -86,6 +86,7 @@ select{cursor:pointer}
 .cv-card.active{border-color:var(--accent)}
 .cv-card .head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .cv-card .name{font-size:13px;font-weight:700}
+.cv-card .vendor{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle}
 .cv-card .idx{font-size:12px;color:var(--good);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
 .cv-card .desc{font-size:11px;color:var(--muted)}
 .cv-card .ctrl{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:end}
@@ -939,7 +940,7 @@ var cvDB=[
   {index:5,name:'Максимальная скорость',value:255,desc:'Максимальный уровень ШИМ (255=полная)'},
   {index:6,name:'Средняя скорость',value:128,desc:'Уровень ШИМ в середине кривой (по умолчанию 128 = половина)'},
   {index:7,name:'Версия',value:1,desc:'Версия декодера (только чтение)'},
-  {index:8,name:'Производитель',value:0,desc:'Чтение: ID производителя. Запись значения 8 = сброс CV к заводским'},
+  {index:8,name:'Производитель',value:0,vendor:'Additipus',desc:'Чтение: ID производителя. Запись значения 8 = сброс CV к заводским'},
   {index:11,name:'Таймаут пакетов',value:0,desc:'Остановка при пропаже DCC-пакетов: значение x 20 мс (0=выкл)'},
   {index:17,name:'Длинный адрес, старший байт',value:0,desc:'CV17 (действует при CV29 бит 5 = 1)'},
   {index:18,name:'Длинный адрес, младший байт',value:0,desc:'CV18'},
@@ -955,7 +956,7 @@ var readOnlyCv={7:1};
 function cvByIndex(index){for(var i=0;i<cvDB.length;i++){if(cvDB[i].index===index)return cvDB[i];}return null;}
 function setActiveCaption(index){
   var def=cvByIndex(index);
-  setText('cv_active_name',def?('CV '+index+' — '+def.name):('CV '+index));
+  setText('cv_active_name',def?('CV '+index+' — '+def.name+(def.vendor?' ('+def.vendor+')':'')):('CV '+index));
 }
 function filteredCv(){
   return cvDB;
@@ -993,7 +994,7 @@ function renderCvList(){
     var cv=rows[i];
     var ro=readOnlyCv[cv.index];
     html.push('<div class="cv-card '+(cv.index===activeCv?'active':'')+'" data-cv="'+cv.index+'" onclick="setActiveCv('+cv.index+')">'
-      +'<div class="head"><div class="name">'+esc(cv.name)+'</div><div class="idx">CV '+cv.index+'</div></div>'
+      +'<div class="head"><div class="name">'+esc(cv.name)+(cv.vendor?'<span class="vendor">'+esc(cv.vendor)+'</span>':'')+'</div><div class="idx">CV '+cv.index+'</div></div>'
       +'<div class="desc">'+esc(cv.desc)+'</div>'
       +'<div class="ctrl">'
       +'<input id="cv_value_'+cv.index+'" type="number" min="0" max="255" value="'+cvValueOf(cv.index)+'" onclick="event.stopPropagation()" oninput="if('+cv.index+'===activeCv)byId(\'cv_quick_value\').value=this.value">'

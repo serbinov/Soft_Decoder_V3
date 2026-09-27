@@ -1966,11 +1966,13 @@ static esp_err_t device_get(httpd_req_t *req)
 {
     char esc[SETTINGS_NAME_MAX * 2];
     json_escape(s_cfg.device_name, esc, sizeof(esc));
-    int64_t uptime_s = esp_timer_get_time() / 1000000;
+    /* 32-bit seconds: fits for >100 years. Do NOT use %lld here — newlib nano
+     * (CONFIG_NEWLIB_NANO_FORMAT) has no 64-bit printf conversion. */
+    uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
     char json[192];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"name\":\"%s\",\"version\":\"" WEB_FW_VERSION "\",\"uptime\":%lld}",
-             esc, (long long)uptime_s);
+             "{\"ok\":true,\"name\":\"%s\",\"version\":\"" WEB_FW_VERSION "\",\"uptime\":%lu}",
+             esc, (unsigned long)uptime_s);
     return send_json(req, json);
 }
 

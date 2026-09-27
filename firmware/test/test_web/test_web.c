@@ -1691,9 +1691,11 @@ static void test_device_get_post(void)
 {
     httpd_req_t req = make_req(0);
     snprintf(s_cfg.device_name, sizeof(s_cfg.device_name), "DEC");
+    mock_timer_now_us = 3661000000LL; /* 1 h 1 min 1 s */
     TEST_ASSERT_EQUAL(ESP_OK, device_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"name\":\"DEC\""));
-    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"uptime\":"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"uptime\":3661"));
+    mock_timer_now_us = 0;
 
     set_query("name=NewName");
     reset_resp();

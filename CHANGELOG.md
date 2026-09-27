@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-27 — fix(web): valid uptime in /api/device under newlib nano
 - 2026-09-27 — feat(web): show device uptime in a fixed bottom bar
 - 2026-09-27 — docs: merge TESTS_HANDOFF into ARCHITECTURE; ignore worktrees/generated files; drop VERSION mirror
 - 2026-09-27 — chore: prune repo (worktrees, old releases, generated files), merge docs, add README

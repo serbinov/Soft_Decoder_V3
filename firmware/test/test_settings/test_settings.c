@@ -20,6 +20,39 @@
 esp_err_t settings_manifest_sync(void) { return ESP_OK; }
 esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
 
+/* Guard against an out-of-band version bump: version.txt is the single source
+ * of truth for the firmware version, and CV7 (decoder version) must match its
+ * minor. If someone edits version.txt without updating settings.c, this fails. */
+static int version_txt_minor(void)
+{
+    const char *paths[] = { "version.txt", "firmware/version.txt" };
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
+        FILE *f = fopen(paths[i], "r");
+        if (f == NULL) {
+            continue;
+        }
+        char buf[32] = { 0 };
+        size_t n = fread(buf, 1, sizeof(buf) - 1U, f);
+        fclose(f);
+        buf[n] = '\0';
+        const char *dot = strchr(buf, '.');
+        if (dot != NULL) {
+            return atoi(dot + 1);
+        }
+    }
+    return -1;
+}
+
+static void test_cv7_matches_version_txt(void)
+{
+    int minor = version_txt_minor();
+    if (minor < 0) {
+        TEST_IGNORE_MESSAGE("version.txt not reachable from CWD");
+        return;
+    }
+    TEST_ASSERT_EQUAL_INT(minor, (int)s_cv[7]);
+}
+
 void setUp(void)
 {
     mock_nvs_reset();
@@ -747,6 +780,7 @@ int main(void)
     RUN_TEST(test_crc32_deterministic);
     RUN_TEST(test_crc32_differs_on_change);
     RUN_TEST(test_defaults);
+    RUN_TEST(test_cv7_matches_version_txt);
     RUN_TEST(test_defaults_speed_table);
     RUN_TEST(test_cv_curve_migration);
     RUN_TEST(test_cv_read_write);

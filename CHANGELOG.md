@@ -11,6 +11,7 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-27 (v0.7) — fix: code-review remediation across firmware + review agents
 - 2026-09-25 (v0.7) — feat: review fixes (ACK/PROV/OTA) + SELFTEST/HIL hardware tests
 - 2026-09-25 (v0.7) — docs: exact host test count (427) in ARCHITECTURE/TESTS_HANDOFF
 - 2026-09-25 (v0.7) — test: add test_web with host shims; 100% first-party coverage

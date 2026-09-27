@@ -19,6 +19,8 @@
 #include "settings.h"
 #include "storage.h"
 #include "motor.h"
+#include "audio.h"
+#include "web.h"
 #include "selftest.h"
 
 static const char *TAG = "prov";
@@ -163,7 +165,8 @@ static void ensure_uart_driver(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "uart driver install: %s", esp_err_to_name(err));
     }
-    s_uart_driver_installed = true;
+    /* Only mark installed on success so a failed install is retried later. */
+    s_uart_driver_installed = (err == ESP_OK || err == ESP_ERR_INVALID_STATE);
 }
 
 static void ensure_usbjtag_driver(void)
@@ -517,7 +520,19 @@ static bool provision_run(void)
     uart_flush_input(UART_NUM_0);
     (void)uart_set_baudrate(UART_NUM_0, PROV_BAUD);
 
-    /* Erase the external NOR and remount a fresh LittleFS (clears old data). */
+    /* Erase the external NOR and remount a fresh LittleFS (clears old data).
+     * First make sure nothing is using the filesystem: stop the motor and the
+     * audio mixer (which holds open files), then refuse if a web upload/OTA is
+     * still writing. Formatting under an active writer would use-after-free the
+     * LittleFS state. */
+    motor_emergency_stop();
+    audio_stop_all();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    if (web_fs_busy()) {
+        ESP_LOGW(TAG, "provision: web transfer in progress, aborting");
+        send_line("PROV-ERR busy");
+        return false;
+    }
     esp_err_t err = storage_format();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "provision: external NOR unavailable, aborting");

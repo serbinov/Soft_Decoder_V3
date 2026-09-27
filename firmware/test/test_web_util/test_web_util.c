@@ -104,6 +104,11 @@ static void test_json_escape(void)
     TEST_ASSERT_EQUAL_STRING("a\\\"b\\\\c\\nd", out);
     json_escape("plain", out, sizeof(out));
     TEST_ASSERT_EQUAL_STRING("plain", out);
+    /* CR/TAB and other C0 controls must not produce invalid JSON. */
+    json_escape("a\rb\tc", out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("a\\rb\\tc", out);
+    json_escape("a\x01" "\x1f" "b", out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("a??b", out);
 }
 
 static void test_json_escape_bounds(void)

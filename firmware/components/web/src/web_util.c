@@ -95,15 +95,25 @@ void json_escape(const char *in, char *out, size_t out_len)
     }
     size_t w = 0;
     for (size_t r = 0; in != NULL && in[r] != '\0' && w + 2 < out_len; ++r) {
-        char c = in[r];
+        unsigned char c = (unsigned char)in[r];
         if (c == '"' || c == '\\') {
             out[w++] = '\\';
-            out[w++] = c;
+            out[w++] = (char)c;
         } else if (c == '\n') {
             out[w++] = '\\';
             out[w++] = 'n';
+        } else if (c == '\r') {
+            out[w++] = '\\';
+            out[w++] = 'r';
+        } else if (c == '\t') {
+            out[w++] = '\\';
+            out[w++] = 't';
+        } else if (c < 0x20U) {
+            /* Remaining C0 controls are not legal in a JSON string; replace
+             * them instead of emitting invalid JSON the UI cannot parse. */
+            out[w++] = '?';
         } else {
-            out[w++] = c;
+            out[w++] = (char)c;
         }
     }
     out[w] = '\0';

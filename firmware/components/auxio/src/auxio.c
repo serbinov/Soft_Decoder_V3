@@ -113,7 +113,8 @@ static uint8_t ch_duty(const auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
             /* triangle 0..255..0, mapped through gamma => sinusoidal-ish sweep */
             uint32_t half = period / 2U;
             uint32_t pos = (phase < half) ? phase : (period - phase);
-            uint8_t t = (uint8_t)((pos * 255U) / (half ? half : 1U));
+            uint32_t t_raw = (pos * 255U) / (half ? half : 1U);
+            uint8_t t = (uint8_t)(t_raw > 255U ? 255U : t_raw);
             uint8_t mid = (uint8_t)(maxv / 2U);
             return (uint8_t)(mid + ((uint32_t)(maxv - mid) * s_gamma[t]) / 255U);
         }
@@ -165,7 +166,7 @@ static uint8_t ch_step(auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
         } else if ((int32_t)(now_ms - ch->fx_next_ms) >= 0) {
             uint32_t floor40 = ((uint32_t)maxv * 40U) / 100U;
             uint32_t range = (uint32_t)maxv - floor40;
-            uint32_t r = (now_ms * 1103515245U) + 12345U;
+            uint32_t r = (now_ms * 1103515245U) + 12345U + (uint32_t)idx * 2654435761U;
             r ^= r >> 15;
             ch->cur = (uint8_t)(floor40 + (range ? (r % range) : 0U));
             ch->fx_next_ms = now_ms + 30U + (r % 71U);

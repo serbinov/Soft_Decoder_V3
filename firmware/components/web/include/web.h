@@ -38,4 +38,8 @@ bool web_func_map_get(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b, uint16_t *au
 bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
                       uint8_t dir, uint8_t speed);
 
+/* True while an HTTP upload or OTA transfer is writing to the filesystem.
+ * Provisioning uses this to avoid reformatting under an active writer. */
+bool web_fs_busy(void);
+
 #endif

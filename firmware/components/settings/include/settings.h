@@ -107,6 +107,9 @@ void settings_pending_flush(void);
 esp_err_t settings_cv_read(uint16_t idx, uint8_t *out);
 esp_err_t settings_cv_write(uint16_t idx, uint8_t value);
 esp_err_t settings_cv_commit(void);
+/* Stage a CV commit to run later from settings_pending_flush() (never blocks
+ * the DCC/service-mode task in a flash write). */
+void settings_cv_commit_deferred(void);
 esp_err_t settings_cv_reset_to_factory(void);
 /* Erase the whole settings namespace and restore CV defaults. The WiFi config,
  * volumes, name, control source, sound tracks and BEMF calibration are cleared
@@ -132,7 +135,7 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count);
  * names, categories and function map come back even after a chip erase.
  * settings_manifest_sync() rewrites it whenever that metadata changes;
  * settings_manifest_load() restores it (ESP_OK when tracks were restored). */
-void settings_manifest_sync(void);
+esp_err_t settings_manifest_sync(void);
 esp_err_t settings_manifest_load(void);
 
 /* Per-output PWM level and light effect (F0F, F0R, AUX1..AUX7). */

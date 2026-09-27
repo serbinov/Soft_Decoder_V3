@@ -80,6 +80,19 @@ static void test_pinmap_check_accepts_valid(void)
     TEST_ASSERT_EQUAL(ESP_OK, pinmap_check(ok, 0));
 }
 
+/* out-of-range, GPIO22 and duplicate assignments must all be rejected. */
+static void test_pinmap_check_rejects_bad(void)
+{
+    int out_hi[] = { 1, 100 };
+    int out_lo[] = { -1, 2 };
+    int p22[] = { 1, 22 };
+    int dup[] = { 4, 4 };
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(out_hi, 2));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(out_lo, 2));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(p22, 2));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(dup, 2));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -88,5 +101,6 @@ int main(void)
     RUN_TEST(test_pinmap_no_duplicates);
     RUN_TEST(test_pinmap_check_rejects_reserved);
     RUN_TEST(test_pinmap_check_accepts_valid);
+    RUN_TEST(test_pinmap_check_rejects_bad);
     return UNITY_END();
 }

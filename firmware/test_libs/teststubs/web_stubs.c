@@ -613,6 +613,17 @@ int mock_bind(int sockfd, const struct sockaddr *addr, mock_socklen_t addrlen)
     return mock_bind_ret;
 }
 
+int mock_setsockopt(int sockfd, int level, int optname, const void *optval,
+                    mock_socklen_t optlen)
+{
+    (void)sockfd;
+    (void)level;
+    (void)optname;
+    (void)optval;
+    (void)optlen;
+    return 0;
+}
+
 int mock_recvfrom(int sockfd, void *buf, size_t len, int flags,
                   struct sockaddr *src_addr, mock_socklen_t *addrlen)
 {
@@ -942,6 +953,13 @@ int mock_bemf_cal_clear_calls = 0;
 void motor_stop(void)
 {
     mock_motor_stop_calls++;
+}
+
+int mock_motor_emergency_stop_calls = 0;
+
+void motor_emergency_stop(void)
+{
+    mock_motor_emergency_stop_calls++;
 }
 
 esp_err_t motor_set_speed(uint8_t speed128, bool forward)

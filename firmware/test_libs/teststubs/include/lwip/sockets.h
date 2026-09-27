@@ -7,11 +7,14 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 #define AF_INET 2
 #define SOCK_DGRAM 2
 #define IPPROTO_UDP 17
 #define INADDR_ANY 0u
+#define SOL_SOCKET 0x0fff
+#define SO_RCVTIMEO 0x1006
 
 typedef unsigned short mock_sa_family_t;
 
@@ -40,6 +43,8 @@ uint32_t mock_lwip_htonl(uint32_t v);
 
 int mock_socket(int domain, int type, int protocol);
 int mock_bind(int sockfd, const struct sockaddr *addr, mock_socklen_t addrlen);
+int mock_setsockopt(int sockfd, int level, int optname, const void *optval,
+                    mock_socklen_t optlen);
 int mock_recvfrom(int sockfd, void *buf, size_t len, int flags,
                   struct sockaddr *src_addr, mock_socklen_t *addrlen);
 int mock_sendto(int sockfd, const void *buf, size_t len, int flags,
@@ -50,6 +55,7 @@ int mock_socket_close(int fd);
 #define htonl  mock_lwip_htonl
 #define socket mock_socket
 #define bind   mock_bind
+#define setsockopt mock_setsockopt
 #define recvfrom mock_recvfrom
 #define sendto mock_sendto
 #define close  mock_socket_close

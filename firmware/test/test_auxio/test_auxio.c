@@ -117,6 +117,21 @@ static void test_ch_duty_mars_triangle(void)
     TEST_ASSERT_TRUE(at_peak > at_start);
 }
 
+/* An odd period can make the Mars triangle reach half+1; the value must clamp
+ * to 255 instead of wrapping through uint8_t. */
+static void test_ch_duty_mars_odd_period_clamps(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->enabled = true;
+    ch->mode = AUXIO_EFFECT_MARS;
+    ch->pwm_on = 255;
+    ch->pwm_off = 0;
+    ch->period_ms = 101; /* odd: pos reaches half+1 at the sweep peak */
+
+    uint8_t peak = ch_duty(ch, 0, 50);
+    TEST_ASSERT_EQUAL_UINT8(255, peak);
+}
+
 static void test_ch_duty_ditch_alternates(void)
 {
     auxio_ch_t *ch = &s_ch[0];
@@ -374,6 +389,7 @@ int main(void)
     RUN_TEST(test_ch_duty_incandescent);
     RUN_TEST(test_ch_duty_firebox);
     RUN_TEST(test_ch_duty_mars_triangle);
+    RUN_TEST(test_ch_duty_mars_odd_period_clamps);
     RUN_TEST(test_ch_duty_ditch_alternates);
     RUN_TEST(test_ch_duty_beacon_decay);
     RUN_TEST(test_ch_duty_strobe_double_flash);

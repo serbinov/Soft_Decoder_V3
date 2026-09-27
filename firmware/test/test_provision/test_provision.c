@@ -120,6 +120,25 @@ esp_err_t motor_set_speed(uint8_t speed128, bool forward)
     return ESP_OK;
 }
 
+static int g_motor_es_calls;
+static int g_audio_stop_calls;
+static int g_web_busy;
+
+void motor_emergency_stop(void)
+{
+    g_motor_es_calls++;
+}
+
+void audio_stop_all(void)
+{
+    g_audio_stop_calls++;
+}
+
+bool web_fs_busy(void)
+{
+    return g_web_busy != 0;
+}
+
 esp_err_t settings_cv_write(uint16_t idx, uint8_t val)
 {
     (void)idx;
@@ -289,6 +308,9 @@ void setUp(void)
     mock_ota_next_size = 4u * 1024u * 1024u;
     mock_esp_restart_calls = 0;
     g_malloc_fail = 0;
+    g_web_busy = 0;
+    g_audio_stop_calls = 0;
+    g_motor_es_calls = 0;
     s_usbjtag_ok = false;
     s_provisioning = false;
     s_listen_iter_cap = 0;
@@ -511,6 +533,19 @@ static void test_provision_run_storage_fail(void)
     TEST_ASSERT_FALSE(provision_run());
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_TRUE(tx_has("PROV-ERR storage"));
+}
+
+static void test_provision_run_web_busy(void)
+{
+    /* An in-flight web upload/OTA must block the destructive format. */
+    g_web_busy = 1;
+    g_storage_format_calls = 0;
+    feed("PROV-CONFIRM\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PROV-ERR busy"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_audio_stop_calls);
+    g_web_busy = 0;
 }
 
 static void test_provision_run_put_and_done(void)
@@ -848,6 +883,7 @@ int main(void)
     RUN_TEST(test_provision_run_requires_confirm);
     RUN_TEST(test_provision_run_confirm_crlf);
     RUN_TEST(test_provision_run_storage_fail);
+    RUN_TEST(test_provision_run_web_busy);
     RUN_TEST(test_provision_run_put_and_done);
     RUN_TEST(test_provision_run_put_write_fail);
     RUN_TEST(test_ensure_uart_driver_idempotent);

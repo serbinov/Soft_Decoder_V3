@@ -74,7 +74,21 @@ static bool s_decoder_long_addr;
 static bool s_speed_mode_14;
 static uint8_t s_consist_addr;
 static bool s_consist_reverse;
+/* True after a service-mode reset (long preamble) until valid main-track
+ * traffic is seen. Service instructions are only decoded while set, so short
+ * addresses 112..126 are not mistaken for service writes. */
+static bool s_service_mode;
 static portMUX_TYPE s_cfg_mux = portMUX_INITIALIZER_UNLOCKED;
+/* Protects the 64-bit microsecond timestamps, which are not atomic on the
+ * 32-bit core: a plain cross-core read can tear. */
+static portMUX_TYPE s_ts_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void mark_packet(void)
+{
+    portENTER_CRITICAL(&s_ts_mux);
+    s_last_packet_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_ts_mux);
+}
 
 static dcc_speed_cb_t s_speed_cb;
 static dcc_function_cb_t s_function_cb;
@@ -107,20 +121,44 @@ static void reset_parser(void)
 
 static bool address_matches(uint16_t addr, bool long_addr, bool *out_consist)
 {
+    /* Snapshot the published configuration under the same lock the writer
+     * (dcc_reload_config) uses, so a reload cannot be observed half-applied. */
+    portENTER_CRITICAL(&s_cfg_mux);
+    uint16_t cfg_addr = s_decoder_addr;
+    bool cfg_long = s_decoder_long_addr;
+    uint8_t cfg_consist = s_consist_addr;
+    portEXIT_CRITICAL(&s_cfg_mux);
+
     if (out_consist != NULL) {
         *out_consist = false;
     }
     /* Consist (CV19): short address only, 1..127. */
-    if (!long_addr && s_consist_addr != 0U && addr == s_consist_addr) {
+    if (!long_addr && cfg_consist != 0U && addr == cfg_consist) {
         if (out_consist != NULL) {
             *out_consist = true;
         }
         return true;
     }
-    if (s_decoder_long_addr == long_addr && addr == s_decoder_addr) {
+    if (cfg_long == long_addr && addr == cfg_addr) {
         return true;
     }
     return false;
+}
+
+static bool cfg_speed_mode_14(void)
+{
+    portENTER_CRITICAL(&s_cfg_mux);
+    bool v = s_speed_mode_14;
+    portEXIT_CRITICAL(&s_cfg_mux);
+    return v;
+}
+
+static bool cfg_consist_reverse(void)
+{
+    portENTER_CRITICAL(&s_cfg_mux);
+    bool v = s_consist_reverse;
+    portEXIT_CRITICAL(&s_cfg_mux);
+    return v;
 }
 
 static uint16_t service_cv_address(uint8_t instr, uint8_t cv_low)
@@ -150,12 +188,20 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         return;
     }
 
-    bool service_mode = (s_last_preamble_count >= 20U) &&
-                        (packet[0] == 0xFFU || (packet[0] >= 112U && packet[0] <= 126U));
+    /* NMRA S-9.2.3: service mode runs on a programming track and is entered by
+     * a reset with an extended preamble. Without that entry, first-byte values
+     * 112..126 are valid short addresses and must NOT be decoded as service
+     * instructions (a 128-step packet for address 124 is 4 bytes and would
+     * otherwise be mistaken for a service write). */
+    bool is_reset = (len == 3U) && (packet[0] == 0x00U) && (packet[1] == 0x00U);
+    bool service_reset = is_reset && (s_last_preamble_count >= 20U);
+    if (service_reset) {
+        s_service_mode = true;
+    }
 
-    /* Extract address. Service-mode packets use a single address byte
-     * (0xFF broadcast or 112..126) and never a long address, even though
-     * 0xFF has bit 7 set. */
+    bool service_mode = s_service_mode && (s_last_preamble_count >= 20U) &&
+                        (packet[0] & 0xF0U) == 0x70U;
+
     uint16_t addr = 0;
     bool long_addr = false;
     uint8_t idx = 1;
@@ -167,51 +213,49 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         addr = packet[0];
     }
 
-    /* Service mode (NMRA S-9.2.3, Direct Mode): 0b0111CCAA. */
+    /* Service mode (NMRA S-9.2.3, Direct Mode): the packet is exactly
+     * [instr(0b0111CCAA), CvLow, data, checksum] - there is no address byte. */
     if (service_mode) {
-        s_last_packet_us = esp_timer_get_time();
-        /* dispatch() guarantees len >= 3 and service packets use idx == 1. */
-        uint8_t instr = packet[idx];
+        mark_packet();
+        if (len < 4U) {
+            return; /* no room for a service instruction + data */
+        }
+        uint8_t instr = packet[0];
+        uint8_t cv_low = packet[1];
+        uint8_t data = packet[2];
 
         if ((instr & 0xFCU) == 0x7CU) { /* Write Byte */
-            if ((idx + 2U) < (uint8_t)(len - 1)) {
-                uint16_t cv = service_cv_address(instr, packet[idx + 1]);
-                uint8_t value = packet[idx + 2];
-                if (s_cv_write_cb != NULL) {
-                    s_cv_write_cb(cv, value, true);
-                }
+            uint16_t cv = service_cv_address(instr, cv_low);
+            if (s_cv_write_cb != NULL) {
+                s_cv_write_cb(cv, data, true);
+            }
+            (void)dcc_service_ack();
+        } else if ((instr & 0xFCU) == 0x74U) { /* Verify Byte: ACK on match */
+            uint16_t cv = service_cv_address(instr, cv_low);
+            uint8_t current = 0;
+            if (read_cv(cv, &current) && current == data) {
                 (void)dcc_service_ack();
             }
-        } else if ((instr & 0xFCU) == 0x74U) { /* Verify Byte: ACK on match */
-            if ((idx + 2U) < (uint8_t)(len - 1)) {
-                uint16_t cv = service_cv_address(instr, packet[idx + 1]);
-                uint8_t expected = packet[idx + 2];
-                uint8_t current = 0;
-                if (read_cv(cv, &current) && current == expected) {
-                    (void)dcc_service_ack();
-                }
-            }
         } else if ((instr & 0xFCU) == 0x78U) { /* Bit Manipulation */
-            if ((idx + 2U) < (uint8_t)(len - 1)) {
-                uint16_t cv = service_cv_address(instr, packet[idx + 1]);
-                uint8_t bdata = packet[idx + 2];
-                uint8_t bit = bdata & 0x07U;
-                uint8_t value = (uint8_t)((bdata >> 3) & 0x01U);
-                bool write = (bdata & 0x10U) != 0U;
-                uint8_t current = 0;
-                if (read_cv(cv, &current)) {
-                    if (write) {
-                        uint8_t mask = (uint8_t)(1U << bit);
-                        uint8_t new_val = (value != 0U) ? (uint8_t)(current | mask)
-                                                        : (uint8_t)(current & (uint8_t)~mask);
-                        if (s_cv_write_cb != NULL) {
-                            s_cv_write_cb(cv, new_val, true);
-                        }
-                    } else {
-                        bool bit_set = (current & (uint8_t)(1U << bit)) != 0U;
-                        if (bit_set == (value != 0U)) {
-                            (void)dcc_service_ack();
-                        }
+            uint16_t cv = service_cv_address(instr, cv_low);
+            uint8_t bit = data & 0x07U;
+            uint8_t value = (uint8_t)((data >> 3) & 0x01U);
+            bool write = (data & 0x10U) != 0U;
+            uint8_t current = 0;
+            if (read_cv(cv, &current)) {
+                if (write) {
+                    uint8_t mask = (uint8_t)(1U << bit);
+                    uint8_t new_val = (value != 0U) ? (uint8_t)(current | mask)
+                                                    : (uint8_t)(current & (uint8_t)~mask);
+                    if (s_cv_write_cb != NULL) {
+                        s_cv_write_cb(cv, new_val, true);
+                    }
+                    /* NMRA S-9.2.3: ACK after a successful bit write too. */
+                    (void)dcc_service_ack();
+                } else {
+                    bool bit_set = (current & (uint8_t)(1U << bit)) != 0U;
+                    if (bit_set == (value != 0U)) {
+                        (void)dcc_service_ack();
                     }
                 }
             }
@@ -229,7 +273,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     if (!is_broadcast && !address_matches(addr, long_addr, &via_consist)) {
         return;
     }
-    s_last_packet_us = esp_timer_get_time();
+    /* Valid main-track traffic means we are no longer on a programming track
+     * (but do not undo the service-mode reset that entered it). */
+    if (!service_reset) {
+        s_service_mode = false;
+    }
+    mark_packet();
 
     if (idx >= (uint8_t)(len - 1)) {
         return;
@@ -269,11 +318,11 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     /* 14/28-step speed (01xxxxxx). */
     if ((instr & 0xC0U) == 0x40U) {
         bool forward = (instr & 0x20U) != 0;
-        if (via_consist && s_consist_reverse) {
+        if (via_consist && cfg_consist_reverse()) {
             forward = !forward;
         }
         uint8_t speed = 0;
-        if (s_speed_mode_14) {
+        if (cfg_speed_mode_14()) {
             uint8_t step14 = instr & 0x0FU;
             if (step14 >= 2U) {
                 /* step 15 scales to 135; clamp so callers never see > 126. */
@@ -622,7 +671,10 @@ void dcc_register_reset_cb(dcc_reset_cb_t cb) { s_reset_cb = cb; }
 
 int64_t dcc_last_packet_us(void)
 {
-    return s_last_packet_us;
+    portENTER_CRITICAL(&s_ts_mux);
+    int64_t v = s_last_packet_us;
+    portEXIT_CRITICAL(&s_ts_mux);
+    return v;
 }
 
 /* Test hook: 0 runs forever (production); host tests set a small cap. */

@@ -7,6 +7,7 @@
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -30,6 +31,11 @@ static const char *TAG = "motor";
 #define BEMF_SETTLE_US 1000
 
 static bool s_init;
+
+/* Timestamp of the last completed motor tick, for the safety task's aliveness
+ * check: if the motor task hangs (e.g. inside a flash operation), the bridge is
+ * coasted from safety_task because motor_stop() would never be applied. */
+static volatile int64_t s_last_tick_us;
 
 static uint8_t s_target_speed;
 static bool s_target_forward;
@@ -147,7 +153,11 @@ static uint32_t speed_duty(uint8_t speed)
         (void)settings_cv_read(68 + i, &b);
         uint32_t lo = (uint32_t)a * 4U;
         uint32_t hi = (uint32_t)b * 4U;
-        return lo + (hi - lo) * f / 128U;
+        if (hi < lo) {
+            hi = lo; /* non-monotonic CV67..94 must not wrap the difference */
+        }
+        uint32_t d = lo + (hi - lo) * f / 128U;
+        return (d > LEDC_MAX) ? LEDC_MAX : d;
     }
 
     uint32_t vs = (uint32_t)cv2 * 4U;
@@ -179,18 +189,26 @@ static uint32_t speed_duty(uint8_t speed)
 
 static void apply_pwm(uint32_t duty, bool forward)
 {
+    /* Update the channel that must turn off before the one that turns on, so
+     * IN1 and IN2 are never high at the same time (even briefly) on a reversal.
+     * For the DRV8870 both-high is brake, but a discrete H-bridge would see
+     * shoot-through. */
     if (duty == 0U) {
         ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_0, 0);
         ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_1, 0);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_0);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_1);
     } else if (forward) {
-        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_0, duty);
         ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_1, 0);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_1);
+        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_0, duty);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_0);
     } else {
         ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_0, 0);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_0);
         ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_1, duty);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_1);
     }
-    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_0);
-    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_1);
 }
 
 static void bemf_sample_window(void)
@@ -320,8 +338,27 @@ static void motor_tick(void)
 
     uint8_t target = s_target_speed;
     uint8_t applied = s_applied_speed;
+    bool reversing = (s_applied_forward != s_target_forward) && (applied > 0U);
 
-    if (s_cal_active) {
+    if (reversing) {
+        /* Reversing while moving: decelerate to a stop before flipping the
+         * bridge, so the polarity never changes at full duty (current spike /
+         * brownout / hardware overcurrent). */
+        if (cv4 == 0U) {
+            applied = 0U;
+            s_ramp_acc = 0;
+        } else {
+            uint32_t ticks = (uint32_t)cv4 * 100U;
+            s_ramp_acc += 126U;
+            while (s_ramp_acc >= ticks && applied > 0U) {
+                s_ramp_acc -= ticks;
+                applied--;
+            }
+            if (applied == 0U) {
+                s_ramp_acc = 0;
+            }
+        }
+    } else if (s_cal_active) {
         /* Calibration drives the motor open-loop: no ramp, no kick, no PID. */
         applied = target;
         s_ramp_acc = 0;
@@ -351,7 +388,9 @@ static void motor_tick(void)
     }
 
     s_applied_speed = applied;
-    s_applied_forward = s_target_forward;
+    if (!reversing || applied == 0U) {
+        s_applied_forward = s_target_forward;
+    }
 
     uint32_t duty_base = speed_duty(applied);
     uint32_t duty_final = duty_base;
@@ -369,10 +408,24 @@ static void motor_tick(void)
         uint8_t cv65 = 0;
         (void)settings_cv_read(65, &cv65);
         if (cv65 > 0U) {
-            uint8_t cv5 = 0;
-            (void)settings_cv_read(5, &cv5);
-            uint32_t vh = (cv5 != 0U) ? (uint32_t)cv5 * 4U : LEDC_MAX;
-            s_kick_duty = (vh * cv65 / 255U > LEDC_MAX) ? LEDC_MAX : vh * cv65 / 255U;
+            uint8_t cv29 = 0;
+            (void)settings_cv_read(29, &cv29);
+            uint32_t base;
+            if ((cv29 & 0x10U) != 0U) {
+                /* Table mode: base the kick on the table's top point (CV94),
+                 * not on the unused CV5. */
+                uint8_t cv94 = 0;
+                (void)settings_cv_read(94, &cv94);
+                base = (uint32_t)cv94 * 4U;
+                if (base == 0U) {
+                    base = LEDC_MAX;
+                }
+            } else {
+                uint8_t cv5 = 0;
+                (void)settings_cv_read(5, &cv5);
+                base = (cv5 != 0U) ? (uint32_t)cv5 * 4U : LEDC_MAX;
+            }
+            s_kick_duty = (base * cv65 / 255U > LEDC_MAX) ? LEDC_MAX : base * cv65 / 255U;
             s_kick_left = KICK_TICKS;
         }
     }
@@ -448,8 +501,11 @@ static void motor_tick(void)
         s_pid_prev_error = 0.0f;
     } else {
         /* Measurement temporarily unavailable while running: decay instead of
-         * resetting so load compensation is not lost. */
+         * resetting so load compensation is not lost. Decay the previous error
+         * too, otherwise the first valid tick after the gap sees a huge
+         * derivative (kick) and spikes the duty. */
         s_pid_integral *= 0.95f;
+        s_pid_prev_error *= 0.95f;
     }
 
     /* During calibration the cal task owns the bridge directly, so the motor
@@ -458,6 +514,7 @@ static void motor_tick(void)
         apply_pwm(duty_final, s_applied_forward);
         s_last_duty = duty_final;
     }
+    s_last_tick_us = esp_timer_get_time();
 }
 
 /* Test hook: 0 runs forever (production); host tests set a small cap. */
@@ -577,6 +634,30 @@ void motor_stop(void)
     (void)motor_set_speed(0, true);
 }
 
+/* Fail-safe stop: force the bridge off immediately, without waiting for the
+ * motor task to apply the target. Safe to call from any task, including when
+ * the motor task is suspected to be stuck. */
+void motor_emergency_stop(void)
+{
+    apply_pwm(0, true);
+    s_target_speed = 0;
+    s_applied_speed = 0;
+    s_applied_forward = true;
+    s_ramp_acc = 0;
+    s_was_stopped = true;
+    s_kick_left = 0;
+    s_kick_duty = 0;
+    s_pid_integral = 0.0f;
+    s_pid_prev_error = 0.0f;
+    s_last_duty = 0;
+}
+
+/* Timestamp (us) of the last completed motor tick; 0 before the first tick. */
+int64_t motor_last_tick_us(void)
+{
+    return s_last_tick_us;
+}
+
 void motor_get_status(uint8_t *out_speed128, bool *out_forward)
 {
     if (out_speed128 != NULL) {
@@ -630,6 +711,20 @@ static void bemf_cal_task(void *arg)
     }
     apply_pwm(0, true);
     motor_stop();
+    /* Force the applied state to a true stop before releasing the bridge:
+     * otherwise the CV4 ramp would ramp down from the last calibration step
+     * (126) with real PWM right after the calibration finishes. */
+    s_applied_speed = 0;
+    s_applied_forward = true;
+    s_ramp_acc = 0;
+    s_was_stopped = true;
+    s_kick_left = 0;
+    s_kick_duty = 0;
+    s_pid_integral = 0.0f;
+    s_pid_prev_error = 0.0f;
+    s_bemf_filtered = 0.0f;
+    s_bemf_valid = false;
+    s_last_duty = 0;
     s_cal_active = false;
 
     settings_bemf_cal_t cal;
@@ -800,6 +895,9 @@ void motor_bemf_coast_read(uint16_t *b1_mv, uint16_t *b2_mv)
     if (b2_mv != NULL) {
         *b2_mv = (uint16_t)s_bemf2_mv;
     }
+    /* Restore the last drive so repeated diagnostic polling does not leave the
+     * bridge coasted between motor ticks. */
+    apply_pwm(s_last_duty, s_applied_forward);
 }
 
 void motor_bemf_base_info(motor_bemf_base_info_t *info)

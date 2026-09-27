@@ -343,3 +343,86 @@ powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -SkipBemf
   не запускались (разрушительные).
 - Реальное вращение мотора под нагрузкой/BEMF и DCC с пульта (нет мотора и
   командной станции).
+
+---
+
+## Батч 6 — исправления по итогам код-ревью (агенты `.kilo/agent/review-*`)
+
+- Статус: ГОТОВО (сборка + тесты + покрытие). Не проверено на железе.
+- Источник: `.kilo/plans/1790518367801-firmware-code-review-agents-and-fixes.md`,
+  отчёт: `CODE_REVIEW_REPORT.md`.
+- Проверка:
+  - `test\run_tests.ps1` — ALL TEST SUITES PASSED (14 наборов, 473 теста).
+  - `test\coverage.ps1` — first-party **100,0 %** (4364/4364 строк).
+  - `pio run -e esp32-s3-devkitc-1` — **SUCCESS**; RAM 50 416 Б (15.4 %),
+    Flash 822 281 Б (41.8 %).
+
+### Исправлено
+
+| ID | Файлы | Что сделано |
+|----|-------|-------------|
+| A1, A2 | `dcc.c` | Service Mode: `[instr,CvLow,data,ck]` без адресного байта; вход через reset с длинной преамбулой (`s_service_mode`); адреса 112..126 больше не трактуются как сервис; bit-write выдаёт ACK |
+| A3 | `motor.c` | Клэмп таблицы CV67..CV94 (нет unsigned-wrap) + ограничение `LEDC_MAX` |
+| A4 | `motor.c` | Конец калибровки: applied/ramp/kick/PID/BEMF обнуляются — нет проброса по CV4 |
+| A5 | `motor.c`, `motor.h`, `app_main.c` | `motor_emergency_stop()` + `motor_last_tick_us()`; `safety_task` глушит мост при зависании motor-задачи (>200 мс); reset/estop/CV11 → emergency stop |
+| A6 | `motor.c` | Реверс при движении: торможение до нуля (CV4), затем смена полярности |
+| A7 | `storage.c` | Раздел внешней NOR = `min(chip_size, 16 МБ)`; при неопределённом/малом чипе backend NONE |
+| A9 | `track_manifest.c`, `settings.h`, `settings.c` | Атомарная запись манифеста (tmp + rename), проверка кодов, возврат `esp_err_t` |
+| A10 | `settings.c` | `settings_cv_write`/`settings_cv_reset_to_factory` под `s_lock` |
+| B2 | `web_util.c` | `json_escape` экранирует CR/TAB, прочие C0 → `?` (валидный JSON) |
+| B5 | `settings.c` | `settings_bemf_cal_load` проверяет точную длину blob |
+| B6 | `settings.c` | `tracks` load: кратность длины + NUL-терминация; save: кламп `count` (также cats/func_map/aux_cfg) |
+| B8 | `app_main.c` | `recover_tracks_from_storage()` до `web_init()` (иначе категории/map остаются дефолтными) |
+| B11 | `auxio.c` | Mars: треугольник клампится к 255 при нечётном периоде |
+| B13 | `pinmap.c` | Отвергаются GPIO22, дубли и значения вне 0..48 |
+| B14 | `motor.c` | `s_pid_prev_error` затухает при недоступном BEMF (нет derivative kick) |
+| B15 | `provision.c` | `s_uart_driver_installed` ставится только при успехе install |
+| B16 | `settings.c` | `nvs_read_str` подставляет дефолт при любом не-OK чтении |
+
+Затронутые тесты: `test_dcc`, `test_motor`, `test_settings`, `test_storage`,
+`test_web_util`, `test_pinmap`, `test_auxio`, `test_track_manifest`,
+`test_provision`, `test_libs/teststubs/stubs.c` (новый
+`mock_partition_registered_size`).
+
+### Статус после батча 7
+
+Все пункты батча 6 закрыты (см. батч 7 ниже).
+
+---
+
+## Батч 7 — закрытие отложенных пунктов
+
+- Статус: ГОТОВО (сборка + тесты + покрытие). Не проверено на железе.
+- Проверка:
+  - `test\run_tests.ps1` — ALL TEST SUITES PASSED (14 наборов, 470 тестов).
+  - `test\coverage.ps1` — first-party **100,0 %** (4414/4414 строк).
+  - `pio run -e esp32-s3-devkitc-1` — **SUCCESS**; RAM 50 416 Б (15.4 %),
+    Flash 823 505 Б (41.9 %).
+
+| ID | Файлы | Что сделано |
+|----|-------|-------------|
+| B1 | — (откат) | Пароль Wi-Fi по умолчанию **не задаётся** (AP открытый) — как и было; автогенерация пароля отменена. Пользователь устанавливает пароль сам (веб `/api/wifi` POST). Открытый AP и отсутствие аутентификации на OTA/reset/delete — принятое поведение по требованию, а не дефект |
+| A8 | `provision.c`, `web.c/.h` | Перед `storage_format()`: `motor_emergency_stop()`, `audio_stop_all()`, задержка 100 мс и отказ (`PROV-ERR busy`), если активна web-передача (`web_fs_busy()` = upload/OTA) |
+| B3 | `web.c` | `audio_tracks_get`: `tracks[]` и `json[8192]` перенесены из стека в heap (нет ~12.6 КБ на стеке httpd) с освобождением на всех путях |
+| B4 | `web.c` | `web_motion_changed`, `web_func_map_set`, `web_get_function_state`, `func_apply_output_locked` работают под `s_func_mutex` |
+| B7 | `audio.c` | EOF закрывает `FILE*`; `voice_start` проверяет PCM16, `sample_rate` 1..192000, каналы 1..2; RIFF padding через `wav_skip`; отклоняются размеры > INT32_MAX (нет обратного fseek) |
+| B9 | `web.c` | `pipe_upload` освобождает queue/sem на всех ветках ошибок; отсутствующий слот (0) авто-назначается свободным (1..20); reboot-хендлеры (wifi/reset/factory/OTA) глушат мотор и аудио перед `esp_restart()` |
+| B10 | `dcc.c` | 64-бит timestamp под `s_ts_mux` (`mark_packet`/`dcc_last_packet_us`); `s_cfg` читается под `s_cfg_mux` (`address_matches`, `cfg_speed_mode_14`, `cfg_consist_reverse`) |
+| B12 | `audio.c` | stdio-буфер голоса 8192 → 2048; `setvbuf` проверяется с fallback на `_IONBF` |
+| FIX-6 | `settings.c`/`web.c`/`dcc.c` | Синхронизация общего состояния закрыта в A10/B4/B10 |
+| FIX-7, FIX-9 | `settings.c/.h`, `app_main.c` | DCC и сервисные записи CV коммитятся отложенно (`settings_cv_commit_deferred` + `settings_pending_flush`) — flash-commit не выполняется в real-time задаче и не на каждый CV |
+| FIX-10 | `sdkconfig.defaults`, `app_main.c` | Включён Task Watchdog (`CONFIG_ESP_TASK_WDT_EN/PANIC`, таймаут 10 с); `safety_task` подписан (`esp_task_wdt_add`) и сбрасывает WDT каждый цикл |
+| FIX-11 | `storage.c/.h`, `test_storage.c` | Удалён разрушительный `storage_benchmark` (raw erase @8 МБ + reformat LittleFS) вместе с тестами |
+| LOW | `motor.c`, `auxio.c`, `web.c`, `web_stubs.c` | `apply_pwm` сначала выключает активный канал (нет both-high); kickstart в table-mode берётся из CV94, не CV5; `motor_bemf_coast_read` восстанавливает duty; Mars-треугольник клампится к 255; `used += snprintf` заменён на `buf_appendf` в `bemf_cal_get`/`bemf_base_get`/`functions_get`; OTA валидирует WAV перед привязкой трека; `/progress` сообщает реальный `ota`; DNS-задача завершается при auto-off AP (SO_RCVTIMEO + `s_dns_run`); firebox подмешивает `idx` в seed |
+
+Сознательно не изменено:
+- Пароль Wi-Fi по умолчанию: AP открытый, если пользователь не задал пароль
+  (автогенерация отменена по требованию). Пользователь задаёт пароль сам через
+  веб; после этого AP работает как WPA2.
+- Размер coredump-раздела (128 КБ): это последний раздел, заканчивается ровно на
+  4 МБ, расширять нечем без уменьшения OTA. Вместо этого уменьшены стеки/буферы.
+- speed=1 duty=0: следствие CV2 (Vstart) = 0 — это намеренная настройка кривой,
+  а не дефект.
+- Аппаратная проверка (HIL, service-mode с командной станции, реверс под
+  нагрузкой, поведение Task Watchdog на реальных flash-операциях).
+

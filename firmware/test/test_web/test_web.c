@@ -959,7 +959,7 @@ static void test_internal_helpers(void)
     TEST_ASSERT_EQUAL_UINT8(AUXIO_CH_AUX1, func_out_channel(2));
     TEST_ASSERT_EQUAL_UINT8(AUXIO_CH_AUX7, func_out_channel(8));
     /* fn out of range is a no-op. */
-    func_apply_output(SETTINGS_FUNC_MAP_COUNT);
+    func_apply_output_locked(SETTINGS_FUNC_MAP_COUNT);
     /* audio slots for an out-of-range function returns zeros. */
     uint8_t sa = 9, sb = 9;
     web_func_audio_slots(SETTINGS_FUNC_MAP_COUNT, &sa, &sb);
@@ -1158,6 +1158,40 @@ static void test_audio_upload_slots_full(void)
     set_body(data, sizeof(data));
     set_query("slot=99");
     snprintf(mock_header_name, sizeof(mock_header_name), "y.wav");
+    TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "track slots full"));
+}
+
+/* No slot in the query -> the first free slot is assigned (slot 0 is not
+ * displayable or deletable). */
+static void test_audio_upload_autoslot(void)
+{
+    mock_tracks_count = 0;
+    memset(mock_tracks, 0, sizeof(mock_tracks));
+    uint8_t data[16];
+    memset(data, 3, sizeof(data));
+    httpd_req_t req = make_req(sizeof(data));
+    set_body(data, sizeof(data));
+    set_query("");
+    mock_header_name[0] = '\0';
+    TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_UINT8(1, mock_saved_tracks[0].slot);
+}
+
+static void test_audio_upload_autoslot_full(void)
+{
+    mock_tracks_count = SETTINGS_MAX_TRACKS;
+    for (int i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
+        mock_tracks[i].slot = (uint8_t)(i + 1);
+        snprintf(mock_tracks[i].file, sizeof(mock_tracks[i].file), "audio/t%d.wav", i);
+    }
+    uint8_t data[16];
+    memset(data, 4, sizeof(data));
+    httpd_req_t req = make_req(sizeof(data));
+    set_body(data, sizeof(data));
+    set_query("");
+    mock_header_name[0] = '\0';
     TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "track slots full"));
 }
@@ -1748,6 +1782,15 @@ static void test_log_get(void)
     TEST_ASSERT_EQUAL(ESP_OK, log_get(&req));
 }
 
+static void test_web_fs_busy(void)
+{
+    s_up_active = false;
+    TEST_ASSERT_FALSE(web_fs_busy());
+    s_up_active = true;
+    TEST_ASSERT_TRUE(web_fs_busy());
+    s_up_active = false;
+}
+
 static void test_progress_handler(void)
 {
     httpd_req_t req = make_req(0);
@@ -1755,11 +1798,14 @@ static void test_progress_handler(void)
     s_up_total = 100;
     s_up_received = 50;
     s_up_active = true;
+    s_up_ota = true;
     TEST_ASSERT_EQUAL(ESP_OK, progress_handler(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"slot\":7"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"received\":50"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"active\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ota\":true"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "Access-Control-Allow-Origin"));
+    s_up_ota = false;
 }
 
 /* ---------- server startup ---------- */
@@ -2052,6 +2098,24 @@ static void test_ota_combined_success(void)
     TEST_ASSERT_EQUAL_STRING("audio/slot1.wav", mock_saved_tracks[0].file);
     TEST_ASSERT_EQUAL_STRING("My Sound", mock_saved_tracks[0].label);
     remove("web_tmp/audio/slot1.wav");
+}
+
+/* A sound in a combined image that is not a valid WAV is discarded (and not
+ * bound to a track). */
+static void test_ota_combined_invalid_wav(void)
+{
+    memset(mock_tracks, 0, sizeof(mock_tracks));
+    mock_tracks_count = 0;
+    const char *name = "bad.wav";
+    size_t n = build_container(ota_combined, 32, 1, (uint16_t)strlen(name), 0, 8, name, NULL);
+    httpd_req_t req = make_req(n);
+    set_body(ota_combined, n);
+    mock_audio_validate_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, ota_update_post(&req));
+    mock_audio_validate_ret = ESP_OK;
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"files\":0"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/bad.wav"));
+    TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)mock_saved_tracks_count);
 }
 
 static void test_ota_combined_auto_slot_and_label(void)
@@ -2404,6 +2468,8 @@ int main(void)
     RUN_TEST(test_audio_upload_replaces_and_removes_old);
     RUN_TEST(test_audio_upload_compacts_duplicates);
     RUN_TEST(test_audio_upload_slots_full);
+    RUN_TEST(test_audio_upload_autoslot);
+    RUN_TEST(test_audio_upload_autoslot_full);
     RUN_TEST(test_audio_upload_validate_and_save_fail);
     RUN_TEST(test_audio_upload_short_body_and_flush_fail);
     RUN_TEST(test_audio_upload_open_fail);
@@ -2434,6 +2500,7 @@ int main(void)
     RUN_TEST(test_task_inputs_and_clientlog);
     RUN_TEST(test_log_get);
     RUN_TEST(test_progress_handler);
+    RUN_TEST(test_web_fs_busy);
     RUN_TEST(test_register_route_failure);
     RUN_TEST(test_start_servers);
     RUN_TEST(test_web_init_wifi_off);
@@ -2445,6 +2512,7 @@ int main(void)
     RUN_TEST(test_ota_guards);
     RUN_TEST(test_ota_plain_success_and_failures);
     RUN_TEST(test_ota_combined_success);
+    RUN_TEST(test_ota_combined_invalid_wav);
     RUN_TEST(test_ota_combined_auto_slot_and_label);
     RUN_TEST(test_ota_combined_clamp_and_short);
     RUN_TEST(test_ota_combined_invalid_header_and_short_data);

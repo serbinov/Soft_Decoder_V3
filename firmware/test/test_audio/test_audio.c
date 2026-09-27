@@ -547,6 +547,110 @@ static void test_voice_start_no_data_chunk(void)
     TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
 }
 
+/* A JUNK chunk of odd size is followed by a pad byte; the parser must honour
+ * RIFF word alignment instead of desyncing. */
+static void make_wav_odd_chunk(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) { TEST_FAIL_MESSAGE("cannot create temp wav"); return; }
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 0);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("JUNK", 1, 4, f);
+    put_u32(f, 5); /* odd size -> one pad byte follows */
+    for (int i = 0; i < 6; ++i) { fputc(0, f); } /* 5 data + 1 pad */
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 16);
+    put_u16(f, 1);
+    put_u16(f, 1);
+    put_u32(f, 22050);
+    put_u32(f, 44100);
+    put_u16(f, 2);
+    put_u16(f, 16);
+    fwrite("data", 1, 4, f);
+    put_u32(f, 4);
+    put_u16(f, 1000);
+    put_u16(f, 1000);
+    fclose(f);
+}
+
+static void test_wav_odd_chunk_padding(void)
+{
+    make_wav_odd_chunk(s_path_bad);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_validate_wav(s_path_bad));
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_bad, false, 100));
+    if (st.f != NULL) { fclose(st.f); st.f = NULL; }
+}
+
+/* A bogus (implausibly large) chunk size must abort the walk, not fseek
+ * backwards through a negative offset. */
+static void test_wav_oversized_chunk_rejected(void)
+{
+    FILE *f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 0);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("JUNK", 1, 4, f);
+    put_u32(f, 0xFFFFFFFFu);
+    fclose(f);
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_validate_wav(s_path_bad));
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+}
+
+/* voice_start must reject non-PCM16, sample_rate 0 and out-of-range rate. */
+static void test_voice_start_rejects_bad_fmt(void)
+{
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    make_wav(s_path_bad, 1, 22050, 1, 8, 8, false);
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+    make_wav(s_path_bad, 1, 0, 1, 16, 8, false);
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+    make_wav(s_path_bad, 1, 200000, 1, 16, 8, false);
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+}
+
+/* A one-shot that reaches EOF must close its descriptor. */
+static void test_voice_fill_eof_closes_file(void)
+{
+    make_wav(s_path_mono, 1, 22050, 1, 16, 2, false);
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
+    TEST_ASSERT_NOT_NULL(st.f);
+    int16_t mix[64];
+    memset(mix, 0, sizeof(mix));
+    (void)voice_fill(&st, mix, 64);
+    TEST_ASSERT_FALSE(st.active);
+    TEST_ASSERT_NULL(st.f);
+}
+
+/* An implausibly large fmt chunk size must abort the walk. */
+static void test_wav_oversized_fmt_chunk_rejected(void)
+{
+    FILE *f = fopen(s_path_bad, "wb");
+    fwrite("RIFF", 1, 4, f);
+    put_u32(f, 0);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    put_u32(f, 0xFFFFFFFFu);
+    put_u16(f, 1);
+    put_u16(f, 1);
+    put_u32(f, 22050);
+    put_u32(f, 44100);
+    put_u16(f, 2);
+    put_u16(f, 16);
+    fclose(f);
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_validate_wav(s_path_bad));
+    voice_state_t st;
+    memset(&st, 0, sizeof(st));
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -577,5 +681,10 @@ int main(void)
     RUN_TEST(test_audio_play_stop_wrappers);
     RUN_TEST(test_voice_next_sample_loops);
     RUN_TEST(test_voice_start_no_data_chunk);
+    RUN_TEST(test_wav_odd_chunk_padding);
+    RUN_TEST(test_wav_oversized_chunk_rejected);
+    RUN_TEST(test_wav_oversized_fmt_chunk_rejected);
+    RUN_TEST(test_voice_start_rejects_bad_fmt);
+    RUN_TEST(test_voice_fill_eof_closes_file);
     return UNITY_END();
 }

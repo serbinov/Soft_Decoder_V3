@@ -745,6 +745,11 @@ static void test_bemf_cal_task_runs(void)
     bemf_cal_task(NULL); /* runs to completion (delay/delete are stubs) */
     TEST_ASSERT_FALSE(s_cal_active);
     TEST_ASSERT_TRUE(g_cal_valid);
+    /* Calibration must leave the motor truly stopped, not at step 126. */
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s_pid_integral);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s_pid_prev_error);
+    TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
 
     /* Rail too low -> n stays 0 -> frac cleared. */
     TEST_ASSERT_EQUAL(ESP_OK, motor_set_rail_voltage_mv(0));
@@ -850,6 +855,151 @@ static void test_motor_tick_pid_kick_and_integral_clamp(void)
     TEST_ASSERT_EQUAL_FLOAT(-20000.0f, s_pid_integral); /* clamped low */
 }
 
+/* Regression: a non-monotonic CV67..CV94 must not wrap the table interpolation
+ * and slam the PWM to an arbitrary value. */
+static void test_speed_duty_table_non_monotonic_no_wrap(void)
+{
+    g_cv[29] = 0x12; /* table mode */
+    g_cv[67] = 255;
+    g_cv[68] = 0;
+
+    uint32_t d = speed_duty(1);
+    TEST_ASSERT_TRUE(d <= 1023);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)g_cv[67] * 4U, d);
+}
+
+static void test_motor_emergency_stop(void)
+{
+    s_target_speed = 50;
+    s_applied_speed = 50;
+    s_applied_forward = false;
+    s_pid_integral = 10.0f;
+    s_pid_prev_error = 5.0f;
+    s_kick_left = 3;
+    s_kick_duty = 100;
+    s_ramp_acc = 7;
+    s_last_duty = 500;
+
+    motor_emergency_stop();
+
+    TEST_ASSERT_EQUAL_UINT8(0, s_target_speed);
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+    TEST_ASSERT_TRUE(s_applied_forward);
+    TEST_ASSERT_EQUAL_UINT32(0, s_ramp_acc);
+    TEST_ASSERT_TRUE(s_was_stopped);
+    TEST_ASSERT_EQUAL_UINT8(0, s_kick_left);
+    TEST_ASSERT_EQUAL_UINT32(0, s_kick_duty);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s_pid_integral);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s_pid_prev_error);
+    TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_1]);
+}
+
+static void test_motor_last_tick_timestamp(void)
+{
+    s_cal_active = false;
+    s_target_speed = 0;
+    s_applied_speed = 0;
+    mock_timer_now_us = 4242;
+    motor_tick();
+    TEST_ASSERT_EQUAL_INT64(4242, motor_last_tick_us());
+}
+
+/* Reversing while moving must decelerate to a stop before the polarity flips
+ * (no full-duty reversal). */
+static void test_motor_tick_reverse_while_moving_ramps_down(void)
+{
+    motor_set_bemf_enabled(false);
+    g_cv[4] = 1; /* deceleration 1 s */
+    s_target_speed = 100;
+    s_applied_speed = 100;
+    s_applied_forward = true;
+    s_target_forward = false;
+    s_ramp_acc = 0;
+    s_was_stopped = false;
+
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(99, s_applied_speed);
+    TEST_ASSERT_TRUE(s_applied_forward); /* still forward until stopped */
+    TEST_ASSERT_EQUAL_UINT32(speed_duty(99), mock_ledc_duty[LEDC_CHANNEL_0]);
+
+    for (int i = 0; i < 200 && s_applied_forward; ++i) {
+        motor_tick();
+    }
+    TEST_ASSERT_FALSE(s_applied_forward);
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+}
+
+/* While the BEMF measurement is unavailable the previous error must decay too,
+ * otherwise the first valid tick sees a huge derivative and spikes the duty. */
+static void test_motor_tick_pid_unavailable_decays_derivative(void)
+{
+    motor_set_bemf_enabled(true);
+    s_bemf_adc_ready = true;
+    s_cal_active = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_rail_voltage_mv(1000));
+    mock_adc_raw[PIN_BEMF1 - 1] = 4095; /* rail-hitting sample -> not valid */
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_target_speed = 10;
+    s_applied_speed = 10;
+    s_target_forward = true;
+    s_pid_integral = 100.0f;
+    s_pid_prev_error = 100.0f;
+
+    motor_tick();
+
+    TEST_ASSERT_FALSE(s_last_pid_ok);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 95.0f, s_pid_integral);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 95.0f, s_pid_prev_error);
+}
+
+/* Reversing while moving with no configured deceleration must stop at once. */
+static void test_motor_tick_reverse_while_moving_no_decel(void)
+{
+    motor_set_bemf_enabled(false);
+    g_cv[4] = 0; /* no deceleration ramp */
+    s_target_speed = 50;
+    s_applied_speed = 50;
+    s_applied_forward = true;
+    s_target_forward = false;
+    s_ramp_acc = 0;
+    s_was_stopped = false;
+
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+    TEST_ASSERT_FALSE(s_applied_forward);
+    TEST_ASSERT_EQUAL_UINT32(0, s_ramp_acc);
+}
+
+/* In table mode the kickstart must be based on the table top (CV94), not CV5. */
+static void test_motor_tick_kickstart_table_mode(void)
+{
+    g_cv[29] = 0x12;  /* table mode, 28 steps */
+    g_cv[65] = 255;   /* full kick */
+    g_cv[94] = 100;   /* table top = 400 */
+    g_cv[5] = 0;      /* CV5 unused in table mode; must not force LEDC_MAX */
+    g_cv[3] = 0;
+    s_target_speed = 1; /* low duty_base so the kick clearly dominates */
+    s_applied_speed = 0;
+    s_was_stopped = true;
+    s_ramp_acc = 0;
+    s_cal_active = false;
+
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(1, s_applied_speed);
+    TEST_ASSERT_EQUAL_UINT32(400, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(KICK_TICKS - 1), s_kick_left);
+
+    /* CV94 == 0 falls back to full duty. */
+    g_cv[94] = 0;
+    s_kick_left = 0;
+    s_was_stopped = true;
+    s_applied_speed = 0;
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT32(LEDC_MAX, s_kick_duty);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -897,5 +1047,12 @@ int main(void)
     RUN_TEST(test_motor_bemf_adc_dump_and_coast_read);
     RUN_TEST(test_motor_bemf_lock_null_mutex);
     RUN_TEST(test_motor_tick_pid_kick_and_integral_clamp);
+    RUN_TEST(test_speed_duty_table_non_monotonic_no_wrap);
+    RUN_TEST(test_motor_emergency_stop);
+    RUN_TEST(test_motor_last_tick_timestamp);
+    RUN_TEST(test_motor_tick_reverse_while_moving_ramps_down);
+    RUN_TEST(test_motor_tick_reverse_while_moving_no_decel);
+    RUN_TEST(test_motor_tick_kickstart_table_mode);
+    RUN_TEST(test_motor_tick_pid_unavailable_decays_derivative);
     return UNITY_END();
 }

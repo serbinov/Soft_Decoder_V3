@@ -20,6 +20,10 @@ static const char *TAG = "audio";
 #define MIX_RATE  22050
 #define MIX_BLOCK 256
 #define AUDIO_PATH_MAX 160
+/* Per-voice stdio buffer. Kept small on purpose: with AUDIO_MAX_VOICES voices a
+ * large buffer would consume a lot of internal DRAM (allocations below
+ * CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL never go to PSRAM). */
+#define VOICE_IO_BUF 2048
 
 typedef struct {
     char riff[4];
@@ -130,6 +134,17 @@ esp_err_t audio_init(void)
     return ESP_OK;
 }
 
+/* Skip `size` bytes plus the RIFF word-alignment pad byte for an odd size.
+ * Returns false for an implausible size (would overflow the signed 32-bit
+ * fseek offset and seek backwards). */
+static bool wav_skip(FILE *f, uint32_t size)
+{
+    if (size > 0x7FFFFFFFU) {
+        return false;
+    }
+    return fseek(f, (long)(size + (size & 1U)), SEEK_CUR) == 0;
+}
+
 esp_err_t audio_validate_wav(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -155,16 +170,18 @@ esp_err_t audio_validate_wav(const char *path)
         if (memcmp(ch.id, "fmt ", 4) == 0) {
             wav_fmt_t fmt;
             if (fread(&fmt, 1, sizeof(fmt), f) == sizeof(fmt)) {
-                has_fmt = (fmt.format == 1 && fmt.bits_per_sample == 16);
+                has_fmt = (fmt.format == 1U && fmt.bits_per_sample == 16U &&
+                           fmt.sample_rate > 0U && fmt.sample_rate <= 192000U &&
+                           fmt.channels >= 1U && fmt.channels <= 2U);
             }
-            if (ch.size > sizeof(wav_fmt_t)) {
-                fseek(f, ch.size - sizeof(wav_fmt_t), SEEK_CUR);
+            if (ch.size > sizeof(wav_fmt_t) && !wav_skip(f, ch.size - sizeof(wav_fmt_t))) {
+                break;
             }
         } else if (memcmp(ch.id, "data", 4) == 0) {
             has_data = true;
             break;
-        } else {
-            fseek(f, ch.size, SEEK_CUR);
+        } else if (!wav_skip(f, ch.size)) {
+            break;
         }
     }
     fclose(f);
@@ -226,6 +243,12 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
             st->s_cur = st->s_next;
             if (!voice_next_sample(st, &st->s_next)) {
                 st->active = false;
+                /* Close the file here: a one-shot that ends on its own would
+                 * otherwise keep its descriptor until the voice is reused. */
+                if (st->f != NULL) {
+                    fclose(st->f);
+                    st->f = NULL;
+                }
                 return i + 1;
             }
         }
@@ -246,7 +269,7 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     if (f == NULL) {
         return ESP_ERR_NOT_FOUND;
     }
-    (void)setvbuf(f, NULL, _IOFBF, 8192);
+    if (setvbuf(f, NULL, _IOFBF, VOICE_IO_BUF) != 0) { (void)setvbuf(f, NULL, _IONBF, 0); }
 
     wav_riff_t riff;
     if (fread(&riff, 1, sizeof(riff), f) != sizeof(riff) ||
@@ -257,6 +280,8 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
 
     uint32_t sample_rate = MIX_RATE;
     uint16_t channels = 1;
+    uint16_t fmt_format = 0;
+    uint16_t fmt_bits = 0;
     bool has_data = false;
     uint32_t data_start = 0;
     uint32_t data_len = 0;
@@ -270,21 +295,25 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
             if (fread(&fmt, 1, sizeof(fmt), f) == sizeof(fmt)) {
                 sample_rate = fmt.sample_rate;
                 channels = fmt.channels;
+                fmt_format = fmt.format;
+                fmt_bits = fmt.bits_per_sample;
             }
-            if (ch.size > sizeof(wav_fmt_t)) {
-                fseek(f, ch.size - sizeof(wav_fmt_t), SEEK_CUR);
+            if (ch.size > sizeof(wav_fmt_t) && !wav_skip(f, ch.size - sizeof(wav_fmt_t))) {
+                break;
             }
         } else if (memcmp(ch.id, "data", 4) == 0) {
             data_start = (uint32_t)ftell(f);
             data_len = ch.size;
             has_data = true;
             break;
-        } else {
-            fseek(f, ch.size, SEEK_CUR);
+        } else if (!wav_skip(f, ch.size)) {
+            break;
         }
     }
 
-    if (!has_data || sample_rate == 0U || channels < 1U || channels > 2U) {
+    if (!has_data || fmt_format != 1U || fmt_bits != 16U ||
+        sample_rate == 0U || sample_rate > 192000U ||
+        channels < 1U || channels > 2U) {
         fclose(f);
         return ESP_FAIL;
     }

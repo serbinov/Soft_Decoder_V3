@@ -60,10 +60,10 @@ static int split_semicolon(char *line, char *fields[], int max)
     return n;
 }
 
-void settings_manifest_sync(void)
+esp_err_t settings_manifest_sync(void)
 {
     if (s_manifest_loading) {
-        return;
+        return ESP_OK;
     }
 
     settings_track_t tracks[SETTINGS_MAX_TRACKS];
@@ -78,12 +78,17 @@ void settings_manifest_sync(void)
     size_t fcount = 0;
     (void)settings_func_map_load(fmap, &fcount);
 
-    FILE *f = fopen(MANIFEST_PATH, "w");
+    /* Write to a temp file and rename it over the real manifest: fopen("w")
+     * truncates the live file, so a reset or power loss mid-write would leave a
+     * truncated manifest as the only recovery copy. */
+    char tmp[sizeof(MANIFEST_PATH) + 8];
+    (void)snprintf(tmp, sizeof(tmp), "%s.tmp", MANIFEST_PATH);
+    FILE *f = fopen(tmp, "w");
     if (f == NULL) {
-        return; /* storage not mounted: nothing to persist */
+        return ESP_ERR_NOT_FOUND; /* storage not mounted: nothing to persist */
     }
 
-    (void)fprintf(f, "%s %d\n", MANIFEST_MAGIC, MANIFEST_VERSION);
+    bool ok = fprintf(f, "%s %d\n", MANIFEST_MAGIC, MANIFEST_VERSION) >= 0;
 
     for (size_t i = 0; i < tcount && i < SETTINGS_MAX_TRACKS; ++i) {
         char file[SETTINGS_TRACK_FILE_MAX];
@@ -95,19 +100,26 @@ void settings_manifest_sync(void)
         uint8_t cat = (tracks[i].slot >= 1U && tracks[i].slot <= ccount)
                           ? cats[tracks[i].slot - 1U]
                           : (uint8_t)SETTINGS_TRACK_CAT_DEFAULT_SLOT(tracks[i].slot);
-        (void)fprintf(f, "T;%u;%u;%u;%s;%s\n", (unsigned)tracks[i].slot,
-                      (unsigned)cat, tracks[i].enabled ? 1U : 0U, file, label);
+        ok = ok && (fprintf(f, "T;%u;%u;%u;%s;%s\n", (unsigned)tracks[i].slot,
+                            (unsigned)cat, tracks[i].enabled ? 1U : 0U, file, label) >= 0);
     }
     for (size_t i = 0; i < fcount && i < SETTINGS_FUNC_MAP_COUNT; ++i) {
-        (void)fprintf(f, "F;%u;%u;%u;%u;%u;%u\n", (unsigned)i,
-                      (unsigned)fmap[i].slot_a, (unsigned)fmap[i].slot_b,
-                      (unsigned)fmap[i].aux_mask, (unsigned)fmap[i].dir,
-                      (unsigned)fmap[i].speed);
+        ok = ok && (fprintf(f, "F;%u;%u;%u;%u;%u;%u\n", (unsigned)i,
+                            (unsigned)fmap[i].slot_a, (unsigned)fmap[i].slot_b,
+                            (unsigned)fmap[i].aux_mask, (unsigned)fmap[i].dir,
+                            (unsigned)fmap[i].speed) >= 0);
     }
 
-    (void)fflush(f);
-    (void)fsync(fileno(f));
-    (void)fclose(f);
+    int rc_flush = fflush(f);
+    int rc_sync = fsync(fileno(f));
+    int rc_close = fclose(f);
+    if (!ok || rc_flush != 0 || rc_sync != 0 || rc_close != 0) { (void)remove(tmp); return ESP_FAIL; }
+    if (rename(tmp, MANIFEST_PATH) != 0) {
+        /* Windows rename() refuses to replace an existing file. */
+        (void)remove(MANIFEST_PATH);
+        if (rename(tmp, MANIFEST_PATH) != 0) { (void)remove(tmp); return ESP_FAIL; }
+    }
+    return ESP_OK;
 }
 
 esp_err_t settings_manifest_load(void)

@@ -17,7 +17,7 @@
 
 /* settings.c calls the metadata-manifest sync on every save; the host build has
  * no VFS, so provide no-op stubs (the manifest itself is not under test here). */
-void settings_manifest_sync(void) { }
+esp_err_t settings_manifest_sync(void) { return ESP_OK; }
 esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
 
 void setUp(void)
@@ -711,7 +711,27 @@ static void test_settings_save_api_timeouts(void)
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_cal_clear());
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_use_save(true));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_factory_reset());
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_cv_write(5, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_cv_reset_to_factory());
     mock_sem_take_fail = 0;
+}
+
+/* A deferred CV commit is flushed (blob + crc + commit) only after the
+ * stability delay, and is a no-op when nothing is pending. */
+static void test_cv_commit_deferred_flush(void)
+{
+    s_lock = (SemaphoreHandle_t)1;
+    mock_nvs_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(5, 42));
+    settings_cv_commit_deferred();
+    mock_timer_now_us = 0;
+    settings_pending_flush();          /* too early: not committed yet */
+    mock_timer_now_us = 3000000;       /* beyond SETTINGS_FLUSH_DELAY_US */
+    settings_pending_flush();
+    uint8_t v = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(5, &v));
+    TEST_ASSERT_EQUAL_UINT8(42, v);
+    settings_pending_flush();          /* nothing pending: no-op */
 }
 
 static void test_bemf_cal_clear_missing_key_is_ok(void)
@@ -764,6 +784,7 @@ int main(void)
     RUN_TEST(test_settings_save_deferred_and_flush);
     RUN_TEST(test_settings_save_api_invalid_args);
     RUN_TEST(test_settings_save_api_timeouts);
+    RUN_TEST(test_cv_commit_deferred_flush);
     RUN_TEST(test_bemf_cal_clear_missing_key_is_ok);
     return UNITY_END();
 }

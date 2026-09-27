@@ -73,6 +73,7 @@ static char s_sta_ip[16];
 static volatile int s_up_total;
 static volatile int s_up_received;
 static volatile bool s_up_active;
+static volatile bool s_up_ota;
 static volatile uint8_t s_up_slot;
 
 /* Test hooks for the otherwise unbounded background loops: 0 runs forever
@@ -80,6 +81,9 @@ static volatile uint8_t s_up_slot;
  * exercised deterministically. */
 static uint32_t s_autooff_iter_cap;
 static uint32_t s_dns_iter_cap;
+/* Set false when the AP is auto-stopped so the DNS task exits and frees its
+ * socket instead of blocking forever on a dead interface. */
+static volatile bool s_dns_run;
 static uint32_t s_pipe_iter_cap;
 /* Test hook: make pipe_upload observe a writer write error. */
 static bool s_pipe_write_err_inject;
@@ -99,6 +103,9 @@ static settings_track_t s_func_tracks[SETTINGS_MAX_TRACKS];
 static bool s_motion_forward = true;
 static uint8_t s_motion_speed;
 static bool s_motion_initialized;
+
+/* Heap size of the /api/audio/tracks JSON frame (was a 8 KB stack buffer). */
+#define WEB_TRACKS_JSON_MAX 8192
 
 /* ---------- event log (web journal) ---------- */
 /* Ring buffer of control events (F commands, AUX, sounds, direction, speed,
@@ -224,12 +231,28 @@ static esp_err_t send_html(httpd_req_t *req, const char *html)
 
 bool web_get_function_state(uint8_t fn)
 {
-    return fn < WEB_FN_COUNT ? s_fn[fn] : false;
+    if (fn >= WEB_FN_COUNT) {
+        return false;
+    }
+    bool state;
+    if (s_func_mutex != NULL) {
+        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
+    state = s_fn[fn];
+    if (s_func_mutex != NULL) {
+        xSemaphoreGive(s_func_mutex);
+    }
+    return state;
 }
 
 bool web_control_is_rails(void)
 {
     return s_cfg.control_source == 0;
+}
+
+bool web_fs_busy(void)
+{
+    return s_up_active;
 }
 
 uint8_t web_get_voice_volume(uint8_t fn)
@@ -267,7 +290,8 @@ static uint8_t func_out_channel(uint8_t bit)
     return (uint8_t)(AUXIO_CH_AUX1 + (bit - 2U));
 }
 
-static void func_apply_output(uint8_t fn)
+/* Caller must hold s_func_mutex (or be single-threaded at init). */
+static void func_apply_output_locked(uint8_t fn)
 {
     if (fn >= SETTINGS_FUNC_MAP_COUNT) {
         return;
@@ -297,14 +321,20 @@ void web_motion_changed(uint8_t speed, bool forward)
     if (s_motion_initialized && speed == s_motion_speed && forward == s_motion_forward) {
         return;
     }
+    if (s_func_mutex != NULL) {
+        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
     s_motion_initialized = true;
     s_motion_speed = speed;
     s_motion_forward = forward;
+    for (uint8_t f = 0; f < SETTINGS_FUNC_MAP_COUNT; ++f) {
+        func_apply_output_locked(f);
+    }
+    if (s_func_mutex != NULL) {
+        xSemaphoreGive(s_func_mutex);
+    }
     web_log_event("DCC", "скор %u, напр %s", (unsigned)speed,
                   forward ? "вперёд" : "назад");
-    for (uint8_t f = 0; f < SETTINGS_FUNC_MAP_COUNT; ++f) {
-        func_apply_output(f);
-    }
 }
 
 void web_func_audio_slots(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b)
@@ -342,7 +372,7 @@ void web_apply_function(uint8_t fn, bool state)
 
     bool changed = (s_fn[fn] != state);
     s_fn[fn] = state;
-    func_apply_output(fn);
+    func_apply_output_locked(fn);
 
     char sounds[48];
     size_t sounds_used = 0;
@@ -445,15 +475,27 @@ bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
     if (fn >= SETTINGS_FUNC_MAP_COUNT) {
         return false;
     }
+    if (s_func_mutex != NULL) {
+        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
     s_func_map[fn].slot_a = slot_a;
     s_func_map[fn].slot_b = slot_b;
     s_func_map[fn].aux_mask = aux;
     s_func_map[fn].dir = dir;
     s_func_map[fn].speed = speed;
+    if (s_func_mutex != NULL) {
+        xSemaphoreGive(s_func_mutex);
+    }
     if (settings_func_map_save(s_func_map, SETTINGS_FUNC_MAP_COUNT) != ESP_OK) {
         return false;
     }
-    func_apply_output(fn);
+    if (s_func_mutex != NULL) {
+        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
+    func_apply_output_locked(fn);
+    if (s_func_mutex != NULL) {
+        xSemaphoreGive(s_func_mutex);
+    }
     {
         char auxs[48];
         char slots[24];
@@ -620,6 +662,7 @@ static void wifi_auto_off_task(void *arg)
                  (unsigned)minutes);
         (void)esp_wifi_stop();
         s_wifi_started = false;
+        s_dns_run = false; /* let the DNS hijack task exit and free its socket */
         vTaskDelete(NULL);
     }
 }
@@ -776,10 +819,16 @@ static void dns_server_task(void *arg)
     }
     ESP_LOGI(TAG, "DNS hijack running on :53");
 
+    /* Receive timeout so the loop can observe s_dns_run after the AP is
+     * stopped instead of blocking forever on recvfrom. */
+    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+    (void)setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    s_dns_run = true;
     uint8_t q[DNS_MSG_MAX];
     uint8_t r[DNS_MSG_MAX];
     uint32_t iters = 0;
-    while (s_dns_iter_cap == 0U || iters < s_dns_iter_cap) {
+    while ((s_dns_iter_cap == 0U || iters < s_dns_iter_cap) && s_dns_run) {
         iters++;
         struct sockaddr_in from = { 0 };
         socklen_t flen = sizeof(from);
@@ -792,6 +841,8 @@ static void dns_server_task(void *arg)
             (void)sendto(sock, r, rlen, 0, (struct sockaddr *)&from, flen);
         }
     }
+    close(sock);
+    vTaskDelete(NULL);
 }
 
 static void start_dns_hijack(void)
@@ -885,21 +936,21 @@ static esp_err_t bemf_cal_get(httpd_req_t *req)
     motor_bemf_cal_info(&info);
     char json[1024];
     size_t used = 0;
-    used += (size_t)snprintf(json + used, sizeof(json) - used,
-                             "{\"ok\":true,\"active\":%s,\"progress\":%u,\"total\":%u,"
-                             "\"valid\":%s,\"stored\":%s,\"use\":%s,\"points\":[",
-                             info.active ? "true" : "false",
-                             (unsigned)info.step, (unsigned)info.total,
-                             info.valid ? "true" : "false",
-                             info.stored ? "true" : "false",
-                             motor_get_bemf_enabled() ? "true" : "false");
+    buf_appendf(json, sizeof(json), &used,
+                "{\"ok\":true,\"active\":%s,\"progress\":%u,\"total\":%u,"
+                "\"valid\":%s,\"stored\":%s,\"use\":%s,\"points\":[",
+                info.active ? "true" : "false",
+                (unsigned)info.step, (unsigned)info.total,
+                info.valid ? "true" : "false",
+                info.stored ? "true" : "false",
+                motor_get_bemf_enabled() ? "true" : "false");
     for (uint8_t i = 0; i < info.count; ++i) {
         uint16_t pct = (uint16_t)((info.frac[i] * 100U) / 1024U);
-        used += (size_t)snprintf(json + used, sizeof(json) - used,
-                                 "%s{\"speed\":%u,\"frac\":%u}",
-                                 i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
+        buf_appendf(json, sizeof(json), &used,
+                    "%s{\"speed\":%u,\"frac\":%u}",
+                    i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
     }
-    (void)snprintf(json + used, sizeof(json) - used, "]}");
+    buf_appendf(json, sizeof(json), &used, "]}");
     return send_json(req, json);
 }
 
@@ -909,17 +960,17 @@ static esp_err_t bemf_base_get(httpd_req_t *req)
     motor_bemf_base_info(&info);
     char json[1024];
     size_t used = 0;
-    used += (size_t)snprintf(json + used, sizeof(json) - used,
-                             "{\"ok\":true,\"start\":%u,\"full\":%u,\"points\":[",
-                             (unsigned)((info.start_frac * 100U) / 1024U),
-                             (unsigned)((info.full_frac * 100U) / 1024U));
+    buf_appendf(json, sizeof(json), &used,
+                "{\"ok\":true,\"start\":%u,\"full\":%u,\"points\":[",
+                (unsigned)((info.start_frac * 100U) / 1024U),
+                (unsigned)((info.full_frac * 100U) / 1024U));
     for (uint8_t i = 0; i < info.count; ++i) {
         uint16_t pct = (uint16_t)((info.frac[i] * 100U) / 1024U);
-        used += (size_t)snprintf(json + used, sizeof(json) - used,
-                                 "%s{\"speed\":%u,\"frac\":%u}",
-                                 i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
+        buf_appendf(json, sizeof(json), &used,
+                    "%s{\"speed\":%u,\"frac\":%u}",
+                    i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
     }
-    (void)snprintf(json + used, sizeof(json) - used, "]}");
+    buf_appendf(json, sizeof(json), &used, "]}");
     return send_json(req, json);
 }
 
@@ -1018,19 +1069,19 @@ static esp_err_t functions_get(httpd_req_t *req)
 {
     char json[128];
     size_t used = 0;
-    used += (size_t)snprintf(json + used, sizeof(json) - used, "{\"ok\":true,\"states\":[");
+    buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"states\":[");
     /* Snapshot under the same lock the DCC callback uses. */
     if (s_func_mutex != NULL) {
         (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
     }
     for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) {
-        used += (size_t)snprintf(json + used, sizeof(json) - used, "%s%d",
-                                 fn == 0 ? "" : ",", s_fn[fn] ? 1 : 0);
+        buf_appendf(json, sizeof(json), &used, "%s%d",
+                    fn == 0 ? "" : ",", s_fn[fn] ? 1 : 0);
     }
     if (s_func_mutex != NULL) {
         xSemaphoreGive(s_func_mutex);
     }
-    (void)snprintf(json + used, sizeof(json) - used, "]}");
+    buf_appendf(json, sizeof(json), &used, "]}");
     return send_json(req, json);
 }
 
@@ -1102,33 +1153,39 @@ static esp_err_t audio_status_get(httpd_req_t *req)
 
 static esp_err_t audio_tracks_get(httpd_req_t *req)
 {
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    /* Heap, not stack: setting_track_t[20] + an 8 KB JSON frame would be ~12 KB
+     * of the 16 KB httpd task stack. */
+    settings_track_t *tracks = malloc(sizeof(settings_track_t) * SETTINGS_MAX_TRACKS);
+    char *json = malloc(WEB_TRACKS_JSON_MAX);
+    if (tracks == NULL || json == NULL) { free(tracks); free(json); return ESP_ERR_NO_MEM; }
+
     size_t count = 0;
     (void)settings_tracks_load(tracks, &count);
     ESP_LOGI(TAG, "GET /api/audio/tracks -> %u", (unsigned)count);
 
-    char json[8192];
     size_t used = 0;
-    buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"cats\":[");
+    buf_appendf(json, WEB_TRACKS_JSON_MAX, &used, "{\"ok\":true,\"cats\":[");
     for (size_t i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
-        buf_appendf(json, sizeof(json), &used, "%s%d",
+        buf_appendf(json, WEB_TRACKS_JSON_MAX, &used, "%s%d",
                     i == 0 ? "" : ",", (int)s_track_cat[i]);
     }
-    buf_appendf(json, sizeof(json), &used, "],\"tracks\":[");
+    buf_appendf(json, WEB_TRACKS_JSON_MAX, &used, "],\"tracks\":[");
     for (size_t i = 0; i < count; ++i) {
         char f[SETTINGS_TRACK_FILE_MAX * 2];
         char l[SETTINGS_TRACK_LABEL_MAX * 2];
         json_escape(tracks[i].file, f, sizeof(f));
         json_escape(tracks[i].label, l, sizeof(l));
-        buf_appendf(json, sizeof(json), &used,
+        buf_appendf(json, WEB_TRACKS_JSON_MAX, &used,
                     "%s{\"slot\":%u,\"file\":\"%s\",\"label\":\"%s\",\"enabled\":%s}",
                     i == 0 ? "" : ",", (unsigned)tracks[i].slot, f, l,
                     tracks[i].enabled ? "true" : "false");
     }
-    buf_appendf(json, sizeof(json), &used, "]}");
+    buf_appendf(json, WEB_TRACKS_JSON_MAX, &used, "]}");
     esp_err_t serr = send_json(req, json);
     ESP_LOGI(TAG, "tracks json len=%u send=%s: %.360s", (unsigned)used,
              esp_err_to_name(serr), json);
+    free(tracks);
+    free(json);
     return serr;
 }
 
@@ -1267,12 +1324,18 @@ static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
     ctx.free_q = xQueueCreate(PIPE_NUM_BUFS, sizeof(int));
     ctx.done_sem = xSemaphoreCreateBinary();
     if (ctx.write_q == NULL || ctx.free_q == NULL || ctx.done_sem == NULL) {
+        if (ctx.write_q != NULL) { vQueueDelete(ctx.write_q); }
+        if (ctx.free_q != NULL) { vQueueDelete(ctx.free_q); }
+        if (ctx.done_sem != NULL) { vSemaphoreDelete(ctx.done_sem); }
         return ESP_ERR_NO_MEM;
     }
     for (int i = 0; i < PIPE_NUM_BUFS; ++i) {
         ctx.bufs[i] = malloc(PIPE_BUF_SIZE);
         if (ctx.bufs[i] == NULL) {
-            for (int j = 0; j < i; ++j) free(ctx.bufs[j]);
+            for (int j = 0; j < i; ++j) { free(ctx.bufs[j]); }
+            vQueueDelete(ctx.write_q);
+            vQueueDelete(ctx.free_q);
+            vSemaphoreDelete(ctx.done_sem);
             return ESP_ERR_NO_MEM;
         }
         int seed = i;
@@ -1280,7 +1343,10 @@ static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
     }
     if (xTaskCreatePinnedToCore(pipe_writer, "pipe_wr", PIPE_WRITER_STACK, &ctx,
                                 PIPE_WRITER_PRIO, &ctx.task, 1) != pdPASS) {
-        for (int j = 0; j < PIPE_NUM_BUFS; ++j) free(ctx.bufs[j]);
+        for (int j = 0; j < PIPE_NUM_BUFS; ++j) { free(ctx.bufs[j]); }
+        vQueueDelete(ctx.write_q);
+        vQueueDelete(ctx.free_q);
+        vSemaphoreDelete(ctx.done_sem);
         return ESP_ERR_NO_MEM;
     }
 
@@ -1388,6 +1454,24 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     if (decoded[0] != '\0') {
         sanitize_name(decoded, name, sizeof(name));
     }
+
+    /* Load the track list first: it is also used to auto-assign a slot when the
+     * request did not carry a valid one (slot 0 is not displayable/deletable). */
+    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    size_t count = 0;
+    bool have_tracks = (settings_tracks_load(tracks, &count) == ESP_OK);
+    if (slot == 0U) {
+        for (uint16_t cand = 1U; cand <= SETTINGS_MAX_TRACKS && slot == 0U; ++cand) {
+            bool used = false;
+            for (size_t i = 0; have_tracks && i < count; ++i) {
+                if (tracks[i].slot == cand) { used = true; break; }
+            }
+            if (!used) { slot = cand; }
+        }
+        if (slot == 0U) {
+            return send_json(req, "{\"ok\":false,\"error\":\"track slots full\"}");
+        }
+    }
     if (name[0] == '\0') {
         snprintf(name, sizeof(name), "slot%u.wav", (unsigned)slot);
     }
@@ -1406,10 +1490,8 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
      * collapses upload speed). It is removed only AFTER the new file is
      * written and validated: writing first stays fast (the old pages are not
      * GC'd mid-upload) and the old track survives a failed upload. */
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
-    size_t count = 0;
     char old_path[160] = { 0 };
-    if (settings_tracks_load(tracks, &count) == ESP_OK) {
+    if (have_tracks) {
         for (size_t i = 0; i < count; ++i) {
             if (tracks[i].slot == slot && tracks[i].file[0] != '\0' &&
                 strcmp(tracks[i].file, rel_file) != 0) {
@@ -1434,6 +1516,7 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     s_up_total = req->content_len;
     s_up_received = 0;
     s_up_active = true;
+    s_up_ota = false;
     esp_err_t perr = pipe_upload(req, f, &total);
     s_up_active = false;
 
@@ -1836,6 +1919,8 @@ static esp_err_t wifi_post(httpd_req_t *req)
     (void)settings_save(&s_cfg);
     web_log_event("Wi-Fi", "настройки сохранены (IP %s), перезагрузка", s_cfg.ap_ip);
     send_json(req, "{\"ok\":true,\"reboot\":1}");
+    motor_emergency_stop();
+    audio_stop_all();
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
     return ESP_OK;
@@ -1855,6 +1940,8 @@ static esp_err_t wifi_reset_post(httpd_req_t *req)
     (void)settings_save(&def);
     web_log_event("Wi-Fi", "сброс настроек, перезагрузка");
     send_json(req, "{\"ok\":true,\"reboot\":1}");
+    motor_emergency_stop();
+    audio_stop_all();
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
     return ESP_OK;
@@ -1868,6 +1955,8 @@ static esp_err_t factory_reset_post(httpd_req_t *req)
     web_log_event("Сброс", "заводские настройки, перезагрузка");
     (void)settings_factory_reset();
     send_json(req, "{\"ok\":true,\"reboot\":1}");
+    motor_emergency_stop();
+    audio_stop_all();
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
     return ESP_OK;
@@ -2084,6 +2173,7 @@ static esp_err_t ota_update_post(httpd_req_t *req)
     s_up_total = req->content_len;
     s_up_received = 0;
     s_up_active = true;
+    s_up_ota = true;
     ESP_LOGI(TAG, "OTA: begin %s size=%d combined=%d fw=%lu files=%lu",
              update->label, req->content_len, combined ? 1 : 0,
              (unsigned long)fw_len, (unsigned long)n_files);
@@ -2212,6 +2302,11 @@ static esp_err_t ota_update_post(httpd_req_t *req)
                 (void)remove(path);
                 continue;
             }
+            if (audio_validate_wav(path) != ESP_OK) {
+                ESP_LOGW(TAG, "OTA: file '%s' invalid wav", safe);
+                (void)remove(path);
+                continue;
+            }
             files_ok++;
 
             if (tn < SETTINGS_MAX_TRACKS) {
@@ -2275,6 +2370,8 @@ static esp_err_t ota_update_post(httpd_req_t *req)
     snprintf(json, sizeof(json), "{\"ok\":true,\"bytes\":%d,\"files\":%lu}",
              req->content_len, (unsigned long)files_ok);
     send_json(req, json);
+    motor_emergency_stop();
+    audio_stop_all();
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
     return ESP_OK;
@@ -2354,8 +2451,8 @@ static esp_err_t progress_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     char json[128];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"slot\":%u,\"ota\":false,\"total\":%d,\"received\":%d,\"active\":%s}",
-             (unsigned)s_up_slot, s_up_total, s_up_received,
+             "{\"ok\":true,\"slot\":%u,\"ota\":%s,\"total\":%d,\"received\":%d,\"active\":%s}",
+             (unsigned)s_up_slot, s_up_ota ? "true" : "false", s_up_total, s_up_received,
              s_up_active ? "true" : "false");
     return send_json(req, json);
 }

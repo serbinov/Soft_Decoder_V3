@@ -65,6 +65,7 @@ void setUp(void)
     mock_flash_write_err = 0;
     mock_flash_erase_err = 0;
     mock_flash_size = 16u * 1024u * 1024u;
+    mock_partition_registered_size = 0;
     mock_lfs_total = 1024u * 1024u;
     mock_lfs_used = 256u * 1024u;
     mock_lfs_register_calls = 0;
@@ -122,6 +123,23 @@ static void test_storage_init_flash_fail(void)
 static void test_storage_init_register_fail(void)
 {
     mock_partition_register_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
+    TEST_ASSERT_FALSE(storage_ext_available());
+}
+
+/* The registered partition must not exceed the detected chip size. */
+static void test_storage_init_small_chip(void)
+{
+    mock_flash_size = 8u * 1024u * 1024u;
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(STORAGE_BACKEND_EXTERNAL_NOR, storage_get_backend());
+    TEST_ASSERT_EQUAL_UINT32(8u * 1024u * 1024u, mock_partition_registered_size);
+}
+
+static void test_storage_init_size_probe_fail(void)
+{
+    mock_flash_size = 0;
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
     TEST_ASSERT_FALSE(storage_ext_available());
@@ -208,71 +226,6 @@ static void test_storage_free_bytes(void)
     TEST_ASSERT_EQUAL(ESP_FAIL, storage_get_free_bytes(&freeb));
 }
 
-/* ---- benchmark helpers ---- */
-
-static void test_bench_kib_per_s(void)
-{
-    TEST_ASSERT_EQUAL_UINT(0, bench_kib_per_s(1024, 0));
-    TEST_ASSERT_EQUAL_UINT(1024u, bench_kib_per_s(1024u * 1024u, 1000000u)); /* 1 MiB/s */
-}
-
-static void test_bench_fill(void)
-{
-    uint8_t a[16];
-    uint8_t b[16];
-    uint8_t c[16];
-    bench_fill(a, sizeof(a), 0);
-    bench_fill(b, sizeof(b), 1);
-    TEST_ASSERT_TRUE(memcmp(a, b, sizeof(a)) != 0); /* different offsets differ */
-    bench_fill(c, sizeof(c), 0);
-    TEST_ASSERT_EQUAL_INT(0, memcmp(a, c, sizeof(a))); /* deterministic */
-    bool non_zero = false;
-    for (size_t i = 0; i < sizeof(a); ++i) {
-        if (a[i] != 0) {
-            non_zero = true;
-        }
-    }
-    TEST_ASSERT_TRUE(non_zero);
-}
-
-/* ---- benchmark ---- */
-
-static void test_storage_benchmark_unavailable(void)
-{
-    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, storage_benchmark());
-}
-
-static void test_storage_benchmark_ok(void)
-{
-    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
-    TEST_ASSERT_EQUAL(ESP_OK, storage_benchmark());
-    TEST_ASSERT_TRUE(mock_lfs_format_calls >= 1); /* re-format step ran */
-}
-
-static void test_storage_benchmark_format_fail(void)
-{
-    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
-    mock_lfs_register_err = ESP_FAIL; /* step 5 re-format fails -> early OK */
-    TEST_ASSERT_EQUAL(ESP_OK, storage_benchmark());
-}
-
-static void test_storage_benchmark_open_fail(void)
-{
-    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
-    /* Remove the mount dir so the fresh-FS fopen() fails. */
-    (void)RMDIR(STORAGE_MOUNT_POINT);
-    TEST_ASSERT_EQUAL(ESP_FAIL, storage_benchmark());
-    (void)MKDIR(STORAGE_MOUNT_POINT);
-}
-
-static void test_storage_benchmark_no_mem(void)
-{
-    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
-    g_malloc_fail = 1;
-    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, storage_benchmark());
-    g_malloc_fail = 0;
-}
-
 int main(void)
 {
     UNITY_BEGIN();
@@ -281,6 +234,8 @@ int main(void)
     RUN_TEST(test_storage_init_add_device_fail);
     RUN_TEST(test_storage_init_flash_fail);
     RUN_TEST(test_storage_init_register_fail);
+    RUN_TEST(test_storage_init_small_chip);
+    RUN_TEST(test_storage_init_size_probe_fail);
     RUN_TEST(test_storage_mount_unavailable);
     RUN_TEST(test_storage_mount_ok_and_idempotent);
     RUN_TEST(test_storage_mount_lfs_fail);
@@ -289,12 +244,5 @@ int main(void)
     RUN_TEST(test_storage_format_lfs_fail);
     RUN_TEST(test_storage_format_remount_fail);
     RUN_TEST(test_storage_free_bytes);
-    RUN_TEST(test_bench_kib_per_s);
-    RUN_TEST(test_bench_fill);
-    RUN_TEST(test_storage_benchmark_unavailable);
-    RUN_TEST(test_storage_benchmark_ok);
-    RUN_TEST(test_storage_benchmark_format_fail);
-    RUN_TEST(test_storage_benchmark_open_fail);
-    RUN_TEST(test_storage_benchmark_no_mem);
     return UNITY_END();
 }

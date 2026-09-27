@@ -22,6 +22,9 @@ static uint8_t s_cv[SETTINGS_CV_COUNT + 1];
 static SemaphoreHandle_t s_lock;
 static volatile bool s_pending;
 static volatile int64_t s_pending_us;
+/* A CV was written but not yet committed to flash (service-mode programming
+ * and DCC CV writes must not block the real-time task on a flash commit). */
+static volatile bool s_cv_pending;
 
 static uint32_t cv_crc32(const uint8_t *data, size_t len)
 {
@@ -85,12 +88,13 @@ static esp_err_t nvs_read_str(const char *key, char *out, size_t len, const char
 {
     size_t rl = len;
     esp_err_t err = nvs_get_str(s_h, key, out, &rl);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
+    if (err != ESP_OK) {
+        /* Missing, truncated or corrupt: always fall back to the documented
+         * default instead of leaving the field empty. */
         strncpy(out, def, len - 1);
         out[len - 1] = '\0';
-        return ESP_OK;
     }
-    return err;
+    return ESP_OK;
 }
 
 esp_err_t settings_init(void)
@@ -222,7 +226,7 @@ esp_err_t settings_save_deferred(const settings_config_t *cfg)
 
 void settings_pending_flush(void)
 {
-    if (!s_pending) {
+    if (!s_pending && !s_cv_pending) {
         return;
     }
     if (esp_timer_get_time() - s_pending_us < SETTINGS_FLUSH_DELAY_US) {
@@ -231,7 +235,16 @@ void settings_pending_flush(void)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return;
     }
-    if (s_pending) {
+    bool commit = s_pending;
+    if (s_cv_pending) {
+        esp_err_t err = nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
+        if (err == ESP_OK) {
+            (void)nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
+        }
+        s_cv_pending = false;
+        commit = true;
+    }
+    if (commit) {
         (void)nvs_commit(s_h);
         s_pending = false;
     }
@@ -262,14 +275,30 @@ esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
         }
         return ESP_ERR_INVALID_ARG;
     }
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
     s_cv[idx] = value;
+    xSemaphoreGive(s_lock);
     return ESP_OK;
 }
 
 esp_err_t settings_cv_reset_to_factory(void)
 {
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    /* Keep cv_set_defaults() and the commit under the same lock as the readers
+     * so the motor task never observes a half-reset CV table. */
     cv_set_defaults();
-    esp_err_t err = settings_cv_commit();
+    esp_err_t err = nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
+    if (err == ESP_OK) {
+        err = nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(s_h);
+    }
+    xSemaphoreGive(s_lock);
     ESP_LOGI(TAG, "CV factory reset%s", err == ESP_OK ? "" : " (commit failed)");
     return err;
 }
@@ -311,6 +340,15 @@ esp_err_t settings_cv_commit(void)
     return err;
 }
 
+/* Stage a CV commit: the actual blob write + commit happens later from
+ * settings_pending_flush(), so a DCC/service-mode CV write never blocks the
+ * real-time task inside a flash program/erase. */
+void settings_cv_commit_deferred(void)
+{
+    s_pending_us = esp_timer_get_time();
+    s_cv_pending = true;
+}
+
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 {
     if (tracks == NULL || count == NULL) {
@@ -322,7 +360,13 @@ esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
         *count = 0;
         return ESP_ERR_NOT_FOUND;
     }
+    if ((len % sizeof(settings_track_t)) != 0U) { *count = 0; return ESP_ERR_INVALID_SIZE; }
     *count = len / sizeof(settings_track_t);
+    for (size_t i = 0; i < *count; ++i) {
+        /* Defensive: a legacy/corrupt blob might not be NUL-terminated. */
+        tracks[i].file[sizeof(tracks[i].file) - 1U] = '\0';
+        tracks[i].label[sizeof(tracks[i].label) - 1U] = '\0';
+    }
     return ESP_OK;
 }
 
@@ -331,6 +375,7 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
     if (tracks == NULL && count != 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (count > SETTINGS_MAX_TRACKS) { return ESP_ERR_INVALID_ARG; }
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
@@ -341,7 +386,7 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
     }
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        settings_manifest_sync();
+        (void)settings_manifest_sync();
     }
     return err;
 }
@@ -369,6 +414,7 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count)
     if (cats == NULL && count != 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (count > SETTINGS_MAX_TRACKS) { return ESP_ERR_INVALID_ARG; }
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
@@ -378,7 +424,7 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count)
     }
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        settings_manifest_sync();
+        (void)settings_manifest_sync();
     }
     return err;
 }
@@ -418,6 +464,7 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
     if (map == NULL && count != 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (count > SETTINGS_FUNC_MAP_COUNT) { return ESP_ERR_INVALID_ARG; }
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
@@ -428,7 +475,7 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
     }
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        settings_manifest_sync();
+        (void)settings_manifest_sync();
     }
     return err;
 }
@@ -461,6 +508,7 @@ esp_err_t settings_aux_cfg_save(const settings_aux_cfg_t *cfg, size_t count)
     if (cfg == NULL && count != 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (count > SETTINGS_AUX_COUNT) { return ESP_ERR_INVALID_ARG; }
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
@@ -483,9 +531,7 @@ esp_err_t settings_bemf_cal_load(settings_bemf_cal_t *cal)
     if (err != ESP_OK) {
         return err;
     }
-    if (cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) {
-        return ESP_ERR_INVALID_SIZE;
-    }
+    if (len != sizeof(settings_bemf_cal_t) || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) { return ESP_ERR_INVALID_SIZE; }
     return ESP_OK;
 }
 

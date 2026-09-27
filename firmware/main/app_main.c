@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -75,7 +76,10 @@ static void on_dcc_function(uint8_t fn, bool state)
 static void on_dcc_cv_write(uint16_t cv, uint8_t value, bool service_mode)
 {
     if (settings_cv_write(cv, value) == ESP_OK) {
-        (void)settings_cv_commit();
+        /* Deferred: the flash commit happens in safety_task after the CVs have
+         * been stable, so this DCC callback (and service-mode programming) does
+         * not block the real-time task inside a flash program/erase. */
+        settings_cv_commit_deferred();
     }
     web_log_event("CV", "CV %u = %u (%s)", (unsigned)cv, (unsigned)value,
                   service_mode ? "сервис" : "DCC");
@@ -103,7 +107,7 @@ static void on_dcc_reset(void)
     if (!web_control_is_rails()) {
         return;
     }
-    motor_stop();
+    motor_emergency_stop();
     clear_functions();
     web_log_event("DCC", "сброс декодера (broadcast)");
     ESP_LOGI(TAG, "Decoder reset (broadcast)");
@@ -113,9 +117,24 @@ static void safety_task(void *arg)
 {
     (void)arg;
     bool timeout_active = false;
+    /* Subscribe to the task watchdog: if this loop ever wedges, the system
+     * reboots instead of leaving the motor bridge driven. The loop yields every
+     * 50 ms and commits settings/flashes CVs, so reset it here. */
+    (void)esp_task_wdt_add(NULL);
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(50));
+        (void)esp_task_wdt_reset();
+        int64_t now_ms = esp_timer_get_time();
+
+        /* Fail-safe: if the motor task has not completed a tick recently it is
+         * stuck (e.g. in a flash/NVS operation) and a normal motor_stop() would
+         * never be applied. Coast the bridge directly from here. */
+        int64_t motor_tick = motor_last_tick_us();
+        if (motor_tick != 0 && (now_ms - motor_tick) > 200000LL) {
+            ESP_LOGW(TAG, "Motor task stalled: emergency coast");
+            motor_emergency_stop();
+        }
 
         /* Flush a staged (deferred) settings write once the UI has been idle,
          * so slider drags do not each trigger a flash program/erase cycle. */
@@ -137,7 +156,7 @@ static void safety_task(void *arg)
         if (timed_out && !timeout_active) {
             ESP_LOGW(TAG, "CV11 packet timeout: stop");
             web_log_event("DCC", "таймаут пакетов: стоп");
-            motor_stop();
+            motor_emergency_stop();
             clear_functions();
         }
         timeout_active = timed_out;
@@ -215,15 +234,18 @@ void app_main(void)
     dcc_register_reset_cb(on_dcc_reset);
     update_decoder_address();
 
+    /* Restore manifest metadata BEFORE web_init(): web_init() caches the
+     * categories and the function map in RAM, so recovering afterwards would
+     * leave the defaults active for the whole session. web_log_event() is safe
+     * before web_init() (it buffers into the journal). */
+    recover_tracks_from_storage();
+
     {
         esp_err_t err = web_init();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Web init failed: %s", esp_err_to_name(err));
         }
     }
-
-    /* After web_init so the result is visible in the web journal. */
-    recover_tracks_from_storage();
 
     {
         esp_err_t err = track_init();

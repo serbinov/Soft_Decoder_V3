@@ -14,7 +14,6 @@ typedef enum {
 esp_err_t storage_init(void);
 esp_err_t storage_mount(void);
 esp_err_t storage_format(void);
-esp_err_t storage_benchmark(void);
 storage_backend_t storage_get_backend(void);
 bool storage_is_mounted(void);
 bool storage_ext_available(void);

@@ -14,6 +14,12 @@ esp_err_t motor_init(void);
 void motor_boot_safe(void);
 esp_err_t motor_set_speed(uint8_t speed128, bool forward);
 void motor_stop(void);
+/* Fail-safe stop: drive the bridge off immediately from any task, even if the
+ * motor task is stuck. Use for resets / emergency stops instead of motor_stop()
+ * when the stop must not depend on the motor task running. */
+void motor_emergency_stop(void);
+/* Timestamp (us) of the last completed motor tick (0 before the first tick). */
+int64_t motor_last_tick_us(void);
 void motor_get_status(uint8_t *out_speed128, bool *out_forward);
 
 /* Rail sense voltage (divider mV) fed by the track task; used for the BEMF

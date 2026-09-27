@@ -18,6 +18,12 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 # Core dump to the coredump partition.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
+# Task watchdog: a wedged periodic task must reboot instead of leaving the
+# motor bridge driven. Long flash operations reset it (see safety_task).
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
 # OTA rollback: a freshly OTA-updated image boots as PENDING_VERIFY and is only
 # kept once app_main confirms it (esp_ota_mark_app_valid_cancel_rollback). If it
 # crashes before that, the bootloader restores the previous image.

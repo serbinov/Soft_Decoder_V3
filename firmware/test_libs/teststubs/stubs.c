@@ -699,6 +699,7 @@ int mock_spi_bus_init_err = 0;
 int mock_spi_add_flash_err = 0;
 int mock_flash_init_err = 0;
 int mock_partition_register_err = 0;
+uint32_t mock_partition_registered_size = 0;
 int mock_lfs_register_err = 0;
 int mock_lfs_format_err = 0;
 int mock_lfs_info_err = 0;
@@ -785,6 +786,7 @@ esp_err_t esp_partition_register_external(esp_flash_t *flash_chip, size_t offset
     if (mock_partition_register_err) {
         return (esp_err_t)mock_partition_register_err;
     }
+    mock_partition_registered_size = (uint32_t)size;
     memset(&s_stub_partition, 0, sizeof(s_stub_partition));
     s_stub_partition.flash = flash_chip;
     s_stub_partition.address = 0;

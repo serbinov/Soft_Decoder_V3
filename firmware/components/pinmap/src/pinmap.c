@@ -9,9 +9,20 @@ static const char *TAG = "pinmap";
 static esp_err_t pinmap_check(const int *pins, size_t n)
 {
     for (size_t i = 0; i < n; ++i) {
-        if (pins[i] == 23 || pins[i] == 24 || pins[i] == 25) {
+        if (pins[i] < 0 || pins[i] > 48) {
+            ESP_LOGE(TAG, "GPIO%d is out of range", pins[i]);
+            return ESP_ERR_INVALID_ARG;
+        }
+        /* GPIO22 is not bonded out on the ESP32-S3; 23-25 are unavailable too. */
+        if (pins[i] == 22 || pins[i] == 23 || pins[i] == 24 || pins[i] == 25) {
             ESP_LOGE(TAG, "GPIO%d is not available on ESP32-S3", pins[i]);
             return ESP_ERR_INVALID_ARG;
+        }
+        for (size_t j = i + 1; j < n; ++j) {
+            if (pins[i] == pins[j]) {
+                ESP_LOGE(TAG, "GPIO%d assigned twice", pins[i]);
+                return ESP_ERR_INVALID_ARG;
+            }
         }
     }
     return ESP_OK;

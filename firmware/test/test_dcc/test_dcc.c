@@ -129,6 +129,7 @@ void setUp(void)
     s_speed_mode_14 = false;
     s_consist_addr = 0;
     s_consist_reverse = false;
+    s_service_mode = false;
 
     reset_parser();
 
@@ -314,10 +315,12 @@ static void test_dcc_function_f13_group(void)
     TEST_ASSERT_FALSE(g_fn_state[20]);
 }
 
-/* Service Mode Direct Write Byte (S-9.2.3): 0xFF 0x7C 0x02 0x64 -> CV3 = 100 */
+/* Service Mode Direct Write Byte (S-9.2.3): instr, CvLow, data, checksum.
+ * There is no address byte: 0x7C 0x02 0x64 -> CV3 = 100. */
 static void test_dcc_service_write_direct(void)
 {
-    const uint8_t packet[] = {0xFF, 0x7C, 0x02, 0x64, 0xFF ^ 0x7C ^ 0x02 ^ 0x64};
+    const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    s_service_mode = true;
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
@@ -329,9 +332,10 @@ static void test_dcc_service_write_direct(void)
 /* Service Mode Direct Verify Byte: match -> ACK pulse (2 gpio_set_level). */
 static void test_dcc_service_verify_match(void)
 {
-    const uint8_t packet[] = {0xFF, 0x74, 0x02, 0x64, 0xFF ^ 0x74 ^ 0x02 ^ 0x64};
+    const uint8_t packet[] = {0x74, 0x02, 0x64, 0x74 ^ 0x02 ^ 0x64};
     g_read_ok = true;
     g_read_returns = 100;
+    s_service_mode = true;
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
@@ -340,9 +344,10 @@ static void test_dcc_service_verify_match(void)
 
 static void test_dcc_service_verify_no_match(void)
 {
-    const uint8_t packet[] = {0xFF, 0x74, 0x02, 0x64, 0xFF ^ 0x74 ^ 0x02 ^ 0x64};
+    const uint8_t packet[] = {0x74, 0x02, 0x64, 0x74 ^ 0x02 ^ 0x64};
     g_read_ok = true;
     g_read_returns = 50;
+    s_service_mode = true;
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
@@ -353,15 +358,49 @@ static void test_dcc_service_verify_no_match(void)
  * data byte = 0xF0 | (1<<3) | 2 = 0xFA */
 static void test_dcc_service_bit_write(void)
 {
-    const uint8_t packet[] = {0xFF, 0x78, 0x03, 0xFA, 0xFF ^ 0x78 ^ 0x03 ^ 0xFA};
+    const uint8_t packet[] = {0x78, 0x03, 0xFA, 0x78 ^ 0x03 ^ 0xFA};
     g_read_ok = true;
     g_read_returns = 0x00;
+    s_service_mode = true;
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0x04, g_cv_value);
     TEST_ASSERT_TRUE(g_cv_service);
+    /* A successful bit write must also ACK (NMRA S-9.2.3). */
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
+}
+
+/* Service mode is entered by a reset with an extended preamble on the
+ * programming track; afterwards service instructions are decoded. */
+static void test_dcc_service_mode_entered_by_reset(void)
+{
+    const uint8_t reset[] = {0x00, 0x00, 0x00};
+    feed_packet(reset, sizeof(reset), 22);
+    TEST_ASSERT_TRUE(s_service_mode);
+
+    const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    feed_packet(packet, sizeof(packet), 22);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
+    TEST_ASSERT_EQUAL_UINT8(100, g_cv_value);
+}
+
+/* Short address 124 must not be mistaken for a service write: a 128-step
+ * packet for that address is also 4 bytes and starts with 0x7C. */
+static void test_dcc_short_addr_124_not_service(void)
+{
+    s_decoder_addr = 124;
+    s_decoder_long_addr = false;
+    s_service_mode = false;
+    /* addr 124, 128-step, forward bit 0, speed code 65. */
+    const uint8_t packet[] = {124, 0x3F, 0x41, 124 ^ 0x3F ^ 0x41};
+    feed_packet(packet, sizeof(packet), 22);
+
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(64, g_speed);
 }
 
 static void test_dcc_idle_packet(void)
@@ -686,8 +725,9 @@ static void test_dcc_service_bit_verify(void)
 {
     g_cv_table_ok = true;
     g_cv_table[4] = 0x04; /* bit 2 set */
-    /* 0xFF 0x78 0x03 -> CV4; data 0x0A = value=1 bit=2, D=0 -> verify. */
-    const uint8_t packet[] = {0xFF, 0x78, 0x03, 0x0A, 0xFF ^ 0x78 ^ 0x03 ^ 0x0A};
+    /* 0x78 0x03 -> CV4; data 0x0A = value=1 bit=2, D=0 -> verify. */
+    const uint8_t packet[] = {0x78, 0x03, 0x0A, 0x78 ^ 0x03 ^ 0x0A};
+    s_service_mode = true;
     feed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
@@ -699,11 +739,11 @@ static void test_dcc_service_bit_verify(void)
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
 }
 
-/* Service mode requires the long (>=20 ones) preamble. With the normal
- * preamble a 0xFF-addressed packet is treated as idle. */
+/* Service mode requires the long (>=20 ones) preamble even after entry. */
 static void test_dcc_service_needs_long_preamble(void)
 {
-    const uint8_t packet[] = {0xFF, 0x7C, 0x02, 0x64, 0xFF ^ 0x7C ^ 0x02 ^ 0x64};
+    const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    s_service_mode = true;
     feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
 }
@@ -829,7 +869,9 @@ static void test_dcc_read_cv_null_callback(void)
 
 static void test_dcc_service_short_packet(void)
 {
-    const uint8_t pkt[] = { 0xFF, 0xFF }; /* service mode, no room for instr */
+    /* 3-byte service packet: valid checksum but no room for the data byte. */
+    const uint8_t pkt[] = { 0x7C, 0x02, 0x7C ^ 0x02 };
+    s_service_mode = true;
     feed_packet(pkt, sizeof(pkt), 20);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
 }
@@ -839,7 +881,8 @@ static void test_dcc_service_bit_manip_clear(void)
     g_read_ok = true;
     g_read_returns = 0xFF;
     /* Service bit manipulation: write 0 to bit 0 of CV4 -> clear the bit. */
-    const uint8_t pkt[] = { 0xFF, 0x78, 0x03, 0x10, 0xFF ^ 0x78 ^ 0x03 ^ 0x10 };
+    const uint8_t pkt[] = { 0x78, 0x03, 0x10, 0x78 ^ 0x03 ^ 0x10 };
+    s_service_mode = true;
     feed_packet(pkt, sizeof(pkt), 20);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
@@ -1058,6 +1101,8 @@ int main(void)
     RUN_TEST(test_dcc_service_verify_match);
     RUN_TEST(test_dcc_service_verify_no_match);
     RUN_TEST(test_dcc_service_bit_write);
+    RUN_TEST(test_dcc_service_mode_entered_by_reset);
+    RUN_TEST(test_dcc_short_addr_124_not_service);
     RUN_TEST(test_dcc_idle_packet);
     RUN_TEST(test_dcc_broadcast_reset);
     RUN_TEST(test_dcc_broadcast_reset_len3_only);

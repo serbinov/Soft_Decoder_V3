@@ -88,16 +88,16 @@ Read-only ревью first-party кода (`components/`, `main/`) с после
 
 ## 3. Проверка
 
-- `test\run_tests.ps1` — все 14 наборов PASSED (470 тестов; +тесты на A1..A10,
+- `test\run_tests.ps1` — все 14 наборов PASSED (471 тест; +тесты на A1..A10,
   B1..B16, FIX-7/9/10/11 и LOW-пункты).
-- `test\coverage.ps1` — first-party **100,0 %** (4414/4414 строк).
-- `pio run -e esp32-s3-devkitc-1` — SUCCESS; RAM 50 416 Б (15.4 %),
-  Flash 823 505 Б (41.9 %).
+- `test\coverage.ps1` — first-party **100,0 %** (4399/4399 строк).
+- `pio run -e esp32-s3-devkitc-1` — SUCCESS; RAM 50 408 Б (15.4 %),
+  Flash 824 597 Б (41.9 %).
 
 Не проверено на железе (нет платы): service-mode ACK/программирование CV с
 командной станции (A1/A2), реверс под нагрузкой и аварийный стоп (A5/A6),
 поведение при просадке питания. Формальная проверка HIL изложена в
-`TESTS_HANDOFF.md`/`FIXES_LOG.md`.
+`FIXES_LOG.md` и `ARCHITECTURE.md` §4.4.
 
 ## 4. Остаётся
 

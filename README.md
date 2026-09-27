@@ -1,7 +1,7 @@
-# Soft Decoder V3 — ADITIPUS AURA-X
+# Soft Decoder V3 — ADDITIPUS AURA-X
 
 Прошивка DCC-декодера для моделей железных дорог на ESP32-S3 (ESP-IDF,
-PlatformIO). Версия: **0.7** (`firmware/version.txt`).
+PlatformIO). Версия: **0.8** (`firmware/version.txt`).
 
 Полное техническое описание — [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md).
 История изменений — [`CHANGELOG.md`](CHANGELOG.md).
@@ -51,7 +51,7 @@ firmware/            исходники прошивки и документац
   test_libs/         заглушки ESP-IDF для host-тестов
   tools/             gen_web_html.py, bump_version.ps1, gen_flash_readme.ps1
   web_ui.html        исходник веб-страницы (сборка генерирует web_html.h)
-release/             собранные образы (например ADDITIPUS_AURA-X_v0.7.bin)
+release/             собранные образы (например ADDITIPUS_AURA-X_v0.8.bin)
 web_flasher/         веб-flasher (Web Serial) для прошивки из браузера
 .kilo/               агенты/команды код-ревью (см. .kilo/agent, .kilo/command)
 ```

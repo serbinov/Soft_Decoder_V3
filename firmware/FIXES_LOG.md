@@ -394,7 +394,7 @@ powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -SkipBemf
 
 - Статус: ГОТОВО (сборка + тесты + покрытие). Не проверено на железе.
 - Проверка:
-  - `test\run_tests.ps1` — ALL TEST SUITES PASSED (14 наборов, 470 тестов).
+  - `test\run_tests.ps1` — ALL TEST SUITES PASSED (14 наборов, 471 тест).
   - `test\coverage.ps1` — first-party **100,0 %** (4414/4414 строк).
   - `pio run -e esp32-s3-devkitc-1` — **SUCCESS**; RAM 50 416 Б (15.4 %),
     Flash 823 505 Б (41.9 %).

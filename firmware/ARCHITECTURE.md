@@ -251,7 +251,7 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 Наборы (14): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_selftest`, `test_web`. Всего **470 тестов**; покрытие first-party
+`test_selftest`, `test_web`. Всего **471 тест**; покрытие first-party
 (`components/` + `main/`) — **100 % строк** (union по строкам, gcov; ~4400 строк).
 
 При добавлении нового набора обновляйте `$inc` (include-пути) и `$suites` в
@@ -766,12 +766,12 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 ## 17. Использование ресурсов
 
-### 17.1 Сводка (сборка release, `pio run`, версия 0.7)
+### 17.1 Сводка (сборка release, `pio run`, версия 0.8)
 
 | Ресурс | Занято | Всего | % |
 |---|---|---|---|
-| RAM (DRAM, статически) | 50 384 Б | 327 680 Б | 15.4 % |
-| Flash (образ приложения) | 820 629 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 41.7 % |
+| RAM (DRAM, статически) | 50 408 Б | 327 680 Б | 15.4 % |
+| Flash (образ приложения) | 824 597 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 41.9 % |
 | Свободно в слоте приложения | ~1.1 МБ | | |
 
 > Запас в OTA-слоте большой (~1.1 МБ), поэтому рост кода не критичен. Дополнительно
@@ -781,8 +781,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 Размеры ELF-секций (xtensa size) и разбивку по компонентам смотрите в актуальном
 `.map` после сборки (`pio run -t size`).
 
-### 17.2 Flash по компонентам (из `soft_decoder_v3.map`; порядок величин —
-снято на сборке ~0.6, точные цифры — в актуальном `.map`)
+### 17.2 Flash по компонентам (порядок величин; точные цифры — в актуальном
+`.map` после сборки, `pio run -t size`)
 
 | Компонент | Flash, Б | Комментарий |
 |---|---|---|
@@ -811,7 +811,7 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | **pinmap** | 363 | карта выводов |
 
 Собственно «наш» код (web, provision, motor, settings, main, dcc, audio,
-storage, auxio, track, pinmap) занимает примерно **120 КБ** flash из ~816 КБ;
+storage, auxio, track, pinmap) занимает примерно **120 КБ** flash из ~825 КБ;
 остальное — ESP-IDF (Wi-Fi/lwIP/LittleFS/toolchain). После 0.7 добавился
 `esp_psram`, из lwIP ушёл IPv6, из libm — `powf`.
 
@@ -821,7 +821,7 @@ storage, auxio, track, pinmap) занимает примерно **120 КБ** fl
 `web` (~4.2 КБ: буферы API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ),
 `spi_flash` (~2.5 КБ), `lwip` (~2.3 КБ), далее — `freertos`, `esp_hw_support`,
 `hal`, `motor` (~0.37 КБ), `vfs`. Плюс загружаемые `.data`/IRAM и динамические
-буферы Wi-Fi/lwIP/HTTP — итого 49.7 КБ DRAM по отчёту сборки.
+буферы Wi-Fi/lwIP/HTTP — итого ~49.2 КБ DRAM по отчёту сборки.
 
 Стеки задач (из таблицы раздела 7): ~96 КБ в сумме, из них основные —
 `main` 16 КБ, HTTP 16 КБ, `pipe_wr` 16 КБ, `dcc` 8 КБ, `prov_listen` 8 КБ,

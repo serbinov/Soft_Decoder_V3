@@ -1,6 +1,6 @@
 ﻿# Журнал изменений (Soft_Decoder_V3)
 
-Хронология проекта. Текущая версия — в `VERSION` (и `firmware/version.txt`);
+Хронология проекта. Текущая версия — в `firmware/version.txt`;
 устройство и архитектура — в `firmware/ARCHITECTURE.md`. Ранее отдельные логи
 (`firmware/BUGFIX.md`, `firmware/FIXES.md`, `Отчет_изменения_2026-08-27.md`)
 объединены сюда.
@@ -11,10 +11,11 @@
 при каждом коммите: дата, версия и тема коммита. Новые — сверху.
 
 <!-- AUTO-LOG -->
-- 2026-09-27 — fix(web): valid uptime in /api/device under newlib nano
-- 2026-09-27 — feat(web): show device uptime in a fixed bottom bar
-- 2026-09-27 — docs: merge TESTS_HANDOFF into ARCHITECTURE; ignore worktrees/generated files; drop VERSION mirror
-- 2026-09-27 — chore: prune repo (worktrees, old releases, generated files), merge docs, add README
+- 2026-09-27 (v0.8) — chore: bump to 0.8; changelog hook reads firmware/version.txt
+- 2026-09-27 (v0.8) — fix(web): valid uptime in /api/device under newlib nano
+- 2026-09-27 (v0.7) — feat(web): show device uptime in a fixed bottom bar
+- 2026-09-27 (v0.7) — docs: merge TESTS_HANDOFF into ARCHITECTURE; ignore worktrees/generated files; drop VERSION mirror
+- 2026-09-27 (v0.7) — chore: prune repo (worktrees, old releases, generated files), merge docs, add README
 - 2026-09-27 (v0.7) — fix: code-review remediation across firmware + review agents
 - 2026-09-25 (v0.7) — feat: review fixes (ACK/PROV/OTA) + SELFTEST/HIL hardware tests
 - 2026-09-25 (v0.7) — docs: exact host test count (427) in ARCHITECTURE/TESTS_HANDOFF

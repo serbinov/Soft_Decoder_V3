@@ -35,7 +35,7 @@ try {
     $subject = $subject.Trim()
 
     $ver = ""
-    $vpath = Join-Path $root "VERSION"
+    $vpath = Join-Path $root "firmware\version.txt"
     if (Test-Path -LiteralPath $vpath) {
         $ver = (Get-Content -LiteralPath $vpath -Raw).Trim()
     }

@@ -9,3 +9,9 @@ components/web/include/web_html.h
 
 # Scratch directories created by the host unit tests
 *_tmp/
+
+# Agent Manager worktrees (local checkouts, never commit)
+.kilo/
+
+# Generated from sdkconfig.defaults by PlatformIO/ESP-IDF
+sdkconfig.esp32-s3-devkitc-1

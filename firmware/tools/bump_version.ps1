@@ -43,12 +43,6 @@ if (Test-Path $tc) {
     [System.IO.File]::WriteAllText($tc, $tt)
 }
 
-# 4) Mirror the version into the repository-root VERSION file, if present.
-$repoRoot = Split-Path -Parent $root
-$rvf = Join-Path $repoRoot "VERSION"
-if (Test-Path $rvf) {
-    Set-Content -Path $rvf -Value $new -NoNewline -Encoding ascii
-}
-
+# 4) Write the new version.
 Write-Host "Version: $cur -> $new"
 Write-Host "Now run build_ota_bin.bat (or pio run) to build ADDITIPUS_AURA-X_v$new.bin"

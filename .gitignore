@@ -7,3 +7,6 @@
 # OS metadata (Windows)
 Thumbs.db
 desktop.ini
+
+# Generated release artifacts (rebuild with firmware/build_flash_tool_files.bat)
+release/flash_download_tool/

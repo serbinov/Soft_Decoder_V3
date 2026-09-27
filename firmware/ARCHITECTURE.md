@@ -250,21 +250,40 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 Наборы (14): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_selftest`, `test_web`. Всего **453 теста**; покрытие first-party
-(`components/` + `main/`) — **100 % строк** (union по строкам, gcov).
+`test_selftest`, `test_web`. Всего **470 тестов**; покрытие first-party
+(`components/` + `main/`) — **100 % строк** (union по строкам, gcov; ~4400 строк).
+
+При добавлении нового набора обновляйте `$inc` (include-пути) и `$suites` в
+ОБОИХ скриптах (`run_tests.ps1`, `coverage.ps1`). Частично исполненные строки
+(gcov `N*`) считаются покрытыми. Опциональный `-Sanitize` (ASan/UBSan) — для
+Linux/CI.
+
+Заглушки с инъекцией отказов (`test_libs/teststubs/stubs.c`): `mock_sem_take_fail`,
+`mock_mutex_create_fail`, `mock_nvs_*`, `mock_task_create_*`, `mock_adc1_config_*`,
+`mock_i2s_*`, `mock_queue_*`, `mock_gpio_isr_install_err`, `mock_uart_*`,
+`mock_usbjtag_*`, `mock_ota_*`, `mock_spi_*`, `mock_flash_*`, `mock_lfs_*`,
+`mock_partition_register_err`, а также `mock_timer_now_us`/мок UART
+(`mock_uart_feed`/`mock_uart_tx`/`mock_uart_reset`). Для `test_web` дополнительно
+`web_stubs.c`: host-shim `esp_http_server` (скриптованные запросы, захват
+ответа, таблица маршрутов), заглушки `esp_wifi`/`esp_netif`/`esp_event`/`lwip`,
+инъекция OOM (`mock_web_malloc/calloc`) и отказов `fsync`/`fwrite`/`fflush`/
+`fclose`.
+
+Тест-хуки в коде для ограничения бесконечных циклов (в проде = 0, «вечно»):
+`s_iter_cap` (track), `s_fx_iter_cap` (auxio), `s_mix_iter_cap` (audio),
+`s_motor_iter_cap` (motor), `s_dcc_iter_cap`/`s_ack_iter_cap` (dcc),
+`s_listen_iter_cap` (provision),
+`s_autooff_iter_cap`/`s_dns_iter_cap`/`s_pipe_iter_cap` (web). Переопределяемые
+для host пути: `MANIFEST_DIR` (track_manifest), `STORAGE_MOUNT_POINT` (storage),
+`PROV_AUDIO_DIR`/`PROV_MKDIR` (provision), `WEB_USERDATA_DIR`/`WEB_AUDIO_DIR`
+(web), `SELFTEST_TMP_PATH` (selftest).
 
 HIL по железу (нужна подключённая плата): `test/hil/run_hil.ps1` шлёт
 `SELFTEST` через USB-Serial-JTAG/UART0 и парсит `TEST <name> PASS|FAIL|SKIP`;
 с `-Actuate` проверяет AUX и звук, `-Sweep` — все F0..F28 и все AUX,
 `-MotorSpeed N` — мотор. `test/hil/run_hil_web.ps1` дополнительно прогоняет
-веб/REST-эндпоинты через SoftAP. См. §6 `selftest` и §16.
-
-`test_web` использует host-shim `esp_http_server` (скриптованные запросы и
-захват ответов), заглушки `esp_wifi`/`esp_netif`/`esp_event`/`lwip` и
-инъецируемые отказы (OOM, `fsync`, `fwrite`, ошибки OTA/очередей). Попутно
-найдены и исправлены два бага: `ota_safe_name` сравнивал расширение до
-терминации строки (мог добавить лишний `.wav`), а обработчик аплоада при
-ошибке `fsync` не закрывал файл (утечка дескриптора и неудачный `remove`).
+веб/REST-эндпоинты через SoftAP (при заданном пароле — параметр `-ApPass`).
+См. §6 `selftest` и §16.
 
 ---
 
@@ -852,22 +871,10 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 
 ---
 
-### 18.1 Изменения по итогам код-ревью (батчи 6–7)
+### 18.1 История исправлений
 
-Полный список — в `FIXES_LOG.md` и `CODE_REVIEW_REPORT.md`. Ключевое:
-
-- **Wi-Fi:** пароль по умолчанию не задан (AP открытый); пользователь задаёт
-  пароль сам через веб, после чего AP работает как WPA2.
-- **Устойчивость:** включён Task Watchdog (`CONFIG_ESP_TASK_WDT_PANIC`, 10 с);
-  прошивка/настройки подтверждаются только после успешной инициализации.
-- **Мотор:** аварийный стоп (`motor_emergency_stop`), контроль живости задачи,
-  реверс с торможением, кламп таблицы CV67..CV94.
-- **DCC:** Service Mode входит по reset с длинной преамбулой; адреса 112..126 не
-  трактуются как сервисные; 64-бит метки времени под критической секцией.
-- **Хранилище:** раздел внешней NOR = min(размер чипа, 16 МБ); манифест пишется
-  атомарно (tmp+rename); перед форматированием проверяется занятость FS.
-- **Запись CV:** коммит во flash отложен (дебаунс) — DCC-задача не блокируется.
-- **Аудио:** проверка формата WAV, закрытие дескриптора на EOF, меньшие буферы.
+Изменения по итогам код-ревью и батчей правок — в `FIXES_LOG.md`; сводный
+отчёт по дефектам и их статусам — в `CODE_REVIEW_REPORT.md`.
 
 ---
 
@@ -880,7 +887,7 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 5. Прогнать `test\run_tests.ps1` и `pio run -e esp32-s3-devkitc-1`.
 6. Проверить `pio run -t size` (RAM/Flash) перед коммитом.
 7. На железе — серийный лог 115200 и, для мотора, `BEMF-RAW`.
-8. Версия проекта — в `VERSION` (и `firmware/version.txt`); инкремент — `bump_version.bat`.
+8. Версия проекта — в `firmware/version.txt` (единственный источник); инкремент — `bump_version.bat`.
 9. Коммит — `CHANGELOG.md` пополняется автоматически (хук `.githooks/post-commit`).
    После клона включить хуки один раз: `setup_git_hooks.bat` (или
    `git config core.hooksPath .githooks`).

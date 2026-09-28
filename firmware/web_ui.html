@@ -391,6 +391,9 @@ function setConnected(ok){
     var dot=byId('link_dot');
     if(dot)dot.classList.toggle('ok',ok);
     setText('connection',ok?'Онлайн':'Офлайн');
+    /* The bottom uptime clock is only meaningful while the board answers: keep
+       it running while online and stop the timer when the device is gone. */
+    if(ok)startUptime();else stopUptime();
   }
 }
 
@@ -497,7 +500,8 @@ async function refreshStatus(){
 function startStatusPoll(){if(statusTimer)clearInterval(statusTimer);statusTimer=setInterval(refreshStatus,3000);}
 function stopStatusPoll(){if(statusTimer)clearInterval(statusTimer);statusTimer=null;}
 document.addEventListener('visibilitychange',function(){
-  if(document.hidden)stopStatusPoll();else{startStatusPoll();refreshStatus();}
+  if(document.hidden){stopStatusPoll();stopHeartbeat();}
+  else{startStatusPoll();startHeartbeat();refreshStatus();}
 });
 
 function fmtBytes(n){
@@ -1276,6 +1280,45 @@ function renderUptime(){
   el.textContent=uptimeAtMs?fmtUptime(uptimeBaseSec+(Date.now()-uptimeAtMs)/1000):'—';
 }
 
+/* Online heartbeat: test every 5 s that the device is reachable. A good answer
+   re-syncs the uptime clock with the board; a lost link stops the bottom timer
+   so it no longer counts up while the device is unreachable. */
+var heartbeatTimer=null,heartbeatBusy=false,uptimeTimer=null;
+function startUptime(){
+  if(uptimeTimer)return;
+  uptimeTimer=setInterval(renderUptime,1000);
+  renderUptime();
+}
+function stopUptime(){
+  if(uptimeTimer){clearInterval(uptimeTimer);uptimeTimer=null;}
+}
+async function checkOnline(){
+  if(heartbeatBusy)return;
+  heartbeatBusy=true;
+  try{
+    var d=await api('/api/device',{timeout:4000,cache:'no-store'});
+    if(d&&d.ok){
+      uptimeBaseSec=Number(d.uptime)||uptimeBaseSec;
+      uptimeAtMs=Date.now();
+      setConnected(true);
+    }else{
+      setConnected(false);
+    }
+  }catch(e){
+    setConnected(false);
+  }finally{
+    heartbeatBusy=false;
+  }
+}
+function startHeartbeat(){
+  stopHeartbeat();
+  heartbeatTimer=setInterval(checkOnline,5000);
+  checkOnline();
+}
+function stopHeartbeat(){
+  if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null;}
+}
+
 /* device name */
 async function loadDevice(){
   try{
@@ -1402,8 +1445,7 @@ function init(){
   loadTrackList();
   refreshStatus();
   startStatusPoll();
-  renderUptime();
-  setInterval(renderUptime,1000);
+  startHeartbeat();
 }
 /* Load the track list once at startup so the sound grid and the function-map
  * sound names are populated even before/without opening the sounds panel. */

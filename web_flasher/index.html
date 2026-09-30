@@ -3,518 +3,125 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ADDITIPUS AURA-X</title>
+<title>ADDITIPUS — панель прошивки</title>
 <style>
   *{box-sizing:border-box;margin:0}
-  body{font:14px/1.4 "Segoe UI",system-ui,sans-serif;background:#0f1420;color:#e6e9f2;padding:16px}
-  .wrap{max-width:640px;margin:0 auto}
-  h1{font-size:16px;margin-bottom:12px}
-  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
-  .path{font-family:Consolas,monospace;font-size:12px;color:#9fb3d1;word-break:break-all}
-  .files{font-family:Consolas,monospace;font-size:11px;color:#7c869e;margin:-4px 0 8px 0}
+  body{font:14px/1.45 "Segoe UI",system-ui,sans-serif;background:#0f1420;color:#e6e9f2;padding:16px}
+  .wrap{max-width:720px;margin:0 auto}
+  h1{font-size:17px;margin-bottom:10px}
+  .note{background:#10203a;border:1px solid #274a7a;border-radius:8px;padding:10px;color:#bcd2ee;font-size:12.5px;margin:6px 0}
+  .alert{margin:8px 0;padding:10px;border-radius:8px;font-size:13px}
+  .alert.warn{background:#2a1c10;border:1px solid #7a5a27;color:#ffd9a8}
+  section{background:#131a2b;border:1px solid #202a45;border-radius:8px;padding:12px;margin:10px 0}
+  section h2{font-size:12px;color:#9fb3d1;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em}
+  .kv{display:flex;gap:8px;margin:4px 0;flex-wrap:wrap}
+  .lbl{color:#8b93a8;min-width:150px}
+  .val{color:#e6e9f2}
+  .ok{color:#3ecf8e}.err{color:#ff6b6b}.dim{color:#7c869e}
+  .hint{color:#7c869e;font-size:12px;margin:6px 0 12px}
   button{background:#4da3ff;color:#04101f;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:13px}
   button:disabled{background:#3a4560;color:#7c869e;cursor:not-allowed}
   button.ghost{background:transparent;color:#4da3ff;border:1px solid #4da3ff}
   button.big{width:100%;font-size:15px;padding:12px;margin-top:4px}
-  .lbl{color:#8b93a8;font-size:12px}
-  .status{font-size:12px;color:#8b93a8}
-  .ok{color:#3ecf8e}.err{color:#ff6b6b}.dim{color:#8b93a8}
-  .check{display:flex;gap:16px;margin:10px 0;color:#8b93a8;font-size:13px}
-  #step{font-size:13px;color:#4da3ff;min-height:20px;margin-top:10px}
-  #files{font-size:13px;color:#3ecf8e;min-height:20px}
-  #done{display:none;font-size:15px;color:#3ecf8e;font-weight:600;margin-top:6px}
-  #log{display:none;background:#0a0e18;border:1px solid #2a3350;border-radius:6px;padding:8px;height:160px;overflow-y:auto;
-    font:11px/1.5 Consolas,monospace;white-space:pre-wrap;word-break:break-all;margin-top:6px}
-  .l-ok{color:#3ecf8e}.l-warn{color:#ffb648}.l-err{color:#ff6b6b}.l-info{color:#8b93a8}.l-raw{color:#7fb2dd}
-  #log div{margin:0}
-  .bar{height:4px;background:#1d2438;border-radius:2px;overflow:hidden}
-  .bar>i{display:block;height:100%;width:0;background:#4da3ff;transition:width .2s}
-  .prow{display:flex;gap:8px;align-items:center;margin:6px 0}
-  .plbl{color:#8b93a8;font-size:11px;width:52px}
-  .ptxt{font-family:Consolas,monospace;font-size:12px;color:#3ecf8e;min-width:40px;text-align:right}
-  hr{border:0;border-top:1px solid #2a3350;margin:10px 0}
+  #status{font-size:13px;color:#4da3ff;margin-bottom:6px}
+  #log{background:#0a0e18;border:1px solid #2a3350;border-radius:6px;padding:10px;height:320px;overflow:auto;
+       font:12px/1.5 Consolas,monospace;white-space:pre-wrap;word-break:break-word;color:#c7d2e6}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>ADDITIPUS AURA-X</h1>
-
-  <div class="row">
-    <button class="ghost" id="btn_fw">Прошивка</button>
-    <span class="path" id="fw_path">не выбрана</span>
+  <h1>Панель прошивки ADDITIPUS</h1>
+  <div class="note">
+    Прошивку выполняют <b>скрипты</b> (<code>flash_standalone.ps1</code>, <code>make_ota.ps1</code>).
+    Эта страница — настройка, статус и запуск. Запускать нужно через
+    <code>start_flasher.bat</code> (Chrome/Edge).
   </div>
-  <div class="files" id="fw_files"></div>
+  <div class="alert" id="alert" style="display:none"></div>
 
-  <div class="row">
-    <button class="ghost" id="btn_snd">Звуки</button>
-    <span class="path" id="snd_path">не выбрана</span>
-  </div>
-  <div class="files" id="snd_files"></div>
+  <section>
+    <h2>Состояние</h2>
+    <div class="kv"><span class="lbl">Порт платы</span><span class="val" id="st_port">…</span></div>
+    <div class="kv"><span class="lbl">ESP-IDF</span><span class="val" id="st_idf">…</span></div>
+    <div class="kv"><span class="lbl">Метод прошивки</span><span class="val" id="st_flasher">…</span></div>
+    <div class="kv"><span class="lbl">Файлы прошивки</span><span class="val" id="st_fw">…</span></div>
+    <div class="kv"><span class="lbl">Звуки</span><span class="val" id="st_snd">…</span></div>
+    <div style="margin-top:8px"><button class="ghost" id="btn_refresh">Обновить</button></div>
+  </section>
 
-  <div class="row" style="margin-top:12px">
-    <span class="lbl">Порт:</span>
-    <span class="status" id="port_info">нет связи</span>
-  </div>
+  <section>
+    <h2>Действия</h2>
+    <button class="big ghost" id="btn_ota">Создать OTA</button>
+    <p class="hint">Создаёт <code>release\ADDITIPUS_AURA-X_vX_OTA.bin</code> для обновления через веб-интерфейс декодера.</p>
+    <button class="big" id="btn_flash">Прошить</button>
+    <p class="hint">Полная прошивка по USB (загрузчик + разделы + приложение). Настройки/NVS сохраняются.</p>
+    <button class="big" id="btn_flash_snd">Прошить + звуки</button>
+    <p class="hint">То же плюс заливка звуков (WAV) во внешнюю память.</p>
+  </section>
 
-  <div class="check">
-    <label><input type="checkbox" id="chk_fw"> проверка прошивки</label>
-    <label><input type="checkbox" id="chk_flash"> проверка данных на Flash</label>
-  </div>
-
-  <button class="big" id="btn_run">Прошить</button>
-  <div id="step"></div>
-  <div class="prow"><span class="plbl">чип</span><div class="bar" id="chip_bar"><i></i></div><span class="ptxt" id="chip_txt"></span></div>
-  <div class="prow"><span class="plbl">внешняя</span><div class="bar" id="ext_bar"><i></i></div><span class="ptxt" id="ext_txt"></span></div>
-  <div id="done">Всё прошито</div>
-
-  <hr>
-  <div class="row"><button class="ghost" id="btn_log" style="padding:4px 10px;font-size:12px">Журнал</button></div>
-  <div id="log"></div>
+  <section>
+    <h2>Вывод</h2>
+    <div id="status">Готово</div>
+    <pre id="log"></pre>
+  </section>
 </div>
 
-<input type="file" id="pick_fw" webkitdirectory multiple style="display:none">
-<input type="file" id="pick_snd" webkitdirectory multiple style="display:none">
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function log(m, c) { const el = document.createElement("div"); el.className = "l-" + (c||"info"); el.textContent = m; $("log").appendChild(el); $("log").scrollTop = $("log").scrollHeight; }
-function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function setAlert(msg, kind){ const el=$("alert"); if(!msg){el.style.display="none";el.textContent="";return;} el.className="alert "+(kind||""); el.textContent=msg; el.style.display="block"; }
+function setButtons(on){ for(const id of ["btn_ota","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
+function logAppend(t){ const el=$("log"); el.textContent+=t; el.scrollTop=el.scrollHeight; }
 
-/* ---------- SLIP / serial ---------- */
-class SlipDecoder {
-  constructor(){this.packets=[];this.cur=[];this.escaped=false;this.inPacket=false;}
-  feed(b){
-    for(const x of b){
-      if(!this.inPacket){if(x===0xC0)this.inPacket=true;}
-      else if(x===0xC0){this.packets.push(new Uint8Array(this.cur));this.cur=[];this.inPacket=false;}
-      else if(this.escaped){this.cur.push(x===0xDC?0xC0:0xDB);this.escaped=false;}
-      else if(x===0xDB){this.escaped=true;}
-      else this.cur.push(x);
-    }
-  }
-  next(){return this.packets.length?this.packets.shift():null;}
-}
-class SerialInput{
-  constructor(port){this.port=port;this.textDecoder=new TextDecoder("utf-8");this.slip=new SlipDecoder();this.textMode=false;this.textBuf="";this.rawLog=false;this.rawCount=0;this.streamEnded=false;this.closed=false;}
-  async start(){this.reader=this.port.readable.getReader();this.pump();}
-  async pump(){
-    try{
-      while(!this.closed){
-        const {value,done}=await this.reader.read();
-        if(done){this.streamEnded=true;break;}
-        if(value&&value.length){
-          this.slip.feed(value);
-          let txt="";
-          if(this.rawLog||this.textMode)txt=this.textDecoder.decode(value,{stream:true});
-          if(this.rawLog&&this.rawCount<3){if(txt.trim()){log("RX: "+txt.trim(),"raw");this.rawCount++;}}
-          if(this.textMode){this.textBuf+=txt;if(this.textBuf.length>2000000)this.textBuf=this.textBuf.slice(-1000000);}
-        }
-      }
-    }catch(e){this.streamEnded=true;}
-  }
-  setTextMode(on){this.textMode=on;if(on)this.textBuf="";this.textDecoder=new TextDecoder("utf-8");}
-  async waitPacket(t){const d=Date.now()+t;while(Date.now()<d){const p=this.slip.next();if(p)return p;await sleep(10);}throw new Error("таймаут");}
-  async waitText(m,t){const d=Date.now()+t;while(Date.now()<d){const i=this.textBuf.indexOf(m);if(i>=0){this.textBuf=this.textBuf.slice(i+m.length);return true;}await sleep(10);}return false;}
-  discard(){this.slip=new SlipDecoder();this.textBuf="";this.textDecoder=new TextDecoder("utf-8");}
-  async close(){this.closed=true;try{await this.reader.cancel();}catch(e){}try{this.reader.releaseLock();}catch(e){}}
-}
-let port=null,writer=null,input=null;
-let opActive=false,portDead=false,spibootDetected=false,bootHintShown=false;
-let closeReopenDone=false,resetViaSignalsDone=false,closeResetDone=false,usbResetDone=false,disconnectLogged=false;
-let autoOpenBlocked=false;
-const isEsp=(p)=>{try{return p.getInfo().usbVendorId===0x303A;}catch(e){return false;}};
-const isNativeUsb=()=>{try{return isEsp(port);}catch(e){return false;}};
-const chipName=(p)=>{try{return "ESP32-S3";}catch(e){return "COM";}};
-const describePort=(p)=>{try{const i=p.getInfo();return "ESP32-S3 ("+(i.usbProductId?"0x"+i.usbProductId.toString(16):"")+")";}catch(e){return "COM";}};
-
-async function writeBytes(b){if(!writer)throw new Error("нет соединения");await writer.write(b);}
-const writeText=(s)=>writeBytes(new TextEncoder().encode(s));
-
-function cleanupPort(){try{if(writer)writer.releaseLock();}catch(e){}try{if(input)input.close();}catch(e){}try{if(port)port.close();}catch(e){}port=null;writer=null;input=null;}
-async function getPortHandle(force){
-  let ports=await navigator.serial.getPorts();
-  if(!ports.length&&force)ports=[await navigator.serial.requestPort()];
-  if(!ports.length)return null;
-  const esp=ports.filter(isEsp);return(esp.length?esp:ports)[0];
-}
-async function openPort(baud){
-  portDead=false;
-  const p=await getPortHandle(true);
-  if(!p)throw new Error("порт не найден");
-  await p.open({baudRate:baud,bufferSize:8192});
-  try{await p.setSignals({dataTerminalReady:false,requestToSend:false});}catch(e){}
-  port=p;writer=p.writable.getWriter();input=new SerialInput(p);
-  await input.start();input.discard();
-  $("port_info").textContent=describePort(p)+" · подключено";
-  log("порт: "+describePort(p),"ok");
-}
-async function detectPort(){
-  const p=await getPortHandle(false);
-  if(p){$("port_info").textContent=describePort(p);}else{$("port_info").textContent="нет связи";}
-}
-async function autoOpenIdle(){
-  if(autoOpenBlocked||port||opActive||!navigator.serial)return;
-  const p=await getPortHandle(false);
-  if(!p){detectPort();return;}
+async function refreshStatus(){
   try{
-    await p.open({baudRate:115200,bufferSize:8192});
-    try{await p.setSignals({dataTerminalReady:false,requestToSend:false});}catch(e){}
-    port=p;writer=p.writable.getWriter();input=new SerialInput(p);
-    await input.start();input.discard();
-    $("port_info").textContent=describePort(p)+" · подключено";
-  }catch(e){detectPort();}
-}
-async function ensurePort(){
-  if(port&&input)return true;
-  for(let i=0;i<6;i++){try{await openPort(115200);return true;}catch(e){if(i<5)await sleep(800);}}
-  return false;
-}
-
-/* ---------- protocol ---------- */
-const CMD_SYNC=0x08,CMD_FLASH_BEGIN=0x02,CMD_FLASH_DATA=0x03,CMD_FLASH_END=0x04,CMD_SPI_ATTACH=0x0D,CMD_MD5=0x13;
-function u32(n){return[n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF];}
-function buildPacket(op,data,chk){
-  const hdr=new Uint8Array([0x00,op,data.length&0xFF,(data.length>>>8)&0xFF,chk&0xFF,0,0,0]);
-  const out=new Uint8Array(hdr.length+data.length);out.set(hdr,0);out.set(data,hdr.length);return out;
-}
-function slipEncode(pkt){
-  const out=[0xC0];
-  for(const b of pkt){if(b===0xC0)out.push(0xDB,0xDC);else if(b===0xDB)out.push(0xDB,0xDD);else out.push(b);}
-  out.push(0xC0);return new Uint8Array(out);
-}
-function xsum(data,state){for(const b of data)state^=b;return state;}
-async function sendCommand(op,data,chk,timeout){
-  if(!input)throw new Error("нет соединения");
-  await writeBytes(slipEncode(buildPacket(op,data,chk||0)));
-  const p=await input.waitPacket(timeout||5000);
-  if(p.length<8||p[0]!==0x01)throw new Error("плохой ответ");
-  if(p.length>=10&&p[p.length-2]!==0)throw new Error("ошибка команды 0x"+op.toString(16)+" (статус "+p[p.length-2]+")");
-  return p;
-}
-async function syncChip(){
-  const d=new Uint8Array(36);d[0]=0x07;d[1]=0x07;d[2]=0x12;d[3]=0x20;
-  for(let i=4;i<36;i++)d[i]=0x55;
-  for(let a=0;a<5;a++){
-    try{
-      input.setTextMode(false);input.discard();
-      await sendCommand(CMD_SYNC,d,0,3000);
-      for(let i=0;i<7;i++){const p=await input.waitPacket(3000);if(p.length<8)throw new Error("sync");}
-      return;
-    }catch(e){await sleep(200);}
-  }
-  throw new Error("нет синхронизации");
-}
-async function attachSpi(){await sendCommand(CMD_SPI_ATTACH,new Uint8Array(8),0,5000);}
-async function flashRegion(name,data,offset){
-  const blocks=Math.ceil(data.length/0x400);
-  const padded=new Uint8Array(blocks*0x400);padded.set(data);padded.fill(0xFF,data.length);
-  const begin=new Uint8Array([...u32(data.length),...u32(blocks),...u32(0x400),...u32(offset),...u32(0)]);
-  await sendCommand(CMD_FLASH_BEGIN,begin,0,15000);
-  for(let seq=0;seq<blocks;seq++){
-    const blk=padded.subarray(seq*0x400,(seq+1)*0x400);
-    const payload=new Uint8Array([...u32(0x400),...u32(seq),...u32(0),...u32(0),...blk]);
-    const chk=xsum(blk,0xEF);
-    for(let att=0;att<3;att++){
-      try{await sendCommand(CMD_FLASH_DATA,payload,chk,10000);break;}
-      catch(e){if(att<2){await sleep(100);}else throw e;}
-    }
-  }
-}
-async function flashMd5(addr,size){
-  const p=await sendCommand(CMD_MD5,new Uint8Array([...u32(addr),...u32(size),...u32(0),...u32(0)]),0,30000);
-  const data=Array.from(p.slice(8,p.length-2));
-  if(data.length===32){return String.fromCharCode(...data);}
-  if(data.length===16){return Array.from(data).map(b=>b.toString(16).padStart(2,"0")).join("");}
-  throw new Error("MD5: ответ "+data.length+" байт");
-}
-/* compact JS MD5 */
-function md5(bytes){function R(n,c){return(n<<c)|(n>>>(32-c));}const K=[];for(let i=0;i<64;i++)K[i]=Math.floor(Math.abs(Math.sin(i+1))*4294967296);
-  const s=[7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
-  const len=bytes.length;const msg=new Uint8Array(((len+8)>>6<<6)+64);msg.set(bytes);
-  msg[len]=0x80;const bl=new DataView(msg.buffer);bl.setUint32(msg.length-8,len*8,true);
-  let a0=0x67452301,b0=0xefcdab89,c0=0x98badcfe,d0=0x10325476;
-  for(let off=0;off<msg.length;off+=64){
-    const M=[];const dv=new DataView(msg.buffer,off,64);
-    for(let i=0;i<16;i++)M[i]=dv.getUint32(i*4,true);
-    let A=a0,B=b0,C=c0,D=d0;
-    for(let i=0;i<64;i++){
-      let F,g;
-      if(i<16){F=(B&C)|(~B&D);g=i;}
-      else if(i<32){F=(D&B)|(~D&C);g=(5*i+1)%16;}
-      else if(i<48){F=B^C^D;g=(3*i+5)%16;}
-      else{F=C^(B|~D);g=(7*i)%16;}
-      F=(F+A+K[i]+M[g])>>>0;A=D;D=C;C=B;B=(B+R(F,s[i]))>>>0;
-    }
-    a0=(a0+A)>>>0;b0=(b0+B)>>>0;c0=(c0+C)>>>0;d0=(d0+D)>>>0;
-  }
-  const r=[a0,b0,c0,d0];let out="";
-  for(const v of r){out+=String.fromCharCode(v&0xFF,(v>>>8)&0xFF,(v>>>16)&0xFF,(v>>>24)&0xFF);}
-  let hex="";for(let i=0;i<16;i++)hex+=out.charCodeAt(i).toString(16).padStart(2,"0");
-  return hex;
-}
-
-/* ---------- reset to download ---------- */
-function setSignalsSafe(sig){if(!port)return false;try{port.setSignals(sig);return true;}catch(e){return false;}}
-async function resetViaSignals(){
-  if(!port)return false;
-  let dtr=false;
-  const setD=async(v)=>{if(!(await setSignalsSafe({dataTerminalReady:v})))return false;dtr=v;return true;};
-  const setR=async(v)=>{if(!(await setSignalsSafe({requestToSend:v})))return false;await setSignalsSafe({dataTerminalReady:dtr});return true;};
-  if(!(await setR(false)))return false;if(!(await setD(false)))return false;await sleep(100);
-  if(!(await setD(true)))return false;if(!(await setR(false)))return false;await sleep(100);
-  if(!(await setR(true)))return false;await setD(false);if(!(await setR(true)))return false;await sleep(100);
-  await setD(false);await setR(false);return true;
-}
-async function resetViaCloseReopen(){
-  if(!port)return false;
-  const p=port;
-  try{await p.setSignals({dataTerminalReady:false,requestToSend:false});}catch(e){}
-  await sleep(100);
-  try{if(writer)writer.releaseLock();}catch(e){}try{if(input)await input.close();}catch(e){}try{await p.close();}catch(e){}
-  port=null;writer=null;input=null;
-  await sleep(120);
-  for(let i=0;i<40;i++){
-    let np=p;
-    try{await np.open({baudRate:115200,bufferSize:8192});}
-    catch(e){np=await getPortHandle(false);if(!np){await sleep(100);continue;}try{await np.open({baudRate:115200,bufferSize:8192});}catch(e2){await sleep(100);continue;}}
-    try{await np.setSignals({dataTerminalReady:false,requestToSend:false});}catch(e){}
-    port=np;writer=np.writable.getWriter();input=new SerialInput(np);
-    await input.start();input.discard();portDead=false;
-    return true;
-  }
-  return false;
-}
-async function autoReset(){
-  if(!closeReopenDone){closeReopenDone=true;await resetViaCloseReopen();return;}
-  if(!resetViaSignalsDone){resetViaSignalsDone=true;await resetViaSignals();await sleep(600);return;}
-  if(!closeResetDone){closeResetDone=true;await resetViaSignals();return;}
-  if(!usbResetDone){usbResetDone=true;}
-  if(!bootHintShown){bootHintShown=true;log("нужен BOOT+RST — жду...","err");}
-}
-async function holdSync(){
-  const start=Date.now();let resetTried=false;
-  while(Date.now()-start<60000){
-    if(!port||portDead||(input&&input.streamEnded)){cleanupPort();portDead=false;for(let i=0;i<50;i++){const np=await getPortHandle(false);if(np){try{await np.open({baudRate:115200,bufferSize:8192});try{await np.setSignals({dataTerminalReady:false,requestToSend:false});}catch(e){}port=np;writer=np.writable.getWriter();input=new SerialInput(np);await input.start();input.discard();portDead=false;break;}catch(e){await sleep(100);}}else await sleep(100);}}
-    if(!port)continue;
-    if(!resetTried){resetTried=true;await autoReset();continue;}
-    try{syncChip();return;}catch(e){
-      if(portDead||(input&&input.streamEnded))continue;
-      await sleep(200);
-    }
-  }
-  throw new Error("нет связи с чипом");
-}
-
-/* ---------- steps ---------- */
-function setStep(label){$("step").textContent="этап: "+(label||"");}
-function setChipFiles(w,t){$("chip_txt").textContent=w+"/"+t;$("chip_bar").querySelector("i").style.width=(t?w/t*100:0)+"%";}
-function setExtFiles(w,t){$("ext_txt").textContent=w+"/"+t;$("ext_bar").querySelector("i").style.width=(t?w/t*100:0)+"%";}
-function setDone(){$("chip_bar").querySelector("i").style.width="100%";$("ext_bar").querySelector("i").style.width="100%";$("step").textContent="";$("done").style.display="block";}
-function resetProgress(){$("chip_bar").querySelector("i").style.width="0";$("ext_bar").querySelector("i").style.width="0";$("chip_txt").textContent="";$("ext_txt").textContent="";$("step").textContent="";$("done").style.display="none";}
-
-/* ---------- folders ---------- */
-const state={fw:{},wavs:[]};
-const OFF={bootloader:0x0,partitions:0x8000,ota:0x1a000,firmware:0x20000}; /* ota re-read from partitions.bin */
-function classifyBin(name,bytes){
-  const n=name.toLowerCase();
-  if(bytes.length>=2&&bytes[0]===0xAA&&bytes[1]===0x50)return"partitions";
-  if(bytes.length>=1&&bytes[0]===0xE9){
-    const magic=bytes.length>=0x24?bytes[0x20]|(bytes[0x21]<<8)|(bytes[0x22]<<16)|(bytes[0x23]<<24):0;
-    if(magic===0xABCD5432)return"firmware";
-    if(bytes.length>0x10000)return"firmware";
-    return"bootloader";
-  }
-  if(bytes.length===0x2000){if(n.includes("ota"))return"ota";const seq=bytes[0]|(bytes[1]<<8)|(bytes[2]<<16)|(bytes[3]<<24);const inv=bytes[4]|(bytes[5]<<8)|(bytes[6]<<16)|(bytes[7]<<24);if((seq===1||seq===2)&&inv===(~seq>>>0))return"ota";if(bytes.every(b=>b===0))return"ota";}
-  return null;
-}
-/* The otadata offset is read from the partition table (label "otadata") so the
-   flasher never writes it to a stale address after a layout change. */
-function parseOtadataOffset(b){
-  for(let i=0;i+32<=b.length;i+=32){
-    if(b[i]!==0xAA||b[i+1]!==0x50)break;
-    const off=(b[i+4]|(b[i+5]<<8)|(b[i+6]<<16)|(b[i+7]<<24))>>>0;
-    let label="";for(let j=12;j<28;j++){const c=b[i+j];if(c===0)break;label+=String.fromCharCode(c);}
-    if(label==="otadata")return off;
-  }
-  return 0;
-}
-function dirPath(files){const rel=files[0].webkitRelativePath||"";const i=rel.lastIndexOf("/");return i>0?rel.slice(0,i):rel;}
-function showFwPath(files){
-  const path=dirPath(files)||"папка";
-  $("fw_path").textContent=path;
-  const names=files.filter(f=>f.name.toLowerCase().endsWith(".bin")).map(f=>f.name);
-  $("fw_files").textContent=names.join(", ");
-}
-function showSndPath(files){
-  $("snd_path").textContent=dirPath(files)||"папка";
-  $("snd_files").textContent=files.length+" файлов";
-}
-async function scanFirmwareFolder(files){
-  const found={};
-  for(const f of files){
-    if(!f.name.toLowerCase().endsWith(".bin"))continue;
-    const bytes=new Uint8Array(await f.arrayBuffer());
-    const role=classifyBin(f.name,bytes);
-    if(role&&(!found[role]||bytes.length>found[role].bytes.length))found[role]={name:f.name,bytes};
-  }
-  if(found.partitions){const ota=parseOtadataOffset(found.partitions.bytes);if(ota)OFF.ota=ota;}
-  return found;
-}
-
-/* ---------- PROV sounds ---------- */
-async function provSession(fwBin,wavs,onProgress){
-  if(!(await ensurePort()))throw new Error("нет порта");
-  input.setTextMode(true);input.discard();
-  let started=false;
-  for(let i=0;i<10&&!started;i++){
-    if((input&&input.streamEnded)||!port){if(!(await ensurePort()))break;input.setTextMode(true);input.discard();}
-    if(!input){await ensurePort();input.setTextMode(true);input.discard();}
-    try{await writeText("PROV\n");}catch(e){}
-    started=await input.waitText("PROV-OK",500);
-  }
-  if(!started)throw new Error("PROV не отвечает (чип не в приложении)");
-  await sleep(300);
-  if(!isNativeUsb()){try{const p=port;cleanupPort();await sleep(150);await p.open({baudRate:921600,bufferSize:8192});port=p;writer=p.writable.getWriter();input=new SerialInput(p);await input.start();}catch(e){}}
-  input.setTextMode(true);input.discard();
-  if(fwBin){
-    log("прошивка (FW)...","info");
-    await writeText("FW "+fwBin.data.length+"\n");
-    if(!(await input.waitText("FW-OK",60000)))throw new Error("нет FW-OK");
-    let sent=0;
-    while(sent<fwBin.data.length){
-      const end=Math.min(sent+4096,fwBin.data.length);
-      await writeBytes(fwBin.data.subarray(sent,end));sent=end;
-      if(sent<fwBin.data.length&&!(await input.waitText("CHUNK",30000)))throw new Error("таймаут FW");
-    }
-    if(!(await input.waitText("FW-DONE",60000)))throw new Error("нет FW-DONE");
-    log("прошивка записана","ok");
-    if(onProgress)onProgress(1,1,"файл");
-  }
-  let slot=1;
-  for(const f of wavs){
-    const buf=new Uint8Array(await f.arrayBuffer());
-    log("слот "+slot+": "+f.name,"info");
-    await writeText("PUT "+slot+" "+buf.length+" "+f.name+"\n");
-    if(!(await input.waitText("PUT-OK",60000)))throw new Error("нет PUT-OK "+slot);
-    let sent=0;
-    while(sent<buf.length){
-      const end=Math.min(sent+4096,buf.length);
-      await writeBytes(buf.subarray(sent,end));sent=end;
-      if(sent<buf.length&&!(await input.waitText("CHUNK",30000)))throw new Error("таймаут данных "+slot);
-    }
-    if(!(await input.waitText("FILE-OK",60000)))throw new Error("нет FILE-OK "+slot);
-    log("OK слот "+slot,"ok");
-    if(onProgress)onProgress(slot,wavs.length,"звуков");
-    slot++;
-  }
-  try{await writeText("DONE\n");}catch(e){}
-  if(await input.waitText("DONE-OK",15000))log("перезагрузка","ok");
-}
-
-/* ---------- main ---------- */
-async function runAll(){
-  const haveFw=Object.keys(state.fw).length>0;
-  if(!haveFw&&!state.wavs.length){log("выберите прошивку или звуки","err");return;}
-  if(!navigator.serial){log("нет Web Serial","err");return;}
-  $("btn_run").disabled=true;
-  opActive=true;spibootDetected=false;bootHintShown=false;disconnectLogged=false;
-  closeReopenDone=false;resetViaSignalsDone=false;closeResetDone=false;usbResetDone=false;
-  resetProgress();
-  if(haveFw)setChipFiles(0,fwTotal);else $("chip_txt").textContent="";
-  if(state.wavs.length)setExtFiles(0,state.wavs.length);else $("ext_txt").textContent="";
-  const chkFw=$("chk_fw").checked,chkFlash=$("chk_flash").checked;
-  const fwBin=state.fw.firmware?{name:state.fw.firmware.name,data:state.fw.firmware.bytes}:null;
-  const fwTotal=haveFw?Object.keys(state.fw).length:0;
-  const sndTotal=state.wavs.length;
-  const prog=(w,t,type)=>{if(type==="звуков")setExtFiles(w,t);else setChipFiles(w,t);};
-  try{
-    let provUsed=false;
-    if(state.wavs.length||fwBin){
-      setStep("порт");
-      try{
-        await provSession(fwBin,state.wavs,prog);
-        provUsed=true;
-      }catch(e){log("PROV: "+e.message,"warn");cleanupPort();}
-    }
-    if(!provUsed&&haveFw){
-      setStep("загрузчик");
-      await holdSync();
-      await attachSpi();
-      let fwWritten=0;
-      const order=["bootloader","partitions","ota","firmware"];
-      for(const role of order){
-        const item=state.fw[role];if(!item)continue;
-        setStep(role);
-        await flashRegion(role,item.bytes,OFF[role]);
-        fwWritten++;setChipFiles(fwWritten,fwTotal);
-      }
-      /* verification */
-      if(chkFw||chkFlash){
-        setStep("проверка");
-        const roles=chkFw&&chkFlash?order:(chkFw?["firmware"]:["partitions","ota"]);
-        for(const role of roles){
-          const item=state.fw[role];if(!item)continue;
-          const fileMd5=md5(item.bytes);
-          const flashMd5hex=await flashMd5(OFF[role],item.bytes.length);
-          if(fileMd5===flashMd5hex){log("OK проверка "+role,"ok");}
-          else{throw new Error("проверка "+role+" не совпала");}
-        }
-      }
-      setStep("перезагрузка");
-      await sendCommand(CMD_FLASH_END,new Uint8Array([0,0,0,0]),0,5000);
-      log("прошито, перезагрузка","ok");
-      cleanupPort();await sleep(2500);
-      if(state.wavs.length){
-        setStep("звуки");
-        await provSession(null,state.wavs,prog);
-      }
-    }else if(!provUsed&&!haveFw){
-      throw new Error("нет связи с чипом");
-    }
-    setDone();
-    log("всё прошито","ok");
+    const s = await (await fetch("/api/status",{cache:"no-store"})).json();
+    $("st_port").textContent = s.port ? (s.port+" (ESP32-S3)") : "не найдена";
+    $("st_idf").textContent  = s.idf ? s.idf : "не установлен (для прошивки не нужен)";
+    $("st_flasher").textContent = (s.flasher === "esptool") ? "esptool (с проверкой хеша)" : "ROM-скрипт (без ESP-IDF)";
+    $("st_fw").textContent   = (s.firmware||0)+" файл(ов) — "+(s.fwDir||"release\\flash_download_tool");
+    $("st_snd").textContent  = (s.sounds||0)+" звук(ов)"+(s.sndDir?(" — "+s.sndDir):" (папка SOUND не найдена)");
+    setAlert("", "");
+    if((s.firmware||0) === 0) setAlert("Нет файлов прошивки. Соберите firmware\\build_flash_tool_files.bat.","warn");
+    else if(!s.port) setAlert("Плата не найдена — подключите USB.","warn");
   }catch(e){
-    log("ошибка: "+e.message,"err");
-    $("step").textContent="ошибка";
-  }finally{
-    opActive=false;$("btn_run").disabled=false;
-    cleanupPort();await detectPort();
+    setAlert("Нет связи с панелью. Откройте страницу через web_flasher\\start_flasher.bat.","warn");
+    $("st_port").textContent="—"; $("st_idf").textContent="—"; $("st_fw").textContent="—"; $("st_snd").textContent="—";
   }
 }
 
-/* ---------- wiring ---------- */
-$("btn_fw").addEventListener("click",()=>$("pick_fw").click());
-$("btn_snd").addEventListener("click",()=>$("pick_snd").click());
-$("pick_fw").addEventListener("change",async()=>{
-  const files=Array.from($("pick_fw").files);
-  if(!files.length)return;
-  showFwPath(files);
-  state.fw=await scanFirmwareFolder(files);
-  const roles=Object.keys(state.fw);
-  log("прошивка: "+roles.join(", "),"info");
-  if(!port)await autoOpenIdle();
-});
-$("pick_snd").addEventListener("change",async()=>{
-  const files=Array.from($("pick_snd").files).filter(f=>f.name.toLowerCase().endsWith(".wav"));
-  state.wavs=files.sort((a,b)=>a.name.localeCompare(b.name,"ru"));
-  showSndPath(files);
-  log("звуки: "+files.length+" файлов","info");
-  if(!port)await autoOpenIdle();
-});
-$("btn_run").addEventListener("click",runAll);
-$("btn_log").addEventListener("click",()=>{$("log").style.display=$("log").style.display==="none"?"block":"none";});
-window.addEventListener("load",()=>{
-  if(!navigator.serial){log("нет Web Serial (Chrome/Edge)","err");return;}
-  navigator.serial.addEventListener("disconnect",()=>{
-    if(!port)return;
-    portDead=true;cleanupPort();
-    if(opActive){if(!disconnectLogged){disconnectLogged=true;log("порт разорван","warn");}}
-    else{autoOpenBlocked=true;detectPort();}
-  });
-  navigator.serial.addEventListener("connect",()=>{if(!opActive)autoOpenIdle();});
-  autoOpenIdle();
-});
+let running=false;
+async function run(action, label){
+  if(running) return;
+  running=true; setButtons(false);
+  $("log").textContent=""; $("status").textContent="Выполняется: "+label+" …";
+  try{
+    const r = await fetch("/api/run?action="+encodeURIComponent(action),{cache:"no-store"});
+    const j = await r.json();
+    if(!j.id) throw new Error("скрипт не запущен");
+    let pos=0, done=false, code=null;
+    while(!done){
+      await sleep(400);
+      const s = await (await fetch("/api/state?pos="+pos,{cache:"no-store"})).json();
+      if(s.text) logAppend(s.text);
+      pos=s.pos; done=s.done; code=s.code;
+      if(!running) break;
+    }
+    $("status").textContent = "Завершено" + (code===0 ? " успешно." : (code===null ? "." : " (код "+code+")."));
+    if(code!==0) setAlert("Скрипт завершился с кодом "+code+" — смотрите вывод.","warn");
+  }catch(e){
+    logAppend("\n[ошибка панели] "+e.message+"\n");
+    $("status").textContent="Ошибка панели";
+  }finally{
+    running=false; setButtons(true); refreshStatus();
+  }
+}
+
+$("btn_refresh").addEventListener("click", refreshStatus);
+$("btn_ota").addEventListener("click", ()=>run("ota","Создать OTA"));
+$("btn_flash").addEventListener("click", ()=>run("flash","Прошить"));
+$("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds","Прошить + звуки"));
+window.addEventListener("load", refreshStatus);
 </script>
 </body>
 </html>

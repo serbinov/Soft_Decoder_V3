@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-30 (v0.9) — feat(flasher): reliable esptool flashing, web control panel, cleanup
 - 2026-09-30 (v0.9) — fix: resolve review CRITICAL/HIGH (REV-A2/S1/W1/M2/M3)
 - 2026-09-30 (v0.9) — docs: verify and fix partition/dependency references
 - 2026-09-30 (v0.9) — chore(build): migrate to ESP-IDF 6.0, drop PlatformIO, add VS Code setup

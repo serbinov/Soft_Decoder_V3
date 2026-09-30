@@ -258,31 +258,51 @@ function Read-Text-Until($sp, [string]$marker, [int]$timeoutMs) {
     $buf = ""
     while ([Environment]::TickCount -lt $deadline) {
         try { $buf += $sp.ReadExisting() } catch { }
-        if ($buf.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) { return $true }
+        if ($buf.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) { $script:lastText = $buf; return $true }
         Start-Sleep -Milliseconds 30
     }
+    $script:lastText = $buf
     return $false
+}
+
+# Short readable form of whatever the device last sent (for diagnostics).
+function Format-Rx {
+    $t = ($script:lastText -replace "[\r\n]+", " ").Trim()
+    if ($t.Length -gt 160) { $t = $t.Substring($t.Length - 160) }
+    if (-not $t) { return "<пусто>" }
+    return $t
 }
 
 function Upload-Sounds($sp, [string]$dir) {
     if (-not (Test-Path $dir)) { Write-Warn "sound folder not found: $dir"; return }
     $files = @(Get-ChildItem -LiteralPath $dir -Filter *.wav | Sort-Object Name)
     if ($files.Count -eq 0) { Write-Warn "no WAV files in $dir"; return }
-    Write-Info ("{0} sound files -> slots 1..{0}" -f $files.Count)
+    $total = ($files | Measure-Object Length -Sum).Sum
+    Write-Info ("{0} sound files, {1:N0} B total -> slots 1..{0}" -f $files.Count, $total)
 
     # The firmware erases the external NOR after PROV, so it first asks for a
     # confirmation (PROV-CONFIRM?) that we must answer with PROV-CONFIRM.
+    Write-Info "asking the app to enter provisioning (PROV)..."
     $started = $false
-    for ($i = 0; $i -lt 240 -and -not $started; $i++) {
-        try { $sp.Write("PROV`n") } catch { }
-        if (Read-Text-Until $sp "PROV-CONFIRM?" 1500) {
+    for ($i = 0; $i -lt 30 -and -not $started; $i++) {
+        try { $sp.DiscardInBuffer(); $sp.Write("PROV`n") } catch { }
+        if (Read-Text-Until $sp "PROV-CONFIRM?" 1200) {
+            Write-Info "  app requires confirmation -> sending PROV-CONFIRM"
             try { $sp.Write("PROV-CONFIRM`n") } catch { }
-            if (Read-Text-Until $sp "PROV-OK" 2000) { $started = $true }
+            if (Read-Text-Until $sp "PROV-OK" 4000) { $started = $true }
+            else { Write-Warn ("  attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) }
+        } else {
+            Write-Info ("  attempt {0}: no answer yet (got: {1})" -f ($i + 1), (Format-Rx))
         }
     }
-    if (-not $started) { Write-Err "firmware did not enter provisioning"; return }
-
+    if (-not $started) {
+        Write-Err "firmware did not enter provisioning - the app is not answering on the port."
+        Write-Warn "  check that the app is running (boot log above) and the port is not busy,"
+        Write-Warn "  then run 'Flash + sounds' again."
+        return
+    }
     Write-Ok "provisioning started"
+
     Start-Sleep -Milliseconds 300
     $sp.BaudRate = 921600
     $sp.DiscardInBuffer()
@@ -290,31 +310,42 @@ function Upload-Sounds($sp, [string]$dir) {
     $slot = 1
     foreach ($f in $files) {
         $len = $f.Length
-        Write-Info ("slot {0}: {1} ({2} B)" -f $slot, $f.Name, $len)
+        Write-Info ("slot {0}: {1} ({2:N0} B)" -f $slot, $f.Name, $len)
         $sp.Write(("PUT {0} {1} {2}`n" -f $slot, $len, $f.Name))
-        if (-not (Read-Text-Until $sp "PUT-OK" 60000)) { Write-Err "no PUT-OK slot $slot"; return }
+        if (-not (Read-Text-Until $sp "PUT-OK" 60000)) {
+            Write-Err ("no PUT-OK slot {0} (got: {1})" -f $slot, (Format-Rx)); return
+        }
 
         $fs = [System.IO.File]::OpenRead($f.FullName)
         $chunk = New-Object byte[] 4096
         $remaining = $len
+        $sent = 0
         try {
             while ($remaining -gt 0) {
                 $n = $fs.Read($chunk, 0, [Math]::Min(4096, [int]$remaining))
                 $sp.Write($chunk, 0, $n)
                 $remaining -= $n
+                $sent += $n
+                if ($len -ge 40960 -and (($sent % 20480) -lt 4096)) {
+                    Write-Host ("    {0}%" -f [int]($sent * 100 / $len))
+                }
                 if ($remaining -gt 0 -and -not (Read-Text-Until $sp "CHUNK" 30000)) {
-                    Write-Err "data ack timeout slot $slot"; $fs.Dispose(); return
+                    Write-Err ("data ack timeout slot {0} at {1}/{2} B (got: {3})" -f $slot, $sent, $len, (Format-Rx))
+                    $fs.Dispose(); return
                 }
             }
         } finally { $fs.Dispose() }
-        if (-not (Read-Text-Until $sp "FILE-OK" 60000)) { Write-Err "no FILE-OK slot $slot"; return }
-        Write-Ok ("slot {0}: {1}" -f $slot, $f.Name)
+        if (-not (Read-Text-Until $sp "FILE-OK" 60000)) {
+            Write-Err ("no FILE-OK slot {0} (got: {1})" -f $slot, (Format-Rx)); return
+        }
+        Write-Ok ("slot {0}: {1} uploaded" -f $slot, $f.Name)
         $slot++
     }
 
+    Write-Info "finalizing (DONE)..."
     try { $sp.Write("DONE`n") } catch { }
-    if (Read-Text-Until $sp "DONE-OK" 15000) { Write-Ok "sounds uploaded, device restarting" }
-    else { Write-Warn "DONE-OK not received" }
+    if (Read-Text-Until $sp "DONE-OK" 20000) { Write-Ok "sounds uploaded, device restarting" }
+    else { Write-Warn ("DONE-OK not received (got: {0})" -f (Format-Rx)) }
 }
 
 # =============================================================

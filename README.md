@@ -136,7 +136,7 @@ firmware/            исходники прошивки и документац
   web_ui.html        исходник веб-страницы (сборка генерирует web_html.h)
   idf_build.ps1      сборка/прошивка через idf.py
 release/             собранные образы (ADDITIPUS_AURA-X_v<ver>.bin)
-web_flasher/         веб-flasher (Web Serial) для прошивки из браузера
+web_flasher/         веб-панель (статус/настройка и запуск скриптов): start_flasher.bat
 .vscode/             конфигурация VS Code (задачи, IntelliSense, отладка)
 setup.ps1            автонастройка окружения (ESP-IDF, .idf_path, VS Code)
 .kilo/               агенты/команды код-ревью (см. .kilo/agent, .kilo/command)

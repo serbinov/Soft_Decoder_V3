@@ -5,7 +5,7 @@
 > ранним версиям.
 
 Read-only ревью first-party кода (`components/`, `main/`) с последующими
-исправлениями. Исходный план: `.kilo/plans/1790518367801-firmware-code-review-agents-and-fixes.md`.
+исправлениями.
 Агенты ревью: `.kilo/agent/review-*.md` (оркестратор `review-lead`, команда
 `/review-firmware`).
 

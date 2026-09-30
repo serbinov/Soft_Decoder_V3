@@ -40,10 +40,17 @@ function ReadUntil([string]$marker, [int]$timeoutMs) {
     $buf = ""
     while ([Environment]::TickCount -lt $deadline) {
         try { $buf += $sp.ReadExisting() } catch { }
-        if ($buf.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) { return $true }
+        if ($buf.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) { $script:lastText = $buf; return $true }
         Start-Sleep -Milliseconds 30
     }
+    $script:lastText = $buf
     return $false
+}
+function Format-Rx {
+    $t = ($script:lastText -replace "[\r\n]+", " ").Trim()
+    if ($t.Length -gt 160) { $t = $t.Substring($t.Length - 160) }
+    if (-not $t) { return "<empty>" }
+    return $t
 }
 
 # 1. Send "PROV" to start provisioning in-place. The firmware's background
@@ -52,17 +59,21 @@ function ReadUntil([string]$marker, [int]$timeoutMs) {
 #    host link never drops mid-protocol. Because the next step erases the
 #    external NOR, the firmware replies with "PROV-CONFIRM?" and waits for an
 #    explicit "PROV-CONFIRM" line; "PROV-OK" follows only after that.
-Write-Host "[INFO] Sending PROV (starting provisioning)..."
+Write-Host "[INFO] Asking the app to enter provisioning (PROV)..."
 $started = $false
-for ($i = 0; $i -lt 240 -and -not $started; $i++) {
-    try { $sp.Write("PROV`n") } catch { }
-    if (ReadUntil "PROV-CONFIRM?" 1500) {
+for ($i = 0; $i -lt 30 -and -not $started; $i++) {
+    try { $sp.DiscardInBuffer(); $sp.Write("PROV`n") } catch { }
+    if (ReadUntil "PROV-CONFIRM?" 1200) {
+        Write-Host "[INFO]   app requires confirmation -> sending PROV-CONFIRM"
         try { $sp.Write("PROV-CONFIRM`n") } catch { }
-        if (ReadUntil "PROV-OK" 2000) { $started = $true }
+        if (ReadUntil "PROV-OK" 4000) { $started = $true }
+        else { Write-Host ("[WARN]   attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) -ForegroundColor Yellow }
+    } else {
+        Write-Host ("[INFO]   attempt {0}: no answer yet (got: {1})" -f ($i + 1), (Format-Rx))
     }
 }
 if (-not $started) {
-    Write-Host "[ERROR] Firmware did not enter provisioning (check power/port)." -ForegroundColor Red
+    Write-Host "[ERROR] Firmware did not enter provisioning (is the app running? is the port free?)." -ForegroundColor Red
     $sp.Close(); exit 1
 }
 Write-Host "[OK] Provisioning started (erase + format)" -ForegroundColor Green

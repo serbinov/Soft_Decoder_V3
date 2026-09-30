@@ -353,8 +353,7 @@ powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -SkipBemf
 ## Батч 6 — исправления по итогам код-ревью (агенты `.kilo/agent/review-*`)
 
 - Статус: ГОТОВО (сборка + тесты + покрытие). Не проверено на железе.
-- Источник: `.kilo/plans/1790518367801-firmware-code-review-agents-and-fixes.md`,
-  отчёт: `CODE_REVIEW_REPORT.md`.
+- Отчёт: `CODE_REVIEW_REPORT.md`.
 - Проверка:
   - `test\run_tests.ps1` — ALL TEST SUITES PASSED (14 наборов, 473 теста).
   - `test\coverage.ps1` — first-party **100,0 %** (4364/4364 строк).

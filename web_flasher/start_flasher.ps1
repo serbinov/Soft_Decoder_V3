@@ -184,6 +184,7 @@ $mime = @{
     ".css"  = "text/css; charset=utf-8"; ".json" = "application/json; charset=utf-8"
     ".txt"  = "text/plain; charset=utf-8"; ".md" = "text/plain; charset=utf-8"
     ".bin"  = "application/octet-stream"; ".wav" = "audio/wav"; ".ico" = "image/x-icon"
+    ".svg"  = "image/svg+xml"; ".png" = "image/png"; ".jpg" = "image/jpeg"
 }
 $repoFull = [IO.Path]::GetFullPath($repo)
 $sndFull  = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }

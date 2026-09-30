@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-01 (v0.9) — feat(web_flasher): add SVG favicon
 - 2026-10-01 (v0.9) — feat(web_flasher): colored log, persistent statistics, auto-stop, adaptive UI
 - 2026-09-30 (v0.9) — feat(flasher): reliable esptool flashing, web control panel, cleanup
 - 2026-09-30 (v0.9) — fix: resolve review CRITICAL/HIGH (REV-A2/S1/W1/M2/M3)

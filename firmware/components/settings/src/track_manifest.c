@@ -34,6 +34,17 @@ static const char *TAG = "manifest";
 #define MANIFEST_VERSION 2
 #define MANIFEST_LINE_MAX 256
 
+/* The manifest read/write workspaces are several kilobytes (tracks + cats +
+ * function map + bindings). Keeping them on the stack overflows the 8 KB
+ * provisioning-listener stack and the 16 KB app_main stack during NVS-loss
+ * recovery, so they are heap-allocated per call (REV-S1). */
+typedef struct {
+    settings_track_t    tracks[SETTINGS_MAX_TRACKS];
+    uint8_t             cats[SETTINGS_MAX_TRACKS];
+    settings_func_map_t fmap[SETTINGS_FUNC_MAP_COUNT];
+    func_binding_t      binds[FUNC_BIND_MAX];
+} manifest_ws_t;
+
 /* Set while restoring from the manifest so the NVS writes it performs do not
  * immediately rewrite the file being read. */
 static bool s_manifest_loading;
@@ -70,21 +81,22 @@ esp_err_t settings_manifest_sync(void)
         return ESP_OK;
     }
 
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    manifest_ws_t *ws = malloc(sizeof(*ws));
+    if (ws == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
     size_t tcount = 0;
-    (void)settings_tracks_load(tracks, &tcount);
+    (void)settings_tracks_load(ws->tracks, &tcount);
 
-    uint8_t cats[SETTINGS_MAX_TRACKS];
     size_t ccount = 0;
-    (void)settings_track_cats_load(cats, &ccount);
+    (void)settings_track_cats_load(ws->cats, &ccount);
 
-    settings_func_map_t fmap[SETTINGS_FUNC_MAP_COUNT];
     size_t fcount = 0;
-    (void)settings_func_map_load(fmap, &fcount);
+    (void)settings_func_map_load(ws->fmap, &fcount);
 
-    func_binding_t binds[FUNC_BIND_MAX];
     size_t bcount = 0;
-    (void)settings_func_bind_load(binds, &bcount);
+    (void)settings_func_bind_load(ws->binds, &bcount);
 
     /* Write to a temp file and rename it over the real manifest: fopen("w")
      * truncates the live file, so a reset or power loss mid-write would leave a
@@ -93,6 +105,7 @@ esp_err_t settings_manifest_sync(void)
     (void)snprintf(tmp, sizeof(tmp), "%s.tmp", MANIFEST_PATH);
     FILE *f = fopen(tmp, "w");
     if (f == NULL) {
+        free(ws);
         return ESP_ERR_NOT_FOUND; /* storage not mounted: nothing to persist */
     }
 
@@ -101,24 +114,24 @@ esp_err_t settings_manifest_sync(void)
     for (size_t i = 0; i < tcount && i < SETTINGS_MAX_TRACKS; ++i) {
         char file[SETTINGS_TRACK_FILE_MAX];
         char label[SETTINGS_TRACK_LABEL_MAX];
-        (void)snprintf(file, sizeof(file), "%s", tracks[i].file);
-        (void)snprintf(label, sizeof(label), "%s", tracks[i].label);
+        (void)snprintf(file, sizeof(file), "%s", ws->tracks[i].file);
+        (void)snprintf(label, sizeof(label), "%s", ws->tracks[i].label);
         sanitize_field(file);
         sanitize_field(label);
-        uint8_t cat = (tracks[i].slot >= 1U && tracks[i].slot <= ccount)
-                          ? cats[tracks[i].slot - 1U]
-                          : (uint8_t)SETTINGS_TRACK_CAT_DEFAULT_SLOT(tracks[i].slot);
-        ok = ok && (fprintf(f, "T;%u;%u;%u;%s;%s\n", (unsigned)tracks[i].slot,
-                            (unsigned)cat, tracks[i].enabled ? 1U : 0U, file, label) >= 0);
+        uint8_t cat = (ws->tracks[i].slot >= 1U && ws->tracks[i].slot <= ccount)
+                          ? ws->cats[ws->tracks[i].slot - 1U]
+                          : (uint8_t)SETTINGS_TRACK_CAT_DEFAULT_SLOT(ws->tracks[i].slot);
+        ok = ok && (fprintf(f, "T;%u;%u;%u;%s;%s\n", (unsigned)ws->tracks[i].slot,
+                            (unsigned)cat, ws->tracks[i].enabled ? 1U : 0U, file, label) >= 0);
     }
     for (size_t i = 0; i < fcount && i < SETTINGS_FUNC_MAP_COUNT; ++i) {
         ok = ok && (fprintf(f, "F;%u;%u;%u;%u;%u;%u\n", (unsigned)i,
-                            (unsigned)fmap[i].slot_a, (unsigned)fmap[i].slot_b,
-                            (unsigned)fmap[i].aux_mask, (unsigned)fmap[i].dir,
-                            (unsigned)fmap[i].speed) >= 0);
+                            (unsigned)ws->fmap[i].slot_a, (unsigned)ws->fmap[i].slot_b,
+                            (unsigned)ws->fmap[i].aux_mask, (unsigned)ws->fmap[i].dir,
+                            (unsigned)ws->fmap[i].speed) >= 0);
     }
     for (size_t i = 0; i < bcount && i < FUNC_BIND_MAX; ++i) {
-        const func_binding_t *b = &binds[i];
+        const func_binding_t *b = &ws->binds[i];
         ok = ok && (fprintf(f, "B;%u;%u;%u;%u;%u;%u;%u;%u;%u;%u;%u;%u\n", (unsigned)i,
                             (unsigned)b->fn, (unsigned)b->target_type,
                             (unsigned)b->target_id, (unsigned)b->dir, (unsigned)b->state,
@@ -130,6 +143,7 @@ esp_err_t settings_manifest_sync(void)
     int rc_flush = fflush(f);
     int rc_sync = fsync(fileno(f));
     int rc_close = fclose(f);
+    free(ws);
     if (!ok || rc_flush != 0 || rc_sync != 0 || rc_close != 0) { (void)remove(tmp); return ESP_FAIL; }
     if (rename(tmp, MANIFEST_PATH) != 0) {
         /* Windows rename() refuses to replace an existing file. */
@@ -146,16 +160,20 @@ esp_err_t settings_manifest_load(void)
         return ESP_ERR_NOT_FOUND;
     }
 
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
-    size_t tcount = 0;
-    uint8_t cats[SETTINGS_MAX_TRACKS];
-    for (size_t i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
-        cats[i] = (uint8_t)SETTINGS_TRACK_CAT_DEFAULT_SLOT((uint8_t)(i + 1U));
+    /* Aggregates on the heap (see manifest_ws_t) to keep this frame small
+     * (REV-S1). */
+    manifest_ws_t *ws = malloc(sizeof(*ws));
+    if (ws == NULL) {
+        (void)fclose(f);
+        return ESP_ERR_NO_MEM;
     }
-    settings_func_map_t fmap[SETTINGS_FUNC_MAP_COUNT];
+
+    size_t tcount = 0;
+    for (size_t i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
+        ws->cats[i] = (uint8_t)SETTINGS_TRACK_CAT_DEFAULT_SLOT((uint8_t)(i + 1U));
+    }
     size_t fcount = 0;
-    (void)settings_func_map_load(fmap, &fcount); /* defaults + overrides below */
-    func_binding_t binds[FUNC_BIND_MAX];
+    (void)settings_func_map_load(ws->fmap, &fcount); /* defaults + overrides below */
     size_t bcount = 0;
     bool have_fmap = false;
     bool have_bind = false;
@@ -181,28 +199,28 @@ esp_err_t settings_manifest_load(void)
             if (slot < 1U || slot > SETTINGS_MAX_TRACKS || tcount >= SETTINGS_MAX_TRACKS) {
                 continue;
             }
-            settings_track_t *t = &tracks[tcount];
+            settings_track_t *t = &ws->tracks[tcount];
             memset(t, 0, sizeof(*t));
             t->slot = (uint8_t)slot;
             t->enabled = strtoul(fields[3], NULL, 10) != 0U;
             (void)strncpy(t->file, fields[4], sizeof(t->file) - 1U);
             (void)strncpy(t->label, fields[5], sizeof(t->label) - 1U);
-            cats[slot - 1U] = (strtoul(fields[2], NULL, 10) != 0U) ? 1U : 0U;
+            ws->cats[slot - 1U] = (strtoul(fields[2], NULL, 10) != 0U) ? 1U : 0U;
             tcount++;
         } else if (fields[0][0] == 'F' && fields[0][1] == '\0' && n >= 7) {
             unsigned idx = (unsigned)strtoul(fields[1], NULL, 10);
             if (idx >= SETTINGS_FUNC_MAP_COUNT) {
                 continue;
             }
-            fmap[idx].slot_a = (uint8_t)strtoul(fields[2], NULL, 10);
-            fmap[idx].slot_b = (uint8_t)strtoul(fields[3], NULL, 10);
-            fmap[idx].aux_mask = (uint16_t)strtoul(fields[4], NULL, 10);
-            fmap[idx].dir = (uint8_t)strtoul(fields[5], NULL, 10);
-            fmap[idx].speed = (uint8_t)strtoul(fields[6], NULL, 10);
+            ws->fmap[idx].slot_a = (uint8_t)strtoul(fields[2], NULL, 10);
+            ws->fmap[idx].slot_b = (uint8_t)strtoul(fields[3], NULL, 10);
+            ws->fmap[idx].aux_mask = (uint16_t)strtoul(fields[4], NULL, 10);
+            ws->fmap[idx].dir = (uint8_t)strtoul(fields[5], NULL, 10);
+            ws->fmap[idx].speed = (uint8_t)strtoul(fields[6], NULL, 10);
             have_fmap = true;
         } else if (fields[0][0] == 'B' && fields[0][1] == '\0' && n >= 13 &&
                    bcount < FUNC_BIND_MAX) {
-            func_binding_t *b = &binds[bcount];
+            func_binding_t *b = &ws->binds[bcount];
             memset(b, 0, sizeof(*b));
             /* idx (fields[1]) mirrors the array position; the record is
              * appended in order so the slot is implicit. */
@@ -225,19 +243,20 @@ esp_err_t settings_manifest_load(void)
     (void)fclose(f);
 
     if (!magic) {
+        free(ws);
         return ESP_ERR_NOT_FOUND;
     }
 
     s_manifest_loading = true;
     if (tcount > 0U) {
-        (void)settings_tracks_save(tracks, tcount);
-        (void)settings_track_cats_save(cats, SETTINGS_MAX_TRACKS);
+        (void)settings_tracks_save(ws->tracks, tcount);
+        (void)settings_track_cats_save(ws->cats, SETTINGS_MAX_TRACKS);
     }
     if (have_fmap) {
-        (void)settings_func_map_save(fmap, SETTINGS_FUNC_MAP_COUNT);
+        (void)settings_func_map_save(ws->fmap, SETTINGS_FUNC_MAP_COUNT);
     }
     if (have_bind) {
-        (void)settings_func_bind_save(binds, bcount);
+        (void)settings_func_bind_save(ws->binds, bcount);
     }
     s_manifest_loading = false;
 
@@ -246,11 +265,13 @@ esp_err_t settings_manifest_load(void)
          * Report NOT_FOUND so the caller rebuilds the track list from the audio
          * files without losing the function map/bindings (REV-ST1). */
         ESP_LOGW(TAG, "restored function metadata (no tracks) from %s", MANIFEST_PATH);
+        free(ws);
         return ESP_ERR_NOT_FOUND;
     }
 
     ESP_LOGW(TAG, "restored %u track(s)%s%s from %s", (unsigned)tcount,
              have_fmap ? " + function map" : "", have_bind ? " + bindings" : "",
              MANIFEST_PATH);
+    free(ws);
     return ESP_OK;
 }

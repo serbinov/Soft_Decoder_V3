@@ -175,13 +175,16 @@ esp_err_t sound_store_verify(const uint8_t *buf, size_t len, sound_scheme_t *out
         hdr.size != (uint16_t)sizeof(sound_scheme_t)) {
         return ESP_FAIL;
     }
-    /* The payload may be unaligned in an HTTP body: copy before checking. */
-    sound_scheme_t sc;
-    memcpy(&sc, buf + sizeof(hdr), sizeof(sc));
-    if (hdr.crc != crc32_bytes((const uint8_t *)&sc, sizeof(sc))) {
+    /* The payload may be unaligned in an HTTP body: copy straight into the
+     * caller's buffer. A ~26 KB stack staging copy would overflow the 16 KB
+     * httpd stack that serves POST /api/sound/upload (REV-A2). On a CRC
+     * mismatch reset the buffer to the safe default so the caller never keeps
+     * unverified data. */
+    memcpy(out, buf + sizeof(hdr), sizeof(*out));
+    if (hdr.crc != crc32_bytes((const uint8_t *)out, sizeof(*out))) {
+        (void)sound_store_default(out);
         return ESP_FAIL;
     }
-    *out = sc;
     return ESP_OK;
 }
 

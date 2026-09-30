@@ -55,6 +55,9 @@ static void applied_publish(uint8_t speed128, bool forward)
 
 static uint32_t s_ramp_acc;
 static bool s_was_stopped = true;
+/* Set by motor_emergency_stop() and consumed by motor_tick() so a fail-safe
+ * stop from another task is not undone by the next duty write (REV-M3). */
+static volatile bool s_stop_requested;
 static uint32_t s_kick_duty;
 static uint8_t s_kick_left;
 
@@ -573,6 +576,20 @@ static void motor_tick(void)
     /* During calibration the cal task owns the bridge directly, so the motor
      * task must not overwrite the duty between samples. */
     if (!s_cal_active) {
+        if (s_stop_requested) {
+            /* A fail-safe stop from another task must win over this tick's
+             * ramped value: force the bridge off and drop the stale state
+             * (REV-M3). */
+            s_stop_requested = false;
+            duty_final = 0;
+            s_applied_speed = 0;
+            s_applied_forward = true;
+            s_ramp_acc = 0;
+            s_kick_left = 0;
+            s_kick_duty = 0;
+            s_was_stopped = true;
+            applied_publish(0, true);
+        }
         apply_pwm(duty_final, s_applied_forward);
         s_last_duty = duty_final;
     }
@@ -643,11 +660,21 @@ esp_err_t motor_init(void)
 
     s_bemf_mutex = xSemaphoreCreateMutex();
     /* PIN_BEMF1=GPIO4 -> ADC1_CH3, PIN_BEMF2=GPIO5 -> ADC1_CH4,
-     * PIN_RAIL_SENSE=GPIO6 -> ADC1_CH5. */
-    (void)motor_adc_config_channel(PIN_BEMF1);
-    (void)motor_adc_config_channel(PIN_BEMF2);
-    (void)motor_adc_config_channel(PIN_RAIL_SENSE);
-    s_bemf_adc_ready = true;
+     * PIN_RAIL_SENSE=GPIO6 -> ADC1_CH5. Enable BEMF only once every channel is
+     * configured: otherwise the sample window would coast the bridge for 1 ms
+     * every tick while reading -1, silently losing ~10 % duty (REV-M2). */
+    esp_err_t adc_err = motor_adc_config_channel(PIN_BEMF1);
+    if (adc_err == ESP_OK) {
+        adc_err = motor_adc_config_channel(PIN_BEMF2);
+    }
+    if (adc_err == ESP_OK) {
+        adc_err = motor_adc_config_channel(PIN_RAIL_SENSE);
+    }
+    if (adc_err == ESP_OK) {
+        s_bemf_adc_ready = true;
+    } else {
+        ESP_LOGW(TAG, "ADC init failed (%s): BEMF disabled", esp_err_to_name(adc_err));
+    }
 
     load_pid();
     bemf_cal_reload();
@@ -701,6 +728,9 @@ void motor_stop(void)
  * the motor task is suspected to be stuck. */
 void motor_emergency_stop(void)
 {
+    /* Raise the flag before touching the bridge so motor_tick() cannot re-drive
+     * a nonzero duty for this stop (REV-M3). */
+    s_stop_requested = true;
     apply_pwm(0, true);
     s_target_speed = 0;
     s_applied_speed = 0;

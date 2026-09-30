@@ -131,6 +131,7 @@ void setUp(void)
     s_cal_task = NULL;
     s_pid_reload = 0;
     s_motor_iter_cap = 0;
+    s_stop_requested = false;
 
     TEST_ASSERT_EQUAL(ESP_OK, motor_init());
     TEST_ASSERT_EQUAL(ESP_OK, motor_set_rail_voltage_mv(0));

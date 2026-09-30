@@ -84,12 +84,24 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
     }
     memset(out, 0, sizeof(*out));
 
-    settings_track_t existing[SETTINGS_MAX_TRACKS];
+    /* Multi-kilobyte aggregates live on the heap: as stack locals they exceed
+     * the 16 KB app_main stack on the recovery path (REV-S1). */
+    settings_track_t *existing = malloc((size_t)SETTINGS_MAX_TRACKS * sizeof(*existing));
+    char (*rel)[SETTINGS_TRACK_FILE_MAX] =
+        malloc((size_t)SETTINGS_MAX_TRACKS * SETTINGS_TRACK_FILE_MAX);
+    settings_track_t *tracks = malloc((size_t)SETTINGS_MAX_TRACKS * sizeof(*tracks));
+    if (existing == NULL || rel == NULL || tracks == NULL) {
+        ESP_LOGE(TAG, "recovery: out of memory");
+        free(existing);
+        free(rel);
+        free(tracks);
+        return;
+    }
+
     size_t count = 0;
     esp_err_t lerr = settings_tracks_load(existing, &count);
 
     /* Always list what is actually on the storage, for diagnosis. */
-    char rel[SETTINGS_MAX_TRACKS][SETTINGS_TRACK_FILE_MAX];
     size_t na = (audio_dir != NULL) ? scan_wavs(audio_dir, "audio/", rel, SETTINGS_MAX_TRACKS) : 0;
     size_t nr = 0;
     if (na == 0 && root_dir != NULL) {
@@ -105,7 +117,7 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
     if (lerr == ESP_OK && count > 0) {
         out->had_nvs = true;
         out->count = count;
-        return;
+        goto done;
     }
 
     /* NVS list is gone: restore it from the metadata manifest if present. */
@@ -114,17 +126,16 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
         (void)settings_tracks_load(existing, &rc);
         out->from_manifest = true;
         out->count = rc;
-        return;
+        goto done;
     }
 
     out->files_found = nf;
     if (nf == 0) {
-        return;
+        goto done;
     }
 
     qsort(rel, nf, sizeof(rel[0]), cmp_names); /* deterministic slots */
 
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
     bool used[SETTINGS_MAX_TRACKS + 1];
     memset(used, 0, sizeof(used));
     size_t n = 0;
@@ -172,4 +183,9 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
         out->rebuilt = true;
         out->count = n;
     }
+
+done:
+    free(existing);
+    free(rel);
+    free(tracks);
 }

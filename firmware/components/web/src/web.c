@@ -3184,6 +3184,13 @@ esp_err_t web_init(void)
     /* The engine may have loaded the (possibly empty) store before web_init
      * migrated it; hand it the authoritative list. */
     sound_reload_bindings();
+
+    /* Bring up the AUX outputs before restoring the saved per-channel level/
+     * effect: auxio_config() only programmes channels that auxio_init() has
+     * created, otherwise it fails and the values are overwritten with defaults
+     * (REV-W1). */
+    outputs_init();
+
     {
         size_t aux_count = 0;
         (void)settings_aux_cfg_load(s_aux_cfg, &aux_count);
@@ -3200,8 +3207,6 @@ esp_err_t web_init(void)
                                aux_effect_period(s_aux_cfg[i].effect));
         }
     }
-
-    outputs_init();
 
     esp_err_t err = wifi_start(&s_cfg);
     if (err != ESP_OK && s_cfg.wifi_mode != 0) {

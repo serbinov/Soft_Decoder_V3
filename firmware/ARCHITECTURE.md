@@ -260,7 +260,7 @@ first-party (`components/` + `main/`) — **100 % строк** (union по ст�
 Linux/CI.
 
 Заглушки с инъекцией отказов (`test_libs/teststubs/stubs.c`): `mock_sem_take_fail`,
-`mock_mutex_create_fail`, `mock_nvs_*`, `mock_task_create_*`, `mock_adc1_config_*`,
+`mock_mutex_create_fail`, `mock_nvs_*`, `mock_task_create_*`, `mock_adc_unit_new_ok`/`mock_adc_config_ok`, `mock_mcpwm_*`,
 `mock_i2s_*`, `mock_queue_*`, `mock_gpio_isr_install_err`, `mock_uart_*`,
 `mock_usbjtag_*`, `mock_ota_*`, `mock_spi_*`, `mock_flash_*`, `mock_lfs_*`,
 `mock_partition_register_err`, а также `mock_timer_now_us`/мок UART
@@ -362,7 +362,7 @@ firmware/
   fallback нет: без внешней NOR `storage_mount()` возвращает ошибку, но не
   фатален (`STORAGE_BACKEND_NONE`), звук просто отключён.
 - API: `storage_init/mount/format`, `storage_get_backend`, `storage_get_free_bytes`.
-- Зависимости: `spi_flash esp_partition esp_littlefs vfs driver nvs_flash pinmap esp_timer`.
+- Зависимости: `spi_flash esp_partition esp_littlefs vfs esp_driver_spi nvs_flash pinmap esp_timer`.
 - Задачи: нет.
 
 ### dcc (`components/dcc`)
@@ -374,7 +374,7 @@ firmware/
   Наружу — колбэки (скорость, функция, запись/чтение CV, reset).
 - API: `dcc_init`, `dcc_set_address/speed_step_mode/consist`, `dcc_reload_config`,
   `dcc_register_*_cb`, `dcc_last_packet_us`, `dcc_service_ack`.
-- Зависимости: `driver esp_timer pinmap`.
+- Зависимости: `esp_driver_gpio esp_timer pinmap`.
 - Задачи: **`dcc`**, стек 8192, prio 10, ядро 1; **`dcc_ack`**, стек 2048,
   prio 5 — выдаёт импульс service-mode ACK, чтобы задача разбора не блокировалась
   на 6 мс; пин ACK конфигурируется один раз в `dcc_init()`.
@@ -389,7 +389,7 @@ firmware/
   `motor_set_rail_voltage_mv`, `motor_bemf_lock/unlock`,
   `motor_bemf_cal_*`, `motor_set/get_bemf_enabled`, `motor_bemf_diag`,
   `motor_bemf_adc_dump`, `motor_bemf_coast_read`.
-- Зависимости: `driver pinmap settings`.
+- Зависимости: `esp_driver_ledc esp_driver_gpio esp_adc pinmap settings`.
 - Задачи: **`motor`** (стек 3072, prio 7, период 10 мс), **`bemf_cal`**
   (стек 3072, prio 6) — создаётся по запросу калибровки.
 
@@ -398,7 +398,7 @@ firmware/
 - Роль: непрерывно читает `PIN_RAIL_SENSE` (ADC1), кормит `motor_set_rail_voltage_mv()`
   и, в DC-режиме с управлением «Рельсы», задаёт скорость/направление по
   напряжению и полярности рельсов.
-- Зависимости: `driver settings motor web`.
+- Зависимости: `esp_driver_gpio settings motor web`.
 - Задачи: **`track_adc`**, стек 3072, prio 7, период 50 мс.
 
 ### audio (`components/audio`)
@@ -412,7 +412,7 @@ firmware/
   `audio_voice_set_rate` (permille 500..3000), `audio_voice_is_active/position`,
   `audio_voice_alloc/release`. Голоса 18/19 зарезервированы под звуковой движок.
 - Анти-щёлчок: линейный фейд 2 блока на старте/стопе (`s_fade_blocks`).
-- Зависимости: `driver pinmap esp_timer`.
+- Зависимости: `esp_driver_gpio esp_driver_i2s pinmap esp_timer`.
 - Задачи: **`audio_mix`**, стек 4096, prio 7, ядро 1 (блок 256 сэмплов ≈ 11.6 мс).
 
 ### sound (`components/sound`)
@@ -441,7 +441,7 @@ firmware/
   эффекты: steady, incandescent, Mars, ditch, beacon, strobe, firebox.
 - API: `auxio_init`, `auxio_set_enabled`, `auxio_set_output`,
   `auxio_set_effect`, `auxio_config`, `auxio_get_enabled`.
-- Зависимости: `driver pinmap`.
+- Зависимости: `esp_driver_ledc esp_driver_mcpwm pinmap`.
 - Задачи: **`aux_fx`**, стек 3072, prio 6, период 20 мс.
 
 ### web (`components/web`)
@@ -452,7 +452,7 @@ firmware/
   REST API, журнал событий (`/api/log`), OTA, аплоад/удаление звуков,
   применение функций/AUX/звуков, громкости.
 - Зависимости: `esp_http_server esp_wifi esp_netif esp_event esp_timer app_update
-  nvs_flash driver audio auxio motor settings storage pinmap dcc sound`.
+  nvs_flash esp_driver_gpio audio auxio motor settings storage pinmap dcc sound`.
 - Задачи (создаются в `web.c`/`httpd`):
   - **`dns_hijack`** (стек 4096, prio 9),
   - **`wifi_off`** (стек 3072, prio 4) — при `auto_off_min ≠ 0`,
@@ -491,7 +491,7 @@ firmware/
   (2) UART-консоль BEMF: `BEMF?`, `BEMF-HDR`, `BEMF=…`, `BEMF-RAW`, `BEMF-ADC`,
    `BEMF-COAST`, `BEMF-TEST`, `BEMF-CAL`, `BEMF-CLR`, `BEMF-CVSET`.
 - Роль (3): HIL-консоль `HIL-*` (в т.ч. `HIL-ENGINE`, `HIL-SCHEME-SPEED`).
-- Зависимости: `driver esp_timer esp_system app_update settings storage motor selftest sound`.
+- Зависимости: `esp_driver_uart esp_driver_usb_serial_jtag esp_timer esp_system app_update settings storage motor selftest sound`.
 - Задачи: **`prov_listen`**, стек 8192, prio 4.
 
 ### app_main (`main/app_main.c`)

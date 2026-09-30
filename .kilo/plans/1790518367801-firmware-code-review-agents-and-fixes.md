@@ -49,7 +49,7 @@
 | `.kilo/agent/review-web.md` | `components/web`, `web_ui.html` | длина тела/query, переполнения буферов, JSON-escape, парсинг чисел, path traversal, OTA-контейнер, auth/CSRF, утечки на ошибках, shared-state, стек httpd |
 | `.kilo/agent/review-storage.md` | `components/settings`, `components/storage` | NVS blob длина/CRC/версия, границы CV/слотов/AUX, атомарность манифеста, поведение без внешней NOR, гонки deferred-flush |
 | `.kilo/agent/review-media.md` | `components/audio`, `components/auxio`, `components/pinmap` | WAV-парсинг и ресемплер, границы эффектов, дескрипторы, overflow/underflow, валидация pinmap |
-| `.kilo/agent/review-rtos.md` | `main/app_main.c` + все `*/src/*.c` (кросс-домен), `sdkconfig*`, `partitions.csv`, `platformio.ini` | WDT/starvation/priority inversion, стеки задач, инвентарь shared-state, brownout, heap/PSRAM, порядок инициализации |
+| `.kilo/agent/review-rtos.md` | `main/app_main.c` + все `*/src/*.c` (кросс-домен), `sdkconfig*`, `partitions.csv` | WDT/starvation/priority inversion, стеки задач, инвентарь shared-state, brownout, heap/PSRAM, порядок инициализации |
 | `.kilo/agent/review-lead.md` | агрегатор | Запускает 6 доменных агентов, дедуплицирует, присваивает ID/приоритет, проверяет высокие находки по коду, формирует единый отчёт |
 
 Шаблон frontmatter (одинаковый для 6 доменных агентов, меняются `description`

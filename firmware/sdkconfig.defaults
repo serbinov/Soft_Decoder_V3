@@ -1,5 +1,5 @@
 # DCC decoder V3: baseline ESP-IDF defaults
-# Custom partition table (single app + internal SPIFFS fallback).
+# Custom partition table (dual-slot OTA; no internal SPIFFS/userdata).
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
@@ -40,7 +40,7 @@ CONFIG_HTTPD_MAX_URI_LEN=512
 # 4MB flash used by the partition table.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-# LittleFS (internal fallback + external W25Q128, 4 KB erase blocks).
+# LittleFS (external W25Q128, 4 KB erase blocks).
 # prog/read size match the flash page (256 B) and a larger cache cuts metadata
 # re-reads. Wear-leveling stays on (default 512 block cycles).
 CONFIG_LITTLEFS_PAGE_SIZE=256

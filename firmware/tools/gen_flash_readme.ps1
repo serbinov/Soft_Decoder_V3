@@ -36,9 +36,9 @@ $totalKiB = ($rows | Measure-Object -Property SizeKiB -Sum).Sum
 $fw = $rows | Where-Object { $_.Sub -eq "ota_0" } | Select-Object -First 1
 $fwOffset = if ($fw) { $fw.Offset } else { "0x20000" }
 $phy = $rows | Where-Object { $_.Sub -eq "phy" } | Select-Object -First 1
-$phyOffset = if ($phy) { $phy.Offset } else { "0x00f000" }
+$phyOffset = if ($phy) { $phy.Offset } else { "0x019000" }
 $ota = $rows | Where-Object { $_.Sub -eq "ota" } | Select-Object -First 1
-$otaOffset = if ($ota) { $ota.Offset } else { "0x10000" }
+$otaOffset = if ($ota) { $ota.Offset } else { "0x01a000" }
 
 $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine("================================================================")
@@ -85,7 +85,7 @@ foreach ($r in $rows) {
 [void]$sb.AppendLine("    продолжает работать (мотор, DCC, веб), но без звуков.")
 [void]$sb.AppendLine("  * Перед записью на плату с ПРЕЖНЕЙ разметкой обязательно выполните ERASE")
 [void]$sb.AppendLine("    (полная очистка flash): таблица разделов изменилась, и старая область")
-[void]$sb.AppendLine("    userdata (0x1f0000) теперь попадает внутрь нового слота ota_1.")
+[void]$sb.AppendLine("    userdata (0x1f0000) теперь перекрывается новыми OTA-слотами (ota_0/ota_1).")
 [void]$sb.AppendLine(("  * phy_init ({0}) не загружается: RF-калибровка генерируется прошивкой." -f $phyOffset))
 [void]$sb.AppendLine("  * ota_data_initial.bin сбрасывает выбор загрузки на ota_0.")
 [void]$sb.AppendLine("  * После прошивки нажмите START; по завершении плата перезагрузится.")

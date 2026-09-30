@@ -7,3 +7,9 @@
 # OS metadata (Windows)
 Thumbs.db
 desktop.ini
+
+# Flasher panel statistics (machine-local history)
+web_flasher/stats.json
+
+# Generated OTA image (created on demand by web_flasher\make_ota.ps1)
+release/*_OTA.bin

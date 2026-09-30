@@ -128,9 +128,11 @@ foreach ($file in $files) {
 
 # 4. Done.
 try { $sp.Write("DONE`n") } catch { }
-if (ReadUntil "DONE-OK" 15000) {
-    Write-Host "[OK] All sounds uploaded. Device restarting." -ForegroundColor Green
+# On DONE the firmware acks and immediately restarts; the ack can be lost to the
+# USB re-enumeration. That is not an error - every slot was already FILE-OK'd.
+if (ReadUntil "DONE-OK" 8000) {
+    Write-Host "[OK] Sounds uploaded, device restarting." -ForegroundColor Green
 } else {
-    Write-Host "[WARN] DONE-OK not received" -ForegroundColor Yellow
+    Write-Host "[INFO] Sounds uploaded; device restarts (DONE-OK not seen - ack may be lost on reboot)." -ForegroundColor Cyan
 }
 $sp.Close()

@@ -344,8 +344,10 @@ function Upload-Sounds($sp, [string]$dir) {
 
     Write-Info "finalizing (DONE)..."
     try { $sp.Write("DONE`n") } catch { }
-    if (Read-Text-Until $sp "DONE-OK" 20000) { Write-Ok "sounds uploaded, device restarting" }
-    else { Write-Warn ("DONE-OK not received (got: {0})" -f (Format-Rx)) }
+    # On DONE the firmware acks and immediately restarts; the ack can be lost to
+    # the USB re-enumeration, which is not an error (every slot was already acked).
+    if (Read-Text-Until $sp "DONE-OK" 8000) { Write-Ok "sounds uploaded, device restarting" }
+    else { Write-Info "sounds uploaded; device is restarting (DONE-OK not seen)" }
 }
 
 # =============================================================

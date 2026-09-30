@@ -7,11 +7,12 @@
 <style>
   *{box-sizing:border-box;margin:0}
   body{font:14px/1.45 "Segoe UI",system-ui,sans-serif;background:#0f1420;color:#e6e9f2;padding:16px}
-  .wrap{max-width:720px;margin:0 auto}
+  .wrap{max-width:760px;margin:0 auto}
   h1{font-size:17px;margin-bottom:10px}
   .note{background:#10203a;border:1px solid #274a7a;border-radius:8px;padding:10px;color:#bcd2ee;font-size:12.5px;margin:6px 0}
   .alert{margin:8px 0;padding:10px;border-radius:8px;font-size:13px}
   .alert.warn{background:#2a1c10;border:1px solid #7a5a27;color:#ffd9a8}
+  .alert.ok{background:#102a1c;border:1px solid #276a4a;color:#a8f0c8}
   section{background:#131a2b;border:1px solid #202a45;border-radius:8px;padding:12px;margin:10px 0}
   section h2{font-size:12px;color:#9fb3d1;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em}
   .kv{display:flex;gap:8px;margin:4px 0;flex-wrap:wrap}
@@ -24,55 +25,151 @@
   button.ghost{background:transparent;color:#4da3ff;border:1px solid #4da3ff}
   button.big{width:100%;font-size:15px;padding:12px;margin-top:4px}
   #status{font-size:13px;color:#4da3ff;margin-bottom:6px}
-  #log{background:#0a0e18;border:1px solid #2a3350;border-radius:6px;padding:10px;height:320px;overflow:auto;
-       font:12px/1.5 Consolas,monospace;white-space:pre-wrap;word-break:break-word;color:#c7d2e6}
+  #log{background:#0a0e18;border:1px solid #2a3350;border-radius:6px;padding:10px;height:340px;overflow:auto;
+       font:12px/1.5 Consolas,monospace;word-break:break-word}
+  #log .ln{white-space:pre-wrap}
+  #log .head{color:#c7d2e6}
+  #log .info{color:#7fc7ff}
+  #log .ok{color:#3ecf8e}
+  #log .warn{color:#ffd479}
+  #log .err{color:#ff6b6b;font-weight:600}
+  #log .dim{color:#6b7690}
+  /* tabs */
+  .tabs{display:flex;gap:6px;margin:10px 0 0}
+  .tab{background:#131a2b;color:#9fb3d1;border:1px solid #202a45;border-bottom:0;border-radius:8px 8px 0 0;padding:8px 16px;font-weight:600;cursor:pointer;font-size:13px}
+  .tab.active{background:#1c2740;color:#eaf1ff}
+  /* stats */
+  .cards{display:flex;gap:8px;flex-wrap:wrap}
+  .card{flex:1 1 120px;background:#0f1830;border:1px solid #223055;border-radius:8px;padding:10px;text-align:center}
+  .card .num{font-size:22px;font-weight:700;color:#eaf1ff}
+  .card .num.ok{color:#3ecf8e}.card .num.err{color:#ff6b6b}
+  .card .cap{font-size:11px;color:#8b93a8;text-transform:uppercase;letter-spacing:.05em}
+  .tblwrap{overflow:auto;max-height:420px}
+  table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #202a45;white-space:nowrap}
+  th{color:#9fb3d1;position:sticky;top:0;background:#131a2b}
+  tr:hover td{background:#16203a}
+  td.ok{color:#3ecf8e}td.err{color:#ff6b6b}
+  td.res{max-width:300px;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:640px){
+    body{padding:8px}
+    h1{font-size:15px}
+    .wrap{max-width:100%}
+    section{padding:10px}
+    .kv{flex-direction:column;gap:2px}
+    .lbl{min-width:0;font-size:12px}
+    .cards .card{flex:1 1 44%}
+    .tab{padding:7px 10px;font-size:12px}
+    #log{height:220px}
+    th,td{padding:4px 6px;font-size:11px}
+    .tblwrap{max-height:340px}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Панель прошивки ADDITIPUS</h1>
   <div class="note">
-    Прошивку выполняют <b>скрипты</b> (<code>flash_standalone.ps1</code>, <code>make_ota.ps1</code>).
-    Эта страница — настройка, статус и запуск. Запускать нужно через
+    Прошивку выполняют <b>скрипты</b> (<code>flash_esptool.ps1</code>, <code>make_ota.ps1</code>).
+    Эта страница — настройка, статус, запуск и статистика. Открывать через
     <code>start_flasher.bat</code> (Chrome/Edge).
   </div>
   <div class="alert" id="alert" style="display:none"></div>
 
-  <section>
-    <h2>Состояние</h2>
-    <div class="kv"><span class="lbl">Порт платы</span><span class="val" id="st_port">…</span></div>
-    <div class="kv"><span class="lbl">ESP-IDF</span><span class="val" id="st_idf">…</span></div>
-    <div class="kv"><span class="lbl">Метод прошивки</span><span class="val" id="st_flasher">…</span></div>
-    <div class="kv"><span class="lbl">Файлы прошивки</span><span class="val" id="st_fw">…</span></div>
-    <div class="kv"><span class="lbl">Звуки</span><span class="val" id="st_snd">…</span></div>
-    <div style="margin-top:8px"><button class="ghost" id="btn_refresh">Обновить</button></div>
-  </section>
+  <div class="tabs">
+    <button class="tab active" id="tabbtn_flash" data-tab="flash">Прошивка</button>
+    <button class="tab" id="tabbtn_stats" data-tab="stats">Статистика</button>
+  </div>
 
-  <section>
-    <h2>Действия</h2>
-    <button class="big ghost" id="btn_ota">Создать OTA</button>
-    <p class="hint">Создаёт <code>release\ADDITIPUS_AURA-X_vX_OTA.bin</code> для обновления через веб-интерфейс декодера.</p>
-    <button class="big" id="btn_flash">Прошить</button>
-    <p class="hint">Полная прошивка по USB (загрузчик + разделы + приложение). Настройки/NVS сохраняются.</p>
-    <button class="big" id="btn_flash_snd">Прошить + звуки</button>
-    <p class="hint">То же плюс заливка звуков (WAV) во внешнюю память.</p>
-  </section>
+  <div id="tab_flash">
+    <section>
+      <h2>Состояние</h2>
+      <div class="kv"><span class="lbl">Порт платы</span><span class="val" id="st_port">…</span></div>
+      <div class="kv"><span class="lbl">ESP-IDF</span><span class="val" id="st_idf">…</span></div>
+      <div class="kv"><span class="lbl">Метод прошивки</span><span class="val" id="st_flasher">…</span></div>
+      <div class="kv"><span class="lbl">Файлы прошивки</span><span class="val" id="st_fw">…</span></div>
+      <div class="kv"><span class="lbl">Звуки</span><span class="val" id="st_snd">…</span></div>
+      <div style="margin-top:8px"><button class="ghost" id="btn_refresh">Обновить</button></div>
+    </section>
 
-  <section>
-    <h2>Вывод</h2>
-    <div id="status">Готово</div>
-    <pre id="log"></pre>
-  </section>
+    <section>
+      <h2>Действия</h2>
+      <button class="big ghost" id="btn_ota">Создать OTA</button>
+      <p class="hint">Создаёт <code>release\ADDITIPUS_AURA-X_vX_OTA.bin</code> для обновления через веб-интерфейс декодера.</p>
+      <button class="big" id="btn_flash">Прошить</button>
+      <p class="hint">Полная прошивка по USB (загрузчик + разделы + приложение). Настройки/NVS сохраняются.</p>
+      <button class="big" id="btn_flash_snd">Прошить + звуки</button>
+      <p class="hint">То же плюс заливка звуков (WAV) во внешнюю память.</p>
+    </section>
+
+    <section>
+      <h2>Вывод</h2>
+      <div id="status">Готово</div>
+      <div id="log"></div>
+    </section>
+  </div>
+
+  <div id="tab_stats" style="display:none">
+    <section>
+      <h2>Сводка</h2>
+      <div class="cards">
+        <div class="card"><div class="num" id="sm_total">0</div><div class="cap">всего</div></div>
+        <div class="card"><div class="num ok" id="sm_ok">0</div><div class="cap">успешно</div></div>
+        <div class="card"><div class="num err" id="sm_fail">0</div><div class="cap">ошибок</div></div>
+        <div class="card"><div class="num" id="sm_last">—</div><div class="cap">последняя</div></div>
+      </div>
+      <div style="margin-top:10px">
+        <button class="ghost" id="btn_stats_refresh">Обновить</button>
+        <span class="hint" id="stats_path" style="margin-left:8px"></span>
+      </div>
+    </section>
+    <section>
+      <h2>История</h2>
+      <div class="tblwrap">
+        <table id="stats_tbl">
+          <thead><tr><th>Дата</th><th>Действие</th><th>Порт</th><th>MAC</th><th>Результат</th><th>Вер.</th><th>Размер</th><th>Звуки</th><th>Сек</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
 </div>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+const ACT_LABEL = { flash: "Прошить", flash_sounds: "Прошить + звуки", ota: "Создать OTA" };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function setAlert(msg, kind){ const el=$("alert"); if(!msg){el.style.display="none";el.textContent="";return;} el.className="alert "+(kind||""); el.textContent=msg; el.style.display="block"; }
 function setButtons(on){ for(const id of ["btn_ota","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
-function logAppend(t){ const el=$("log"); el.textContent+=t; el.scrollTop=el.scrollHeight; }
 
+/* ---------- colored log ---------- */
+let logBuf="";
+function classify(l){
+  const s=l.toLowerCase();
+  if(/\[error\]|fatal|\bfailed\b|no put-ok|no file-ok|no prov-ok|no done-ok|timeout|ошибка|отказ|не уд|\[завершено, код [1-9]/.test(s)) return "err";
+  if(/\[warn\]|\bwarning\b|предупрежд/.test(s)) return "warn";
+  if(/\[ok\]|hash of data verified|\bverified\b|\bdone\b|uploaded|успешн|\[завершено, код 0/.test(s)) return "ok";
+  if(/\[info\]|^info|downloading|uploading|writing at/.test(s)) return "info";
+  if(/\d+%/.test(l)) return "dim";
+  return "head";
+}
+function logClear(){ $("log").innerHTML=""; logBuf=""; }
+function appendLog(t){
+  logBuf += t;
+  const parts = logBuf.split(/\r?\n/);
+  logBuf = parts.pop();
+  const el = $("log");
+  for(const line of parts){
+    const d = document.createElement("div");
+    d.className = "ln " + classify(line);
+    d.textContent = line;
+    el.appendChild(d);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ---------- status ---------- */
 async function refreshStatus(){
   try{
     const s = await (await fetch("/api/status",{cache:"no-store"})).json();
@@ -86,15 +183,66 @@ async function refreshStatus(){
     else if(!s.port) setAlert("Плата не найдена — подключите USB.","warn");
   }catch(e){
     setAlert("Нет связи с панелью. Откройте страницу через web_flasher\\start_flasher.bat.","warn");
-    $("st_port").textContent="—"; $("st_idf").textContent="—"; $("st_fw").textContent="—"; $("st_snd").textContent="—";
   }
 }
 
+/* ---------- stats ---------- */
+function fmtBytes(n){ n=Number(n)||0; if(n>=1048576) return (n/1048576).toFixed(2)+" МБ"; if(n>=1024) return (n/1024).toFixed(0)+" КБ"; return n+" Б"; }
+async function refreshStats(){
+  try{
+    const s = await (await fetch("/api/stats",{cache:"no-store"})).json();
+    $("sm_total").textContent = s.total||0;
+    $("sm_ok").textContent = s.ok||0;
+    $("sm_fail").textContent = s.fail||0;
+    $("sm_last").textContent = s.last && s.last.ts ? s.last.ts.replace(/^\d{4}-/,"").replace(/ /," ") : "—";
+    $("stats_path").textContent = "файл: web_flasher\\stats.json";
+    const tb = $("stats_tbl").querySelector("tbody");
+    tb.innerHTML = "";
+    const items = Array.isArray(s.items) ? s.items.slice().reverse() : [];
+    for(const it of items){
+      const tr = document.createElement("tr");
+      const isSnd = it.action === "flash_sounds";
+      const sizeTxt = fmtBytes(isSnd ? ((it.fwBytes||0)+(it.sndBytes||0)) : it.fwBytes);
+      const cells = [
+        it.ts || "",
+        it.label || ACT_LABEL[it.action] || it.action || "",
+        it.port || "",
+        it.mac || "",
+        it.ok ? "OK" : ("ошибка: " + (it.error || (it.code===null?"":it.code))),
+        it.version || "",
+        sizeTxt,
+        String(it.sounds || 0),
+        (it.durationSec!=null ? String(it.durationSec) : "")
+      ];
+      cells.forEach((txt,i)=>{
+        const td = document.createElement("td");
+        td.textContent = txt;
+        if(i===4){ td.className = (it.ok ? "ok" : "err") + " res"; td.title = it.error || ""; }
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    }
+    if(!items.length){ tb.innerHTML = '<tr><td colspan="9" class="dim">Пока нет записей — прошейте что-нибудь.</td></tr>'; }
+  }catch(e){ /* панель недоступна */ }
+}
+
+/* ---------- tabs ---------- */
+function showTab(name){
+  $("tab_flash").style.display = name==="flash" ? "" : "none";
+  $("tab_stats").style.display = name==="stats" ? "" : "none";
+  $("tabbtn_flash").className = "tab" + (name==="flash"?" active":"");
+  $("tabbtn_stats").className = "tab" + (name==="stats"?" active":"");
+  if(name==="stats") refreshStats();
+}
+$("tabbtn_flash").addEventListener("click", ()=>showTab("flash"));
+$("tabbtn_stats").addEventListener("click", ()=>showTab("stats"));
+
+/* ---------- run ---------- */
 let running=false;
 async function run(action, label){
   if(running) return;
   running=true; setButtons(false);
-  $("log").textContent=""; $("status").textContent="Выполняется: "+label+" …";
+  logClear(); $("status").textContent="Выполняется: "+label+" …"; setAlert("","");
   try{
     const r = await fetch("/api/run?action="+encodeURIComponent(action),{cache:"no-store"});
     const j = await r.json();
@@ -103,25 +251,27 @@ async function run(action, label){
     while(!done){
       await sleep(400);
       const s = await (await fetch("/api/state?pos="+pos,{cache:"no-store"})).json();
-      if(s.text) logAppend(s.text);
+      if(s.text) appendLog(s.text);
       pos=s.pos; done=s.done; code=s.code;
       if(!running) break;
     }
     $("status").textContent = "Завершено" + (code===0 ? " успешно." : (code===null ? "." : " (код "+code+")."));
-    if(code!==0) setAlert("Скрипт завершился с кодом "+code+" — смотрите вывод.","warn");
+    setAlert(code===0 ? (label+": успешно.") : (label+": код "+code+" — смотрите вывод."), code===0?"ok":"warn");
   }catch(e){
-    logAppend("\n[ошибка панели] "+e.message+"\n");
+    appendLog("\n[ERROR] панель: "+e.message+"\n");
     $("status").textContent="Ошибка панели";
   }finally{
-    running=false; setButtons(true); refreshStatus();
+    running=false; setButtons(true); refreshStatus(); refreshStats();
   }
 }
 
 $("btn_refresh").addEventListener("click", refreshStatus);
-$("btn_ota").addEventListener("click", ()=>run("ota","Создать OTA"));
-$("btn_flash").addEventListener("click", ()=>run("flash","Прошить"));
-$("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds","Прошить + звуки"));
-window.addEventListener("load", refreshStatus);
+$("btn_stats_refresh").addEventListener("click", refreshStats);
+$("btn_ota").addEventListener("click", ()=>run("ota", ACT_LABEL.ota));
+$("btn_flash").addEventListener("click", ()=>run("flash", ACT_LABEL.flash));
+$("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds", ACT_LABEL.flash_sounds));
+window.addEventListener("load", ()=>{ refreshStatus(); refreshStats(); ping(); setInterval(ping, 3000); });
+function ping(){ try{ fetch("/api/ping",{cache:"no-store"}).catch(()=>{}); }catch(e){} }
 </script>
 </body>
 </html>

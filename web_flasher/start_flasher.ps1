@@ -13,7 +13,8 @@
 
 param(
     [int]$Port = 8765,
-    [switch]$NoOpen
+    [switch]$NoOpen,
+    [switch]$NoIdleExit
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +38,16 @@ function Get-DevicePort {
     if ($p) { return $p }
     return $null
 }
+function Get-DeviceMac {
+    # ESP32-S3 USB-Serial-JTAG exposes the base MAC as the USB serial number
+    # (USB\VID_303A&PID_1001\AA:BB:CC:DD:EE:FF) - readable without download mode.
+    $pnp = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+        Where-Object { $_.PNPDeviceID -match 'VID_303A&PID_1001\\' } |
+        ForEach-Object { if ($_.PNPDeviceID -match '\\([0-9A-Fa-f:]{17})$') { $Matches[1] } } |
+        Select-Object -First 1
+    if ($pnp) { return $pnp.ToUpper() }
+    return $null
+}
 function Get-IdfPath {
     $cands = @()
     if ($env:IDF_PATH) { $cands += $env:IDF_PATH }
@@ -56,6 +67,61 @@ function Get-EsptoolExe {
 }
 # "esptool" when a standalone esptool.exe or ESP-IDF is present, else the ROM fallback.
 function Get-Flasher { if ((Get-EsptoolExe) -or (Get-IdfPath)) { return "esptool" } else { return "rom" } }
+
+# ---- statistics (persisted to web_flasher\stats.json) ---------------------
+$script:statsPath = Join-Path $web "stats.json"
+$script:esptoolVer = $null
+function Get-EsptoolVersion {
+    if ($script:esptoolVer) { return $script:esptoolVer }
+    $exe = Get-EsptoolExe
+    if ($exe) { try { $script:esptoolVer = (((& $exe version 2>$null | Select-Object -First 1)) -replace '\s+', ' ').Trim() } catch { } }
+    if (-not $script:esptoolVer) { $script:esptoolVer = "" }
+    return $script:esptoolVer
+}
+function Read-Stats {
+    if (-not (Test-Path -LiteralPath $script:statsPath)) { return @() }
+    try { $j = Get-Content -LiteralPath $script:statsPath -Raw -Encoding UTF8 | ConvertFrom-Json; if ($null -eq $j) { return @() }; return @($j) } catch { return @() }
+}
+function Add-Stat($rec) {
+    $arr = @(Read-Stats) + @($rec)
+    if ($arr.Count -gt 500) { $arr = $arr[($arr.Count - 500)..($arr.Count - 1)] }
+    try {
+        $json = ConvertTo-Json -InputObject @($arr) -Depth 6
+        [IO.File]::WriteAllText($script:statsPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+    } catch { }
+}
+function Get-RunDetails {
+    $ver = ""; $vf = Join-Path $repo "firmware\version.txt"
+    if (Test-Path -LiteralPath $vf) { $ver = (Get-Content -LiteralPath $vf -Raw).Trim() }
+    $fwBytes = 0; $fwb = Join-Path $fwDir "firmware.bin"
+    if (Test-Path -LiteralPath $fwb) { $fwBytes = (Get-Item -LiteralPath $fwb).Length }
+    $snd = 0; $sndBytes = 0
+    if ($sndDir) {
+        $wavs = @(Get-ChildItem -LiteralPath $sndDir -Filter *.wav -ErrorAction SilentlyContinue)
+        $snd = $wavs.Count
+        if ($snd) { $sndBytes = [int64](($wavs | Measure-Object Length -Sum).Sum) }
+    }
+    return @{ version = $ver; fwBytes = $fwBytes; sndBytes = $sndBytes; sounds = $snd; flasher = (Get-Flasher); esptool = (Get-EsptoolVersion); idf = (Get-IdfPath) }
+}
+# Last meaningful error line from a failed run's log (for the statistics table).
+function Get-LastError([string]$logPath, $code) {
+    if (Test-Path -LiteralPath $logPath) {
+        try {
+            $lines = @(Get-Content -LiteralPath $logPath -Encoding UTF8)
+            for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+                $l = ($lines[$i] -replace '\s+', ' ').Trim()
+                if ($l -match '\[ERROR\]') { return ($l -replace '^.*?\[ERROR\]\s*', '') }
+            }
+            for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+                $l = ($lines[$i] -replace '\s+', ' ').Trim()
+                if ($l -match 'ошибка|failed|error|missing|не удалось|timeout|no put-ok|no file-ok|no prov-ok') { return $l }
+            }
+            for ($i = $lines.Count - 1; $i -ge 0; $i--) { $l = $lines[$i].Trim(); if ($l) { return $l } }
+        } catch { }
+    }
+    if ($null -ne $code) { return ("код " + $code) }
+    return "ошибка"
+}
 
 # ---- one run at a time ----------------------------------------------------
 $script:cur = $null
@@ -98,7 +164,8 @@ function Start-Action([string]$action) {
     Set-Content -LiteralPath $wrapper -Value $content -Encoding UTF8
     $p = Start-Process -FilePath "powershell" -PassThru -WindowStyle Hidden -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapper)
-    $script:cur = @{ id = $id; proc = $p; log = $log; done = $false; code = $null; sent = 0 }
+    $script:cur = @{ id = $id; proc = $p; log = $log; done = $false; code = $null; sent = 0;
+                     recorded = $false; action = $action; startedAt = (Get-Date); port = (Get-DevicePort) }
     return $id
 }
 
@@ -122,6 +189,11 @@ $repoFull = [IO.Path]::GetFullPath($repo)
 $sndFull  = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
+# Idle watchdog: the page sends /api/ping; when it stops, the server exits.
+$script:lastPing = $null
+$script:sawPing  = $false
+$script:startedAt = Get-Date
+
 function Send-Text($ctx, [string]$text, [string]$ctype) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($text)
     if ($ctype) { $ctx.Response.ContentType = $ctype }
@@ -140,13 +212,20 @@ Write-Host "Остановить: закройте это окно (Ctrl+C)." -F
 if (-not $NoOpen) { Start-Process $pageUrl }
 
 try {
+$iar = $listener.BeginGetContext($null, $null)
 while ($listener.IsListening) {
-    $ctx = $listener.GetContext()
+    if ($iar.AsyncWaitHandle.WaitOne(1000)) {
+    $ctx = $listener.EndGetContext($iar)
+    $iar = $listener.BeginGetContext($null, $null)
     try {
         $pathQ = $ctx.Request.Url.AbsolutePath
         $q = [System.Web.HttpUtility]::ParseQueryString($ctx.Request.Url.Query)
 
-        if ($pathQ -eq "/api/status") {
+        if ($pathQ -eq "/api/ping") {
+            $script:lastPing = Get-Date; $script:sawPing = $true
+            Send-Text $ctx '{"ok":true}' "application/json; charset=utf-8"
+        }
+        elseif ($pathQ -eq "/api/status") {
             $fwCount = @(Get-ChildItem -LiteralPath $fwDir -Filter *.bin -ErrorAction SilentlyContinue).Count
             $sndCount = if ($sndDir) { @(Get-ChildItem -LiteralPath $sndDir -Filter *.wav -ErrorAction SilentlyContinue).Count } else { 0 }
             $obj = [ordered]@{
@@ -157,6 +236,14 @@ while ($listener.IsListening) {
                 busy = [bool]($script:cur -and -not $script:cur.proc.HasExited)
             }
             Send-Text $ctx ($obj | ConvertTo-Json -Compress) "application/json; charset=utf-8"
+        }
+        elseif ($pathQ -eq "/api/stats") {
+            $arr = @(Read-Stats)
+            $okCount = @($arr | Where-Object { $_.ok }).Count
+            $last = if ($arr.Count) { $arr[-1] } else { $null }
+            $items = @($arr | Select-Object -Last 100)
+            $obj = [ordered]@{ total = $arr.Count; ok = $okCount; fail = ($arr.Count - $okCount); last = $last; items = $items }
+            Send-Text $ctx ($obj | ConvertTo-Json -Depth 6 -Compress) "application/json; charset=utf-8"
         }
         elseif ($pathQ -eq "/api/run") {
             $action = $q["action"]
@@ -170,6 +257,30 @@ while ($listener.IsListening) {
             if (-not $cur) { Send-Text $ctx '{"text":"","pos":0,"done":true,"code":null}' "application/json; charset=utf-8" }
             else {
                 if (-not $cur.done -and $cur.proc.HasExited) { $cur.done = $true; $cur.code = $cur.proc.ExitCode }
+                if ($cur.done -and -not $cur.recorded) {
+                    $cur.recorded = $true
+                    try {
+                        $d = Get-RunDetails
+                        $fin = Get-Date
+                        Add-Stat ([ordered]@{
+                            ts = $fin.ToString("yyyy-MM-dd HH:mm:ss")
+                            action = $cur.action
+                            ok = ($cur.code -eq 0)
+                            code = $cur.code
+                            error = if ($cur.code -ne 0) { Get-LastError $cur.log $cur.code } else { "" }
+                            port = $cur.port
+                            mac = (Get-DeviceMac)
+                            durationSec = [int]($fin - $cur.startedAt).TotalSeconds
+                            version = $d.version
+                            fwBytes = $d.fwBytes
+                            sndBytes = $d.sndBytes
+                            sounds = $d.sounds
+                            flasher = $d.flasher
+                            esptool = $d.esptool
+                            idf = $d.idf
+                        })
+                    } catch { }
+                }
                 $text = ""
                 if (Test-Path -LiteralPath $cur.log) {
                     try {
@@ -212,6 +323,16 @@ while ($listener.IsListening) {
         try { $ctx.Response.StatusCode = 500 } catch { }
     } finally {
         try { $ctx.Response.OutputStream.Close() } catch { }
+    }
+    }
+    if (-not $NoIdleExit) {
+        if ($script:sawPing) {
+            if (((Get-Date) - $script:lastPing).TotalSeconds -gt 12) {
+                Write-Host "Страница закрыта - останавливаю сервер." -ForegroundColor DarkGray; break
+            }
+        } elseif (((Get-Date) - $script:startedAt).TotalSeconds -gt 300) {
+            Write-Host "Страница не подключилась - останавливаю сервер." -ForegroundColor DarkGray; break
+        }
     }
 }
 } finally {

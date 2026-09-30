@@ -50,4 +50,4 @@ $tt = [regex]::Replace($tt, $pat2, "TEST_ASSERT_EQUAL_UINT8($minor, v); /* uncha
 # 4) Report.
 Write-Host "Version: $cur -> $new"
 Write-Host "Updated: version.txt, settings.c CV7, test_settings.c expectations"
-Write-Host "Now run build_ota_bin.bat (or pio run) to build ADDITIPUS_AURA-X_v$new.bin"
+Write-Host "Now run build_ota_bin.bat (or idf_build.ps1) to build ADDITIPUS_AURA-X_v$new.bin"

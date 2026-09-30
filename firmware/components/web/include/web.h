@@ -38,6 +38,11 @@ bool web_func_map_get(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b, uint16_t *au
 bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
                       uint8_t dir, uint8_t speed);
 
+/* Apply a new master volume (0..100) from the CV63 alias: updates the cached
+ * config, the live audio volume and persists it. Called from the CV path so a
+ * CV63 write does not desync from /api/audio/volume. */
+void web_master_volume_changed(uint8_t vol0_100);
+
 /* True while an HTTP upload or OTA transfer is writing to the filesystem.
  * Provisioning uses this to avoid reformatting under an active writer. */
 bool web_fs_busy(void);

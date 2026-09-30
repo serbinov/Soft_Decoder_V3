@@ -1,5 +1,9 @@
 # Отчёт код-ревью прошивки (Soft_Decoder_V3)
 
+> Примечание: документ исторический. Сборка переведена на ESP-IDF 6.0
+> (`firmware\idf_build.ps1`); упоминания `pio run`/PlatformIO относятся к
+> ранним версиям.
+
 Read-only ревью first-party кода (`components/`, `main/`) с последующими
 исправлениями. Исходный план: `.kilo/plans/1790518367801-firmware-code-review-agents-and-fixes.md`.
 Агенты ревью: `.kilo/agent/review-*.md` (оркестратор `review-lead`, команда

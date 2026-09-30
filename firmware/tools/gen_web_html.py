@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate firmware/components/web/include/web_html.h from firmware/web_ui.html.
 
-Runs as a PlatformIO pre-build script (extra_scripts).  Converts the readable
-single-file page into a C string literal embedded into the firmware (rodata).
+Invoked from CMake before web.c is compiled (see components/web/CMakeLists.txt).
+Converts the readable single-file page into a C string literal embedded into the
+firmware (rodata).
 
 Minification rules (safe subset):
   * HTML comments are removed.
@@ -24,8 +25,7 @@ import sys
 if "__file__" in globals():
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 else:
-    # PlatformIO runs extra scripts via SConscript without __file__;
-    # cwd is the project directory (the one containing platformio.ini).
+    # Fallback when __file__ is unavailable: assume the project directory.
     ROOT = os.getcwd()
 SRC = os.path.join(ROOT, "web_ui.html")
 OUT = os.path.join(ROOT, "components", "web", "include", "web_html.h")
@@ -112,6 +112,5 @@ def main():
 if __name__ == "__main__":
     sys.exit(main())
 else:
-    # Run as a PlatformIO extra script (exec'd by SCons, __name__ != "__main__"):
-    # call main() without sys.exit so the build process is not terminated.
+    # Imported as a module: run main() without sys.exit.
     main()

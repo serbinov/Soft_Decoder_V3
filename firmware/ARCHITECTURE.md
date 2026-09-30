@@ -5,10 +5,10 @@
 периферии и памяти, список задач, компоненты и их взаимодействие, настройки,
 REST API и ресурсы.
 
-Версия прошивки: **0.8** (`version.txt` — единственный источник; попадает в
+Версия прошивки: **0.9** (`version.txt` — единственный источник; попадает в
 веб-страницу, CV7 и OTA-образ).
-Целевой модуль сборки: `esp32-s3-devkitc-1` (PlatformIO), фреймворк ESP-IDF
-`5.1.4`. Язык: C (C11), без C++.
+Целевой чип: `esp32-s3` (плата ESP32-S3-DevKitC-1), фреймворк ESP-IDF
+`6.0`. Язык: C (C11), без C++.
 
 ---
 
@@ -38,14 +38,14 @@ DCC-декодер для модели железной дороги с:
 | МК | ESP32-S3FH4R2 (по мастер-документу, `pinmap.h:6`) |
 | Ядра | 2 × Xtensa LX7 |
 | Тактовая частота | **160 МГц** (`CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160`; 240 доступно, не используется ради нагрева/потребления) |
-| Встроенная flash | **4 МБ** (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y`, `board_build.flash_size=4MB`) |
+| Встроенная flash | **4 МБ** (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y`) |
 | Встроенная PSRAM | **2 МБ, включена** как heap (quad, 80 МГц; `CONFIG_SPIRAM=y`) |
-| Пакет сборки PlatformIO | `esp32-s3-devkitc-1` (совместимый «декит-профиль»; микросхема на плате — S3FH4R2) |
+| Целевой чип | `esp32s3` (плата ESP32-S3-DevKitC-1; микросхема на плате — S3FH4R2) |
 | Режим загрузки flash | DIO @ 80 МГц |
 
-> Важно: PlatformIO при сборке печатает «ESP32-S3-DevKitC-1-N8 (8 MB QD, No
-> PSRAM)» — это описание профиля платы, а не фактического чипа. Ограничение
-> размера приложения задаёт `board_build.flash_size = 4MB` и таблица разделов.
+> Важно: конфигурация чипа задаётся таргетом `esp32s3` и `sdkconfig.defaults`.
+> Размер встроенной flash (4 МБ) и границы приложения определяют
+> `CONFIG_ESPTOOLPY_FLASHSIZE_4MB` и таблица разделов (`partitions.csv`).
 
 ### 2.2 Питание, сброс, защита
 
@@ -160,7 +160,7 @@ DCC-декодер для модели железной дороги с:
 ### 3.4 RAM
 
 - Встроенная SRAM ESP32-S3 — 512 КБ, из них под приложение доступно
-  ~320 КБ DRAM (PlatformIO считает от 327 680 Б).
+  ~320 КБ DRAM (IDF считает от 327 680 Б).
 - **PSRAM 2 МБ включена** (`CONFIG_SPIRAM=y`, quad, 80 МГц) и отдаётся в heap:
   крупные аллокации уходят в PSRAM, мелкие остаются во внутренней DRAM.
 - Точные цифры — в разделе 17.
@@ -173,10 +173,10 @@ DCC-декодер для модели железной дороги с:
 
 | Слой | Версия/инструмент |
 |---|---|
-| SDK | ESP-IDF **5.1.4** (`dependencies.lock`) |
+| SDK | ESP-IDF **6.0** |
 | ОСРВ | FreeRTOS (в составе IDF), тик 1000 Гц (`CONFIG_FREERTOS_HZ=1000`) |
-| Сборщик | PlatformIO (`platformio.ini`), CMake + Ninja |
-| Компилятор | `xtensa-esp32s3-elf-gcc` (GCC 12.2) |
+| Сборщик | ESP-IDF (`idf.py`), CMake + Ninja |
+| Компилятор | `xtensa-esp32s3-elf-gcc` (GCC 15.2) |
 | Оптимизация | `-Os` (`CONFIG_COMPILER_OPTIMIZATION_SIZE`), `newlib` nano |
 | Хранилище | esp_littlefs (вкомпилированный компонент) |
 | Веб-сервер | esp_http_server |
@@ -187,25 +187,18 @@ DCC-декодер для модели железной дороги с:
 
 ### 4.2 Сборка и прошивка
 
-`platformio.ini`:
+Стандартный проект ESP-IDF: `CMakeLists.txt` → `project(soft_decoder_v3)`,
+таргет `esp32s3`, разделы — `partitions.csv`, база настроек —
+`sdkconfig.defaults`. Нужен ESP-IDF **6.0.x**; путь задаётся через
+`$env:IDF_PATH`, `-IdfPath` или файл `firmware\.idf_path`.
+
+Команды (из каталога `firmware/`):
 
 ```
-[env:esp32-s3-devkitc-1]
-platform = espressif32
-framework = espidf
-board = esp32-s3-devkitc-1
-board_build.partitions = partitions.csv
-board_build.flash_size = 4MB
-extra_scripts = pre:tools/gen_web_html.py
-src_dir = main
-```
-
-Команды (PlatformIO лежит в `%USERPROFILE%\.platformio\penv\Scripts`):
-
-```
-pio run -e esp32-s3-devkitc-1                 # сборка
-pio run -e esp32-s3-devkitc-1 -t upload --upload-port COMx   # прошивка
-pio run -e esp32-s3-devkitc-1 -t size         # размер образа
+.\idf_build.ps1                     # сборка (idf.py build)
+.\idf_build.ps1 -Flash              # сборка + прошивка (автопоиск COM)
+.\idf_build.ps1 -Erase -Flash       # полное стирание чипа + прошивка
+idf.py size                         # размер образа
 ```
 
 Готовые bat/ps1-обёртки в корне `firmware/`:
@@ -221,9 +214,15 @@ pio run -e esp32-s3-devkitc-1 -t size         # размер образа
 | `read_bemf.ps1` | Чтение коэффициентов BEMF по UART, опц. запись в `bemf_cal_base.h` |
 | `bump_version.bat` / `tools/bump_version.ps1` | Инкремент версии в `version.txt` |
 
+Первичная настройка окружения — `setup.ps1` в корне репозитория: находит или
+ставит ESP-IDF 6.0, пишет `firmware\.idf_path`, ставит расширения VS Code и
+делает первую сборку. В VS Code доступны задачи `ESP-IDF: build / flash /
+flash + monitor / erase + flash / fullclean` и `Host tests`.
+
 ### 4.3 Генерация веб-страницы
 
-`tools/gen_web_html.py` запускается как `pre:`-скрипт PlatformIO:
+`tools/gen_web_html.py` вызывается из CMake (`components/web/CMakeLists.txt`)
+до сборки `web.c`:
 
 - читает `firmware/web_ui.html` (единственный источник страницы);
 - вырезает HTML-комментарии, схлопывает переводы строк и пробелы (безопасный
@@ -248,11 +247,12 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1            # gcov, un
 powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 ```
 
-Наборы (14): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
+Наборы (15): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_selftest`, `test_web`. Всего **471 тест**; покрытие first-party
-(`components/` + `main/`) — **100 % строк** (union по строкам, gcov; ~4400 строк).
+`test_selftest`, `test_web`, `test_sound`. Всего **527 тестов**; покрытие
+first-party (`components/` + `main/`) — **100 % строк** (union по строкам, gcov;
+5601 строка).
 
 При добавлении нового набора обновляйте `$inc` (include-пути) и `$suites` в
 ОБОИХ скриптах (`run_tests.ps1`, `coverage.ps1`). Частично исполненные строки
@@ -292,10 +292,10 @@ HIL по железу (нужна подключённая плата): `test/hi
 
 ```
 firmware/
-├─ platformio.ini            конфигурация сборки
+├─ idf_build.ps1             сборка/прошивка через idf.py
 ├─ partitions.csv            таблица разделов
 ├─ sdkconfig.defaults        базовые настройки IDF
-├─ sdkconfig.esp32-s3-...    итоговый sdkconfig (генерируется)
+├─ sdkconfig                 итоговый sdkconfig (генерируется)
 ├─ version.txt               версия для сборки (единственный источник)
 ├─ CMakeLists.txt            project(soft_decoder_v3)
 ├─ web_ui.html               исходник веб-страницы (single-file)
@@ -310,21 +310,24 @@ firmware/
 │  ├─ dcc/                   разбор DCC, service/ops mode, consist
 │  ├─ motor/                 DRV8870 ШИМ + BEMF-PID + калибровка
 │  ├─ track/                 рельсовый ADC, DC-режим
-│  ├─ audio/                 20-голосый микшер → I2S
+│  ├─ audio/                 20-голосый микшер → I2S, управляемый rate/фейд
+│  ├─ sound/                 звуковой движок схемы (.mds, автомат, секвенсер)
 │  ├─ auxio/                 9 световых выходов + эффекты
 │  ├─ web/                   Wi-Fi AP, HTTP, REST API, журнал, веб-контент
-│  ├─ provision/             UART-провижининг звуков, BEMF-консоль
+│  ├─ provision/             UART-провижининг звуков, BEMF/HIL-консоль
 │  ├─ selftest/              встроенный SELFTEST (консоль) для HIL по USB
 │  └─ esp_littlefs/          сторонний компонент LittleFS
-├─ tools/                    gen_web_html.py, bump_version.ps1
-├─ test/                     нативные тесты + run_tests.ps1
+├─ docs/                     sound_scheme.md, cv_sound.md
+├─ tools/                    gen_web_html.py, bump_version.ps1, gen_flash_readme.ps1
+├─ test/                     нативные тесты: run_tests.ps1, coverage.ps1
 ├─ test_libs/teststubs/      заглушки ESP-IDF для тестов
-└─ *.bat / *.ps1             скрипты сборки/прошивки/провижининга
+└─ *.bat / *.ps1             скрипты сборки/прошивки/провижининга/звуков
 ```
 
-В **корне репозитория** (`Soft_Decoder_V3/`): `VERSION` (версия проекта),
-`CHANGELOG.md` (хронология; строка за коммит добавляется автоматически хуком),
-`.githooks/` + `setup_git_hooks.bat` (git-хуки), `release/`, `web_flasher/`.
+В **корне репозитория** (`Soft_Decoder_V3/`): `setup.ps1` (автонастройка
+окружения), `.vscode/` (задачи и IntelliSense VS Code), `CHANGELOG.md`
+(хронология; строка за коммит добавляется автоматически хуком), `.githooks/` +
+`setup_git_hooks.bat` (git-хуки), `README.md`, `release/`, `web_flasher/`.
 
 ---
 
@@ -405,9 +408,32 @@ firmware/
   ресемплируются, суммируются с громкостями и ограничиваются. Открытие/закрытие
   файлов — только в задаче микшера через очередь запросов под мьютексом.
 - API: `audio_init`, `audio_voice_play/stop`, `audio_stop_all`,
-  `audio_set/get_volume`, `audio_is_playing`, `audio_validate_wav`.
+  `audio_set/get_volume`, `audio_is_playing`, `audio_validate_wav`,
+  `audio_voice_set_rate` (permille 500..3000), `audio_voice_is_active/position`,
+  `audio_voice_alloc/release`. Голоса 18/19 зарезервированы под звуковой движок.
+- Анти-щёлчок: линейный фейд 2 блока на старте/стопе (`s_fade_blocks`).
 - Зависимости: `driver pinmap esp_timer`.
 - Задачи: **`audio_mix`**, стек 4096, prio 7, ядро 1 (блок 256 сэмплов ≈ 11.6 мс).
+
+### sound (`components/sound`)
+- Файлы: `src/sound.c`, `src/sound_store.c`, `include/sound.h`,
+  `include/sound_store.h`.
+- Роль: звуковой движок схемы «ADDITIPUS AURA-X». Держит активную схему,
+  автомат 5 ступеней (drive/accel/coast, гистерезис), секвенсер Init/Loop/End
+  (до 4 цилиндров), режимы F-клавиш (one-shot/trigger/loop-held/short-long/
+  latched), логики mute (`MUTE_STOP/MOVE/LIGHT`), `sync_motion`, тормозной
+  скрип, случайные/состояний-звуки, линт схемы. Хранит схему в бинарном `.mds`
+  (`sound_store`, атомарная запись), активное имя — в NVS `active_scheme`.
+  Пока активен `SOUND_SCHEME_NONE/LEGACY`, движок полностью инертен.
+- API: `sound_init`, `sound_stop_all`, `sound_set_speed`, `sound_function`,
+  `sound_scheme_get/set`, `sound_table_get/set`, `sound_extra_get/set`,
+  `sound_type_get/set`, `sound_engine_get/set`, `sound_load_scheme`,
+  `sound_scheme_save`, `sound_status_get`, `sound_lint`, `sound_reload_bindings`,
+  `sound_engine_power`.
+- Зависимости: `settings storage audio motor esp_timer`.
+- Задачи: **`sound`**, стек 4096, prio 6, ядро 1, период 20 мс (опрос
+  `motor_get_applied_speed` → автомат/секвенсер → `audio_*`).
+- Подробности и модель данных — `docs/sound_scheme.md`, CV — `docs/cv_sound.md`.
 
 ### auxio (`components/auxio`)
 - Файлы: `src/auxio.c`, `include/auxio.h`.
@@ -426,7 +452,7 @@ firmware/
   REST API, журнал событий (`/api/log`), OTA, аплоад/удаление звуков,
   применение функций/AUX/звуков, громкости.
 - Зависимости: `esp_http_server esp_wifi esp_netif esp_event esp_timer app_update
-  nvs_flash driver audio auxio motor settings storage pinmap dcc`.
+  nvs_flash driver audio auxio motor settings storage pinmap dcc sound`.
 - Задачи (создаются в `web.c`/`httpd`):
   - **`dns_hijack`** (стек 4096, prio 9),
   - **`wifi_off`** (стек 3072, prio 4) — при `auto_off_min ≠ 0`,
@@ -450,7 +476,10 @@ firmware/
   F в веб-UI и DCC, поэтому прогон F проверяет реальную цепочку маппинга.
 - Консольные команды: `SELFTEST` (read-only отчёт) и `HIL-AUX <ch> <ms>`,
   `HIL-SOUND <slot> <ms>`, `HIL-MOTOR <spd> <ms>`, `HIL-FN <fn> <0|1>`,
-  `HIL-FN-SWEEP <ms>`, `HIL-AUX-SWEEP <ms>` (ответы `HIL-*-OK` / `HIL-*-ERR`).
+  `HIL-FN-SWEEP <ms>`, `HIL-AUX-SWEEP <ms>`, `HIL-ENGINE <0|1>`,
+  `HIL-SCHEME-SPEED <spd> <fwd>` (ответы `HIL-*-OK` / `HIL-*-ERR`).
+  Последние две управляют звуковым движком (`sound_engine_power`,
+  `sound_set_speed`).
 - Зависимости: `pinmap settings storage motor audio auxio dcc web nvs_flash esp_system`.
 - Задачи: нет (выполняется в задаче `prov_listen`).
 - Формат вывода и host-runner: `test/hil/run_hil.ps1` (см. §16).
@@ -460,19 +489,22 @@ firmware/
 - Роль: (1) приём `PROV` по UART0/USB-JTAG в первые ~8 с после старта → стирание
   внешней NOR, приём WAV по протоколу `PUT <slot> <size> <label>` + ACK, перезагрузка;
   (2) UART-консоль BEMF: `BEMF?`, `BEMF-HDR`, `BEMF=…`, `BEMF-RAW`, `BEMF-ADC`,
-  `BEMF-COAST`, `BEMF-TEST`, `BEMF-CAL`, `BEMF-CLR`, `BEMF-CVSET`.
-- Зависимости: `driver esp_timer esp_system app_update settings storage motor`.
+   `BEMF-COAST`, `BEMF-TEST`, `BEMF-CAL`, `BEMF-CLR`, `BEMF-CVSET`.
+- Роль (3): HIL-консоль `HIL-*` (в т.ч. `HIL-ENGINE`, `HIL-SCHEME-SPEED`).
+- Зависимости: `driver esp_timer esp_system app_update settings storage motor selftest sound`.
 - Задачи: **`prov_listen`**, стек 8192, prio 4.
 
 ### app_main (`main/app_main.c`)
 - Порядок старта: `pinmap_validate` → `motor_boot_safe` → `storage_init/mount`
   (не фатально: без внешней NOR звук отключён) → `settings_init` → `provision_try` →
-  `motor_init` → `audio_init` → `dcc_init` + регистрация колбэков → `web_init` →
+  `motor_init` → `audio_init` → `sound_init` → `dcc_init` + регистрация колбэков →
+  `web_init` (миграция `func_bind` → `sound_reload_bindings`) →
   восстановление метаданных (манифест, иначе из имён файлов) → `track_init` →
   задача `safety` → `provision_listener_start`.
 - Колбэки DCC: скорость → `motor_set_speed` + `web_motion_changed`; функции →
-  `web_apply_function`; CV write/read → `settings_cv_*`; reset → `motor_stop` +
-  гашение функций. В режиме «Веб» колбэки скорости/функций игнорируются.
+  `web_apply_function` (в режиме схемы — `sound_function`); CV write/read →
+  `settings_cv_*`; reset → `motor_stop` + гашение функций + `sound_stop_all`.
+  В режиме «Веб» колбэки скорости/функций игнорируются.
 - Задача: **`safety`**, стек 3072, prio 6, период 50 мс (flush отложенных
   настроек + таймаут CV11 в режиме «Рельсы»).
 
@@ -489,6 +521,7 @@ firmware/
 | `motor` | 3072 | 7 | — | 10 мс | motor.c |
 | `track_adc` | 3072 | 7 | — | 50 мс | track.c |
 | `audio_mix` | 4096 | 7 | 1 | блок 256 сэмплов | audio.c |
+| `sound` | 4096 | 6 | 1 | 20 мс | sound.c |
 | `safety` | 3072 | 6 | — | 50 мс | app_main.c |
 | `aux_fx` | 3072 | 6 | — | 20 мс | auxio.c |
 | `bemf_cal` | 3072 | 6 | — | по запросу | motor.c |
@@ -567,6 +600,8 @@ flowchart TD
 | `tracks` | blob | до 20 треков (`settings_track_t`) |
 | `track_cat` | blob | категории слотов (двигатель/эффекты) |
 | `func_map` | blob | карта F0..F28 (`settings_func_map_t`) |
+| `func_bind` | blob | канонические привязки F→цель (`func_binding_t[64]`) |
+| `active_scheme` | str | имя активной схемы звука (`.mds` в `projects/`) |
 | `aux_cfg` | blob | уровни/эффекты 9 AUX |
 | `bemf_cal` | blob | калибровочная кривая BEMF |
 | `bemf_use` | u8 | 1=замкнутый контур BEMF, 0=только ШИМ |
@@ -583,15 +618,20 @@ flowchart TD
 | 3 / 4 | 0 | разгон / торможение (0 = мгновенно) |
 | 5 | 255 | Vhigh (~100 % ШИМ на 126) |
 | 6 | 128 | Vmid (50 % на 63) |
-| 7 | 8 | версия декодера (совпадает с `version.txt`) |
+| 7 | 9 | версия декодера (совпадает с `version.txt`; при OTA мигрируется) |
 | 8 | 0 | производитель; запись 8 = CV factory reset |
 | 11 | 0 | таймаут DCC-пакетов (×20 мс, 0=выкл) |
+| 30 | 0 | опции звука: бит0 `Skip StoD1`, бит1 `Skip D1toS` |
+| 63 | 20 | алиас общей громкости (`mvol`), чтение/запись через CV |
 | 17/18 | 0 | длинный адрес |
 | 19 | 0 | consist (бит 7 = реверс) |
 | 29 | 0x02 | 28/128 шагов, DCC (бит 4 = таблица CV67..94, бит 2 = DC) |
 | 54/55/56 | 128/60/32 | BEMF PID Kp/Ki/Kd |
 | 65 | 0 | кикстарт при трогании (0=выкл) |
 | 67..94 | линейно 0..255 | 28-точечная таблица скорости |
+| 114 | 57 | chuff/exhaust rate двигателя (0→0.5×, 51→1.0×, 255→3.0×) |
+| 115 | 5 | bell rate — скорость случайных/авто-звуков |
+| 116 | 30 | dynamic brake rate — скорость тормозного скрипа |
 
 Каждый `settings_cv_read()` — это чтение из RAM-массива `s_cv` (не NVS), поэтому
 горячие пути (мотор каждые 10 мс) дешёвы. Запись CV не пишет flash до
@@ -606,6 +646,9 @@ flowchart TD
 - SoftAP: SSID/пароль/адрес настраиваются, канал выбирается сканом, captive
   portal через DNS-хайджек (все имена → адрес AP) и 404→302.
 - Опрос статуса страницей — раз в 3 с; журнал событий — `GET /api/log`.
+- Панели звука: «Звук: Схема» (тип, клавиша старта, таблицы + модальный
+  редактор), «Звук: Функции» (матрица привязок), «Звук: Доп. звуки»,
+  «Звук: Параметры» (CV30/63/114/115/116). Живой статус — `GET /api/sound/state`.
 
 Маршруты (`start_http_server`, `web.c`):
 
@@ -629,7 +672,16 @@ flowchart TD
 | POST | `/api/audio/upload` | загрузка WAV (chunked, через `pipe_wr`) |
 | POST | `/api/audio/delete` | удалить слот |
 | POST | `/api/track/category` | категория слота (двигатель/эффект) |
-| GET/POST | `/api/func-map` | карта функций |
+| GET/POST | `/api/func-map` | карта функций; `?view=bind\|matrix` — канонические привязки, `POST ?bind=1[&remove=1&idx=N]` — добавить/удалить привязку |
+| GET | `/api/sound/state` | живой статус движка (тип, двигатель, таблица, скорость) |
+| GET/POST | `/api/sound/scheme` | схема (тип, engine, таблицы, extras) |
+| POST | `/api/sound/table` | правка одной таблицы |
+| POST | `/api/sound/extra` | правка одного доп. звука |
+| GET | `/api/sound/lint` | проверка графа схемы |
+| GET | `/api/sound/projects` | список схем `.mds` (+ активная) |
+| POST | `/api/sound/project` | создать (`create=NAME[&type=N]`), выбрать (`activate=NAME`) или удалить (`delete=NAME`) схему |
+| GET | `/api/sound/download` | скачать схему файлом `.mds` (`name=NAME`) |
+| POST | `/api/sound/upload` | загрузить схему файлом `.mds` (`name=NAME[&activate=0]`) |
 | GET/POST | `/api/aux/cfg` | уровни/эффекты AUX |
 | GET | `/api/cv/read` / `/api/cv/all` | чтение CV |
 | POST | `/api/cv/write` | запись CV (commit) |
@@ -684,6 +736,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 - Привязка F1..F20 ↔ слоты 1..20 ↔ голоса 0..19; для F1..F10 доступен второй
   слот (`slot_b`) и второй голос (смещение `AUDIO_MAX_VOICES/2`).
 - Громкость голоса = общая × (двигатель/эффекты) по категории слота.
+- Скорость воспроизведения на голос — `audio_voice_set_rate()` (permille,
+  500..3000), сглаживается с ресемплером; на старте/стопе — анти-щёлчок фейд.
 - Файлы: `/userdata/audio/*.wav`; поддержка PCM16 в `audio_validate_wav()`.
 
 ---
@@ -755,6 +809,7 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | `SELFTEST` (UART/USB) | самотест подсистем: heap/pinmap/CV/NVS/LittleFS/ADC/audio/AUX/DCC; вывод `TEST <name> PASS|FAIL|SKIP` и `SELFTEST-END` |
 | `HIL-AUX/HIL-SOUND/HIL-MOTOR` (UART/USB) | активирующие команды: вкл. AUX/проигрыш слота/прогон мотора на `ms`, затем возврат состояния или стоп |
 | `HIL-FN/HIL-FN-SWEEP/HIL-AUX-SWEEP` (UART/USB) | нажатие функции F0..F28 (`web_apply_function`) и прогон всех 9 AUX |
+| `HIL-ENGINE <0\|1>` / `HIL-SCHEME-SPEED <spd> <fwd>` (UART/USB) | вкл/выкл двигательный цикл схемы и подача скорости в звуковой движок |
 | `test/hil/run_hil.ps1` | HIL по USB: `SELFTEST`+`BEMF?`; с `-Actuate` — AUX/звук, `-Sweep` — все F и все AUX, `-MotorSpeed N` — мотор; код выхода 0/1 |
 | `test/hil/run_hil_web.ps1` | HIL по SoftAP: подключается к AP и прогоняет все safe REST-эндпоинты (F0..F28, AUX effect+cfg, звук, громкость, CV, func-map, мотор, mode, control source, device, BEMF, log); настройки возвращает |
 | `/api/log` + веб-журнал | события управления, ошибки, статусы |
@@ -766,30 +821,36 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 ## 17. Использование ресурсов
 
-### 17.1 Сводка (сборка release, `pio run`, версия 0.8)
+### 17.1 Сводка (сборка release, `idf.py`, версия 0.9)
 
 | Ресурс | Занято | Всего | % |
 |---|---|---|---|
-| RAM (DRAM, статически) | 50 408 Б | 327 680 Б | 15.4 % |
-| Flash (образ приложения) | 824 597 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 41.9 % |
+| RAM (DRAM, статически) | 79 544 Б | 327 680 Б | 24.3 % |
+| Flash (образ приложения) | 850 281 Б | 1 966 080 Б (слот `ota_0`/`ota_1` = 1920 КБ) | 43.2 % |
 | Свободно в слоте приложения | ~1.1 МБ | | |
+
+Звуковой движок (0.8 → 0.9): Flash **+25 684 Б (≈ +25 КБ)**, статическая RAM
+**+29 136 Б (≈ +28 КБ)**. Основной вклад в RAM — `s_scheme` в `.bss`
+(`0x655E` = 26 206 Б, `components/sound`); остальное — `s_binds` привязок,
+`web`-массивы. Flash-прирост: код `sound`/REST + встроенная страница
+(`web_ui.html` выросла). `firmware.bin`: 826 176 → 850 640 Б.
 
 > Запас в OTA-слоте большой (~1.1 МБ), поэтому рост кода не критичен. Дополнительно
 > доступна **PSRAM 2 МБ** как heap. Веб-страница (`web_ui.html`) лежит в rodata и
 > весит ~60 КБ.
 
 Размеры ELF-секций (xtensa size) и разбивку по компонентам смотрите в актуальном
-`.map` после сборки (`pio run -t size`).
+`.map` после сборки (`idf.py size`).
 
 ### 17.2 Flash по компонентам (порядок величин; точные цифры — в актуальном
-`.map` после сборки, `pio run -t size`)
+`.map` после сборки, `idf.py size`)
 
 | Компонент | Flash, Б | Комментарий |
 |---|---|---|
 | esp_wifi | 184 040 | Wi-Fi драйвер + PHY |
 | lwip | 92 719 | TCP/IP |
 | toolchain/other | 91 738 | libc/libm/libgcc и сгенерированное |
-| **web** | 87 738 | наш HTTP/API + встроенная страница (~56 КБ) + журнал |
+| **web** | ~100 000 | наш HTTP/API + встроенная страница (~68 КБ) + журнал |
 | driver | 46 017 | LEDC/MCPWM/I2S/ADC/GPIO драйверы |
 | esp_hw_support | ~34 700 | платформенная обвязка |
 | wpa_supplicant | 32 467 | WPA2 |
@@ -802,6 +863,7 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | **provision** | 6 444 | протокол провижининга + BEMF-консоль |
 | **motor** | 4 496 | ШИМ + PID + калибровка |
 | **settings** | 3 835 | NVS-обвязка |
+| **sound** | ~8–10 КБ | новый компонент: движок схемы + `.mds`-хранилище (0.9) |
 | **main** | 3 803 | app_main + safety + колбэки |
 | **dcc** | 2 730 | разбор DCC |
 | **audio** | 2 326 | микшер |
@@ -810,27 +872,30 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | **track** | 588 | рельсовый ADC |
 | **pinmap** | 363 | карта выводов |
 
-Собственно «наш» код (web, provision, motor, settings, main, dcc, audio,
-storage, auxio, track, pinmap) занимает примерно **120 КБ** flash из ~825 КБ;
+Собственно «наш» код (web, sound, provision, motor, settings, main, dcc, audio,
+storage, auxio, track, pinmap) занимает примерно **150 КБ** flash из ~850 КБ;
 остальное — ESP-IDF (Wi-Fi/lwIP/LittleFS/toolchain). После 0.7 добавился
 `esp_psram`, из lwIP ушёл IPv6, из libm — `powf`.
 
 ### 17.3 RAM
 
-Статический `.bss` (из `.map`) — крупнейшие: `esp_wifi` (~5.2 КБ),
-`web` (~4.2 КБ: буферы API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ),
-`spi_flash` (~2.5 КБ), `lwip` (~2.3 КБ), далее — `freertos`, `esp_hw_support`,
+Статический `.bss` (из `.map`) — крупнейшие: **`sound.s_scheme` (~25.6 КБ,
+активная схема, `0x655E`)**, `esp_wifi` (~5.2 КБ), `web` (~4.2 КБ: буферы
+API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~2.5 КБ),
+`lwip` (~2.3 КБ), `sound.s_binds` (~1 КБ), далее — `freertos`, `esp_hw_support`,
 `hal`, `motor` (~0.37 КБ), `vfs`. Плюс загружаемые `.data`/IRAM и динамические
-буферы Wi-Fi/lwIP/HTTP — итого ~49.2 КБ DRAM по отчёту сборки.
+буферы Wi-Fi/lwIP/HTTP — итого ~79.5 КБ DRAM по отчёту сборки (было ~50 КБ до
+0.9; рост ≈ +28 КБ, в основном `s_scheme`). При нехватке DRAM `s_scheme` —
+первый кандидат на вынос в PSRAM.
 
-Стеки задач (из таблицы раздела 7): ~96 КБ в сумме, из них основные —
+Стеки задач (из таблицы раздела 7): ~100 КБ в сумме, из них основные —
 `main` 16 КБ, HTTP 16 КБ, `pipe_wr` 16 КБ, `dcc` 8 КБ, `prov_listen` 8 КБ,
 HTTP-progress 4 КБ. При добавлении задач/увеличении стеков следите за DRAM.
 
 ### 17.4 Куда смотреть при росте ресурсов
 
 - Flash: уменьшать веб-страницу; не тащить лишние компоненты IDF; проверять
-  `pio run -t size` и парсить `.map`.
+  `idf.py size` и парсить `.map`.
 - RAM: уменьшать `MIX_BLOCK`/число голосов, размеры JSON/буферов web, число
   HTTP-сокетов; не увеличивать стеки без нужды.
 - CPU: 160 МГц; горячие периодические задачи — мотор (10 мс), aux (20 мс),
@@ -843,8 +908,8 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 
 **Легко добавить:**
 
-- Новая команда/маршрут REST — `register_route()` в `web.c` (лимит
-  `max_uri_handlers = 48`, сейчас занято ~41 — при новых следите за лимитом).
+- Новая команда/маршрут REST — `register_route()` в `web.c` (лимит поднят до
+  `max_uri_handlers = 64`, сейчас занято ~47 — при новых следите за лимитом).
 - Новый эффект света — `auxio_effect_t` + `ch_duty()`/`ch_step()`.
 - Новый CV — прочитать в нужном месте через `settings_cv_read()` (массив
   `s_cv` уже 512 записей).
@@ -860,15 +925,18 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 - Внешняя NOR не форматируется автоматически — при повреждении FS нужен
   провижининг/явный `storage_format()`; без неё звук отключён (fallback нет).
 - **Смена таблицы разделов** (размеры/смещения `nvs`/`ota`/`coredump`) выполняется
-  только по USB — OTA её не обновляет. Обычная прошивка по USB (`pio run -t
-  upload`) таблицу перезапишет; полная очистка (`erase`) нужна лишь раз при
+  только по USB — OTA её не обновляет. Обычная прошивка по USB (`idf_build.ps1
+  -Flash`) таблицу перезапишет; полная очистка (`-Erase`) нужна лишь раз при
   переходе со старой разметки.
 - Wi-Fi — только SoftAP (STA/APSTA игнорируются), power management выключен.
 - DCC ISR level-3 на CPU1 — при переносе задач с ядра 1 возможны конфликты по
   приоритету/латентности.
 - Изменение веб-страницы только через `web_ui.html` (иначе перезапишется).
-- `sdkconfig.esp32-s3-devkitc-1` генерируется; править надо `sdkconfig.defaults`
-  и/или `platformio.ini`.
+- `sound_scheme_t` ≈ 26 КБ (имена файлов 4×3×32 таблиц): не размещать на стеке
+  задач (главный стек — 16 КБ), использовать heap/модульную статику; при
+  нехватке DRAM — вынести в PSRAM. Loop-треки пока играются с перезапуском
+  (бесшовность — задача предзагрузки P2).
+- `sdkconfig` генерируется; править надо `sdkconfig.defaults`.
 
 ---
 
@@ -876,6 +944,17 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 
 Изменения по итогам код-ревью и батчей правок — в `FIXES_LOG.md`; сводный
 отчёт по дефектам и их статусам — в `CODE_REVIEW_REPORT.md`.
+
+**0.9 — звуковой движок (roadmap R0–R6).** Добавлен компонент `sound`
+(`.mds`-хранилище, автомат, секвенсер, режимы F-клавиш, логики mute,
+`sync_motion`, random/state-звуки, тормозной скрип, линт). `audio` получил
+управление скоростью/фейд и аллокатор голосов (18/19 — под движок).
+`settings` — модель `sound_types.h`, канонические привязки `func_bind`
+(+миграция), `active_scheme`, манифест v2 (`B;`), CV30/63/114/115/116.
+`motor` — `motor_get_applied_speed()`. `web` — маршруты `/api/sound/*`,
+привязки `/api/func-map?view=bind`, панели «Звук» и `max_uri_handlers=64`.
+`provision` — `HIL-ENGINE`/`HIL-SCHEME-SPEED`. Версия 0.9 (CV7=9 с миграцией).
+Подробности — `docs/sound_scheme.md`, `docs/cv_sound.md`, `CHANGELOG.md`.
 
 ---
 
@@ -885,8 +964,8 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 2. Новые зависимости модуля — в его `CMakeLists.txt` (`REQUIRES`).
 3. Веб — в `web_ui.html`, затем обычная сборка (заголовок сгенерируется).
 4. Настройки/CV — через `settings_*`, не писать в NVS напрямую.
-5. Прогнать `test\run_tests.ps1` и `pio run -e esp32-s3-devkitc-1`.
-6. Проверить `pio run -t size` (RAM/Flash) перед коммитом.
+5. Прогнать `test\run_tests.ps1` и `idf_build.ps1`.
+6. Проверить `idf.py size` (RAM/Flash) перед коммитом.
 7. На железе — серийный лог 115200 и, для мотора, `BEMF-RAW`.
 8. Версия проекта — в `firmware/version.txt` (единственный источник); инкремент — `bump_version.bat`.
 9. Коммит — `CHANGELOG.md` пополняется автоматически (хук `.githooks/post-commit`).

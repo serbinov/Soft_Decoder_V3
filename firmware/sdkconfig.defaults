@@ -10,7 +10,7 @@ CONFIG_FREERTOS_HZ=1000
 # Detect task stack overflow (canary on task switch) so an overflow panics with
 # the task name instead of silently corrupting the heap (heap corruption looked
 # like a random FreeRTOS assert in xTaskRemoveFromEventList).
-CONFIG_FREERTOS_CHECK_STACKOVERFLOW=1
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
 
 # app_main() starts Wi-Fi (esp_wifi_init needs ~10 KB stack).
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384

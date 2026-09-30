@@ -6,7 +6,7 @@
 #include <math.h>
 
 #include "driver/ledc.h"
-#include "driver/mcpwm.h"
+#include "driver/mcpwm_prelude.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -24,13 +24,7 @@ void setUp(void)
 {
     mock_ledc_update_count = 0;
     memset(mock_ledc_duty, 0, sizeof(mock_ledc_duty));
-    for (int u = 0; u < 2; ++u) {
-        for (int t = 0; t < 3; ++t) {
-            for (int o = 0; o < 2; ++o) {
-                mock_mcpwm_duty[u][t][o] = -1.0f;
-            }
-        }
-    }
+    mock_mcpwm_reset();
     mock_mutex_create_fail = 0;
     mock_sem_take_fail = 0;
     mock_task_create_ok = 1;
@@ -244,7 +238,7 @@ static void test_auxio_set_output_applies_duty(void)
 
     /* AUX5..AUX7 are MCPWM-backed. */
     TEST_ASSERT_EQUAL(ESP_OK, auxio_set_output(8, true, 255));
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, mock_mcpwm_duty[0][MCPWM_TIMER_1][MCPWM_OPR_A]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, mock_mcpwm_duty[2]);
 }
 
 static void test_auxio_set_enabled_validation(void)

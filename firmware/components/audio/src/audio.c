@@ -24,6 +24,8 @@ static const char *TAG = "audio";
  * large buffer would consume a lot of internal DRAM (allocations below
  * CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL never go to PSRAM). */
 #define VOICE_IO_BUF 2048
+/* Envelope full-scale (fixed point); the anti-click fade ramps 0..AUDIO_ENV_ONE. */
+#define AUDIO_ENV_ONE 1024
 
 typedef struct {
     char riff[4];
@@ -59,6 +61,11 @@ typedef struct {
     uint32_t cur_idx;
     int16_t s_cur;
     int16_t s_next;
+    uint16_t rate_permille; /* target rate, 1000 = nominal */
+    double rate_cur;        /* smoothed rate actually used by the resampler */
+    uint32_t played;        /* output samples produced since the last start */
+    uint16_t env;           /* anti-click envelope, 0..AUDIO_ENV_ONE */
+    bool stopping;          /* fading out towards silence, then close */
 } voice_state_t;
 
 typedef struct {
@@ -68,6 +75,7 @@ typedef struct {
     bool req_stop;
     bool req_loop;
     uint8_t req_volume;
+    uint16_t req_rate; /* per-voice playback rate, 1000 = nominal */
     char req_path[AUDIO_PATH_MAX];
 } voice_t;
 
@@ -75,6 +83,22 @@ static i2s_chan_handle_t s_tx;
 static volatile uint8_t s_volume = 20;
 static voice_t s_voice[AUDIO_MAX_VOICES];
 static SemaphoreHandle_t s_req_mutex;
+/* Voice allocator flags, protected by s_req_mutex (owner: alloc/release and
+ * the mixer task when a voice ends on its own). */
+static bool s_busy[AUDIO_MAX_VOICES];
+/* Anti-click fade length in mix blocks; test hook (0 disables the envelope). */
+static uint8_t s_fade_blocks = 2;
+
+static uint16_t rate_clamp(uint16_t permille)
+{
+    if (permille < AUDIO_RATE_MIN) {
+        return AUDIO_RATE_MIN;
+    }
+    if (permille > AUDIO_RATE_MAX) {
+        return AUDIO_RATE_MAX;
+    }
+    return permille;
+}
 
 static void mixer_task(void *arg);
 
@@ -111,6 +135,11 @@ static esp_err_t i2s_setup(void)
 
 esp_err_t audio_init(void)
 {
+    for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
+        s_busy[v] = false;
+        s_voice[v].req_rate = 1000;
+    }
+
     gpio_config_t sd = {
         .pin_bit_mask = 1ULL << PIN_AUDIO_SD_MODE,
         .mode = GPIO_MODE_OUTPUT,
@@ -221,14 +250,39 @@ static bool voice_next_sample(voice_state_t *st, int16_t *out)
 /* Produce up to `count` mono output samples, adding them into mix[]. */
 static int voice_fill(voice_state_t *st, int16_t *mix, int count)
 {
-    double step = (double)st->sample_rate / (double)MIX_RATE;
+    /* Smooth the playback rate towards its target once per block so a rate step
+     * does not produce an audible click (miniaudio/SoLoud rule: keep the
+     * resampler active even at 1.0). */
+    double target = (double)st->rate_permille / 1000.0;
+    st->rate_cur += (target - st->rate_cur) * 0.25;
+    double step = ((double)st->sample_rate / (double)MIX_RATE) * st->rate_cur;
+
+    /* Anti-click envelope: ramp in on start / out on stop over s_fade_blocks. */
+    int env_step = 0;
+    if (s_fade_blocks != 0U) {
+        env_step = AUDIO_ENV_ONE / ((int)s_fade_blocks * MIX_BLOCK);
+        if (env_step < 1) {
+            env_step = 1;
+        }
+    }
     int i;
     for (i = 0; i < count; ++i) {
+        if (env_step != 0) {
+            if (st->stopping) {
+                st->env = ((int)st->env > env_step) ? (uint16_t)(st->env - env_step) : 0U;
+            } else if (st->env < AUDIO_ENV_ONE) {
+                int e = (int)st->env + env_step;
+                st->env = (uint16_t)(e > AUDIO_ENV_ONE ? AUDIO_ENV_ONE : e);
+            }
+        }
         double frac = st->pos - (double)st->cur_idx;
         int32_t s = (int32_t)st->s_cur +
                     (int32_t)((double)(st->s_next - st->s_cur) * frac);
         int32_t gain = (int32_t)st->volume * (int32_t)s_volume / 100;
         int32_t out = s * gain / 100;
+        if (env_step != 0) {
+            out = out * (int32_t)st->env / AUDIO_ENV_ONE;
+        }
         int32_t acc = (int32_t)mix[i] + out;
         if (acc > 32767) {
             acc = 32767;
@@ -236,6 +290,17 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
             acc = -32768;
         }
         mix[i] = (int16_t)acc;
+        st->played++;
+
+        /* A stop request fades the voice out; close only once silent. */
+        if (env_step != 0 && st->stopping && st->env == 0U) {
+            st->active = false;
+            if (st->f != NULL) {
+                fclose(st->f);
+                st->f = NULL;
+            }
+            return i + 1;
+        }
 
         st->pos += step;
         while (st->pos >= (double)(st->cur_idx + 1U)) {
@@ -324,6 +389,11 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
         return ESP_FAIL;
     }
 
+    uint16_t rate = st->rate_permille;
+    if (rate < AUDIO_RATE_MIN) {
+        rate = 1000; /* unset/invalid (e.g. zero-initialised state) -> nominal */
+    }
+
     fseek(f, (long)data_start, SEEK_SET);
     st->f = f;
     st->sample_rate = sample_rate;
@@ -335,6 +405,11 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     st->volume = volume > 100U ? 100U : volume;
     st->pos = 0.0;
     st->cur_idx = 0;
+    st->rate_permille = rate;
+    st->rate_cur = (double)rate / 1000.0;
+    st->played = 0;
+    st->stopping = false;
+    st->env = (s_fade_blocks == 0U) ? AUDIO_ENV_ONE : 0U;
 
     if (!voice_next_sample(st, &st->s_cur)) {
         fclose(f);
@@ -362,6 +437,7 @@ static void mixer_task(void *arg)
             voice_t *vo = &s_voice[v];
             bool play = false, stop = false, loop = false;
             uint8_t volume = 100;
+            uint16_t rate = 1000;
             char path[AUDIO_PATH_MAX];
 
             if (s_req_mutex != NULL) {
@@ -371,6 +447,7 @@ static void mixer_task(void *arg)
             stop = vo->req_stop;
             loop = vo->req_loop;
             volume = vo->req_volume;
+            rate = rate_clamp(vo->req_rate);
             memcpy(path, vo->req_path, sizeof(path));
             path[sizeof(path) - 1] = '\0';
             vo->req_play = false;
@@ -380,14 +457,41 @@ static void mixer_task(void *arg)
             }
 
             if (stop) {
-                vo->st.active = false;
-                if (vo->st.f != NULL) {
-                    fclose(vo->st.f);
-                    vo->st.f = NULL;
+                if (s_fade_blocks != 0U && vo->st.active) {
+                    vo->st.stopping = true; /* fade out, then close in voice_fill */
+                } else {
+                    vo->st.active = false;
+                    vo->st.stopping = false;
+                    if (vo->st.f != NULL) {
+                        fclose(vo->st.f);
+                        vo->st.f = NULL;
+                    }
+                    if (s_req_mutex != NULL) {
+                        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+                    }
+                    s_busy[v] = false;
+                    if (s_req_mutex != NULL) {
+                        xSemaphoreGive(s_req_mutex);
+                    }
                 }
             }
             if (play) {
-                (void)voice_start(&vo->st, path, loop, volume);
+                vo->st.stopping = false;
+                vo->st.rate_permille = rate;
+                if (voice_start(&vo->st, path, loop, volume) != ESP_OK) {
+                    /* The voice never became active (open/format error). Release
+                     * its allocator slot so a missing/corrupt WAV cannot leak a
+                     * voice forever (REV-A1). */
+                    if (s_req_mutex != NULL) {
+                        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+                    }
+                    s_busy[v] = false;
+                    if (s_req_mutex != NULL) {
+                        xSemaphoreGive(s_req_mutex);
+                    }
+                }
+            } else if (vo->st.active) {
+                vo->st.rate_permille = rate; /* live rate updates */
             }
         }
 
@@ -398,6 +502,16 @@ static void mixer_task(void *arg)
                 continue;
             }
             (void)voice_fill(st, mix, MIX_BLOCK);
+            if (!st->active) {
+                /* Voice finished on its own; free its allocator slot. */
+                if (s_req_mutex != NULL) {
+                    xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+                }
+                s_busy[v] = false;
+                if (s_req_mutex != NULL) {
+                    xSemaphoreGive(s_req_mutex);
+                }
+            }
         }
         size_t written = 0;
         (void)i2s_channel_write(s_tx, mix, sizeof(mix), &written, pdMS_TO_TICKS(1000));
@@ -448,6 +562,72 @@ void audio_stop_all(void)
     for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
         (void)audio_voice_stop(v);
     }
+}
+
+esp_err_t audio_voice_set_rate(uint8_t voice, uint16_t permille)
+{
+    if (voice >= AUDIO_MAX_VOICES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    voice_t *vo = &s_voice[voice];
+    if (s_req_mutex != NULL) {
+        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+    }
+    vo->req_rate = rate_clamp(permille);
+    if (s_req_mutex != NULL) {
+        xSemaphoreGive(s_req_mutex);
+    }
+    return ESP_OK;
+}
+
+bool audio_voice_is_active(uint8_t voice)
+{
+    if (voice >= AUDIO_MAX_VOICES) {
+        return false;
+    }
+    return s_voice[voice].st.active;
+}
+
+uint32_t audio_voice_position(uint8_t voice)
+{
+    if (voice >= AUDIO_MAX_VOICES) {
+        return 0U;
+    }
+    return s_voice[voice].st.played;
+}
+
+uint8_t audio_voice_alloc(void)
+{
+    uint8_t found = AUDIO_VOICE_NONE;
+    if (s_req_mutex != NULL) {
+        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+    }
+    for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
+        if (!s_busy[v]) {
+            s_busy[v] = true;
+            found = (uint8_t)v;
+            break;
+        }
+    }
+    if (s_req_mutex != NULL) {
+        xSemaphoreGive(s_req_mutex);
+    }
+    return found;
+}
+
+void audio_voice_release(uint8_t voice)
+{
+    if (voice >= AUDIO_MAX_VOICES) {
+        return;
+    }
+    if (s_req_mutex != NULL) {
+        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+    }
+    s_busy[voice] = false;
+    if (s_req_mutex != NULL) {
+        xSemaphoreGive(s_req_mutex);
+    }
+    (void)audio_voice_stop(voice);
 }
 
 void audio_set_volume(uint8_t vol)

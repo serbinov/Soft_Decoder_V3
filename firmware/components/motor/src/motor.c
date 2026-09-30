@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "driver/adc.h"
+#include "esp_adc/adc_oneshot.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
@@ -43,6 +43,16 @@ static bool s_target_forward;
 static uint8_t s_applied_speed;
 static bool s_applied_forward;
 
+/* Published copy of the applied (speed, direction) pair for cross-task readers:
+ * a single 16-bit store/load avoids a torn pair while reversing (REV-M1).
+ * bit8 = forward, bits 0..7 = speed (0..126). */
+static volatile uint16_t s_applied_state;
+
+static void applied_publish(uint8_t speed128, bool forward)
+{
+    s_applied_state = (uint16_t)((uint16_t)speed128 | (forward ? 0x100U : 0U));
+}
+
 static uint32_t s_ramp_acc;
 static bool s_was_stopped = true;
 static uint32_t s_kick_duty;
@@ -62,8 +72,8 @@ static float s_pid_kd;
 static SemaphoreHandle_t s_bemf_mutex;
 static bool s_bemf_adc_ready;
 static bool s_bemf_enabled = true;
-static adc1_channel_t s_bemf1_ch;
-static adc1_channel_t s_bemf2_ch;
+static adc_oneshot_unit_handle_t s_adc;
+static bool s_adc_ready;
 static uint16_t s_pid_reload;
 
 /* BEMF calibration: applied speed steps measured with the motor unloaded.
@@ -211,6 +221,57 @@ static void apply_pwm(uint32_t duty, bool forward)
     }
 }
 
+/* Shared ADC1 (adc_oneshot). One unit serves the BEMF sample window, the rail
+ * sense and the diagnostics dump; channels are 12-bit at 12 dB attenuation.
+ * ESP32-S3 ADC1 channels 0..9 map to GPIO1..10. */
+#define ADC1_GPIO_MIN 1
+#define ADC1_GPIO_MAX 10
+
+static esp_err_t adc_unit_ensure(void)
+{
+    if (s_adc_ready) {
+        return ESP_OK;
+    }
+    adc_oneshot_unit_init_cfg_t cfg = { .unit_id = ADC_UNIT_1 };
+    esp_err_t err = adc_oneshot_new_unit(&cfg, &s_adc);
+    if (err != ESP_OK) {
+        return err;
+    }
+    s_adc_ready = true;
+    return ESP_OK;
+}
+
+esp_err_t motor_adc_config_channel(int gpio_num)
+{
+    if (gpio_num < ADC1_GPIO_MIN || gpio_num > ADC1_GPIO_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = adc_unit_ensure();
+    if (err != ESP_OK) {
+        return err;
+    }
+    adc_oneshot_chan_cfg_t chan = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
+    };
+    return adc_oneshot_config_channel(s_adc, (adc_channel_t)(gpio_num - 1), &chan);
+}
+
+int motor_adc_read_raw(int gpio_num)
+{
+    if (gpio_num < ADC1_GPIO_MIN || gpio_num > ADC1_GPIO_MAX) {
+        return -1;
+    }
+    if (adc_unit_ensure() != ESP_OK) {
+        return -1;
+    }
+    int raw = -1;
+    if (adc_oneshot_read(s_adc, (adc_channel_t)(gpio_num - 1), &raw) != ESP_OK) {
+        return -1;
+    }
+    return raw;
+}
+
 static void bemf_sample_window(void)
 {
     if (!motor_bemf_lock()) {
@@ -229,8 +290,8 @@ static void bemf_sample_window(void)
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_0);
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_1);
     esp_rom_delay_us(BEMF_SETTLE_US);
-    int raw1 = adc1_get_raw(s_bemf1_ch);
-    int raw2 = adc1_get_raw(s_bemf2_ch);
+    int raw1 = motor_adc_read_raw(PIN_BEMF1);
+    int raw2 = motor_adc_read_raw(PIN_BEMF2);
     motor_bemf_unlock();
     if (raw1 >= 0) {
         s_bemf1_mv = (uint32_t)raw1 * 3100U / 4095U;
@@ -391,6 +452,7 @@ static void motor_tick(void)
     if (!reversing || applied == 0U) {
         s_applied_forward = s_target_forward;
     }
+    applied_publish(s_applied_speed, s_applied_forward);
 
     uint32_t duty_base = speed_duty(applied);
     uint32_t duty_final = duty_base;
@@ -580,12 +642,11 @@ esp_err_t motor_init(void)
     ESP_ERROR_CHECK(ledc_channel_config(&ch2));
 
     s_bemf_mutex = xSemaphoreCreateMutex();
-    (void)adc1_config_width(ADC_WIDTH_BIT_12);
-    /* PIN_BEMF1=GPIO4 -> ADC1_CH3, PIN_BEMF2=GPIO5 -> ADC1_CH4. */
-    s_bemf1_ch = (adc1_channel_t)(PIN_BEMF1 - 1);
-    s_bemf2_ch = (adc1_channel_t)(PIN_BEMF2 - 1);
-    (void)adc1_config_channel_atten(s_bemf1_ch, ADC_ATTEN_DB_12);
-    (void)adc1_config_channel_atten(s_bemf2_ch, ADC_ATTEN_DB_12);
+    /* PIN_BEMF1=GPIO4 -> ADC1_CH3, PIN_BEMF2=GPIO5 -> ADC1_CH4,
+     * PIN_RAIL_SENSE=GPIO6 -> ADC1_CH5. */
+    (void)motor_adc_config_channel(PIN_BEMF1);
+    (void)motor_adc_config_channel(PIN_BEMF2);
+    (void)motor_adc_config_channel(PIN_RAIL_SENSE);
     s_bemf_adc_ready = true;
 
     load_pid();
@@ -600,6 +661,7 @@ esp_err_t motor_init(void)
     s_target_forward = true;
     s_applied_speed = 0;
     s_applied_forward = true;
+    applied_publish(0, true);
     s_ramp_acc = 0;
     s_was_stopped = true;
     s_kick_duty = 0;
@@ -643,6 +705,7 @@ void motor_emergency_stop(void)
     s_target_speed = 0;
     s_applied_speed = 0;
     s_applied_forward = true;
+    applied_publish(0, true);
     s_ramp_acc = 0;
     s_was_stopped = true;
     s_kick_left = 0;
@@ -665,6 +728,18 @@ void motor_get_status(uint8_t *out_speed128, bool *out_forward)
     }
     if (out_forward != NULL) {
         *out_forward = s_target_forward;
+    }
+}
+
+void motor_get_applied_speed(uint8_t *out_speed128, bool *out_forward)
+{
+    /* One atomic 16-bit load: the pair is always self-consistent (REV-M1). */
+    uint16_t st = s_applied_state;
+    if (out_speed128 != NULL) {
+        *out_speed128 = (uint8_t)(st & 0xFFU);
+    }
+    if (out_forward != NULL) {
+        *out_forward = (st & 0x100U) != 0U;
     }
 }
 
@@ -716,6 +791,7 @@ static void bemf_cal_task(void *arg)
      * (126) with real PWM right after the calibration finishes. */
     s_applied_speed = 0;
     s_applied_forward = true;
+    applied_publish(0, true);
     s_ramp_acc = 0;
     s_was_stopped = true;
     s_kick_left = 0;
@@ -855,19 +931,19 @@ void motor_bemf_adc_dump(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw)
         return;
     }
     if (b1_raw != NULL) {
-        int r = adc1_get_raw(s_bemf1_ch);
+        int r = motor_adc_read_raw(PIN_BEMF1);
         if (r >= 0) {
             *b1_raw = (uint16_t)r;
         }
     }
     if (b2_raw != NULL) {
-        int r = adc1_get_raw(s_bemf2_ch);
+        int r = motor_adc_read_raw(PIN_BEMF2);
         if (r >= 0) {
             *b2_raw = (uint16_t)r;
         }
     }
     if (rail_raw != NULL) {
-        int r = adc1_get_raw((adc1_channel_t)(PIN_RAIL_SENSE - 1));
+        int r = motor_adc_read_raw(PIN_RAIL_SENSE);
         if (r >= 0) {
             *rail_raw = (uint16_t)r;
         }

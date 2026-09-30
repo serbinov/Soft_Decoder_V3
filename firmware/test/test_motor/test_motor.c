@@ -7,7 +7,7 @@
 
 /* Pre-include every header motor.c pulls in (directly or transitively) so the
  * `static` strip below cannot change their linkage rules. */
-#include "driver/adc.h"
+#include "esp_adc/adc_oneshot.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
@@ -296,6 +296,21 @@ static void test_motor_set_speed_clamps(void)
     TEST_ASSERT_EQUAL_UINT8(0, sp);
 
     motor_get_status(NULL, NULL);
+}
+
+static void test_motor_get_applied_speed(void)
+{
+    uint8_t sp = 0;
+    bool fwd = false;
+    applied_publish(42, false);
+    motor_get_applied_speed(&sp, &fwd);
+    TEST_ASSERT_EQUAL_UINT8(42, sp);
+    TEST_ASSERT_FALSE(fwd);
+    applied_publish(7, true);
+    motor_get_applied_speed(&sp, &fwd);
+    TEST_ASSERT_EQUAL_UINT8(7, sp);
+    TEST_ASSERT_TRUE(fwd);
+    motor_get_applied_speed(NULL, NULL);
 }
 
 /* ---- motor_tick: ramp / kickstart ---- */
@@ -1013,6 +1028,7 @@ int main(void)
     RUN_TEST(test_bemf_cal_table_needs_two_points);
     RUN_TEST(test_load_pid_maps_cv_range);
     RUN_TEST(test_motor_set_speed_clamps);
+    RUN_TEST(test_motor_get_applied_speed);
     RUN_TEST(test_motor_tick_ramp_no_inertia);
     RUN_TEST(test_motor_tick_ramp_uses_cv3);
     RUN_TEST(test_motor_tick_decel_uses_cv4);

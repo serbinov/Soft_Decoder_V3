@@ -2,21 +2,14 @@
 setlocal
 cd /d "%~dp0"
 
-set "PIO=%USERPROFILE%\.platformio\penv\Scripts\pio.exe"
-if not exist "%PIO%" (
-    echo [ERROR] PlatformIO not found: %PIO%
-    pause
-    exit /b 1
-)
-
 set /p VERSION=<version.txt
-set "SRC=.pio\build\esp32-s3-devkitc-1\firmware.bin"
+set "SRC=build\soft_decoder_v3.bin"
 set "DST=..\release\ADDITIPUS_AURA-X_v%VERSION%.bin"
 
 echo ================================================
 echo  Build OTA firmware v%VERSION%
 echo ================================================
-"%PIO%" run -e esp32-s3-devkitc-1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0idf_build.ps1"
 if errorlevel 1 (
     echo.
     echo [FAIL] Build failed.
@@ -25,7 +18,7 @@ if errorlevel 1 (
 )
 
 if not exist "%SRC%" (
-    echo [ERROR] firmware.bin not found: %SRC%
+    echo [ERROR] firmware image not found: %SRC%
     pause
     exit /b 1
 )

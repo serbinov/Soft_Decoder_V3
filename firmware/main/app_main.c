@@ -20,6 +20,7 @@
 #include "pinmap.h"
 #include "provision.h"
 #include "settings.h"
+#include "sound.h"
 #include "storage.h"
 #include "track.h"
 #include "web.h"
@@ -80,6 +81,11 @@ static void on_dcc_cv_write(uint16_t cv, uint8_t value, bool service_mode)
          * been stable, so this DCC callback (and service-mode programming) does
          * not block the real-time task inside a flash program/erase. */
         settings_cv_commit_deferred();
+        /* CV63 aliases the master volume: apply it live (updates the cached
+         * config + audio + persistence) so the next settings_save keeps it. */
+        if (cv == 63U) {
+            web_master_volume_changed((uint8_t)((uint16_t)value * 100U / 255U));
+        }
     }
     web_log_event("CV", "CV %u = %u (%s)", (unsigned)cv, (unsigned)value,
                   service_mode ? "сервис" : "DCC");
@@ -100,6 +106,8 @@ static void clear_functions(void)
          * configured to drive. */
         web_apply_function(fn, false);
     }
+    /* Silence the scheme engine (including the latched prime mover) as well. */
+    sound_stop_all();
 }
 
 static void on_dcc_reset(void)
@@ -223,6 +231,15 @@ void app_main(void)
         esp_err_t err = audio_init();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Audio init failed: %s", esp_err_to_name(err));
+        }
+    }
+
+    /* Sound scheme engine: needs audio + storage + settings; must run before
+     * the DCC callbacks can apply a function key. */
+    {
+        esp_err_t err = sound_init();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Sound init failed: %s", esp_err_to_name(err));
         }
     }
 

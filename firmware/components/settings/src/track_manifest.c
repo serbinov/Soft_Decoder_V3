@@ -6,10 +6,14 @@
  * such a reset.
  *
  * Format (text, one record per line, ';'-separated; file/label are last so a
- * label may contain spaces):
- *   AURA-TRACKS 1
+ * label may contain spaces). Version 1 carries only tracks + the legacy
+ * function map; version 2 adds the canonical function bindings. A v1 file is
+ * read fine (unknown records are ignored) and an old parser would skip the
+ * new 'B;' records, so v1/v2 are mutually backwards compatible:
+ *   AURA-TRACKS 2
  *   T;<slot>;<cat>;<enabled>;<file>;<label>
  *   F;<idx>;<slot_a>;<slot_b>;<aux_mask>;<dir>;<speed>
+ *   B;<idx>;<fn>;<type>;<id>;<dir>;<state>;<mode>;<flags>;<short_table>;<short_ms>;<min_ms>;<fade_ms>
  */
 #include "settings.h"
 
@@ -27,7 +31,7 @@ static const char *TAG = "manifest";
 #endif
 #define MANIFEST_PATH    MANIFEST_DIR "/tracks.txt"
 #define MANIFEST_MAGIC   "AURA-TRACKS"
-#define MANIFEST_VERSION 1
+#define MANIFEST_VERSION 2
 #define MANIFEST_LINE_MAX 256
 
 /* Set while restoring from the manifest so the NVS writes it performs do not
@@ -78,6 +82,10 @@ esp_err_t settings_manifest_sync(void)
     size_t fcount = 0;
     (void)settings_func_map_load(fmap, &fcount);
 
+    func_binding_t binds[FUNC_BIND_MAX];
+    size_t bcount = 0;
+    (void)settings_func_bind_load(binds, &bcount);
+
     /* Write to a temp file and rename it over the real manifest: fopen("w")
      * truncates the live file, so a reset or power loss mid-write would leave a
      * truncated manifest as the only recovery copy. */
@@ -109,6 +117,15 @@ esp_err_t settings_manifest_sync(void)
                             (unsigned)fmap[i].aux_mask, (unsigned)fmap[i].dir,
                             (unsigned)fmap[i].speed) >= 0);
     }
+    for (size_t i = 0; i < bcount && i < FUNC_BIND_MAX; ++i) {
+        const func_binding_t *b = &binds[i];
+        ok = ok && (fprintf(f, "B;%u;%u;%u;%u;%u;%u;%u;%u;%u;%u;%u;%u\n", (unsigned)i,
+                            (unsigned)b->fn, (unsigned)b->target_type,
+                            (unsigned)b->target_id, (unsigned)b->dir, (unsigned)b->state,
+                            (unsigned)b->mode, (unsigned)b->flags, (unsigned)b->short_table,
+                            (unsigned)b->short_ms, (unsigned)b->min_ms,
+                            (unsigned)b->fade_ms) >= 0);
+    }
 
     int rc_flush = fflush(f);
     int rc_sync = fsync(fileno(f));
@@ -138,7 +155,10 @@ esp_err_t settings_manifest_load(void)
     settings_func_map_t fmap[SETTINGS_FUNC_MAP_COUNT];
     size_t fcount = 0;
     (void)settings_func_map_load(fmap, &fcount); /* defaults + overrides below */
+    func_binding_t binds[FUNC_BIND_MAX];
+    size_t bcount = 0;
     bool have_fmap = false;
+    bool have_bind = false;
     bool magic = false;
 
     char line[MANIFEST_LINE_MAX];
@@ -151,8 +171,8 @@ esp_err_t settings_manifest_load(void)
             magic = true;
             continue;
         }
-        char *fields[8];
-        int n = split_semicolon(line, fields, 8);
+        char *fields[16];
+        int n = split_semicolon(line, fields, 16);
         if (n < 2) {
             continue;
         }
@@ -180,23 +200,57 @@ esp_err_t settings_manifest_load(void)
             fmap[idx].dir = (uint8_t)strtoul(fields[5], NULL, 10);
             fmap[idx].speed = (uint8_t)strtoul(fields[6], NULL, 10);
             have_fmap = true;
+        } else if (fields[0][0] == 'B' && fields[0][1] == '\0' && n >= 13 &&
+                   bcount < FUNC_BIND_MAX) {
+            func_binding_t *b = &binds[bcount];
+            memset(b, 0, sizeof(*b));
+            /* idx (fields[1]) mirrors the array position; the record is
+             * appended in order so the slot is implicit. */
+            b->used = 1;
+            b->fn = (uint8_t)strtoul(fields[2], NULL, 10);
+            b->target_type = (uint8_t)strtoul(fields[3], NULL, 10);
+            b->target_id = (uint8_t)strtoul(fields[4], NULL, 10);
+            b->dir = (uint8_t)strtoul(fields[5], NULL, 10);
+            b->state = (uint8_t)strtoul(fields[6], NULL, 10);
+            b->mode = (uint8_t)strtoul(fields[7], NULL, 10);
+            b->flags = (uint8_t)strtoul(fields[8], NULL, 10);
+            b->short_table = (uint8_t)strtoul(fields[9], NULL, 10);
+            b->short_ms = (uint16_t)strtoul(fields[10], NULL, 10);
+            b->min_ms = (uint16_t)strtoul(fields[11], NULL, 10);
+            b->fade_ms = (uint16_t)strtoul(fields[12], NULL, 10);
+            bcount++;
+            have_bind = true;
         }
     }
     (void)fclose(f);
 
-    if (!magic || tcount == 0U) {
+    if (!magic) {
         return ESP_ERR_NOT_FOUND;
     }
 
     s_manifest_loading = true;
-    (void)settings_tracks_save(tracks, tcount);
-    (void)settings_track_cats_save(cats, SETTINGS_MAX_TRACKS);
+    if (tcount > 0U) {
+        (void)settings_tracks_save(tracks, tcount);
+        (void)settings_track_cats_save(cats, SETTINGS_MAX_TRACKS);
+    }
     if (have_fmap) {
         (void)settings_func_map_save(fmap, SETTINGS_FUNC_MAP_COUNT);
     }
+    if (have_bind) {
+        (void)settings_func_bind_save(binds, bcount);
+    }
     s_manifest_loading = false;
 
-    ESP_LOGW(TAG, "restored %u track(s)%s from %s", (unsigned)tcount,
-             have_fmap ? " + function map" : "", MANIFEST_PATH);
+    if (tcount == 0U) {
+        /* No track records, but the F;/B; metadata was still restored above.
+         * Report NOT_FOUND so the caller rebuilds the track list from the audio
+         * files without losing the function map/bindings (REV-ST1). */
+        ESP_LOGW(TAG, "restored function metadata (no tracks) from %s", MANIFEST_PATH);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    ESP_LOGW(TAG, "restored %u track(s)%s%s from %s", (unsigned)tcount,
+             have_fmap ? " + function map" : "", have_bind ? " + bindings" : "",
+             MANIFEST_PATH);
     return ESP_OK;
 }

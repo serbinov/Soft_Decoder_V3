@@ -277,6 +277,44 @@ uint16_t web_util_func_desired(const settings_func_map_t *m, bool fn_on,
     return on ? mask : 0U;
 }
 
+uint16_t func_eval(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t state,
+                   uint8_t dir, func_eval_cb_t cb, void *ctx)
+{
+    if (bind == NULL) {
+        return 0U;
+    }
+    uint16_t mask = 0U;
+    for (size_t i = 0; i < count; ++i) {
+        const func_binding_t *b = &bind[i];
+        if (b->used == 0U || b->fn != fn) {
+            continue;
+        }
+        if (b->dir != FUNC_DIR_ANY && b->dir != dir) {
+            continue;
+        }
+        if (b->state != FUNC_STATE_ANY && b->state != state) {
+            continue;
+        }
+        switch (b->target_type) {
+            case FUNC_TARGET_OUTPUT:
+                if (b->target_id < 9U) {
+                    mask |= (uint16_t)(1U << b->target_id);
+                }
+                break;
+            case FUNC_TARGET_SOUND:
+            case FUNC_TARGET_SLOT:
+            case FUNC_TARGET_LOGIC:
+                if (cb != NULL) {
+                    cb(ctx, b->target_type, b->target_id, true);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    return mask;
+}
+
 uint8_t web_util_voice_volume(uint8_t fn, const uint8_t *cats, bool cats_loaded,
                               uint8_t engine_vol, uint8_t effects_vol)
 {

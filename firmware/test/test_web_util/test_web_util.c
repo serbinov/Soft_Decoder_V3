@@ -505,6 +505,99 @@ static void test_fuzz_random_inputs(void)
     TEST_ASSERT_TRUE(true);
 }
 
+/* ---- func_eval ---- */
+
+static int s_cb_calls;
+static uint8_t s_cb_type;
+static uint8_t s_cb_id;
+static bool s_cb_active;
+
+static void eval_cb(void *ctx, uint8_t type, uint8_t id, bool active)
+{
+    (void)ctx;
+    s_cb_calls++;
+    s_cb_type = type;
+    s_cb_id = id;
+    s_cb_active = active;
+}
+
+static void test_func_eval_outputs(void)
+{
+    func_binding_t b[3];
+    memset(b, 0, sizeof(b));
+    b[0].used = 1;
+    b[0].fn = 1;
+    b[0].target_type = FUNC_TARGET_OUTPUT;
+    b[0].target_id = 2;
+    b[1].used = 1;
+    b[1].fn = 1;
+    b[1].target_type = FUNC_TARGET_OUTPUT;
+    b[1].target_id = 9; /* out of range -> ignored */
+    b[2].used = 0;
+    b[2].fn = 1;
+    b[2].target_type = FUNC_TARGET_OUTPUT;
+    b[2].target_id = 3;
+
+    s_cb_calls = 0;
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)(1U << 2),
+                             func_eval(b, 3, 1, FUNC_STATE_ANY, FUNC_DIR_ANY, eval_cb, NULL));
+    TEST_ASSERT_EQUAL_INT(0, s_cb_calls);
+    TEST_ASSERT_EQUAL_UINT16(0, func_eval(b, 3, 2, FUNC_STATE_ANY, FUNC_DIR_ANY, eval_cb, NULL));
+    TEST_ASSERT_EQUAL_UINT16(0, func_eval(NULL, 3, 1, 0, 0, eval_cb, NULL));
+}
+
+static void test_func_eval_dir_state_gates(void)
+{
+    func_binding_t b[1];
+    memset(b, 0, sizeof(b));
+    b[0].used = 1;
+    b[0].fn = 1;
+    b[0].target_type = FUNC_TARGET_OUTPUT;
+    b[0].target_id = 0;
+    b[0].dir = FUNC_DIR_FWD;
+    b[0].state = FUNC_STATE_MOVING;
+
+    TEST_ASSERT_EQUAL_UINT16(1U, func_eval(b, 1, 1, FUNC_STATE_MOVING, FUNC_DIR_FWD, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT16(0U, func_eval(b, 1, 1, FUNC_STATE_STOPPED, FUNC_DIR_FWD, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT16(0U, func_eval(b, 1, 1, FUNC_STATE_MOVING, FUNC_DIR_REV, NULL, NULL));
+
+    b[0].dir = FUNC_DIR_ANY;
+    b[0].state = FUNC_STATE_ANY;
+    TEST_ASSERT_EQUAL_UINT16(1U, func_eval(b, 1, 1, FUNC_STATE_STOPPED, FUNC_DIR_REV, NULL, NULL));
+}
+
+static void test_func_eval_callbacks(void)
+{
+    func_binding_t b[4];
+    memset(b, 0, sizeof(b));
+    b[0].used = 1;
+    b[0].fn = 1;
+    b[0].target_type = FUNC_TARGET_SOUND;
+    b[0].target_id = 4;
+    b[1].used = 1;
+    b[1].fn = 1;
+    b[1].target_type = FUNC_TARGET_SLOT;
+    b[1].target_id = 5;
+    b[2].used = 1;
+    b[2].fn = 1;
+    b[2].target_type = FUNC_TARGET_LOGIC;
+    b[2].target_id = 6;
+    b[3].used = 1;
+    b[3].fn = 1;
+    b[3].target_type = 99; /* unknown -> ignored */
+    b[3].target_id = 7;
+
+    s_cb_calls = 0;
+    TEST_ASSERT_EQUAL_UINT16(0, func_eval(b, 4, 1, FUNC_STATE_ANY, FUNC_DIR_ANY, eval_cb, NULL));
+    TEST_ASSERT_EQUAL_INT(3, s_cb_calls);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_LOGIC, s_cb_type);
+    TEST_ASSERT_EQUAL_UINT8(6, s_cb_id);
+    TEST_ASSERT_TRUE(s_cb_active);
+
+    /* A NULL callback must not crash on sound/slot/logic targets. */
+    TEST_ASSERT_EQUAL_UINT16(0, func_eval(b, 4, 1, FUNC_STATE_ANY, FUNC_DIR_ANY, NULL, NULL));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -534,6 +627,9 @@ int main(void)
     RUN_TEST(test_ota_container_parse);
     RUN_TEST(test_ota_file_hdr_parse);
     RUN_TEST(test_guards_and_bad_args);
+    RUN_TEST(test_func_eval_outputs);
+    RUN_TEST(test_func_eval_dir_state_gates);
+    RUN_TEST(test_func_eval_callbacks);
     RUN_TEST(test_fuzz_random_inputs);
     return UNITY_END();
 }

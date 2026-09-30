@@ -21,6 +21,9 @@ void motor_emergency_stop(void);
 /* Timestamp (us) of the last completed motor tick (0 before the first tick). */
 int64_t motor_last_tick_us(void);
 void motor_get_status(uint8_t *out_speed128, bool *out_forward);
+/* Actual ramped output (not the target): what the motor is doing right now.
+ * The sound engine follows this so transitions match the real motion. */
+void motor_get_applied_speed(uint8_t *out_speed128, bool *out_forward);
 
 /* Rail sense voltage (divider mV) fed by the track task; used for the BEMF
  * speed target and freewheel-clamp rejection. */
@@ -30,6 +33,12 @@ esp_err_t motor_set_rail_voltage_mv(uint32_t rail_mv);
  * (BEMF sampling window). Call unlock ONLY when lock returned true. */
 bool motor_bemf_lock(void);
 void motor_bemf_unlock(void);
+
+/* Shared ADC1 (adc_oneshot) used by the BEMF sampling and the track rail
+ * sense. Configure a channel (12-bit, 12 dB) before reading. Reads return -1
+ * when the ADC unit or channel is unavailable. */
+esp_err_t motor_adc_config_channel(int gpio_num);
+int motor_adc_read_raw(int gpio_num);
 
 /* BEMF calibration: runs the motor without load through a set of speed steps,
  * measures the back-EMF (as a fraction of the rail voltage) at each step and

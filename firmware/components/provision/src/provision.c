@@ -6,6 +6,7 @@
 
 #include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -22,6 +23,7 @@
 #include "audio.h"
 #include "web.h"
 #include "selftest.h"
+#include "sound.h"
 
 static const char *TAG = "prov";
 
@@ -185,7 +187,7 @@ static void ensure_usbjtag_driver(void)
         s_usbjtag_ok = true;
         /* Route console output through the driver so LL writes do not race
          * with the driver ISR on the shared TX FIFO. */
-        esp_vfs_usb_serial_jtag_use_driver();
+        usb_serial_jtag_vfs_use_driver();
     } else {
         ESP_LOGW(TAG, "usb_serial_jtag driver install: %s", esp_err_to_name(err));
     }
@@ -718,8 +720,24 @@ static void run_hil_act_console(const char *line)
                      (err == ESP_ERR_NOT_FOUND) ? "no-track" : "bad-arg");
         }
     } else if (strncmp(line, "HIL-MOTOR ", 10) == 0 && sscanf(line, "HIL-MOTOR %d %d", &a, &b) == 2) {
-        esp_err_t err = selftest_act_motor((uint8_t)a, (uint16_t)b);
-        snprintf(out, sizeof(out), err == ESP_OK ? "HIL-MOTOR-OK %d %d" : "HIL-MOTOR-ERR %d", a, b);
+        /* Range-check before the uint8_t cast: 300 must not wrap to 44. */
+        if (a < 1 || a > 126 || b < 0) {
+            snprintf(out, sizeof(out), "HIL-MOTOR-ERR %d", a);
+        } else {
+            esp_err_t err = selftest_act_motor((uint8_t)a, (uint16_t)b);
+            snprintf(out, sizeof(out), err == ESP_OK ? "HIL-MOTOR-OK %d %d" : "HIL-MOTOR-ERR %d", a, b);
+        }
+    } else if (strncmp(line, "HIL-ENGINE ", 11) == 0 && sscanf(line, "HIL-ENGINE %d", &a) == 1) {
+        sound_engine_power(a != 0);
+        snprintf(out, sizeof(out), "HIL-ENGINE-OK %d", a != 0 ? 1 : 0);
+    } else if (strncmp(line, "HIL-SCHEME-SPEED ", 17) == 0 &&
+               sscanf(line, "HIL-SCHEME-SPEED %d %d", &a, &b) == 2) {
+        if (a < 0 || a > 255) {
+            snprintf(out, sizeof(out), "HIL-SCHEME-SPEED-ERR %d", a);
+        } else {
+            sound_set_speed((uint8_t)a, b != 0);
+            snprintf(out, sizeof(out), "HIL-SCHEME-SPEED-OK %d %d", a, b);
+        }
     } else {
         snprintf(out, sizeof(out), "HIL-ERR");
     }

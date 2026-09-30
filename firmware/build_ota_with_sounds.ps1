@@ -5,14 +5,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
 
-$pio = Join-Path $env:USERPROFILE ".platformio\penv\Scripts\pio.exe"
-if (-not (Test-Path $pio)) {
-    Write-Host "[ERROR] PlatformIO not found: $pio" -ForegroundColor Red
-    exit 1
-}
-
 $version = (Get-Content (Join-Path $PSScriptRoot "version.txt") -Raw).Trim()
-$src = Join-Path $PSScriptRoot ".pio\build\esp32-s3-devkitc-1\firmware.bin"
+$src = Join-Path $PSScriptRoot "build\soft_decoder_v3.bin"
 $dst = Join-Path $PSScriptRoot "..\release\ADDITIPUS_AURA-X_v$version`_with_sounds.bin"
 
 if (-not (Test-Path $SoundDir)) {
@@ -28,7 +22,7 @@ if ($files.Count -eq 0) {
 Write-Host "================================================"
 Write-Host " Build OTA + sounds v$version"
 Write-Host "================================================"
-& $pio run -e esp32-s3-devkitc-1
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "idf_build.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[FAIL] Build failed." -ForegroundColor Red
     exit 1

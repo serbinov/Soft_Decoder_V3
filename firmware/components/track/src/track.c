@@ -1,6 +1,5 @@
 #include "track.h"
 
-#include "driver/adc.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -64,12 +63,9 @@ static uint8_t dc_speed_step(uint32_t mv)
  * loop so host tests can drive it step by step. */
 static void track_adc_step(bool *was_driving)
 {
-    /* ESP32-S3 ADC1: GPIO1..10 map to ADC1_CH0..CH9, so GPIO6 -> CH5. */
-    adc1_channel_t rail_ch = (adc1_channel_t)(PIN_RAIL_SENSE - 1);
-
     /* Always sample the rail: it feeds the motor BEMF-PID target. */
     if (motor_bemf_lock()) {
-        int raw = adc1_get_raw(rail_ch);
+        int raw = motor_adc_read_raw(PIN_RAIL_SENSE);
         motor_bemf_unlock();
         if (raw >= 0) {
             s_rail_mv = raw_to_mv(raw);
@@ -114,14 +110,9 @@ static void track_adc_task(void *arg)
 
 esp_err_t track_init(void)
 {
-    esp_err_t err = adc1_config_width(ADC_WIDTH_BIT_12);
+    esp_err_t err = motor_adc_config_channel(PIN_RAIL_SENSE);
     if (err != ESP_OK) {
-        return err;
-    }
-    err = adc1_config_channel_atten((adc1_channel_t)(PIN_RAIL_SENSE - 1),
-                                    ADC_ATTEN_DB_12);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ADC atten failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "ADC config failed: %s", esp_err_to_name(err));
         return err;
     }
 

@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "driver/adc.h"
 #include "driver/gpio.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -76,6 +76,23 @@ void motor_bemf_unlock(void)
 {
 }
 
+esp_err_t motor_adc_config_channel(int gpio_num)
+{
+    (void)gpio_num;
+    if (!mock_adc_unit_new_ok || !mock_adc_config_ok) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+int motor_adc_read_raw(int gpio_num)
+{
+    if (!mock_adc_ok || gpio_num < 1 || gpio_num > 16) {
+        return -1;
+    }
+    return mock_adc_raw[gpio_num - 1];
+}
+
 void setUp(void)
 {
     memset(g_cv, 0, sizeof(g_cv));
@@ -90,8 +107,8 @@ void setUp(void)
     memset(mock_adc_raw, 0, sizeof(mock_adc_raw));
     mock_adc_ok = 1;
     mock_gpio_get_level = 0;
-    mock_adc1_config_width_ok = 1;
-    mock_adc1_config_atten_ok = 1;
+    mock_adc_unit_new_ok = 1;
+    mock_adc_config_ok = 1;
     mock_task_create_ok = 1;
     s_dc_forward = true;
     s_dc_forward_votes = 0;
@@ -181,7 +198,7 @@ static void test_track_step_adc_error_keeps_rail(void)
     track_adc_step(&wd);
     uint32_t rail = g_rail_set;
 
-    mock_adc_ok = 0; /* adc1_get_raw -> -1 */
+    mock_adc_ok = 0; /* motor_adc_read_raw -> -1 */
     track_adc_step(&wd);
     TEST_ASSERT_EQUAL_UINT32(rail, g_rail_set);
 }
@@ -252,15 +269,15 @@ static void test_track_init_ok(void)
     TEST_ASSERT_EQUAL(ESP_OK, track_init());
 }
 
-static void test_track_init_width_failure(void)
+static void test_track_init_unit_failure(void)
 {
-    mock_adc1_config_width_ok = 0;
+    mock_adc_unit_new_ok = 0;
     TEST_ASSERT_EQUAL(ESP_FAIL, track_init());
 }
 
-static void test_track_init_atten_failure(void)
+static void test_track_init_channel_failure(void)
 {
-    mock_adc1_config_atten_ok = 0;
+    mock_adc_config_ok = 0;
     TEST_ASSERT_EQUAL(ESP_FAIL, track_init());
 }
 
@@ -286,8 +303,8 @@ int main(void)
     RUN_TEST(test_track_step_stops_when_leaving_dc);
     RUN_TEST(test_track_task_loop_bounded);
     RUN_TEST(test_track_init_ok);
-    RUN_TEST(test_track_init_width_failure);
-    RUN_TEST(test_track_init_atten_failure);
+    RUN_TEST(test_track_init_unit_failure);
+    RUN_TEST(test_track_init_channel_failure);
     RUN_TEST(test_track_init_no_mem);
     return UNITY_END();
 }

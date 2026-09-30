@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sound_types.h"
 
 #define SETTINGS_CV_COUNT   512
 #define SETTINGS_SSID_MAX   33
@@ -46,6 +47,17 @@
 #define SETTINGS_FUNC_SPD_NONE   0  /* "-" (not set / any speed) */
 #define SETTINGS_FUNC_SPD_MOVING 1  /* only while moving */
 #define SETTINGS_FUNC_SPD_STOP   2  /* only while stopped */
+
+/* The legacy func-map direction/speed values are copied directly into the
+ * canonical binding dir/state fields during migration, so the two families
+ * must stay numerically identical (SOUND_ENGINE_ROADMAP.md R2). Locking this
+ * at compile time prevents silent direction/state misrouting. */
+_Static_assert(SETTINGS_FUNC_DIR_NONE == FUNC_DIR_ANY, "dir enum drift");
+_Static_assert(SETTINGS_FUNC_DIR_FWD == FUNC_DIR_FWD, "dir enum drift");
+_Static_assert(SETTINGS_FUNC_DIR_REV == FUNC_DIR_REV, "dir enum drift");
+_Static_assert(SETTINGS_FUNC_SPD_NONE == FUNC_STATE_ANY, "state enum drift");
+_Static_assert(SETTINGS_FUNC_SPD_MOVING == FUNC_STATE_MOVING, "state enum drift");
+_Static_assert(SETTINGS_FUNC_SPD_STOP == FUNC_STATE_STOPPED, "state enum drift");
 
 typedef struct {
     uint8_t slot_a;     /* 0 = none, 1..SETTINGS_MAX_TRACKS = audio slot */
@@ -129,6 +141,27 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count);
  * defaults are returned (F0 = head light, F1..F20 = matching sound slot). */
 esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count);
 esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count);
+
+/* Canonical function bindings (many-to-many, SOUND_ENGINE_IMPLEMENTATION.md
+ * section 8.4). Stored under its own NVS key; a missing/empty store returns
+ * count = 0 so the caller can migrate the legacy func_map exactly once. */
+esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count);
+esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count);
+/* Convert a legacy settings_func_map_t[] into function bindings. */
+esp_err_t settings_func_bind_legacy_convert(const settings_func_map_t *map, size_t map_count,
+                                            func_binding_t *out, size_t *out_count);
+
+/* Array helpers over a caller-owned binding list of capacity FUNC_BIND_MAX.
+ * add appends and returns ESP_ERR_NO_MEM when full; remove shifts the tail
+ * down; find returns the index of an exact match or -1. */
+esp_err_t settings_func_bind_add(func_binding_t *bind, size_t *count, const func_binding_t *b);
+esp_err_t settings_func_bind_remove(func_binding_t *bind, size_t *count, size_t idx);
+int settings_func_bind_find(const func_binding_t *bind, size_t count, const func_binding_t *b);
+
+/* Name of the active sound scheme (a .mds file under <root>/projects). Empty
+ * when no scheme is selected. */
+esp_err_t settings_active_scheme_get(char *out, size_t cap);
+esp_err_t settings_active_scheme_set(const char *name);
 
 /* Metadata manifest stored next to the sounds on the external storage
  * (/userdata/audio/tracks.txt). It survives a full NVS reset, so the track

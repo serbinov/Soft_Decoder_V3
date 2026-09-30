@@ -1,0 +1,16 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/firmware",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
+    "C_Cpp.default.cStandard": "c17",
+    "C_Cpp.default.cppStandard": "c++23",
+    "files.associations": {
+        "*.h": "c"
+    },
+    "files.exclude": {
+        "**/build": true,
+        "**/.pio": true
+    },
+    "search.exclude": {
+        "**/build": true
+    }
+}

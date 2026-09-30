@@ -16,8 +16,8 @@ firmware (C11). Never modify files.
 Scope:
 - firmware/main/app_main.c
 - all firmware/components/*/src/*.c (task creation, locks, ISR, shared globals)
-- firmware/sdkconfig.defaults, sdkconfig.esp32-s3-devkitc-1, partitions.csv,
-  platformio.ini, CMakeLists.txt
+- firmware/sdkconfig.defaults, sdkconfig, partitions.csv,
+  CMakeLists.txt
 
 Hunt concrete defects and architectural risks:
 1. Task watchdog coverage and blast radius of each task hang; blocking calls

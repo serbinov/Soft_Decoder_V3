@@ -32,7 +32,7 @@ typedef enum {
 } wifi_auth_mode_t;
 
 typedef enum {
-    WIFI_BW_HT20 = 1,
+    WIFI_BW20 = 1,
 } wifi_bandwidth_t;
 
 typedef enum {
@@ -87,7 +87,7 @@ typedef struct {
 typedef struct {
     esp_ip4_addr_t ip;
     uint8_t mac[6];
-} ip_event_ap_staipassigned_t;
+} ip_event_assigned_ip_to_client_t;
 
 typedef struct {
     int _placeholder;

@@ -102,6 +102,10 @@ select{cursor:pointer}
 .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .modal .msg{font-size:14px;margin-bottom:14px;white-space:pre-line}
 .modal .acts{display:flex;gap:8px;justify-content:flex-end}
+.binds{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.binds th,.binds td{border:1px solid var(--line);padding:4px;text-align:center}
+.binds td.cell{cursor:pointer}
+.binds td.cell.on{background:#2e7d32;color:#fff}
 
 @media(max-width:760px){
   .shell{padding:0 12px 10px}
@@ -242,6 +246,89 @@ select{cursor:pointer}
     </div>
   </div>
 
+  <div class="panel" id="panel_scheme">
+    <div class="panel-hd" id="hd_scheme" onclick="togglePanel('scheme')">
+      <h2>Звук: Схема</h2>
+      <span class="chev" id="chev_scheme">▸</span>
+    </div>
+    <div class="bd" id="bd_scheme" style="display:none">
+      <div class="muted" id="snd_live">—</div>
+      <div class="field">
+        <label>Проект схемы</label>
+        <select id="snd_proj" onchange="activateScheme()"></select>
+      </div>
+      <div class="row">
+        <input id="snd_newname" type="text" placeholder="имя схемы" style="min-width:120px">
+        <button class="btn primary" onclick="createScheme()">Создать</button>
+        <button class="btn ghost" onclick="downloadScheme()">Скачать</button>
+        <button class="btn ghost" onclick="deleteScheme()">Удалить</button>
+      </div>
+      <div class="row">
+        <input id="snd_file" type="file" accept=".mds" style="min-width:160px">
+        <button class="btn ghost" onclick="uploadScheme()">Загрузить</button>
+      </div>
+      <div class="field">
+        <label>Тип схемы</label>
+        <select id="snd_type" onchange="saveScheme()">
+          <option value="0">Выкл</option>
+          <option value="1">Legacy (слоты F1..F20)</option>
+          <option value="2">Дизель</option>
+          <option value="3">Паровоз</option>
+          <option value="4">Электровоз</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Клавиша старта (F)</label>
+        <input id="snd_startfn" type="number" min="0" max="28" value="1" onchange="saveScheme()">
+      </div>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+          <input type="checkbox" id="snd_sync" style="width:auto" onchange="saveScheme()"> синхронизировать звук с движением
+        </label>
+      </div>
+      <div class="muted" style="margin-top:8px">Таблицы: нажмите, чтобы открыть редактор</div>
+      <div id="snd_tables"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" onclick="loadScheme()">Обновить</button>
+        <button class="btn primary" onclick="runLint()">Проверить схему</button>
+      </div>
+      <div class="muted" id="snd_lint"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_sndmap">
+    <div class="panel-hd" id="hd_sndmap" onclick="togglePanel('sndmap')">
+      <h2>Звук: Функции</h2>
+      <span class="chev" id="chev_sndmap">▸</span>
+    </div>
+    <div class="bd" id="bd_sndmap" style="display:none">
+      <div class="muted">Клик по ячейке привязывает функцию к таблице, повторный клик убирает.</div>
+      <div id="snd_matrix"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_extra">
+    <div class="panel-hd" id="hd_extra" onclick="togglePanel('extra')">
+      <h2>Звук: Доп. звуки</h2>
+      <span class="chev" id="chev_extra">▸</span>
+    </div>
+    <div class="bd" id="bd_extra" style="display:none">
+      <div class="muted">Звуки по состоянию, случайные, переключение цилиндров.</div>
+      <div id="snd_extra"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel_sparams">
+    <div class="panel-hd" id="hd_sparams" onclick="togglePanel('sparams')">
+      <h2>Звук: Параметры</h2>
+      <span class="chev" id="chev_sparams">▸</span>
+    </div>
+    <div class="bd" id="bd_sparams" style="display:none">
+      <div class="muted">CV30 (флаги), CV63 (общая громкость), CV114/115/116 (скорость звука).</div>
+      <div id="snd_cv"></div>
+    </div>
+  </div>
+
   <div class="panel" id="panel_cv">
     <div class="panel-hd" id="hd_cv" onclick="togglePanel('cv')">
       <h2>CV</h2>
@@ -327,6 +414,25 @@ select{cursor:pointer}
       <div class="acts">
         <button class="btn" id="modal_no" onclick="dlgAnswer(false)">Нет</button>
         <button class="btn primary" id="modal_yes" onclick="dlgAnswer(true)">Да</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="tblmodal">
+    <div class="box">
+      <div class="msg" id="tbl_title">Таблица</div>
+      <div class="field"><label>Имя</label><input id="tbl_name" type="text" maxlength="23"></div>
+      <div class="field"><label>min скорость → таблица</label><input id="tbl_min" type="number" min="0" max="255" value="0"></div>
+      <div class="field"><label>max скорость → таблица</label><input id="tbl_max" type="number" min="0" max="255" value="0"></div>
+      <div class="field"><label>ускорение звука (0..127)</label><input id="tbl_rate" type="number" min="0" max="127" value="0"></div>
+      <div class="field"><label>min проигрышей</label><input id="tbl_minplays" type="number" min="0" max="255" value="0"></div>
+      <div class="field"><label>max проигрышей</label><input id="tbl_maxplays" type="number" min="0" max="255" value="0"></div>
+      <div class="field"><label>Init (файл)</label><input id="tbl_init" type="text"></div>
+      <div class="field"><label>Loop (файл)</label><input id="tbl_loop" type="text"></div>
+      <div class="field"><label>End (файл)</label><input id="tbl_end" type="text"></div>
+      <div class="acts">
+        <button class="btn" onclick="closeTable()">Закрыть</button>
+        <button class="btn primary" onclick="saveTable()">Сохранить</button>
       </div>
     </div>
   </div>
@@ -491,6 +597,7 @@ async function refreshStatus(){
       if(typeof dl.seq==='number')logSeq=dl.seq;
     }
   }catch(e){}
+  updateSoundLive();
   try{
     renderControlSource();
   }finally{
@@ -950,6 +1057,11 @@ var cvDB=[
   {index:18,name:'Длинный адрес, младший байт',value:0,desc:'CV18'},
   {index:19,name:'Адрес состава',value:0,desc:'Адрес при движении в составе (1..127), бит 7 = реверс'},
   {index:29,name:'Конфигурация (CV29)',value:2,desc:'Биты: 2=28/128 шагов, 4=DC, 16=таблица CV67..94, 32=длинный адрес'},
+  {index:30,name:'Звук: флаги',value:0,desc:'Бит 0 = не запускать D1 со стопа, бит 1 = без стоп-таблицы при остановке'},
+  {index:63,name:'Громкость (общая)',value:20,desc:'Общая громкость звука (алиас мастер-громкости), 0..255'},
+  {index:114,name:'Звук: разгон звука',value:0,desc:'Масштаб скорости звука 0..127, если у таблицы не задан'},
+  {index:115,name:'Звук: мин. скорость',value:0,desc:'Нижний предел скорости воспроизведения, десятые промилле (0=по умолчанию)'},
+  {index:116,name:'Звук: макс. скорость',value:0,desc:'Верхний предел скорости воспроизведения, десятые промилле (0=по умолчанию)'},
   {index:54,name:'BEMF PID — Kp',value:128,desc:'Пропорциональный коэффициент регулятора BEMF (0=BEMF выкл, 255=максимум)'},
   {index:55,name:'BEMF PID — Ki',value:60,desc:'Интегральный коэффициент регулятора BEMF'},
   {index:56,name:'BEMF PID — Kd',value:32,desc:'Дифференциальный коэффициент регулятора BEMF'},
@@ -1414,6 +1526,212 @@ function uploadOta(input){
   xhr.send(file);
 }
 
+/* sound scheme panels */
+var sndScheme=null,sndBinds=[],sndEdit=0,sndProjects=[];
+function loadScheme(){
+  api('/api/sound/scheme').then(function(d){if(d&&d.ok){sndScheme=d;renderScheme();}}).catch(function(e){log('Звук','схема: '+e.message);});
+}
+function loadProjects(){
+  api('/api/sound/projects').then(function(d){
+    if(!d||!d.ok)return;
+    sndProjects=d.projects||[];
+    var sel=byId('snd_proj');if(!sel)return;
+    sel.innerHTML='';
+    sndProjects.forEach(function(p){
+      var o=document.createElement('option');
+      o.value=p.name;
+      o.textContent=p.name+(p.active?' (активна)':'');
+      if(p.active)o.selected=true;
+      sel.appendChild(o);
+    });
+  }).catch(function(e){log('Звук','проекты: '+e.message);});
+}
+function createScheme(){
+  var n=byId('snd_newname').value;
+  if(!n){log('Звук','введите имя схемы');return;}
+  var q='create='+encodeURIComponent(n)+'&type='+encodeURIComponent(byId('snd_type').value);
+  api('/api/sound/project?'+q,{method:'POST'}).then(function(d){
+    if(d&&d.ok){log('Звук','схема создана: '+n);byId('snd_newname').value='';loadProjects();loadScheme();}
+  }).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function activateScheme(){
+  var sel=byId('snd_proj');if(!sel||!sel.value)return;
+  api('/api/sound/project?activate='+encodeURIComponent(sel.value),{method:'POST'}).then(function(d){
+    if(d&&d.ok){log('Звук','активна: '+sel.value);loadScheme();}
+  }).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function deleteScheme(){
+  var sel=byId('snd_proj');if(!sel||!sel.value)return;
+  if(!confirmDialog('Удалить схему '+sel.value+'?'))return;
+  api('/api/sound/project?delete='+encodeURIComponent(sel.value),{method:'POST'}).then(function(d){
+    if(d&&d.ok){log('Звук','удалено: '+sel.value);loadProjects();loadScheme();}
+  }).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function downloadScheme(){
+  var sel=byId('snd_proj');if(!sel||!sel.value){log('Звук','нет схемы');return;}
+  window.location='/api/sound/download?name='+encodeURIComponent(sel.value);
+}
+function uploadScheme(){
+  var f=byId('snd_file');if(!f||!f.files||!f.files[0]){log('Звук','выберите файл');return;}
+  var file=f.files[0];
+  var name=byId('snd_newname').value;
+  if(!name)name=file.name.replace(/\.mds$/i,'');
+  name=name.replace(/[^A-Za-z0-9_-]/g,'_');
+  if(!name){log('Звук','введите имя');return;}
+  var exists=false;
+  for(var i=0;i<sndProjects.length;i++){if(sndProjects[i].name===name){exists=true;break;}}
+  if(exists&&!confirmDialog('Схема '+name+' уже есть. Перезаписать?'))return;
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/api/sound/upload?name='+encodeURIComponent(name)+'&activate=1');
+  xhr.onload=function(){
+    f.value='';
+    if(xhr.status===200&&xhr.responseText.indexOf('"ok":true')>=0){log('Звук','загружено: '+name);loadProjects();loadScheme();}
+    else{log('Звук','ошибка загрузки');}
+  };
+  xhr.onerror=function(){log('Звук','ошибка сети');};
+  xhr.send(file);
+}
+function loadSndBinds(){
+  api('/api/func-map?view=bind').then(function(d){if(d&&d.ok){sndBinds=d.binds||[];renderSndMatrix();}}).catch(function(e){log('Звук','привязки: '+e.message);});
+}
+function saveScheme(){
+  var q='type='+encodeURIComponent(byId('snd_type').value)+'&start_fn='+encodeURIComponent(byId('snd_startfn').value)+'&sync='+(byId('snd_sync').checked?1:0);
+  api('/api/sound/scheme?'+q,{method:'POST'}).then(function(d){if(d&&d.ok){log('Звук','схема сохранена');loadScheme();}}).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function renderScheme(){
+  if(!sndScheme)return;
+  byId('snd_type').value=String(sndScheme.type||0);
+  byId('snd_startfn').value=String(sndScheme.start_fn||0);
+  byId('snd_sync').checked=!!sndScheme.sync;
+  var el=byId('snd_tables');if(!el)return;
+  el.innerHTML='';
+  (sndScheme.tables||[]).forEach(function(t){
+    if(!t.used)return;
+    var row=document.createElement('div');
+    row.className='muted';
+    row.style.cursor='pointer';
+    row.innerHTML='<strong>'+esc(t.name||('#'+t.i))+'</strong> · скор '+t.min+'-'+t.max+' · rate '+t.rate;
+    row.onclick=function(){openTable(t.i);};
+    el.appendChild(row);
+  });
+  renderSndExtra();
+}
+function openTable(i){
+  if(!sndScheme)return;
+  var t=null;
+  (sndScheme.tables||[]).forEach(function(x){if(x.i===i)t=x;});
+  if(!t)return;
+  sndEdit=i;
+  setText('tbl_title','Таблица #'+i);
+  byId('tbl_name').value=t.name||'';
+  byId('tbl_min').value=t.min||0;
+  byId('tbl_max').value=t.max||0;
+  byId('tbl_rate').value=t.rate||0;
+  byId('tbl_minplays').value=t.min_plays||0;
+  byId('tbl_maxplays').value=t.max_plays||0;
+  byId('tbl_init').value=t.init||'';
+  byId('tbl_loop').value=t.loop||'';
+  byId('tbl_end').value=t.endf||'';
+  byId('tblmodal').classList.add('show');
+}
+function closeTable(){byId('tblmodal').classList.remove('show');}
+function saveTable(){
+  var q='i='+sndEdit+'&used=1';
+  q+='&name='+encodeURIComponent(byId('tbl_name').value);
+  q+='&min='+encodeURIComponent(byId('tbl_min').value);
+  q+='&max='+encodeURIComponent(byId('tbl_max').value);
+  q+='&rate='+encodeURIComponent(byId('tbl_rate').value);
+  q+='&min_plays='+encodeURIComponent(byId('tbl_minplays').value);
+  q+='&max_plays='+encodeURIComponent(byId('tbl_maxplays').value);
+  var ini=byId('tbl_init').value;if(ini)q+='&init='+encodeURIComponent(ini);
+  var lp=byId('tbl_loop').value;if(lp)q+='&loop='+encodeURIComponent(lp);
+  var en=byId('tbl_end').value;if(en)q+='&endf='+encodeURIComponent(en);
+  api('/api/sound/table?'+q,{method:'POST'}).then(function(d){if(d&&d.ok){log('Звук','таблица сохранена');closeTable();loadScheme();}}).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function runLint(){
+  api('/api/sound/lint').then(function(d){if(d&&d.ok){setText('snd_lint',d.problems?('Проблем: '+d.problems+' '+(d.report||'')):'Схема корректна');}}).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function sndFindBind(fn,table){
+  for(var i=0;i<sndBinds.length;i++){var b=sndBinds[i];if(b.fn===fn&&b.type===2&&b.id===table)return i;}
+  return -1;
+}
+function toggleBind(fn,table){
+  var idx=sndFindBind(fn,table);
+  var url=idx>=0?('/api/func-map?bind=1&remove=1&idx='+idx):('/api/func-map?bind=1&fn='+fn+'&type=2&id='+table);
+  api(url,{method:'POST'}).then(function(){loadSndBinds();}).catch(function(e){log('Звук','ошибка: '+e.message);});
+}
+function renderSndMatrix(){
+  var el=byId('snd_matrix');if(!el||!sndScheme)return;
+  el.innerHTML='';
+  var used=(sndScheme.tables||[]).filter(function(t){return t.used;});
+  if(!used.length){el.innerHTML='<div class="muted">Нет таблиц в схеме</div>';return;}
+  var tbl=document.createElement('table');
+  tbl.className='binds';
+  var hr=document.createElement('tr');
+  hr.innerHTML='<th>F</th>'+used.map(function(t){return '<th>'+esc(t.name||('#'+t.i))+'</th>';}).join('');
+  tbl.appendChild(hr);
+  for(var fn=1;fn<=10;fn++){
+    var tr=document.createElement('tr');
+    var html='<td>F'+fn+'</td>';
+    used.forEach(function(t){
+      var on=sndFindBind(fn,t.i)>=0;
+      html+='<td class="cell '+(on?'on':'')+'" data-fn="'+fn+'" data-t="'+t.i+'">'+(on?'●':'·')+'</td>';
+    });
+    tr.innerHTML=html;
+    tbl.appendChild(tr);
+  }
+  el.appendChild(tbl);
+  Array.prototype.forEach.call(el.querySelectorAll('td.cell'),function(c){
+    c.onclick=function(){toggleBind(Number(c.getAttribute('data-fn')),Number(c.getAttribute('data-t')));};
+  });
+}
+function renderSndExtra(){
+  var el=byId('snd_extra');if(!el||!sndScheme)return;
+  el.innerHTML='';
+  (sndScheme.extras||[]).forEach(function(x,idx){
+    var row=document.createElement('div');
+    row.className='field';
+    row.innerHTML='<label>#'+idx+' таблица</label><input type="number" min="0" max="31" value="'+(x.table||0)+'" data-i="'+idx+'" class="ex_table"><span class="muted">F '+x.fn+' режим '+x.mode+'</span>';
+    el.appendChild(row);
+  });
+  Array.prototype.forEach.call(el.querySelectorAll('.ex_table'),function(inp){
+    inp.onchange=function(){
+      var i=Number(inp.getAttribute('data-i'));
+      api('/api/sound/extra?i='+i+'&table='+encodeURIComponent(inp.value),{method:'POST'}).then(function(){loadScheme();}).catch(function(e){log('Звук','ошибка: '+e.message);});
+    };
+  });
+}
+function updateSoundLive(){
+  if(!byId('snd_live'))return;
+  api('/api/sound/state',{timeout:4000}).then(function(d){
+    if(!d||!d.ok)return;
+    setText('snd_live',(d.enabled?'● ':'○ ')+(d.name||'нет схемы')+' · двиг '+(d.engine?'вкл':'выкл')+' · табл '+d.table+' · скор '+d.speed);
+  }).catch(function(){});
+}
+function loadSndCv(){
+  var el=byId('snd_cv');if(!el)return;
+  el.innerHTML='';
+  var cvs=[30,63,114,115,116];
+  cvs.forEach(function(cv){
+    var row=document.createElement('div');
+    row.className='field';
+    row.innerHTML='<label>CV'+cv+'</label><input id="snd_cv_'+cv+'" type="number" min="0" max="255" value="0">';
+    el.appendChild(row);
+  });
+  api('/api/cv/all').then(function(d){
+    if(!d||!d.ok||!d.values)return;
+    cvs.forEach(function(cv){
+      var f=byId('snd_cv_'+cv);if(f&&d.values[cv-1]!=null)f.value=d.values[cv-1];
+    });
+  }).catch(function(){});
+  cvs.forEach(function(cv){
+    var f=byId('snd_cv_'+cv);if(!f)return;
+    f.onchange=function(){
+      api('/api/cv/write?index='+cv+'&value='+encodeURIComponent(f.value),{method:'POST'}).then(function(){log('CV','CV'+cv+'='+f.value);}).catch(function(e){log('CV','ошибка: '+e.message);});
+    };
+  });
+}
+
 /* collapsible panels */
 function togglePanel(name){
   var bd=byId('bd_'+name);
@@ -1428,6 +1746,10 @@ function togglePanel(name){
   if(show&&name==='cv'){loadCvValues();}
   if(show&&name==='fnmap'){loadFuncMap();}
   if(show&&name==='auxpwm'){loadAuxPwm();}
+  if(show&&name==='scheme'){loadProjects();loadScheme();loadSndBinds();}
+  if(show&&name==='sndmap'){loadScheme();loadSndBinds();}
+  if(show&&name==='extra'){loadScheme();}
+  if(show&&name==='sparams'){loadSndCv();}
 }
 
 /* init */

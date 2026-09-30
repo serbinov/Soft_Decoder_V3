@@ -18,7 +18,7 @@ typedef const char *esp_event_base_t;
 #define WIFI_EVENT_AP_STOP              2
 #define WIFI_EVENT_AP_STACONNECTED      3
 #define WIFI_EVENT_AP_STADISCONNECTED   4
-#define IP_EVENT_AP_STAIPASSIGNED       5
+#define IP_EVENT_ASSIGNED_IP_TO_CLIENT  5
 
 typedef void (*esp_event_handler_t)(void *arg, esp_event_base_t base, int32_t id, void *data);
 typedef void *esp_event_handler_instance_t;

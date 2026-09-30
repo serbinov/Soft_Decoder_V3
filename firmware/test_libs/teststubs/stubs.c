@@ -11,11 +11,11 @@
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
-#include "driver/adc.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "driver/mcpwm.h"
+#include "driver/mcpwm_prelude.h"
 #include "driver/i2s_std.h"
+#include "esp_adc/adc_oneshot.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -536,32 +536,55 @@ esp_err_t nvs_erase_all(nvs_handle_t h)
     return ESP_OK;
 }
 
-/* ---- ADC1 ---- */
+/* ---- ADC1 (adc_oneshot) ---- */
 int mock_adc_raw[16];
 int mock_adc_ok = 1;
+int mock_adc_unit_new_ok = 1;
+int mock_adc_config_ok = 1;
 
-int mock_adc1_config_width_ok = 1;
-int mock_adc1_config_atten_ok = 1;
+struct adc_oneshot_unit_ctx {
+    int unit_id;
+};
+static struct adc_oneshot_unit_ctx s_mock_adc_unit;
 
-esp_err_t adc1_config_width(adc_bits_width_t width)
+esp_err_t adc_oneshot_new_unit(const adc_oneshot_unit_init_cfg_t *init_config,
+                               adc_oneshot_unit_handle_t *ret_unit)
 {
-    (void)width;
-    return mock_adc1_config_width_ok ? ESP_OK : ESP_FAIL;
-}
-
-esp_err_t adc1_config_channel_atten(adc1_channel_t channel, adc_atten_t atten)
-{
-    (void)channel;
-    (void)atten;
-    return mock_adc1_config_atten_ok ? ESP_OK : ESP_FAIL;
-}
-
-int adc1_get_raw(adc1_channel_t channel)
-{
-    if (!mock_adc_ok || channel < 0 || channel >= 16) {
-        return -1;
+    (void)init_config;
+    if (!mock_adc_unit_new_ok) {
+        return ESP_FAIL;
     }
-    return mock_adc_raw[channel];
+    if (ret_unit != NULL) {
+        *ret_unit = &s_mock_adc_unit;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adc_oneshot_config_channel(adc_oneshot_unit_handle_t handle,
+                                     adc_channel_t channel,
+                                     const adc_oneshot_chan_cfg_t *config)
+{
+    (void)handle;
+    (void)channel;
+    (void)config;
+    return mock_adc_config_ok ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t adc_oneshot_read(adc_oneshot_unit_handle_t handle,
+                           adc_channel_t chan, int *out_raw)
+{
+    (void)handle;
+    if (!mock_adc_ok || chan < 0 || chan >= 16 || out_raw == NULL) {
+        return ESP_FAIL;
+    }
+    *out_raw = mock_adc_raw[chan];
+    return ESP_OK;
+}
+
+esp_err_t adc_oneshot_del_unit(adc_oneshot_unit_handle_t handle)
+{
+    (void)handle;
+    return ESP_OK;
 }
 
 /* ---- LEDC ---- */
@@ -597,41 +620,140 @@ esp_err_t ledc_update_duty(ledc_mode_t speed_mode, ledc_channel_t channel)
     return ESP_OK;
 }
 
-/* ---- MCPWM ---- */
-float mock_mcpwm_duty[2][3][2];
+/* ---- MCPWM (mcpwm_prelude) ---- */
+uint32_t mock_mcpwm_period_ticks = 1;
+float mock_mcpwm_duty[16];
+int mock_mcpwm_count = 0;
 
-esp_err_t mcpwm_gpio_init(mcpwm_unit_t unit, mcpwm_io_signals_t io_signal, gpio_num_t gpio_num)
+struct mcpwm_timer_ctx {
+    int id;
+};
+struct mcpwm_oper_ctx {
+    int id;
+};
+struct mcpwm_compr_ctx {
+    int id;
+};
+struct mcpwm_gen_ctx {
+    int id;
+};
+
+static struct mcpwm_timer_ctx s_mock_timer;
+static struct mcpwm_oper_ctx s_mock_oper[16];
+static struct mcpwm_compr_ctx s_mock_cmpr[16];
+static struct mcpwm_gen_ctx s_mock_gen[16];
+static int s_mock_oper_n;
+static int s_mock_cmpr_n;
+static int s_mock_gen_n;
+
+void mock_mcpwm_reset(void)
 {
-    (void)unit;
-    (void)io_signal;
-    (void)gpio_num;
-    return ESP_OK;
+    s_mock_oper_n = 0;
+    s_mock_cmpr_n = 0;
+    s_mock_gen_n = 0;
+    mock_mcpwm_count = 0;
+    mock_mcpwm_period_ticks = 1;
+    for (int i = 0; i < 16; ++i) {
+        mock_mcpwm_duty[i] = -1.0f;
+    }
 }
 
-esp_err_t mcpwm_init(mcpwm_unit_t unit, mcpwm_timer_t timer, const mcpwm_config_t *conf)
+esp_err_t mcpwm_new_timer(const mcpwm_timer_config_t *config, mcpwm_timer_handle_t *ret_timer)
 {
-    (void)unit;
-    (void)timer;
-    (void)conf;
-    return ESP_OK;
-}
-
-esp_err_t mcpwm_set_duty(mcpwm_unit_t unit, mcpwm_timer_t timer,
-                         mcpwm_operator_t op, float duty)
-{
-    if (unit >= 0 && unit < 2 && timer >= 0 && timer < 3 && op >= 0 && op < 2) {
-        mock_mcpwm_duty[unit][timer][op] = duty;
+    if (config != NULL) {
+        mock_mcpwm_period_ticks = config->period_ticks ? config->period_ticks : 1U;
+    }
+    if (ret_timer != NULL) {
+        *ret_timer = &s_mock_timer;
     }
     return ESP_OK;
 }
 
-esp_err_t mcpwm_set_duty_type(mcpwm_unit_t unit, mcpwm_timer_t timer,
-                              mcpwm_operator_t op, mcpwm_duty_type_t type)
+esp_err_t mcpwm_new_operator(const mcpwm_operator_config_t *config, mcpwm_oper_handle_t *ret_oper)
 {
-    (void)unit;
+    (void)config;
+    if (ret_oper == NULL) {
+        return ESP_FAIL;
+    }
+    int i = s_mock_oper_n++ % 16;
+    s_mock_oper[i].id = i;
+    *ret_oper = &s_mock_oper[i];
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_operator_connect_timer(mcpwm_oper_handle_t oper, mcpwm_timer_handle_t timer)
+{
+    (void)oper;
     (void)timer;
-    (void)op;
-    (void)type;
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_new_comparator(mcpwm_oper_handle_t oper,
+                               const mcpwm_comparator_config_t *config,
+                               mcpwm_cmpr_handle_t *ret_cmpr)
+{
+    (void)oper;
+    (void)config;
+    if (ret_cmpr == NULL) {
+        return ESP_FAIL;
+    }
+    int i = s_mock_cmpr_n++ % 16;
+    s_mock_cmpr[i].id = i;
+    mock_mcpwm_duty[i] = 0.0f;
+    mock_mcpwm_count = s_mock_cmpr_n;
+    *ret_cmpr = &s_mock_cmpr[i];
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_new_generator(mcpwm_oper_handle_t oper,
+                              const mcpwm_generator_config_t *config,
+                              mcpwm_gen_handle_t *ret_gen)
+{
+    (void)oper;
+    (void)config;
+    if (ret_gen == NULL) {
+        return ESP_FAIL;
+    }
+    int i = s_mock_gen_n++ % 16;
+    s_mock_gen[i].id = i;
+    *ret_gen = &s_mock_gen[i];
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_generator_set_action_on_timer_event(mcpwm_gen_handle_t generator, int action)
+{
+    (void)generator;
+    (void)action;
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_generator_set_action_on_compare_event(mcpwm_gen_handle_t generator, int action)
+{
+    (void)generator;
+    (void)action;
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_comparator_set_compare_value(mcpwm_cmpr_handle_t cmpr, uint32_t value)
+{
+    if (cmpr == NULL) {
+        return ESP_FAIL;
+    }
+    int i = cmpr->id % 16;
+    mock_mcpwm_duty[i] = ((float)value * 100.0f) / (float)mock_mcpwm_period_ticks;
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_timer_enable(mcpwm_timer_handle_t timer)
+{
+    (void)timer;
+    return ESP_OK;
+}
+
+esp_err_t mcpwm_timer_start_stop(mcpwm_timer_handle_t timer, int command)
+{
+    (void)timer;
+    (void)command;
     return ESP_OK;
 }
 
@@ -966,7 +1088,7 @@ int usb_serial_jtag_write_bytes(const void *src, size_t size, uint32_t ticks)
     return (int)size;
 }
 
-void esp_vfs_usb_serial_jtag_use_driver(void)
+void usb_serial_jtag_vfs_use_driver(void)
 {
 }
 

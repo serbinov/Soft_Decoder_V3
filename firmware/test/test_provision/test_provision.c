@@ -248,6 +248,26 @@ uint8_t selftest_act_aux_sweep(uint16_t ms)
     return g_aux_sweep_ret;
 }
 
+/* ---- sound engine stubs (HIL-ENGINE / HIL-SCHEME-SPEED) ---- */
+static int g_sound_engine_set_calls;
+static bool g_sound_engine_last;
+static int g_sound_speed_calls;
+static uint8_t g_sound_speed_last;
+static bool g_sound_speed_fwd_last;
+
+void sound_engine_power(bool on)
+{
+    g_sound_engine_set_calls++;
+    g_sound_engine_last = on;
+}
+
+void sound_set_speed(uint8_t speed, bool forward)
+{
+    g_sound_speed_calls++;
+    g_sound_speed_last = speed;
+    g_sound_speed_fwd_last = forward;
+}
+
 /* ---- helpers ---- */
 static bool tx_has(const char *s)
 {
@@ -709,6 +729,17 @@ static void test_provision_hil_act_commands(void)
     run_hil_act_console("HIL-AUX-SWEEP 100");
     TEST_ASSERT_TRUE(tx_has("HIL-AUX-SWEEP-OK 9"));
 
+    run_hil_act_console("HIL-ENGINE 1");
+    TEST_ASSERT_TRUE(tx_has("HIL-ENGINE-OK 1"));
+    TEST_ASSERT_EQUAL_INT(1, g_sound_engine_set_calls);
+    TEST_ASSERT_TRUE(g_sound_engine_last);
+
+    run_hil_act_console("HIL-SCHEME-SPEED 120 1");
+    TEST_ASSERT_TRUE(tx_has("HIL-SCHEME-SPEED-OK 120 1"));
+    TEST_ASSERT_EQUAL_INT(1, g_sound_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(120, g_sound_speed_last);
+    TEST_ASSERT_TRUE(g_sound_speed_fwd_last);
+
     run_hil_act_console("HIL-NONSENSE");
     TEST_ASSERT_TRUE(tx_has("HIL-ERR"));
 }
@@ -734,6 +765,18 @@ static void test_provision_hil_act_errors(void)
     run_hil_act_console("HIL-MOTOR 70 300");
     TEST_ASSERT_TRUE(tx_has("HIL-MOTOR-ERR 70"));
     g_act_motor_err = ESP_OK;
+
+    /* Out-of-range args are rejected before the uint8_t cast (REV-P1). */
+    run_hil_act_console("HIL-MOTOR 300 800");
+    TEST_ASSERT_TRUE(tx_has("HIL-MOTOR-ERR 300"));
+    run_hil_act_console("HIL-MOTOR 0 800");
+    TEST_ASSERT_TRUE(tx_has("HIL-MOTOR-ERR 0"));
+    run_hil_act_console("HIL-MOTOR 30 -5");
+    TEST_ASSERT_TRUE(tx_has("HIL-MOTOR-ERR 30"));
+    g_sound_speed_calls = 0;
+    run_hil_act_console("HIL-SCHEME-SPEED 300 1");
+    TEST_ASSERT_TRUE(tx_has("HIL-SCHEME-SPEED-ERR 300"));
+    TEST_ASSERT_EQUAL_INT(0, g_sound_speed_calls);
 
     g_act_fn_err = ESP_ERR_INVALID_ARG;
     run_hil_act_console("HIL-FN 99 1");

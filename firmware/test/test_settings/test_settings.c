@@ -91,7 +91,7 @@ static void test_defaults(void)
     TEST_ASSERT_EQUAL_UINT8(0, s_cv[2]);           /* Vstart (slow low steps) */
     TEST_ASSERT_EQUAL_UINT8(255, s_cv[5]);         /* Vhigh = full */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[6]);         /* Vmid = half */
-    TEST_ASSERT_EQUAL_UINT8(8, s_cv[7]);           /* decoder version = version.txt */
+    TEST_ASSERT_EQUAL_UINT8(9, s_cv[7]);           /* decoder version = version.txt */
     TEST_ASSERT_EQUAL_UINT8(0, s_cv[8]);           /* manufacturer (read-only) */
     TEST_ASSERT_EQUAL_UINT8(0x02, s_cv[29]);       /* 28 steps, DCC */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[54]);
@@ -149,7 +149,7 @@ static void test_cv7_readonly(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_write(7, 5));
     uint8_t v = 0;
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(7, &v));
-    TEST_ASSERT_EQUAL_UINT8(8, v); /* unchanged default */
+    TEST_ASSERT_EQUAL_UINT8(9, v); /* unchanged default (version.txt) */
 }
 
 static void test_cv8_not_factory_reset(void)
@@ -774,6 +774,208 @@ static void test_bemf_cal_clear_missing_key_is_ok(void)
     TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_clear());
 }
 
+/* ---- CV63 master-volume alias (R6.1) ---- */
+
+static void test_cv63_master_volume_alias(void)
+{
+    uint8_t v = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(63, 255));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
+    TEST_ASSERT_EQUAL_UINT8(255, v); /* 100 % <-> CV 255 */
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(63, 128));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
+    TEST_ASSERT_EQUAL_UINT8(127, v); /* 128 -> 50 % -> 127 */
+
+    mock_nvs_reset();
+    s_lock = (SemaphoreHandle_t)1;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
+    TEST_ASSERT_EQUAL_UINT8(51, v); /* default 20 % when mvol is absent */
+
+    (void)nvs_set_u8(1, "mvol", 200); /* out-of-range % is clamped */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
+    TEST_ASSERT_EQUAL_UINT8(255, v);
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_cv_write(63, 10));
+    mock_sem_take_fail = 0;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_read(63, NULL));
+}
+
+static void test_cv7_migrated_from_old_blob(void)
+{
+    s_cv[7] = 7; /* simulate a device upgraded from an older firmware */
+    cv_migrate_version();
+    TEST_ASSERT_EQUAL_UINT8(9, s_cv[7]);
+    cv_migrate_version(); /* idempotent */
+    TEST_ASSERT_EQUAL_UINT8(9, s_cv[7]);
+}
+
+/* ---- function bindings (R1) ---- */
+
+static void test_func_bind_roundtrip(void)
+{
+    func_binding_t b[FUNC_BIND_MAX];
+    size_t n = 123;
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_func_bind_load(b, &n));
+    TEST_ASSERT_EQUAL_UINT32(0, n);
+    TEST_ASSERT_EQUAL_UINT8(0, b[0].used);
+
+    memset(b, 0, sizeof(b));
+    b[0].used = 1;
+    b[0].fn = 2;
+    b[0].target_type = FUNC_TARGET_SOUND;
+    b[0].target_id = 3;
+    b[0].mode = SOUND_MODE_SHORT_LONG;
+    b[0].flags = FUNC_FLAG_DUCK;
+    b[0].short_table = 7;
+    b[0].short_ms = 400;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_save(b, 1));
+
+    func_binding_t back[FUNC_BIND_MAX];
+    size_t bn = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_load(back, &bn));
+    TEST_ASSERT_EQUAL_UINT32(1, bn);
+    TEST_ASSERT_EQUAL_UINT8(2, back[0].fn);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SOUND, back[0].target_type);
+    TEST_ASSERT_EQUAL_UINT8(3, back[0].target_id);
+    TEST_ASSERT_EQUAL_UINT8(SOUND_MODE_SHORT_LONG, back[0].mode);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_FLAG_DUCK, back[0].flags);
+    TEST_ASSERT_EQUAL_UINT16(400, back[0].short_ms);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_load(NULL, &bn));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_load(back, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_save(NULL, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_save(back, FUNC_BIND_MAX + 1U));
+
+    /* A blob that is not a whole number of bindings is rejected. */
+    uint8_t junk[3] = { 1, 2, 3 };
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("func_bind", junk, sizeof(junk)));
+    size_t jn = 99;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, settings_func_bind_load(back, &jn));
+    TEST_ASSERT_EQUAL_UINT32(0, jn);
+
+    /* Lock timeout paths. */
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_func_bind_save(b, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_active_scheme_set("x"));
+    mock_sem_take_fail = 0;
+}
+
+static void test_func_bind_legacy_convert(void)
+{
+    settings_func_map_t m[SETTINGS_FUNC_MAP_COUNT];
+    memset(m, 0, sizeof(m));
+    /* F0: directional head light with a reverse gate -> only F0R. */
+    m[0].aux_mask = SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R;
+    m[0].dir = SETTINGS_FUNC_DIR_REV;
+    m[0].speed = SETTINGS_FUNC_SPD_MOVING;
+    /* F1: AUX1 (bit 2) forward-only while stopped + two sound slots. */
+    m[1].aux_mask = SETTINGS_FUNC_OUT_AUX1;
+    m[1].dir = SETTINGS_FUNC_DIR_FWD;
+    m[1].speed = SETTINGS_FUNC_SPD_STOP;
+    m[1].slot_a = 1;
+    m[1].slot_b = 2;
+    /* F2: head light with no function gate -> both directions. */
+    m[2].aux_mask = SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R;
+
+    func_binding_t out[FUNC_BIND_MAX];
+    size_t n = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_legacy_convert(m, SETTINGS_FUNC_MAP_COUNT,
+                                                                 out, &n));
+    TEST_ASSERT_EQUAL_UINT32(6, n);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_OUTPUT, out[0].target_type);
+    TEST_ASSERT_EQUAL_UINT8(1, out[0].target_id); /* F0R only */
+    TEST_ASSERT_EQUAL_UINT8(FUNC_DIR_REV, out[0].dir);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_STATE_MOVING, out[0].state);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_OUTPUT, out[1].target_type);
+    TEST_ASSERT_EQUAL_UINT8(2, out[1].target_id);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_DIR_FWD, out[1].dir);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_STATE_STOPPED, out[1].state);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SLOT, out[2].target_type);
+    TEST_ASSERT_EQUAL_UINT8(1, out[2].target_id);
+    TEST_ASSERT_EQUAL_UINT8(SOUND_MODE_LATCHED, out[2].mode);
+    TEST_ASSERT_EQUAL_UINT8(2, out[3].target_id);
+    TEST_ASSERT_EQUAL_UINT8(0, out[4].target_id); /* F2F forward */
+    TEST_ASSERT_EQUAL_UINT8(FUNC_DIR_FWD, out[4].dir);
+    TEST_ASSERT_EQUAL_UINT8(1, out[5].target_id); /* F2R reverse */
+    TEST_ASSERT_EQUAL_UINT8(FUNC_DIR_REV, out[5].dir);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_legacy_convert(NULL, 29, out, &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_legacy_convert(m, 29, NULL, &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_legacy_convert(m, 29, out, NULL));
+
+    /* Saturated map: the output is capped at FUNC_BIND_MAX. */
+    for (size_t i = 0; i < SETTINGS_FUNC_MAP_COUNT; ++i) {
+        m[i].aux_mask = SETTINGS_FUNC_OUT_ALL;
+        m[i].slot_a = 1;
+        m[i].slot_b = 2;
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_legacy_convert(m, SETTINGS_FUNC_MAP_COUNT,
+                                                                 out, &n));
+    TEST_ASSERT_EQUAL_UINT32(FUNC_BIND_MAX, n);
+}
+
+static void test_func_bind_add_remove_find(void)
+{
+    func_binding_t list[FUNC_BIND_MAX];
+    memset(list, 0, sizeof(list));
+    size_t n = 0;
+    func_binding_t b;
+    memset(&b, 0, sizeof(b));
+    b.used = 1;
+    b.fn = 3;
+    b.target_type = FUNC_TARGET_SOUND;
+    b.target_id = 4;
+
+    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(list, n, &b));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_add(NULL, &n, &b));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_add(list, NULL, &b));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_add(list, &n, NULL));
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_add(list, &n, &b));
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL(0, settings_func_bind_find(list, n, &b));
+
+    func_binding_t c = b;
+    c.target_id = 9;
+    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(list, n, &c));
+    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(NULL, n, &b));
+    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(list, n, NULL));
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_remove(NULL, &n, 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_remove(list, NULL, 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_remove(list, &n, 5));
+
+    func_binding_t b2 = b;
+    b2.target_id = 5;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_add(list, &n, &b2));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_remove(list, &n, 0)); /* shifts b2 down */
+    TEST_ASSERT_EQUAL_UINT32(1, n);
+    TEST_ASSERT_EQUAL(0, settings_func_bind_find(list, n, &b2));
+
+    n = FUNC_BIND_MAX;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, settings_func_bind_add(list, &n, &b));
+}
+
+/* ---- active scheme pointer (R1) ---- */
+
+static void test_active_scheme(void)
+{
+    char buf[64];
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_active_scheme_get(NULL, sizeof(buf)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_active_scheme_get(buf, 0));
+
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, settings_active_scheme_get(buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("", buf);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_active_scheme_set(NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_active_scheme_set("diesel"));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_active_scheme_get(buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL_STRING("diesel", buf);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -820,5 +1022,11 @@ int main(void)
     RUN_TEST(test_settings_save_api_timeouts);
     RUN_TEST(test_cv_commit_deferred_flush);
     RUN_TEST(test_bemf_cal_clear_missing_key_is_ok);
+    RUN_TEST(test_cv63_master_volume_alias);
+    RUN_TEST(test_cv7_migrated_from_old_blob);
+    RUN_TEST(test_func_bind_roundtrip);
+    RUN_TEST(test_func_bind_legacy_convert);
+    RUN_TEST(test_func_bind_add_remove_find);
+    RUN_TEST(test_active_scheme);
     return UNITY_END();
 }

@@ -45,6 +45,18 @@ void sanitize_name(const char *in, char *out, size_t out_len);
 uint16_t web_util_func_desired(const settings_func_map_t *m, bool fn_on,
                                bool motion_forward, uint8_t motion_speed);
 
+/* Callback fired for every matching non-output binding (SOUND / SLOT / LOGIC).
+ * `target_type` is FUNC_TARGET_*, `target_id` the table/slot/logic id. */
+typedef void (*func_eval_cb_t)(void *ctx, uint8_t target_type, uint8_t target_id, bool active);
+
+/* Pure evaluator over the canonical binding list (SOUND_ENGINE_IMPLEMENTATION.md
+ * section 8.5): returns the output mask (SETTINGS_FUNC_OUT_* bits) that the
+ * given function must drive for the current `state` (FUNC_STATE_*) and `dir`
+ * (FUNC_DIR_*), and invokes `cb` for each matching sound/slot/logic target.
+ * No side effects beyond `cb`. Output bits >= 9 are ignored. */
+uint16_t func_eval(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t state,
+                   uint8_t dir, func_eval_cb_t cb, void *ctx);
+
 /* Per-slot volume: slot 1 defaults to the engine volume, the rest to the
  * effects volume; `cats` may override the category when `cats_loaded`. */
 uint8_t web_util_voice_volume(uint8_t fn, const uint8_t *cats, bool cats_loaded,

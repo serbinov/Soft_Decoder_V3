@@ -771,6 +771,13 @@ esp_err_t settings_cv_commit(void)
     return (esp_err_t)mock_cv_commit_ret;
 }
 
+int mock_cv_commit_deferred_calls = 0;
+
+void settings_cv_commit_deferred(void)
+{
+    mock_cv_commit_deferred_calls++;
+}
+
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 {
     if (tracks != NULL && count != NULL) {
@@ -827,6 +834,130 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
     return (esp_err_t)mock_map_save_ret;
 }
 
+/* ---- canonical function bindings (test doubles) ---- */
+
+func_binding_t mock_binds[FUNC_BIND_MAX];
+size_t mock_binds_count = 0;
+int mock_bind_load_ret = ESP_ERR_NOT_FOUND; /* empty store by default */
+int mock_bind_save_ret = 0;
+int mock_bind_save_calls = 0;
+
+esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count)
+{
+    if (bind != NULL && count != NULL) {
+        memcpy(bind, mock_binds, sizeof(mock_binds));
+        *count = mock_binds_count;
+    }
+    return (esp_err_t)mock_bind_load_ret;
+}
+
+esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count)
+{
+    mock_bind_save_calls++;
+    if (bind != NULL && count <= FUNC_BIND_MAX) {
+        memcpy(mock_binds, bind, count * sizeof(func_binding_t));
+        mock_binds_count = count;
+    }
+    return (esp_err_t)mock_bind_save_ret;
+}
+
+esp_err_t settings_func_bind_legacy_convert(const settings_func_map_t *map, size_t map_count,
+                                            func_binding_t *out, size_t *out_count)
+{
+    if (map == NULL || out == NULL || out_count == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t n = 0;
+    for (size_t f = 0; f < map_count && f < SETTINGS_FUNC_MAP_COUNT; ++f) {
+        uint8_t dir = FUNC_DIR_ANY;
+        if (map[f].dir == SETTINGS_FUNC_DIR_FWD) {
+            dir = FUNC_DIR_FWD;
+        } else if (map[f].dir == SETTINGS_FUNC_DIR_REV) {
+            dir = FUNC_DIR_REV;
+        }
+        uint8_t state = FUNC_STATE_ANY;
+        if (map[f].speed == SETTINGS_FUNC_SPD_MOVING) {
+            state = FUNC_STATE_MOVING;
+        } else if (map[f].speed == SETTINGS_FUNC_SPD_STOP) {
+            state = FUNC_STATE_STOPPED;
+        }
+        const uint16_t light = SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R;
+        for (uint8_t bit = 0; bit < 9U && n < FUNC_BIND_MAX; ++bit) {
+            if ((map[f].aux_mask & (uint16_t)(1U << bit)) == 0U) {
+                continue;
+            }
+            if ((map[f].aux_mask & light) == light && bit <= 1U) {
+                if (map[f].dir == SETTINGS_FUNC_DIR_FWD && bit != 0U) {
+                    continue;
+                }
+                if (map[f].dir == SETTINGS_FUNC_DIR_REV && bit != 1U) {
+                    continue;
+                }
+                memset(&out[n], 0, sizeof(out[n]));
+                out[n].used = 1;
+                out[n].fn = (uint8_t)f;
+                out[n].target_type = FUNC_TARGET_OUTPUT;
+                out[n].target_id = bit;
+                out[n].dir = (bit == 0U) ? FUNC_DIR_FWD : FUNC_DIR_REV;
+                out[n].state = state;
+                n++;
+                continue;
+            }
+            memset(&out[n], 0, sizeof(out[n]));
+            out[n].used = 1;
+            out[n].fn = (uint8_t)f;
+            out[n].target_type = FUNC_TARGET_OUTPUT;
+            out[n].target_id = bit;
+            out[n].dir = dir;
+            out[n].state = state;
+            n++;
+        }
+        const uint8_t slots[2] = { map[f].slot_a, map[f].slot_b };
+        for (int s = 0; s < 2 && n < FUNC_BIND_MAX; ++s) {
+            if (slots[s] != 0U) {
+                memset(&out[n], 0, sizeof(out[n]));
+                out[n].used = 1;
+                out[n].fn = (uint8_t)f;
+                out[n].target_type = FUNC_TARGET_SLOT;
+                out[n].target_id = slots[s];
+                out[n].dir = dir;
+                out[n].state = state;
+                out[n].mode = SOUND_MODE_LATCHED;
+                n++;
+            }
+        }
+    }
+    *out_count = n;
+    return ESP_OK;
+}
+
+esp_err_t settings_func_bind_add(func_binding_t *bind, size_t *count, const func_binding_t *b)
+{
+    if (bind == NULL || count == NULL || b == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (*count >= FUNC_BIND_MAX) {
+        return ESP_ERR_NO_MEM;
+    }
+    bind[*count] = *b;
+    bind[*count].used = 1;
+    (*count)++;
+    return ESP_OK;
+}
+
+esp_err_t settings_func_bind_remove(func_binding_t *bind, size_t *count, size_t idx)
+{
+    if (bind == NULL || count == NULL || idx >= *count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (size_t i = idx; i + 1U < *count; ++i) {
+        bind[i] = bind[i + 1U];
+    }
+    (*count)--;
+    memset(&bind[*count], 0, sizeof(bind[0]));
+    return ESP_OK;
+}
+
 esp_err_t settings_aux_cfg_load(settings_aux_cfg_t *cfg, size_t *count)
 {
     if (cfg != NULL && count != NULL) {
@@ -856,6 +987,252 @@ esp_err_t settings_factory_reset(void)
 {
     mock_factory_reset_calls++;
     return (esp_err_t)mock_factory_reset_ret;
+}
+
+/* ---- sound stubs ---- */
+int mock_sound_scheme_enabled = 0;
+int mock_sound_function_calls = 0;
+uint8_t mock_sound_last_fn = 0;
+bool mock_sound_last_state = false;
+int mock_sound_stop_all_calls = 0;
+
+sound_scheme_t mock_sound_scheme;
+int mock_sound_scheme_get_ret = 0;
+int mock_sound_scheme_set_calls = 0;
+int mock_sound_scheme_save_ret = 0;
+int mock_sound_scheme_save_calls = 0;
+int mock_sound_lint_ret = 0;
+sound_status_t mock_sound_status;
+
+esp_err_t sound_scheme_get(sound_scheme_t *out)
+{
+    if (out != NULL) {
+        *out = mock_sound_scheme;
+    }
+    return (esp_err_t)mock_sound_scheme_get_ret;
+}
+
+esp_err_t sound_scheme_set(const sound_scheme_t *in)
+{
+    mock_sound_scheme_set_calls++;
+    if (in != NULL) {
+        mock_sound_scheme = *in;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_scheme_save(void)
+{
+    mock_sound_scheme_save_calls++;
+    return (esp_err_t)mock_sound_scheme_save_ret;
+}
+
+void sound_status_get(sound_status_t *out)
+{
+    if (out != NULL) {
+        *out = mock_sound_status;
+    }
+}
+
+int sound_lint(char *out, size_t cap)
+{
+    if (out != NULL && cap != 0U) {
+        out[0] = '\0';
+    }
+    return mock_sound_lint_ret;
+}
+
+uint8_t sound_type_get(void) { return mock_sound_scheme.type; }
+esp_err_t sound_type_set(uint8_t type) { mock_sound_scheme.type = type; return ESP_OK; }
+
+esp_err_t sound_engine_get(sound_engine_t *out)
+{
+    if (out != NULL) {
+        *out = mock_sound_scheme.engine;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_engine_set(const sound_engine_t *in)
+{
+    if (in != NULL) {
+        mock_sound_scheme.engine = *in;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_table_get(uint8_t idx, sound_table_t *out)
+{
+    if (out != NULL && idx < SOUND_MAX_TABLES) {
+        *out = mock_sound_scheme.tables[idx];
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_table_set(uint8_t idx, const sound_table_t *t)
+{
+    if (t != NULL && idx < SOUND_MAX_TABLES) {
+        mock_sound_scheme.tables[idx] = *t;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_extra_get(uint8_t idx, sound_extra_t *out)
+{
+    if (out != NULL && idx < SOUND_MAX_EXTRAS) {
+        *out = mock_sound_scheme.extras[idx];
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_extra_set(uint8_t idx, const sound_extra_t *e)
+{
+    if (e != NULL && idx < SOUND_MAX_EXTRAS) {
+        mock_sound_scheme.extras[idx] = *e;
+    }
+    return ESP_OK;
+}
+
+bool sound_scheme_enabled(void) { return mock_sound_scheme_enabled != 0; }
+int mock_sound_reload_calls = 0;
+void sound_reload_bindings(void) { mock_sound_reload_calls++; }
+void sound_function(uint8_t fn, bool state)
+{
+    mock_sound_function_calls++;
+    mock_sound_last_fn = fn;
+    mock_sound_last_state = state;
+}
+void sound_stop_all(void) { mock_sound_stop_all_calls++; }
+
+/* Scheme project files (create/select/delete/export/import/list). */
+int mock_sound_last_name_calls = 0;
+char mock_sound_last_name[64] = { 0 };
+int mock_sound_active_name_ret = 0;
+char mock_sound_active_name[64] = { 0 };
+int mock_sound_load_scheme_ret = 0;
+int mock_sound_load_scheme_calls = 0;
+
+esp_err_t sound_active_name_get(char *out, size_t cap)
+{
+    mock_sound_last_name_calls++;
+    if (out != NULL && cap > 0) {
+        snprintf(out, cap, "%s", mock_sound_active_name);
+    }
+    return (esp_err_t)mock_sound_active_name_ret;
+}
+
+esp_err_t sound_load_scheme(const char *name)
+{
+    mock_sound_load_scheme_calls++;
+    if (name != NULL) {
+        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
+    }
+    return (esp_err_t)mock_sound_load_scheme_ret;
+}
+
+int mock_sound_scheme_create_ret = 0;
+int mock_sound_scheme_create_calls = 0;
+uint8_t mock_sound_last_type = 0;
+
+esp_err_t sound_scheme_create(const char *name, uint8_t type)
+{
+    mock_sound_scheme_create_calls++;
+    if (name != NULL) {
+        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
+    }
+    mock_sound_last_type = type;
+    return (esp_err_t)mock_sound_scheme_create_ret;
+}
+
+int mock_sound_scheme_delete_ret = 0;
+int mock_sound_scheme_delete_calls = 0;
+
+esp_err_t sound_scheme_delete(const char *name)
+{
+    mock_sound_scheme_delete_calls++;
+    if (name != NULL) {
+        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
+    }
+    return (esp_err_t)mock_sound_scheme_delete_ret;
+}
+
+int mock_sound_scheme_export_ret = 0;
+int mock_sound_scheme_export_calls = 0;
+size_t mock_sound_export_len = 0;
+uint8_t mock_sound_export_byte = 0;
+
+esp_err_t sound_scheme_export(const char *name, uint8_t *buf, size_t cap, size_t *out_len)
+{
+    (void)name;
+    mock_sound_scheme_export_calls++;
+    if (mock_sound_scheme_export_ret != 0) {
+        return (esp_err_t)mock_sound_scheme_export_ret;
+    }
+    size_t n = mock_sound_export_len < cap ? mock_sound_export_len : cap;
+    if (buf != NULL) {
+        memset(buf, mock_sound_export_byte, n);
+    }
+    if (out_len != NULL) {
+        *out_len = n;
+    }
+    return ESP_OK;
+}
+
+int mock_sound_scheme_import_ret = 0;
+int mock_sound_scheme_import_calls = 0;
+size_t mock_sound_import_last_len = 0;
+bool mock_sound_import_last_activate = false;
+
+esp_err_t sound_scheme_import(const char *name, const uint8_t *buf, size_t len, bool activate)
+{
+    (void)buf;
+    mock_sound_scheme_import_calls++;
+    if (name != NULL) {
+        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
+    }
+    mock_sound_import_last_len = len;
+    mock_sound_import_last_activate = activate;
+    return (esp_err_t)mock_sound_scheme_import_ret;
+}
+
+int mock_sound_scheme_list_ret = 0;
+int mock_sound_scheme_list_calls = 0;
+int mock_sound_scheme_list_count = 0;
+char mock_sound_scheme_list_names[8][SOUND_FILE_MAX];
+
+esp_err_t sound_scheme_list(char names[][SOUND_FILE_MAX], size_t max, size_t *count)
+{
+    mock_sound_scheme_list_calls++;
+    if (mock_sound_scheme_list_ret != 0) {
+        return (esp_err_t)mock_sound_scheme_list_ret;
+    }
+    size_t n = (size_t)mock_sound_scheme_list_count;
+    if (n > max) {
+        n = max;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        snprintf(names[i], SOUND_FILE_MAX, "%s", mock_sound_scheme_list_names[i]);
+    }
+    if (count != NULL) {
+        *count = n;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_brake_get(sound_brake_t *out)
+{
+    if (out != NULL) {
+        *out = mock_sound_scheme.brake;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sound_brake_set(const sound_brake_t *in)
+{
+    if (in != NULL) {
+        mock_sound_scheme.brake = *in;
+    }
+    return ESP_OK;
 }
 
 /* ====================================================================== */
@@ -1211,6 +1588,7 @@ void mock_web_reset(void)
     mock_cv_commit_ret = 0;
     mock_cv_write_calls = 0;
     mock_cv_commit_calls = 0;
+    mock_cv_commit_deferred_calls = 0;
     mock_cv_last_index = 0;
     mock_cv_last_value = 0;
 
@@ -1237,6 +1615,12 @@ void mock_web_reset(void)
     mock_map_save_ret = 0;
     mock_map_save_calls = 0;
 
+    memset(mock_binds, 0, sizeof(mock_binds));
+    mock_binds_count = 0;
+    mock_bind_load_ret = ESP_ERR_NOT_FOUND;
+    mock_bind_save_ret = 0;
+    mock_bind_save_calls = 0;
+
     memset(mock_aux, 0, sizeof(mock_aux));
     memset(mock_saved_aux, 0, sizeof(mock_saved_aux));
     for (int i = 0; i < SETTINGS_AUX_COUNT; ++i) {
@@ -1253,6 +1637,43 @@ void mock_web_reset(void)
     mock_bemf_use_saved_value = -1;
     mock_factory_reset_ret = 0;
     mock_factory_reset_calls = 0;
+
+    mock_sound_scheme_enabled = 0;
+    mock_sound_function_calls = 0;
+    mock_sound_last_fn = 0;
+    mock_sound_last_state = false;
+    mock_sound_stop_all_calls = 0;
+    memset(&mock_sound_scheme, 0, sizeof(mock_sound_scheme));
+    memset(&mock_sound_status, 0, sizeof(mock_sound_status));
+    mock_sound_scheme_get_ret = 0;
+    mock_sound_scheme_set_calls = 0;
+    mock_sound_scheme_save_ret = 0;
+    mock_sound_scheme_save_calls = 0;
+    mock_sound_lint_ret = 0;
+    mock_sound_reload_calls = 0;
+    mock_sound_last_name_calls = 0;
+    mock_sound_last_name[0] = '\0';
+    mock_sound_active_name_ret = 0;
+    mock_sound_active_name[0] = '\0';
+    mock_sound_load_scheme_ret = 0;
+    mock_sound_load_scheme_calls = 0;
+    mock_sound_scheme_create_ret = 0;
+    mock_sound_scheme_create_calls = 0;
+    mock_sound_last_type = 0;
+    mock_sound_scheme_delete_ret = 0;
+    mock_sound_scheme_delete_calls = 0;
+    mock_sound_scheme_export_ret = 0;
+    mock_sound_scheme_export_calls = 0;
+    mock_sound_export_len = 0;
+    mock_sound_export_byte = 0;
+    mock_sound_scheme_import_ret = 0;
+    mock_sound_scheme_import_calls = 0;
+    mock_sound_import_last_len = 0;
+    mock_sound_import_last_activate = false;
+    mock_sound_scheme_list_ret = 0;
+    mock_sound_scheme_list_calls = 0;
+    mock_sound_scheme_list_count = 0;
+    memset(mock_sound_scheme_list_names, 0, sizeof(mock_sound_scheme_list_names));
 
     mock_audio_is_playing = 0;
     mock_audio_validate_ret = 0;

@@ -257,6 +257,40 @@ static void test_manifest_bad_track_lines_are_skipped(void)
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_manifest_load());
 }
 
+/* A manifest with only function metadata (no T; records) must still restore the
+ * function map and bindings, while reporting NOT_FOUND so the caller rebuilds
+ * the track list from the audio files (REV-ST1). */
+static void test_manifest_metadata_without_tracks(void)
+{
+    FILE *f = fopen(MANIFEST_PATH, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("AURA-TRACKS 1\n", f);
+    fputs("F;0;3;4;5;1;2\n", f);
+    fputs("B;0;7;1;2;0;1;2;3;4;5;6;7\n", f);
+    fclose(f);
+
+    mock_nvs_reset();
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_manifest_load());
+
+    settings_func_map_t back[SETTINGS_FUNC_MAP_COUNT];
+    size_t fn = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_map_load(back, &fn));
+    TEST_ASSERT_EQUAL_UINT8(3, back[0].slot_a);
+    TEST_ASSERT_EQUAL_UINT8(4, back[0].slot_b);
+    TEST_ASSERT_EQUAL_UINT16(5, back[0].aux_mask);
+    TEST_ASSERT_EQUAL_UINT8(1, back[0].dir);
+    TEST_ASSERT_EQUAL_UINT8(2, back[0].speed);
+
+    func_binding_t binds[FUNC_BIND_MAX];
+    size_t bn = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_load(binds, &bn));
+    TEST_ASSERT_EQUAL_UINT32(1, bn);
+    TEST_ASSERT_EQUAL_UINT8(7, binds[0].fn);
+    TEST_ASSERT_EQUAL_UINT8(4, binds[0].short_table);
+    TEST_ASSERT_EQUAL_UINT16(5, binds[0].short_ms);
+    TEST_ASSERT_EQUAL_UINT16(7, binds[0].fade_ms);
+}
+
 /* ---- sync is a no-op (no crash) when storage is not mounted ---- */
 
 static void test_manifest_sync_without_dir_no_crash(void)
@@ -297,6 +331,61 @@ static void test_manifest_track_slot_without_category(void)
     TEST_ASSERT_EQUAL_UINT8(10, back[0].slot);
 }
 
+/* ---- roundtrip: function bindings (manifest v2) ---- */
+
+static void test_manifest_roundtrip_bindings(void)
+{
+    settings_track_t t;
+    seed_track(&t, 1, "audio/slot1.wav", "One", true);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_save(&t, 1));
+
+    func_binding_t b[2];
+    memset(b, 0, sizeof(b));
+    b[0].used = 1;
+    b[0].fn = 2;
+    b[0].target_type = FUNC_TARGET_SOUND;
+    b[0].target_id = 5;
+    b[0].mode = SOUND_MODE_SHORT_LONG;
+    b[0].flags = FUNC_FLAG_DUCK;
+    b[0].short_table = 7;
+    b[0].short_ms = 400;
+    b[0].min_ms = 150;
+    b[0].fade_ms = 80;
+    b[1].used = 1;
+    b[1].fn = 1;
+    b[1].target_type = FUNC_TARGET_OUTPUT;
+    b[1].target_id = 3;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_save(b, 2));
+
+    FILE *f = fopen(MANIFEST_PATH, "r");
+    TEST_ASSERT_NOT_NULL(f);
+    char buf[2048] = { 0 };
+    (void)fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "AURA-TRACKS 2"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "B;"));
+
+    mock_nvs_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manifest_load());
+
+    func_binding_t back[FUNC_BIND_MAX];
+    size_t bn = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_load(back, &bn));
+    TEST_ASSERT_EQUAL_UINT32(2, bn);
+    TEST_ASSERT_EQUAL_UINT8(2, back[0].fn);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SOUND, back[0].target_type);
+    TEST_ASSERT_EQUAL_UINT8(5, back[0].target_id);
+    TEST_ASSERT_EQUAL_UINT8(SOUND_MODE_SHORT_LONG, back[0].mode);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_FLAG_DUCK, back[0].flags);
+    TEST_ASSERT_EQUAL_UINT8(7, back[0].short_table);
+    TEST_ASSERT_EQUAL_UINT16(400, back[0].short_ms);
+    TEST_ASSERT_EQUAL_UINT16(150, back[0].min_ms);
+    TEST_ASSERT_EQUAL_UINT16(80, back[0].fade_ms);
+    TEST_ASSERT_EQUAL_UINT8(1, back[1].fn);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_OUTPUT, back[1].target_type);
+    TEST_ASSERT_EQUAL_UINT8(3, back[1].target_id);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -310,7 +399,9 @@ int main(void)
     RUN_TEST(test_manifest_header_only_returns_not_found);
     RUN_TEST(test_manifest_without_magic_returns_not_found);
     RUN_TEST(test_manifest_bad_track_lines_are_skipped);
+    RUN_TEST(test_manifest_metadata_without_tracks);
     RUN_TEST(test_manifest_sync_without_dir_no_crash);
     RUN_TEST(test_manifest_track_slot_without_category);
+    RUN_TEST(test_manifest_roundtrip_bindings);
     return UNITY_END();
 }

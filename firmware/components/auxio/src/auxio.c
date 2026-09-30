@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "driver/ledc.h"
-#include "driver/mcpwm.h"
+#include "driver/mcpwm_prelude.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -25,9 +25,7 @@ typedef struct {
     uint32_t fx_next_ms;  /* next change time for firebox flicker */
     bool ledc;
     ledc_channel_t ledc_ch;
-    mcpwm_unit_t mcpwm_unit;
-    mcpwm_timer_t mcpwm_timer;
-    mcpwm_operator_t mcpwm_op;
+    mcpwm_cmpr_handle_t mcpwm_cmpr;
 } auxio_ch_t;
 
 static auxio_ch_t s_ch[AUXIO_CH_COUNT];
@@ -60,10 +58,14 @@ static const int s_gpios[AUXIO_CH_COUNT] = {
     PIN_AUX4, PIN_AUX5, PIN_AUX6, PIN_AUX7,
 };
 
-/* AUX5..AUX7 are on MCPWM_UNIT_0 (the motor keeps LEDC_CHANNEL_0/1). */
-static const mcpwm_io_signals_t s_mcpwm_sig[3] = { MCPWM0A, MCPWM0B, MCPWM1A };
-static const mcpwm_timer_t s_mcpwm_timer[3] = { MCPWM_TIMER_0, MCPWM_TIMER_0, MCPWM_TIMER_1 };
-static const mcpwm_operator_t s_mcpwm_op[3] = { MCPWM_OPR_A, MCPWM_OPR_B, MCPWM_OPR_A };
+/* AUX5..AUX7 are MCPWM-backed (LEDC has only 8 channels and the motor owns
+ * LEDC_CHANNEL_0/1). One 20 kHz timer feeds two operators: operator 0 drives
+ * AUX5/AUX6, operator 1 drives AUX7. */
+#define AUXIO_MCPWM_RES_HZ 10000000U
+#define AUXIO_MCPWM_PERIOD_TICKS (AUXIO_MCPWM_RES_HZ / AUXIO_PWM_FREQ_HZ)
+
+static mcpwm_timer_handle_t s_mcpwm_timer;
+static mcpwm_oper_handle_t s_mcpwm_oper[2];
 
 static void apply_duty(auxio_ch_t *ch, uint8_t duty)
 {
@@ -71,10 +73,8 @@ static void apply_duty(auxio_ch_t *ch, uint8_t duty)
         (void)ledc_set_duty(LEDC_LOW_SPEED_MODE, ch->ledc_ch, duty);
         (void)ledc_update_duty(LEDC_LOW_SPEED_MODE, ch->ledc_ch);
     } else {
-        float pct = (float)duty * 100.0f / 255.0f;
-        (void)mcpwm_set_duty(ch->mcpwm_unit, ch->mcpwm_timer, ch->mcpwm_op, pct);
-        (void)mcpwm_set_duty_type(ch->mcpwm_unit, ch->mcpwm_timer, ch->mcpwm_op,
-                                  MCPWM_DUTY_MODE_0);
+        uint32_t ticks = ((uint32_t)duty * AUXIO_MCPWM_PERIOD_TICKS) / 255U;
+        (void)mcpwm_comparator_set_compare_value(ch->mcpwm_cmpr, ticks);
     }
 }
 
@@ -218,6 +218,22 @@ esp_err_t auxio_init(void)
     };
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
+    /* MCPWM: one 20 kHz timer, two operators (AUX5/AUX6 on operator 0,
+     * AUX7 on operator 1). */
+    mcpwm_timer_config_t mcpwm_timer = {
+        .group_id = 0,
+        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
+        .resolution_hz = AUXIO_MCPWM_RES_HZ,
+        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
+        .period_ticks = AUXIO_MCPWM_PERIOD_TICKS,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_timer(&mcpwm_timer, &s_mcpwm_timer));
+    mcpwm_operator_config_t mcpwm_oper = { .group_id = 0 };
+    ESP_ERROR_CHECK(mcpwm_new_operator(&mcpwm_oper, &s_mcpwm_oper[0]));
+    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(s_mcpwm_oper[0], s_mcpwm_timer));
+    ESP_ERROR_CHECK(mcpwm_new_operator(&mcpwm_oper, &s_mcpwm_oper[1]));
+    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(s_mcpwm_oper[1], s_mcpwm_timer));
+
     for (int i = 0; i < AUXIO_CH_COUNT; ++i) {
         auxio_ch_t *ch = &s_ch[i];
         memset(ch, 0, sizeof(*ch));
@@ -241,25 +257,30 @@ esp_err_t auxio_init(void)
             ch->ledc = true;
             ch->ledc_ch = (ledc_channel_t)(LEDC_CHANNEL_2 + i);
         } else {
-            int m = i - 6;
-            ESP_ERROR_CHECK(mcpwm_gpio_init(MCPWM_UNIT_0, s_mcpwm_sig[m], s_gpios[i]));
+            mcpwm_oper_handle_t oper = s_mcpwm_oper[(i - 6) >= 2 ? 1 : 0];
             ch->ledc = false;
-            ch->mcpwm_unit = MCPWM_UNIT_0;
-            ch->mcpwm_timer = s_mcpwm_timer[m];
-            ch->mcpwm_op = s_mcpwm_op[m];
+            mcpwm_comparator_config_t cmp_cfg = {
+                .flags.update_cmp_on_tez = true,
+            };
+            ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &cmp_cfg, &ch->mcpwm_cmpr));
+            mcpwm_generator_config_t gen_cfg = {
+                .gen_gpio_num = s_gpios[i],
+            };
+            mcpwm_gen_handle_t gen = NULL;
+            ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_cfg, &gen));
+            ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(gen,
+                MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP,
+                                             MCPWM_TIMER_EVENT_EMPTY,
+                                             MCPWM_GEN_ACTION_HIGH)));
+            ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(gen,
+                MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP,
+                                               ch->mcpwm_cmpr,
+                                               MCPWM_GEN_ACTION_LOW)));
         }
     }
 
-    mcpwm_config_t m0 = {
-        .frequency = AUXIO_PWM_FREQ_HZ,
-        .cmpr_a = 0.0f,
-        .cmpr_b = 0.0f,
-        .counter_mode = MCPWM_UP_COUNTER,
-        .duty_mode = MCPWM_DUTY_MODE_0,
-    };
-    ESP_ERROR_CHECK(mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_0, &m0));
-    mcpwm_config_t m1 = m0;
-    ESP_ERROR_CHECK(mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_1, &m1));
+    ESP_ERROR_CHECK(mcpwm_timer_enable(s_mcpwm_timer));
+    ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_mcpwm_timer, MCPWM_TIMER_START_NO_STOP));
 
     if (xTaskCreate(effect_task, "aux_fx", 3072, NULL, 6, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;

@@ -109,6 +109,10 @@ void setUp(void)
     clear_files();
     MKDIR("web_tmp");
     MKDIR("web_tmp/audio");
+    /* Bindings are per-suite state in web.c; keep the legacy fallback path
+     * active unless a test populates them explicitly. */
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
 }
 
 void tearDown(void)
@@ -193,9 +197,9 @@ static void test_wifi_event_handler(void)
     TEST_ASSERT_EQUAL_UINT8(0, s_ap_sta_count);
     /* Unknown event id and a different base. */
     wifi_event_handler(NULL, WIFI_EVENT, 9999, NULL);
-    ip_event_ap_staipassigned_t assigned;
+    ip_event_assigned_ip_to_client_t assigned;
     memset(&assigned, 0, sizeof(assigned));
-    wifi_event_handler(NULL, IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &assigned);
+    wifi_event_handler(NULL, IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, &assigned);
     wifi_event_handler(NULL, IP_EVENT, 42, &assigned);
     TEST_PASS();
 }
@@ -354,6 +358,28 @@ static void test_web_apply_function_out_of_audio_range(void)
     s_func_map[25].aux_mask = SETTINGS_FUNC_OUT_F0F;
     web_apply_function(25, true);
     TEST_ASSERT_EQUAL_INT(0, mock_audio_voice_play_calls);
+}
+
+static void test_web_apply_function_scheme_routes_to_sound(void)
+{
+    /* With a scheme active the engine owns F routing; the legacy slot mapping
+     * must not start a voice (engine voices 18/19 are reserved). */
+    mock_sound_scheme_enabled = 1;
+    s_func_map[2].slot_a = 3;
+    mock_tracks_count = 1;
+    mock_tracks[0].slot = 3;
+    mock_tracks[0].enabled = true;
+    snprintf(mock_tracks[0].file, sizeof(mock_tracks[0].file), "audio/slot3.wav");
+
+    web_apply_function(2, true);
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_function_calls);
+    TEST_ASSERT_EQUAL_UINT8(2, mock_sound_last_fn);
+    TEST_ASSERT_TRUE(mock_sound_last_state);
+    TEST_ASSERT_EQUAL_INT(0, mock_audio_voice_play_calls);
+
+    web_apply_function(2, false);
+    TEST_ASSERT_EQUAL_INT(2, mock_sound_function_calls);
+    TEST_ASSERT_FALSE(mock_sound_last_state);
 }
 
 static void test_web_motion_changed(void)
@@ -1415,6 +1441,23 @@ static void test_cv_write_post(void)
     TEST_ASSERT_EQUAL_INT(1, mock_cv_commit_calls);
     TEST_ASSERT_EQUAL_INT(1, mock_dcc_reload_config_calls);
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+
+    /* CV63 aliases the master volume: applied live and persisted (REV-SET1). */
+    reset_resp();
+    mock_audio_last_volume = 0;
+    mock_settings_save_deferred_calls = 0;
+    set_query("index=63&value=255");
+    TEST_ASSERT_EQUAL(ESP_OK, cv_write_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(100, mock_audio_last_volume);
+    TEST_ASSERT_EQUAL_INT(1, mock_settings_save_deferred_calls);
+    TEST_ASSERT_EQUAL_UINT8(100, s_cfg.master_volume);
+
+    /* Clamp: a >100 % request cannot exceed the audio range. */
+    reset_resp();
+    s_cfg.master_volume = 0;
+    web_master_volume_changed(200);
+    TEST_ASSERT_EQUAL_UINT8(100, s_cfg.master_volume);
+    TEST_ASSERT_EQUAL_UINT8(100, mock_audio_last_volume);
 }
 
 /* ---------- AUX config ---------- */
@@ -1499,6 +1542,439 @@ static void test_func_map_get_post(void)
     mock_map_save_ret = 0;
     TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+}
+
+/* ---- canonical function bindings (R2) ---- */
+
+static void test_func_bind_load_and_desired(void)
+{
+    /* load-success path from the store */
+    memset(mock_binds, 0, sizeof(mock_binds));
+    mock_binds[0].used = 1;
+    mock_binds[0].fn = 1;
+    mock_binds[0].target_type = FUNC_TARGET_OUTPUT;
+    mock_binds[0].target_id = 2;
+    mock_binds_count = 1;
+    mock_bind_load_ret = ESP_OK;
+    func_bind_load();
+    TEST_ASSERT_EQUAL_UINT32(1, s_func_bind_count);
+
+    /* binding path drives the output mask; fn_on gates it */
+    s_motion_initialized = true;
+    s_motion_forward = true;
+    s_motion_speed = 1;
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)(1U << 2), func_desired_locked(1, true));
+    TEST_ASSERT_EQUAL_UINT16(0, func_desired_locked(1, false));
+    TEST_ASSERT_EQUAL_UINT16(0, func_desired_locked(0, true));
+}
+
+static void test_func_bind_get_view(void)
+{
+    httpd_req_t req = make_req(0);
+    s_func_bind_count = 1;
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 2;
+    s_func_bind[0].target_type = FUNC_TARGET_SOUND;
+    s_func_bind[0].target_id = 5;
+    s_func_bind[0].short_ms = 400;
+
+    reset_resp();
+    set_query("view=bind");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"binds\":["));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"id\":5"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"short_ms\":400"));
+
+    reset_resp();
+    set_query("view=matrix");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"count\":1"));
+
+    reset_resp();
+    mock_alloc_fail_at = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "oom"));
+}
+
+static void test_func_map_post_binding(void)
+{
+    httpd_req_t req = make_req(0);
+
+    reset_resp();
+    set_query("bind=1&fn=2&type=2&id=5&dir=1&state=2&mode=3&flags=1&short=7"
+              "&short_ms=400&min_ms=150&fade_ms=80");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_EQUAL_UINT32(1, s_func_bind_count);
+    TEST_ASSERT_EQUAL_UINT8(2, s_func_bind[0].fn);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SOUND, s_func_bind[0].target_type);
+    TEST_ASSERT_EQUAL_UINT8(5, s_func_bind[0].target_id);
+    TEST_ASSERT_EQUAL_UINT8(1, s_func_bind[0].dir);
+    TEST_ASSERT_EQUAL_UINT8(2, s_func_bind[0].state);
+    TEST_ASSERT_EQUAL_UINT8(3, s_func_bind[0].mode);
+    TEST_ASSERT_EQUAL_UINT8(1, s_func_bind[0].flags);
+    TEST_ASSERT_EQUAL_UINT8(7, s_func_bind[0].short_table);
+    TEST_ASSERT_EQUAL_UINT16(400, s_func_bind[0].short_ms);
+    TEST_ASSERT_EQUAL_UINT16(150, s_func_bind[0].min_ms);
+    TEST_ASSERT_EQUAL_UINT16(80, s_func_bind[0].fade_ms);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+
+    reset_resp();
+    set_query("bind=1&fn=1&type=1&id=2"); /* optional params default */
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_EQUAL_UINT32(2, s_func_bind_count);
+
+    const char *bad[] = {
+        "bind=1&fn=99&type=1&id=0",
+        "bind=1&fn=1&type=0&id=0",
+        "bind=1&fn=1&type=9&id=0",
+        "bind=1&fn=1&type=1",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+        reset_resp();
+        set_query(bad[i]);
+        TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+        TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    }
+
+    reset_resp();
+    mock_bind_save_ret = ESP_FAIL;
+    set_query("bind=1&fn=3&type=2&id=1");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_bind_save_ret = 0;
+
+    reset_resp();
+    set_query("bind=1&remove=1&idx=9");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    reset_resp();
+    mock_bind_save_ret = ESP_FAIL;
+    set_query("bind=1&remove=1&idx=0");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_bind_save_ret = 0;
+
+    reset_resp();
+    set_query("bind=1&remove=1&idx=0");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_UINT32(1, s_func_bind_count);
+
+    /* Full store: add fails. */
+    reset_resp();
+    s_func_bind_count = FUNC_BIND_MAX;
+    set_query("bind=1&fn=3&type=2&id=1");
+    TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+
+    /* Empty store: direct remove guard. */
+    s_func_bind_count = 0;
+    TEST_ASSERT_FALSE(web_func_bind_remove(0));
+}
+
+static void test_sound_rest_handlers(void)
+{
+    httpd_req_t req = make_req(0);
+
+    mock_sound_status.type = SOUND_SCHEME_DIESEL;
+    mock_sound_status.enabled = true;
+    mock_sound_status.engine = true;
+    mock_sound_status.table = 5;
+    mock_sound_status.phase = 2;
+    mock_sound_status.speed = 100;
+    mock_sound_status.forward = true;
+    snprintf(mock_sound_status.name, sizeof(mock_sound_status.name), "my\"sc");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, sound_state_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"type\":2"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "my\\\"sc"));
+
+    mock_sound_scheme.type = SOUND_SCHEME_STEAM;
+    mock_sound_scheme.engine.engine_start_fn = 3;
+    mock_sound_scheme.tables[4].used = true;
+    snprintf(mock_sound_scheme.tables[4].name, SOUND_NAME_MAX, "D1");
+    mock_sound_scheme.extras[0].fn = 7;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"tables\":["));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"extras\":["));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "D1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"drive\":["));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"brake\":{\"max\":"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"init\":\""));
+
+    reset_resp();
+    mock_alloc_fail_at = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "oom"));
+
+    reset_resp();
+    set_query("type=1&start_fn=4&sync=1&flags=3&start=2&stop=3&shutdown=4&cyl_min=1&cyl_max=3&cyl_inc=1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_post_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_UINT8(1, mock_sound_scheme.type);
+    TEST_ASSERT_EQUAL_UINT8(4, mock_sound_scheme.engine.engine_start_fn);
+    TEST_ASSERT_TRUE(mock_sound_scheme.engine.sync_motion);
+    /* `flags` is mirrored to CV30 so the engine (which reads CV30) sees it. */
+    TEST_ASSERT_EQUAL_UINT16(30, mock_cv_last_index);
+    TEST_ASSERT_EQUAL_UINT8(3, mock_cv[30]);
+    TEST_ASSERT_EQUAL_INT(1, mock_cv_commit_deferred_calls);
+
+    /* Engine graph arrays + brake are settable through the scheme POST. */
+    reset_resp();
+    set_query("drive0=5&drive4=9&accel2=3&coast1=4&brake_max=20&brake_min=80");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_post_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_UINT8(5, mock_sound_scheme.engine.drive[0]);
+    TEST_ASSERT_EQUAL_UINT8(9, mock_sound_scheme.engine.drive[4]);
+    TEST_ASSERT_EQUAL_UINT8(3, mock_sound_scheme.engine.accel[2]);
+    TEST_ASSERT_EQUAL_UINT8(4, mock_sound_scheme.engine.coast[1]);
+    TEST_ASSERT_EQUAL_UINT8(20, mock_sound_scheme.brake.max_on_speed);
+    TEST_ASSERT_EQUAL_UINT8(80, mock_sound_scheme.brake.min_brake_speed);
+
+    /* An out-of-range scheme type is rejected before touching RAM. */
+    reset_resp();
+    set_query("type=9");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_post_handler(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    reset_resp();
+    mock_sound_scheme_save_ret = ESP_FAIL;
+    set_query("type=2");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_post_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save"));
+    mock_sound_scheme_save_ret = 0;
+
+    reset_resp();
+    set_query("i=5&used=1&name=Drive&min=10&max=20&rate=32&min_plays=1&max_plays=3&end=6"
+              "&nacc=7&ndec=8&init=i.wav&loop=l.wav&endf=e.wav");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_table_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"i\":5"));
+    TEST_ASSERT_EQUAL_UINT8(10, mock_sound_scheme.tables[5].min_speed);
+    TEST_ASSERT_EQUAL_STRING("Drive", mock_sound_scheme.tables[5].name);
+    TEST_ASSERT_EQUAL_STRING("l.wav", mock_sound_scheme.tables[5].loop[0].file);
+
+    reset_resp();
+    set_query("i=0");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_table_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    reset_resp();
+    set_query("i=40");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_table_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    reset_resp();
+    mock_sound_scheme_save_ret = ESP_FAIL;
+    set_query("i=5&used=1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_table_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save"));
+    mock_sound_scheme_save_ret = 0;
+
+    reset_resp();
+    set_query("i=3&table=5&fn=7&dir=1&state=2&mode=3&vol=80&rmin=100&rmax=900");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_extra_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"i\":3"));
+    TEST_ASSERT_EQUAL_UINT8(5, mock_sound_scheme.extras[3].table);
+    TEST_ASSERT_EQUAL_UINT16(900, mock_sound_scheme.extras[3].random_max_ms);
+
+    reset_resp();
+    set_query("i=99");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_extra_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    reset_resp();
+    mock_sound_scheme_save_ret = ESP_FAIL;
+    set_query("i=3&fn=7");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_extra_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save"));
+    mock_sound_scheme_save_ret = 0;
+
+    reset_resp();
+    mock_sound_lint_ret = 2;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_lint_handler(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"problems\":2"));
+}
+
+static void test_sound_project_handlers(void)
+{
+    httpd_req_t req = make_req(0);
+
+    snprintf(mock_sound_active_name, sizeof(mock_sound_active_name), "diesel");
+    mock_sound_scheme_list_count = 2;
+    snprintf(mock_sound_scheme_list_names[0], SOUND_FILE_MAX, "diesel");
+    snprintf(mock_sound_scheme_list_names[1], SOUND_FILE_MAX, "steam\"x");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, sound_projects_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"active\":\"diesel\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"name\":\"diesel\",\"active\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"name\":\"steam\\\"x\",\"active\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"count\":2"));
+
+    reset_resp();
+    mock_alloc_calls = 0;
+    mock_alloc_fail_at = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_projects_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "oom"));
+
+    reset_resp();
+    set_query("create=my_scheme");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_project_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_scheme_create_calls);
+    TEST_ASSERT_EQUAL_STRING("my_scheme", mock_sound_last_name);
+    TEST_ASSERT_EQUAL_UINT8(SOUND_SCHEME_DIESEL, mock_sound_last_type);
+
+    reset_resp();
+    set_query("create=steam1&type=3");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_project_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(SOUND_SCHEME_STEAM, mock_sound_last_type);
+
+    reset_resp();
+    set_query("activate=steam1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_project_post(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_load_scheme_calls);
+    TEST_ASSERT_EQUAL_STRING("steam1", mock_sound_last_name);
+
+    reset_resp();
+    set_query("delete=steam1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_project_post(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_scheme_delete_calls);
+
+    reset_resp();
+    mock_sound_scheme_create_ret = ESP_FAIL;
+    set_query("create=x");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_project_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    mock_sound_scheme_create_ret = 0;
+
+    reset_resp();
+    set_query("other=1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_project_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    mock_sound_export_len = 16;
+    mock_sound_export_byte = 0x5A;
+    reset_resp();
+    set_query("name=diesel");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_download_get(&req));
+    TEST_ASSERT_EQUAL_STRING("application/octet-stream", mock_resp_type);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "Content-Disposition"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "diesel.mds"));
+    TEST_ASSERT_EQUAL_UINT32(16, mock_resp_body_len);
+    TEST_ASSERT_EQUAL_UINT8(0x5A, (uint8_t)mock_resp_body[0]);
+
+    reset_resp();
+    mock_sound_scheme_export_ret = ESP_ERR_NOT_FOUND;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_download_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    mock_sound_scheme_export_ret = 0;
+
+    reset_resp();
+    set_query("other=1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_download_get(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    reset_resp();
+    mock_alloc_calls = 0;
+    mock_alloc_fail_at = 0;
+    set_query("name=diesel");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_download_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "oom"));
+}
+
+static void test_sound_upload_handler(void)
+{
+    static uint8_t big[SOUND_STORE_MAX_BYTES];
+    memset(big, 0x11, sizeof(big));
+    uint8_t shorty[8];
+    memset(shorty, 0x22, sizeof(shorty));
+    httpd_req_t req = make_req(0);
+
+    mock_storage_is_mounted = 0;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+    mock_storage_is_mounted = 1;
+
+    reset_resp();
+    req = make_req(8);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    reset_resp();
+    req = make_req(SOUND_STORE_MAX_BYTES);
+    set_query("other=1");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    /* Short body: the recv loop ends before content_len -> fail. */
+    reset_resp();
+    set_body(shorty, sizeof(shorty));
+    set_query("name=abc");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+
+    /* Success; activation defaults on. */
+    reset_resp();
+    set_body(big, sizeof(big));
+    set_query("name=abc");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_scheme_import_calls);
+    TEST_ASSERT_EQUAL_STRING("abc", mock_sound_last_name);
+    TEST_ASSERT_EQUAL_UINT32(SOUND_STORE_MAX_BYTES, mock_sound_import_last_len);
+    TEST_ASSERT_TRUE(mock_sound_import_last_activate);
+
+    /* activate=0 keeps the current scheme. */
+    reset_resp();
+    set_body(big, sizeof(big));
+    set_query("name=abc&activate=0");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_FALSE(mock_sound_import_last_activate);
+
+    reset_resp();
+    mock_sound_scheme_import_ret = ESP_FAIL;
+    set_body(big, sizeof(big));
+    set_query("name=abc");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    mock_sound_scheme_import_ret = 0;
+
+    reset_resp();
+    mock_alloc_calls = 0;
+    mock_alloc_fail_at = 0;
+    set_query("name=abc");
+    TEST_ASSERT_EQUAL(ESP_OK, sound_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "oom"));
+}
+
+static void test_web_func_map_set_preserves_sound_bindings(void)
+{
+    /* A canonical SOUND binding must survive a legacy map edit: the legacy
+     * POST only rebuilds OUTPUT/SLOT records. */
+    s_func_bind_count = 1;
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 3;
+    s_func_bind[0].target_type = FUNC_TARGET_SOUND;
+    s_func_bind[0].target_id = 5;
+    s_func_bind[0].mode = SOUND_MODE_SHORT_LONG;
+
+    TEST_ASSERT_TRUE(web_func_map_set(2, 0, 0, 0x0004u, SETTINGS_FUNC_DIR_FWD,
+                                      SETTINGS_FUNC_SPD_MOVING));
+    TEST_ASSERT_EQUAL_UINT32(2, s_func_bind_count); /* 1 sound + 1 AUX output */
+
+    int found = -1;
+    for (size_t i = 0; i < s_func_bind_count; ++i) {
+        if (s_func_bind[i].target_type == FUNC_TARGET_SOUND) {
+            found = (int)i;
+        }
+    }
+    TEST_ASSERT_TRUE(found >= 0);
+    TEST_ASSERT_EQUAL_UINT8(5, s_func_bind[found].target_id);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_OUTPUT, s_func_bind[0].target_type);
 }
 
 /* ---------- small branch gaps ---------- */
@@ -2425,6 +2901,7 @@ int main(void)
     RUN_TEST(test_web_apply_function_double_voice);
     RUN_TEST(test_web_apply_function_b_voice_ignored_above_10);
     RUN_TEST(test_web_apply_function_out_of_audio_range);
+    RUN_TEST(test_web_apply_function_scheme_routes_to_sound);
     RUN_TEST(test_web_motion_changed);
     RUN_TEST(test_web_func_map_get_set);
     RUN_TEST(test_parse_ip4);
@@ -2486,6 +2963,13 @@ int main(void)
     RUN_TEST(test_aux_cfg_get_post);
     RUN_TEST(test_aux_cfg_effect_periods);
     RUN_TEST(test_func_map_get_post);
+    RUN_TEST(test_func_bind_load_and_desired);
+    RUN_TEST(test_func_bind_get_view);
+    RUN_TEST(test_func_map_post_binding);
+    RUN_TEST(test_sound_rest_handlers);
+    RUN_TEST(test_sound_project_handlers);
+    RUN_TEST(test_sound_upload_handler);
+    RUN_TEST(test_web_func_map_set_preserves_sound_bindings);
     RUN_TEST(test_utf8_four_byte_and_outputs_init);
     RUN_TEST(test_captive_handler);
     RUN_TEST(test_start_dns_hijack);

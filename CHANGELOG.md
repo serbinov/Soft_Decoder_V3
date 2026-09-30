@@ -5,12 +5,46 @@
 (`firmware/BUGFIX.md`, `firmware/FIXES.md`, `Отчет_изменения_2026-08-27.md`)
 объединены сюда.
 
+## Сборка
+
+Проект собирается через **ESP-IDF 6.0** (`idf.py`; см. `README.md` и
+`firmware/ARCHITECTURE.md` §4). PlatformIO больше не используется — упоминания
+`pio run` в исторических записях ниже относятся к версиям до перехода на ESP-IDF.
+
+## Релизы
+
+### 0.9 — звуковой движок (ADDITIPUS AURA-X)
+
+Sound scheme engine, roadmap R0–R6.
+
+- `audio`: playback-rate control (`audio_voice_set_rate`), voice state queries,
+  voice allocator, anti-click start/stop fade.
+- `settings`: shared `sound_types.h` model, canonical `func_bind` bindings with
+  legacy migration, `active_scheme` pointer, manifest v2 (`B;` records),
+  CV30/63/114/115/116.
+- `sound` (new component): binary `.mds` scheme store (atomic write), engine
+  state machine, Init/Loop/End sequencer, chuff/cylinder handling, F-key modes
+  (one-shot/trigger/loop-held/short-long/latched), logic mutes, `sync_motion`,
+  random/state extras, brake cue, scheme lint.
+- `web`: `/api/sound/{state,scheme,table,extra,lint}`, binding API
+  (`/api/func-map?view=bind`, `POST ?bind=1`), sound UI panels, `max_uri_handlers`
+  raised to 64.
+- `motor`: `motor_get_applied_speed()` (ramped output) feeding the engine.
+- `main`: `sound_init()` after `audio_init`; sound reset on DCC reset/CV11
+  timeout.
+- `provision`: HIL commands `HIL-ENGINE`, `HIL-SCHEME-SPEED`.
+- Version bumped to 0.9 (CV7 = 9). Existing devices migrate CV7 on first boot.
+
+Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
+
 ## Автожурнал (по коммитам)
 
-Записи ниже добавляются автоматически скриптом `.githooks/prepare-commit-msg`
-при каждом коммите: дата, версия и тема коммита. Новые — сверху.
+Записи ниже добавляются автоматически скриптом `.githooks/post-commit`
+(`.githooks/changelog.ps1`) при каждом коммите: дата, версия и тема коммита.
+Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-09-30 (v0.9) — chore(build): migrate to ESP-IDF 6.0, drop PlatformIO, add VS Code setup
 - 2026-09-28 (v0.8) — feat(web): check device online every 5 s; freeze uptime when offline
 - 2026-09-27 (v0.8) — docs: refresh stale data; release v0.8
 - 2026-09-27 (v0.8) — feat(web): show Additipus as the CV8 manufacturer name

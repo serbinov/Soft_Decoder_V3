@@ -1,13 +1,6 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
-
-set "PIO=%USERPROFILE%\.platformio\penv\Scripts\pio.exe"
-if not exist "%PIO%" (
-    echo [ERROR] PlatformIO not found: %PIO%
-    pause
-    exit /b 1
-)
 
 rem Usage: flash_firmware_and_sounds.bat [COMx] [erase]
 rem   erase  = full internal-chip erase first (wipes NVS: settings, CVs,
@@ -41,32 +34,21 @@ if "%DO_ERASE%"=="1" (
 echo  External flash ^(W25Q128/sounds^) is always re-written.
 echo ================================================================
 
-if "%DO_ERASE%"=="1" goto :do_erase
-goto :flash
-
-:do_erase
-echo [1/3] Erasing internal flash (NVS/settings will be cleared)...
-"%PIO%" run -e esp32-s3-devkitc-1 -t erase --upload-port %PORT%
-if errorlevel 1 (
-    echo.
-    echo [FAIL] Erase failed.
-    pause
-    exit /b 1
+echo [1/2] Building and writing firmware...
+if "%DO_ERASE%"=="1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0idf_build.ps1" -Erase -Flash -Port %PORT%
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0idf_build.ps1" -Flash -Port %PORT%
 )
-goto :flash
-
-:flash
-echo [2/3] Writing firmware...
-"%PIO%" run -e esp32-s3-devkitc-1 -t upload --upload-port %PORT%
 if errorlevel 1 (
     echo.
-    echo [FAIL] Firmware flash failed.
+    echo [FAIL] Firmware build/flash failed.
     pause
     exit /b 1
 )
 
 echo.
-echo [3/3] Uploading sounds (keep the board connected)...
+echo [2/2] Uploading sounds (keep the board connected)...
 powershell -ExecutionPolicy Bypass -File "%~dp0provision_sounds.ps1" -Port %PORT%
 if errorlevel 1 (
     echo.

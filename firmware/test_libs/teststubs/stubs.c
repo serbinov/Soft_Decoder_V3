@@ -55,10 +55,12 @@ esp_err_t gpio_config(const gpio_config_t *cfg)
 }
 
 int mock_gpio_isr_install_err = 0;
+int mock_gpio_isr_flags = 0;
+int mock_gpio_isr_add_err = 0;
 
 esp_err_t gpio_install_isr_service(int flags)
 {
-    (void)flags;
+    mock_gpio_isr_flags = flags;
     return (esp_err_t)mock_gpio_isr_install_err;
 }
 
@@ -67,7 +69,11 @@ esp_err_t gpio_isr_handler_add(gpio_num_t gpio, void (*isr)(void *), void *arg)
     (void)gpio;
     (void)isr;
     (void)arg;
-    return ESP_OK;
+    return (esp_err_t)mock_gpio_isr_add_err;
+}
+
+void gpio_uninstall_isr_service(void)
+{
 }
 
 esp_err_t gpio_isr_handler_remove(gpio_num_t gpio)
@@ -188,6 +194,25 @@ int mock_task_create_ok = 1;
  * (-1 = off). Shared by xTaskCreate and xTaskCreatePinnedToCore. */
 int mock_task_create_fail_after = -1;
 int mock_task_create_calls = 0;
+void (*mock_task_startup_hook)(void (*task)(void *), void *param);
+void (*mock_task_create_hook)(void (*task)(void *), void *param);
+TaskHandle_t mock_current_task_handle = (TaskHandle_t)1;
+
+TaskHandle_t xTaskGetCurrentTaskHandle(void)
+{
+    return mock_current_task_handle;
+}
+
+QueueHandle_t xQueueCreateWithCaps(UBaseType_t length, UBaseType_t item_size, UBaseType_t caps)
+{
+    (void)caps;
+    return xQueueCreate(length, item_size);
+}
+
+void vQueueDeleteWithCaps(QueueHandle_t queue)
+{
+    vQueueDelete(queue);
+}
 
 static BaseType_t mock_task_create_result(void)
 {
@@ -213,7 +238,37 @@ BaseType_t xTaskCreate(void (*task)(void *), const char *name, uint32_t stack,
     if (handle != NULL) {
         *handle = NULL;
     }
-    return mock_task_create_result();
+    BaseType_t result = mock_task_create_result();
+    if (result == pdPASS && mock_task_create_hook != NULL) {
+        mock_task_create_hook(task, param);
+    }
+    return result;
+}
+
+int mock_task_wdt_add_err;
+int mock_task_wdt_reset_calls;
+
+esp_err_t esp_task_wdt_add(TaskHandle_t task)
+{
+    (void)task;
+    return (esp_err_t)mock_task_wdt_add_err;
+}
+
+esp_err_t esp_task_wdt_reset(void)
+{
+    ++mock_task_wdt_reset_calls;
+    return ESP_OK;
+}
+
+esp_err_t esp_task_wdt_delete(TaskHandle_t task)
+{
+    (void)task;
+    return ESP_OK;
+}
+
+int esp_reset_reason(void)
+{
+    return 0;
 }
 
 BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
@@ -230,7 +285,11 @@ BaseType_t xTaskCreatePinnedToCore(void (*task)(void *), const char *name,
     if (handle != NULL) {
         *handle = NULL;
     }
-    return mock_task_create_result();
+    BaseType_t result = mock_task_create_result();
+    if (result == pdPASS && mock_task_startup_hook != NULL) {
+        mock_task_startup_hook(task, param);
+    }
+    return result;
 }
 
 void vTaskDelay(const TickType_t ticks)
@@ -318,11 +377,24 @@ typedef struct {
 static mock_nvs_entry_t s_nvs[MOCK_NVS_MAX_KEYS];
 static int s_nvs_entries;
 
+int mock_nvs_set_err = 0;
+int mock_nvs_commit_err = 0;
+int mock_nvs_set_calls = 0;
+int mock_nvs_commit_calls = 0;
+
+static esp_err_t mock_nvs_set_result(void)
+{
+    ++mock_nvs_set_calls;
+    return (esp_err_t)mock_nvs_set_err;
+}
+
 /* Wipe the in-memory NVS so each test starts from an empty store. */
 void mock_nvs_reset(void)
 {
     memset(s_nvs, 0, sizeof(s_nvs));
     s_nvs_entries = 0;
+    mock_nvs_set_err = mock_nvs_commit_err = 0;
+    mock_nvs_set_calls = mock_nvs_commit_calls = 0;
 }
 
 /* Force a raw blob under a key (for stale/corrupt-blob tests). */
@@ -475,18 +547,24 @@ esp_err_t nvs_get_blob(nvs_handle_t h, const char *key, void *out, size_t *len)
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value)
 {
     (void)h;
+    esp_err_t err = mock_nvs_set_result();
+    if (err != ESP_OK) { return err; }
     return mock_nvs_put(key, MOCK_NVS_U8, &value, sizeof(value)) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 esp_err_t nvs_set_u16(nvs_handle_t h, const char *key, uint16_t value)
 {
     (void)h;
+    esp_err_t err = mock_nvs_set_result();
+    if (err != ESP_OK) { return err; }
     return mock_nvs_put(key, MOCK_NVS_U16, &value, sizeof(value)) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value)
 {
     (void)h;
+    esp_err_t err = mock_nvs_set_result();
+    if (err != ESP_OK) { return err; }
     if (mock_nvs_set_u32_err) {
         return (esp_err_t)mock_nvs_set_u32_err;
     }
@@ -496,6 +574,8 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value)
 esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value)
 {
     (void)h;
+    esp_err_t err = mock_nvs_set_result();
+    if (err != ESP_OK) { return err; }
     if (value == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -506,13 +586,16 @@ esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value)
 esp_err_t nvs_set_blob(nvs_handle_t h, const char *key, const void *value, size_t len)
 {
     (void)h;
+    esp_err_t err = mock_nvs_set_result();
+    if (err != ESP_OK) { return err; }
     return mock_nvs_put(key, MOCK_NVS_BLOB, value, len) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 esp_err_t nvs_commit(nvs_handle_t h)
 {
     (void)h;
-    return ESP_OK;
+    ++mock_nvs_commit_calls;
+    return (esp_err_t)mock_nvs_commit_err;
 }
 
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key)
@@ -793,9 +876,27 @@ esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t handle, const i2s_std_conf
     return (esp_err_t)mock_i2s_init_std_err;
 }
 
+int mock_i2s_enable_err = 0;
+int mock_i2s_disable_count = 0;
+int mock_i2s_delete_count = 0;
+
 esp_err_t i2s_channel_enable(i2s_chan_handle_t handle)
 {
     (void)handle;
+    return (esp_err_t)mock_i2s_enable_err;
+}
+
+esp_err_t i2s_channel_disable(i2s_chan_handle_t handle)
+{
+    (void)handle;
+    ++mock_i2s_disable_count;
+    return ESP_OK;
+}
+
+esp_err_t i2s_del_channel(i2s_chan_handle_t handle)
+{
+    (void)handle;
+    ++mock_i2s_delete_count;
     return ESP_OK;
 }
 

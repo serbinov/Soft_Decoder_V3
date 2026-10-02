@@ -9,7 +9,7 @@
 # -Sanitize adds -fsanitize=address,undefined (needs a toolchain that ships
 # libasan/libubsan; the MinGW gcc used here does not, so it is opt-in).
 
-param([switch]$Sanitize)
+param([switch]$Sanitize, [string[]]$Only = @())
 
 $ErrorActionPreference = "Stop"
 
@@ -71,8 +71,14 @@ $inc = @(
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
             "test_track_manifest", "test_storage", "test_track_recover", "test_provision",
-            "test_selftest", "test_web", "test_sound")
+            "test_selftest", "test_web", "test_sound", "test_main")
 $failed = 0
+if ($Only.Count -gt 0) {
+    foreach ($name in $Only) {
+        if ($name -notin $suites) { throw "Unknown test suite: $name" }
+    }
+    $suites = $Only
+}
 
 foreach ($suite in $suites) {
     $srcs = @(Get-ChildItem "$root\test\$suite\*.c" -ErrorAction SilentlyContinue)
@@ -82,6 +88,7 @@ foreach ($suite in $suites) {
     Write-Host "=== $suite ===" -ForegroundColor Cyan
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    $buildExit = 1
     try {
         # No global -Dstatic=: the white-box tests strip `static` for the
         # component translation unit only, so Unity keeps its own statics.
@@ -89,14 +96,24 @@ foreach ($suite in $suites) {
         $extra = @()
 if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
 & $cc $inc $names "$unitySrc\unity.c" $extra -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
+        $buildExit = $LASTEXITCODE
     } catch {
         Write-Host "BUILD FAILED: $_"
     } finally {
         $ErrorActionPreference = $prevEAP
     }
-    if (-not (Test-Path $exe)) { Write-Host "BUILD FAILED"; $failed++; continue }
+    if ($buildExit -ne 0 -or -not (Test-Path $exe)) { Write-Host "BUILD FAILED"; $failed++; continue }
     & $exe 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { $failed++ }
+}
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+if ($node) {
+    Write-Host "=== test_web_ui (Node.js) ===" -ForegroundColor Cyan
+    & $node.Source --test "$root\test\test_web_ui.js"
+    if ($LASTEXITCODE -ne 0) { $failed++ }
+} else {
+    Write-Warning "Node.js not found: JavaScript regressions were NOT run."
 }
 
 Write-Host ""

@@ -18,8 +18,8 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 # Core dump to the coredump partition.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
-# Task watchdog: a wedged periodic task must reboot instead of leaving the
-# motor bridge driven. Long flash operations reset it (see safety_task).
+# Safety subscribes to the task watchdog and performs no flash I/O.
+# Persistence runs separately; motor faults also latch an output inhibit.
 CONFIG_ESP_TASK_WDT_EN=y
 CONFIG_ESP_TASK_WDT_PANIC=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
@@ -57,7 +57,8 @@ CONFIG_LWIP_TCP_WND_DEFAULT=16384
 # with the old 14/60 s limits httpd_accept_conn failed with ENFILE (23) and API
 # responses (e.g. /api/audio/tracks) were dropped. Enlarge the pool and shorten
 # TIME_WAIT (2 x MSL) so closed sockets are recycled quickly.
-CONFIG_LWIP_MAX_SOCKETS=16
+# 8 main + 3 progress clients + 6 httpd internal sockets + 1 DNS = 18; reserve 6.
+CONFIG_LWIP_MAX_SOCKETS=24
 CONFIG_LWIP_MAX_ACTIVE_TCP=16
 CONFIG_LWIP_MAX_LISTENING_TCP=16
 CONFIG_LWIP_TCP_MSL=15000
@@ -69,7 +70,7 @@ CONFIG_LWIP_TCP_MSL=15000
 CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
 # CONFIG_MBEDTLS_TLS_SERVER is not set
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
-CONFIG_NEWLIB_NANO_FORMAT=y
+# ESP-IDF 6.0 defaults to Picolibc; the old newlib-only nano flag is inapplicable.
 
 # IPv6 disabled: the decoder runs an IPv4-only softAP/captive portal. This
 # drops nd6/ip6/ICMPv6 from lwIP and saves ~10-15 KB of flash.

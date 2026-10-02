@@ -83,11 +83,16 @@ typedef struct {
     { .data_bit_width = (bits), .slot_bit_width = (bits), .slot_mode = (mode) }
 
 extern int mock_i2s_write_count;
+extern int mock_i2s_enable_err;
+extern int mock_i2s_disable_count;
+extern int mock_i2s_delete_count;
 
 esp_err_t i2s_new_channel(const i2s_chan_config_t *chan_cfg,
                           i2s_chan_handle_t *tx_handle, i2s_chan_handle_t *rx_handle);
 esp_err_t i2s_channel_init_std_mode(i2s_chan_handle_t handle, const i2s_std_config_t *std_cfg);
 esp_err_t i2s_channel_enable(i2s_chan_handle_t handle);
+esp_err_t i2s_channel_disable(i2s_chan_handle_t handle);
+esp_err_t i2s_del_channel(i2s_chan_handle_t handle);
 esp_err_t i2s_channel_write(i2s_chan_handle_t handle, const void *src, size_t size,
                             size_t *bytes_written, uint32_t timeout_ms);
 

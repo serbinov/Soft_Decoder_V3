@@ -30,6 +30,58 @@ static esp_flash_t *s_ext_flash = NULL;
 static const esp_partition_t *s_ext_partition = NULL;
 static bool s_mounted = false;
 static storage_backend_t s_backend = STORAGE_BACKEND_NONE;
+static portMUX_TYPE s_lifecycle_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_leases;
+static TaskHandle_t s_maintenance_owner;
+static bool s_lifecycle_busy;
+
+esp_err_t storage_access_begin(void)
+{
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (s_mounted && s_maintenance_owner == NULL && !s_lifecycle_busy && s_leases < UINT32_MAX) {
+        ++s_leases;
+        err = ESP_OK;
+    }
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    return err;
+}
+
+void storage_access_end(void)
+{
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    if (s_leases > 0U) --s_leases;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+}
+
+esp_err_t storage_maintenance_begin(void)
+{
+    TaskHandle_t caller = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (s_maintenance_owner == NULL && !s_lifecycle_busy) {
+        s_maintenance_owner = caller;
+        err = ESP_OK;
+    }
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    return err;
+}
+
+void storage_maintenance_end(void)
+{
+    TaskHandle_t caller = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    if (s_maintenance_owner == caller && !s_lifecycle_busy) s_maintenance_owner = NULL;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+}
+
+bool storage_is_quiescent(void)
+{
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    bool quiet = s_leases == 0U && !s_lifecycle_busy;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    return quiet;
+}
 
 static esp_err_t external_nor_init(void)
 {
@@ -116,7 +168,7 @@ esp_err_t storage_init(void)
     return ESP_OK;
 }
 
-esp_err_t storage_mount(void)
+static esp_err_t storage_mount_owned(void)
 {
     if (s_mounted) {
         return ESP_OK;
@@ -137,8 +189,25 @@ esp_err_t storage_mount(void)
         return err;
     }
     ESP_LOGI(TAG, "Mounted external NOR user data at %s", MOUNT_POINT);
+    portENTER_CRITICAL(&s_lifecycle_mux);
     s_mounted = true;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
     return ESP_OK;
+}
+
+esp_err_t storage_mount(void)
+{
+    TaskHandle_t caller = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    bool allowed = !s_lifecycle_busy && (s_maintenance_owner == NULL || s_maintenance_owner == caller);
+    if (allowed) s_lifecycle_busy = true;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    if (!allowed) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = storage_mount_owned();
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    s_lifecycle_busy = false;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    return err;
 }
 
 storage_backend_t storage_get_backend(void)
@@ -148,7 +217,10 @@ storage_backend_t storage_get_backend(void)
 
 bool storage_is_mounted(void)
 {
-    return s_mounted;
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    bool mounted = s_mounted;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    return mounted;
 }
 
 bool storage_ext_available(void)
@@ -165,7 +237,7 @@ const char *storage_get_root(void)
 /* External NOR format                                                 */
 /* ------------------------------------------------------------------ */
 
-esp_err_t storage_format(void)
+static esp_err_t storage_format_owned(void)
 {
     if (s_ext_partition == NULL) {
         ESP_LOGW(TAG, "format: external NOR not available");
@@ -174,8 +246,11 @@ esp_err_t storage_format(void)
 
     /* Unmount the external NOR so it can be reformatted and remounted. */
     if (s_mounted) {
-        (void)esp_vfs_littlefs_unregister_partition(s_ext_partition);
+        esp_err_t err = esp_vfs_littlefs_unregister_partition(s_ext_partition);
+        if (err != ESP_OK) return err;
+        portENTER_CRITICAL(&s_lifecycle_mux);
         s_mounted = false;
+        portEXIT_CRITICAL(&s_lifecycle_mux);
     }
 
     ESP_LOGI(TAG, "Formatting external NOR (LittleFS)...");
@@ -191,9 +266,27 @@ esp_err_t storage_format(void)
         return err;
     }
     s_backend = STORAGE_BACKEND_EXTERNAL_NOR;
+    portENTER_CRITICAL(&s_lifecycle_mux);
     s_mounted = true;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
     ESP_LOGI(TAG, "External NOR formatted and remounted");
     return ESP_OK;
+}
+
+esp_err_t storage_format(void)
+{
+    TaskHandle_t caller = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    bool allowed = s_maintenance_owner == caller && caller != NULL &&
+                   s_leases == 0U && !s_lifecycle_busy;
+    if (allowed) s_lifecycle_busy = true;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    if (!allowed) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = storage_format_owned();
+    portENTER_CRITICAL(&s_lifecycle_mux);
+    s_lifecycle_busy = false;
+    portEXIT_CRITICAL(&s_lifecycle_mux);
+    return err;
 }
 
 esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
@@ -201,13 +294,13 @@ esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
     if (out_free_bytes == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (!s_mounted) {
-        return ESP_ERR_INVALID_STATE;
-    }
+    esp_err_t err = storage_access_begin();
+    if (err != ESP_OK) return err;
 
     size_t total = 0;
     size_t used = 0;
-    esp_err_t err = esp_littlefs_partition_info(s_ext_partition, &total, &used);
+    err = esp_littlefs_partition_info(s_ext_partition, &total, &used);
+    storage_access_end();
     if (err != ESP_OK) {
         return err;
     }

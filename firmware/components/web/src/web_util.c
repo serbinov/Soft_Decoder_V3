@@ -19,24 +19,27 @@ bool parse_query(const char *query, const char *key, char *out, size_t out_len)
         const char *eq = memchr(cur, '=', pair_len);
         if (eq != NULL && (size_t)(eq - cur) == key_len && strncmp(cur, key, key_len) == 0) {
             size_t vl = pair_len - key_len - 1U;
-            if (vl >= out_len) {
-                vl = out_len - 1U;
-            }
-            memcpy(out, eq + 1, vl);
-            out[vl] = '\0';
+            const char *src = eq + 1;
             size_t r = 0, w = 0;
-            while (out[r] != '\0') {
-                if (out[r] == '%' && isxdigit((unsigned char)out[r + 1]) &&
-                    isxdigit((unsigned char)out[r + 2])) {
-                    char hex[3] = { out[r + 1], out[r + 2], '\0' };
-                    out[w++] = (char)strtoul(hex, NULL, 16);
-                    r += 3;
-                } else if (out[r] == '+') {
-                    out[w++] = ' ';
-                    r++;
-                } else {
-                    out[w++] = out[r++];
+            while (r < vl) {
+                unsigned char c = (unsigned char)src[r++];
+                if (c == '%') {
+                    if (vl - r < 2U || !isxdigit((unsigned char)src[r]) ||
+                        !isxdigit((unsigned char)src[r + 1])) {
+                        out[0] = '\0';
+                        return false;
+                    }
+                    char hex[3] = { src[r], src[r + 1], '\0' };
+                    c = (unsigned char)strtoul(hex, NULL, 16);
+                    r += 2U;
+                } else if (c == '+') {
+                    c = ' ';
                 }
+                if (c == 0U || w + 1U >= out_len) {
+                    out[0] = '\0';
+                    return false;
+                }
+                out[w++] = (char)c;
             }
             out[w] = '\0';
             return true;
@@ -140,6 +143,12 @@ void buf_appendf(char *buf, size_t cap, size_t *used, const char *fmt, ...)
 
 size_t dns_build_response(const uint8_t *q, int qlen, uint8_t *r, const uint8_t ip[4])
 {
+    if (q == NULL || r == NULL || ip == NULL || qlen < 17 || qlen > DNS_MSG_MAX ||
+        (q[2] & 0xF8U) != 0U || q[3] != 0U || q[4] != 0U || q[5] != 1U ||
+        q[6] != 0U || q[7] != 0U || q[8] != 0U || q[9] != 0U ||
+        q[10] != 0U || q[11] != 0U) {
+        return 0;
+    }
     memcpy(r, q, 12);
     r[2] = 0x81;
     r[3] = 0x80;
@@ -154,12 +163,20 @@ size_t dns_build_response(const uint8_t *q, int qlen, uint8_t *r, const uint8_t 
 
     int i = 12;
     while (i < qlen && q[i] != 0) {
+        if (q[i] > 63U || i + 1 + q[i] >= qlen || i - 12 > 253) {
+            return 0;
+        }
         i += 1 + q[i];
     }
     if (i >= qlen || q[i] != 0 || i + 5 > qlen) {
         return 0;
     }
+    if (i - 12 > 254) return 0;
     int qend = i + 5;
+    if (qend != qlen || q[i + 3] != 0U || q[i + 4] != 1U ||
+        q[i + 1] != 0U || (q[i + 2] != 1U && q[i + 2] != 28U)) {
+        return 0;
+    }
     /* The echoed question plus the 16-byte answer must fit the response
      * buffer, otherwise a near-512-byte query would write past the end. */
     if (qend + 16 > DNS_MSG_MAX) {
@@ -168,6 +185,12 @@ size_t dns_build_response(const uint8_t *q, int qlen, uint8_t *r, const uint8_t 
     int o = 12;
     memcpy(r + o, q + 12, (size_t)(qend - 12));
     o += qend - 12;
+    r[2] = (uint8_t)(0x80U | (q[2] & 1U));
+    r[3] = 0U;
+    if (q[i + 2] == 28U) {
+        r[7] = 0U;
+        return (size_t)o;
+    }
 
     r[o++] = 0xC0;
     r[o++] = 0x0C;

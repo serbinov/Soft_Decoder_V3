@@ -22,6 +22,8 @@ typedef enum {
 
 typedef struct httpd_req {
     httpd_handle_t handle;
+    void *user_ctx;
+    httpd_method_t method;
     const char *uri;
     size_t content_len;
 } httpd_req_t;
@@ -40,6 +42,7 @@ typedef enum {
     HTTPD_404_NOT_FOUND = 104,
     HTTPD_400_BAD_REQUEST = 400,
     HTTPD_500_INTERNAL_SERVER_ERROR = 500,
+    HTTPD_503_SERVICE_UNAVAILABLE = 503,
 } httpd_err_code_t;
 
 typedef esp_err_t (*httpd_err_handler_func_t)(httpd_req_t *req, httpd_err_code_t err);
@@ -89,5 +92,11 @@ esp_err_t httpd_req_get_url_query_str(httpd_req_t *req, char *buf, size_t buf_le
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *req, const char *field, char *val,
                                       size_t val_size);
 int httpd_req_recv(httpd_req_t *req, char *buf, size_t buf_len);
+size_t httpd_req_get_url_query_len(httpd_req_t *req);
+size_t httpd_req_get_hdr_value_len(httpd_req_t *req, const char *field);
+esp_err_t httpd_req_async_handler_begin(httpd_req_t *req, httpd_req_t **out);
+esp_err_t httpd_req_async_handler_complete(httpd_req_t *req);
+int httpd_req_to_sockfd(httpd_req_t *req);
+esp_err_t httpd_sess_trigger_close(httpd_handle_t handle, int fd);
 
 #endif /* MOCK_ESP_HTTP_SERVER_H */

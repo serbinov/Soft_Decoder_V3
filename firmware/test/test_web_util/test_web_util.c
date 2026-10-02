@@ -36,6 +36,9 @@ static void test_parse_query_percent_and_plus(void)
     TEST_ASSERT_EQUAL_STRING("hello world", out);
     TEST_ASSERT_TRUE(parse_query("q=a+b%2Bc", "q", out, sizeof(out)));
     TEST_ASSERT_EQUAL_STRING("a b+c", out);
+    char utf8[5];
+    TEST_ASSERT_TRUE(parse_query("name=%D0%B0%D0%B1", "name", utf8, sizeof(utf8)));
+    TEST_ASSERT_EQUAL_STRING("\xd0\xb0\xd0\xb1", utf8);
 }
 
 static void test_parse_query_missing_and_prefix(void)
@@ -55,8 +58,16 @@ static void test_parse_query_missing_and_prefix(void)
 static void test_parse_query_truncates(void)
 {
     char out[4];
-    TEST_ASSERT_TRUE(parse_query("k=abcdef", "k", out, sizeof(out)));
+    TEST_ASSERT_FALSE(parse_query("k=abcdef", "k", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
+    TEST_ASSERT_TRUE(parse_query("k=%61%62%63", "k", out, sizeof(out)));
     TEST_ASSERT_EQUAL_STRING("abc", out);
+    TEST_ASSERT_FALSE(parse_query("k=%", "k", out, sizeof(out)));
+    TEST_ASSERT_FALSE(parse_query("k=%1", "k", out, sizeof(out)));
+    TEST_ASSERT_FALSE(parse_query("k=%GG", "k", out, sizeof(out)));
+    TEST_ASSERT_FALSE(parse_query("k=a%00b", "k", out, sizeof(out)));
+    uint8_t n;
+    TEST_ASSERT_FALSE(parse_u8("n=12345678901234567", "n", &n));
 }
 
 /* ---- parse_u8 / parse_u16 / parse_bool ---- */
@@ -165,6 +176,7 @@ static int make_dns_query(uint8_t *buf, const char *name)
     memset(buf, 0, 12);
     buf[0] = 0x12;
     buf[1] = 0x34;
+    buf[2] = 0x01; /* RD */
     buf[5] = 0x01; /* RD */
     int o = 12;
     const char *p = name;
@@ -192,7 +204,7 @@ static void test_dns_build_response_valid(void)
     size_t rlen = dns_build_response(q, qlen, r, (const uint8_t[4]){192, 168, 1, 1});
     TEST_ASSERT_EQUAL_UINT32((uint32_t)(qlen + 16), (uint32_t)rlen);
     TEST_ASSERT_EQUAL_UINT8(0x81, r[2]);
-    TEST_ASSERT_EQUAL_UINT8(0x80, r[3]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, r[3]);
     TEST_ASSERT_EQUAL_UINT8(0x00, r[6]);
     TEST_ASSERT_EQUAL_UINT8(0x01, r[7]); /* ANCOUNT */
     TEST_ASSERT_EQUAL_UINT8(0x00, r[9]); /* NSCOUNT */
@@ -214,6 +226,28 @@ static void test_dns_build_response_malformed(void)
     q[12] = 200;
     TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)dns_build_response(
                                     q, 14, r, (const uint8_t[4]){192, 168, 1, 1}));
+}
+
+static void test_dns_question_contract(void)
+{
+    uint8_t q[512], r[512];
+    const uint8_t ip[4] = {192, 168, 1, 1};
+    int n = make_dns_query(q, "example.com");
+    q[n - 3] = 28;
+    TEST_ASSERT_EQUAL_UINT32(n, dns_build_response(q, n, r, ip));
+    TEST_ASSERT_EQUAL_UINT8(0, r[7]);
+    q[n - 1] = 3;
+    TEST_ASSERT_EQUAL_UINT32(0, dns_build_response(q, n, r, ip));
+    n = make_dns_query(q, "example.com");
+    q[5] = 2;
+    TEST_ASSERT_EQUAL_UINT32(0, dns_build_response(q, n, r, ip));
+    q[5] = 1; q[2] |= 0x80;
+    TEST_ASSERT_EQUAL_UINT32(0, dns_build_response(q, n, r, ip));
+    q[2] = 0x09;
+    TEST_ASSERT_EQUAL_UINT32(0, dns_build_response(q, n, r, ip));
+    q[2] = 1; q[12] = 0xC0;
+    TEST_ASSERT_EQUAL_UINT32(0, dns_build_response(q, n, r, ip));
+    TEST_ASSERT_EQUAL_UINT32(0, dns_build_response(q, 11, r, ip));
 }
 
 /* A near-512-byte query must be rejected instead of overflowing `r`. */
@@ -614,6 +648,7 @@ int main(void)
     RUN_TEST(test_buf_appendf_overflow_is_safe);
     RUN_TEST(test_dns_build_response_valid);
     RUN_TEST(test_dns_build_response_malformed);
+    RUN_TEST(test_dns_question_contract);
     RUN_TEST(test_dns_build_response_too_large);
     RUN_TEST(test_url_decode);
     RUN_TEST(test_sanitize_name);

@@ -429,3 +429,35 @@ powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -SkipBemf
 - Аппаратная проверка (HIL, service-mode с командной станции, реверс под
   нагрузкой, поведение Task Watchdog на реальных flash-операциях).
 
+---
+
+## Исправления Полного Ревью 2026-10-02
+
+Программные пункты REV-D1..D19, REV-M1..M16, REV-S20..S27,
+REV-R1/R2/R3/R4/R6/R7, REV-A3..A13, REV-L1/L2, REV-W20..W35 реализованы.
+Полная per-ID матрица, ограничения и доказательства —
+[`CODE_REVIEW_REPORT.md`, раздел 5](CODE_REVIEW_REPORT.md#5-исправления-ревью-2026-10-02).
+
+- Мотор: независимые inhibit owners, сериализованные generation/PWM,
+  cancellation-aware save, raw калибровка, ADC freshness и bounded feedback
+  hold 100 мс с fault. Одинаковые DCC refresh не отменяют coast sampling.
+- DCC: правильные e-stop/address partitions/functions/consist, подтверждение
+  CV и service expiry; IRQ/данные в IRAM/DRAM, startup readiness.
+- Safety: обязательный handshake до actuation/OTA acceptance; persistence
+  отделён. Maintenance и file leases заменяют старую задержку 100 мс A8.
+- NVS/FS: versioned CV+CRC32 одним blob, legacy read, error/retry, empty stores
+  и partial recovery. Rename failure не удаляет исправную копию.
+- Звук/свет: generation-owned voices, async sequencer state, MDS/WAV validation,
+  phase/EMA/lifecycle fixes, OR общих AUX, правильный gamma envelope/deadline.
+- Web: async transfers с deadline и quiescence; канонические WAV-имена
+  сохраняют MDS compatibility. Backup/rollback сообщает partial/uncertain,
+  не ложный успех. UI исправляет stop/debounce/password/confirm/timeout/reconnect.
+- ESP-IDF 6.0: лимит сокетов 24 сохранён; неактивный legacy newlib nano flag
+  удалён из defaults без изменения текущего Picolibc-профиля.
+
+Проверка: **705 C-тестов в 16 наборах + 13 JS-тестов PASS**, без ignored.
+Финальная ESP32-S3 / ESP-IDF 6.0 сборка PASS, binary `0xef890` байт.
+Coverage заново не измерялось. Flash, motion/format HIL и power-loss испытания
+не выполнялись; аппаратная устойчивость BEMF и скорость DHCP не обещаются
+по одному успешному build. FS/NVS/boot не являются одной power-loss транзакцией:
+`WAVTXN1`/`.bak` — данные для ручного восстановления, не automatic replay.

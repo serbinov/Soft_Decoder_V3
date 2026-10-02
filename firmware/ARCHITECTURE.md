@@ -25,7 +25,8 @@ DCC-декодер для модели железной дороги с:
 - обновлением по OTA и «провижинингом» звуков по UART.
 
 Управление может идти либо с рельсов (DCC), либо из веба
-(`control_source`), либо — для рельсов — в DCC- или DC-режиме (CV29 бит 2).
+(`control_source`). Для рельсов CV29.bit2 разрешает обнаружение DC после
+отсутствия DCC; сам установленный бит не переключает цифровой поток в DC.
 
 ---
 
@@ -149,12 +150,14 @@ DCC-декодер для модели железной дороги с:
 
 ### 3.3 NVS
 
-Пространство имён `decoder`. Legacy-ключ `cv` хранит блоб `SETTINGS_CV_COUNT+1 =
-513 байт` + CRC32 (`cv_crc`). Остальные ключи — `components/settings/src/settings.c`.
+Пространство имён `decoder`. CV хранятся в одном versioned `cv_record`: header,
+513 байт и CRC32. Legacy `cv` + `cv_crc` (FNV-1a, несмотря на старое имя)
+читаются при миграции и сохраняются, но будущие записи идут в новый record.
+Остальные ключи — `components/settings/src/settings.c`.
 
 Рядом со звуками на внешней NOR лежит **манифест** `/userdata/audio/tracks.txt`
 (список слотов + карта F↔AUX). Он перезаписывается при любом изменении этих
-метаданных и читается при пустом NVS — так имена, категории и карта F↔AUX
+метаданных и читается при отсутствующих/невалидных данных NVS — так имена, категории и карта F↔AUX
 переживают полный сброс (см. §15).
 
 ### 3.4 RAM
@@ -177,7 +180,7 @@ DCC-декодер для модели железной дороги с:
 | ОСРВ | FreeRTOS (в составе IDF), тик 1000 Гц (`CONFIG_FREERTOS_HZ=1000`) |
 | Сборщик | ESP-IDF (`idf.py`), CMake + Ninja |
 | Компилятор | `xtensa-esp32s3-elf-gcc` (GCC 15.2) |
-| Оптимизация | `-Os` (`CONFIG_COMPILER_OPTIMIZATION_SIZE`), `newlib` nano |
+| Оптимизация | `-Os` (`CONFIG_COMPILER_OPTIMIZATION_SIZE`), Picolibc |
 | Хранилище | esp_littlefs (вкомпилированный компонент) |
 | Веб-сервер | esp_http_server |
 | Сеть | esp_wifi (SoftAP-only), lwIP, esp_netif |
@@ -247,12 +250,20 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1            # gcov, un
 powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 ```
 
-Наборы (15): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
+Наборы (16): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_selftest`, `test_web`, `test_sound`. Всего **527 тестов**; покрытие
-first-party (`components/` + `main/`) — **100 % строк** (union по строкам, gcov;
-5601 строка).
+`test_selftest`, `test_web`, `test_sound`, `test_main`. Итог исправлений
+2026-10-02: **705 C-тестов, 16 наборов PASSED**, плюс **13 JS-тестов PASS**.
+Исходная проверка до правок: 534 теста в 15 наборах, включая 52 motor-теста.
+
+Ранее сообщалось **100 % покрытия 5601 строки**: это union исполняемых
+строк first-party исходников, попавших в gcov из host-сборок. Исходники,
+не включённые в эти сборки, отсутствуют в отчёте; показатель не означает
+покрытия всех ветвей, всего текущего кода или аппаратного поведения.
+В проверке 2026-10-02 покрытие повторно не измерялось. Дополнительные
+временные тесты выявили ошибки BEMF и позднее включены в постоянные регрессии:
+см. [отчёт BEMF](BEMF_DIAGNOSTICS.md).
 
 При добавлении нового набора обновляйте `$inc` (include-пути) и `$suites` в
 ОБОИХ скриптах (`run_tests.ps1`, `coverage.ps1`). Частично исполненные строки
@@ -284,6 +295,9 @@ HIL по железу (нужна подключённая плата): `test/hi
 с `-Actuate` проверяет AUX и звук, `-Sweep` — все F0..F28 и все AUX,
 `-MotorSpeed N` — мотор. `test/hil/run_hil_web.ps1` дополнительно прогоняет
 веб/REST-эндпоинты через SoftAP (при заданном пароле — параметр `-ApPass`).
+Веб-HIL для мотора проверяет только `speed=0`. Ответ `HIL-MOTOR-OK`
+подтверждает выполнение команды, а не измеренные обороты. PASS host/HIL
+не доказывает физическое вращение и устойчивость BEMF на реальном двигателе.
 См. §6 `selftest` и §16.
 
 ---
@@ -343,12 +357,14 @@ firmware/
 
 ### settings (`components/settings`)
 - Файлы: `src/settings.c`, `src/track_manifest.c`, `include/settings.h`.
-- Роль: NVS-хранилище: конфиг устройства, CV-блок (513 Б + CRC32 FNV-1a),
+- Роль: NVS-хранилище: конфиг устройства, versioned CV record с CRC32,
   список треков, категории слотов, карта функций, конфиг AUX, калибровка BEMF и
   флаг включения BEMF. Отложенная запись (`settings_save_deferred` + фоновый
-  `settings_pending_flush`) защищает flash/радио от частых коммитов.
+  `settings_pending_flush`) ставит изменения в RAM; NVS setters выполняет
+  отдельный persistence worker. Ошибки сохраняют dirty и ограниченный retry.
   `track_manifest.c` дублирует список треков + карту F↔AUX в
-  `/userdata/audio/tracks.txt` и восстанавливает их при пустом NVS.
+  `/userdata/audio/tracks.txt`; manifest v3 различает missing и intentional
+  empty stores, а незавершённый recovery повторяет все metadata keys.
 - API: `settings_load/save`, `settings_cv_*`, `settings_tracks_*`,
   `settings_track_cats_*`, `settings_func_map_*`, `settings_aux_cfg_*`,
   `settings_bemf_cal_*`, `settings_bemf_use_*`, `settings_factory_reset`,
@@ -392,6 +408,10 @@ firmware/
 - Зависимости: `esp_driver_ledc esp_driver_gpio esp_adc pinmap settings`.
 - Задачи: **`motor`** (стек 3072, prio 7, период 10 мс), **`bemf_cal`**
   (стек 3072, prio 6) — создаётся по запросу калибровки.
+- Исторические ошибки и текущие программные исправления описаны в
+  [отчёте BEMF](BEMF_DIAGNOSTICS.md); host-тесты не подтверждают устойчивость
+  на конкретном моторе. Output mux защищает bounded LL-записи каналов 0/1;
+  emergency/inhibit не ждут control/ADC mutex.
 
 ### track (`components/track`)
 - Файлы: `src/track.c`, `include/track.h`.
@@ -456,7 +476,7 @@ firmware/
 - Задачи (создаются в `web.c`/`httpd`):
   - **`dns_hijack`** (стек 4096, prio 9),
   - **`wifi_off`** (стек 3072, prio 4) — при `auto_off_min ≠ 0`,
-  - **`pipe_wr`** (стек 16384, prio 10, ядро 1) — на время загрузки файла,
+  - **`web_transfer`** (стек 16384, prio 6) — async upload/OTA/MDS,
   - HTTP-задачи создаёт `esp_http_server`: основной сервер (стек 16384) и
     progress-сервер (стек 4096).
 
@@ -497,16 +517,22 @@ firmware/
 ### app_main (`main/app_main.c`)
 - Порядок старта: `pinmap_validate` → `motor_boot_safe` → `storage_init/mount`
   (не фатально: без внешней NOR звук отключён) → `settings_init` → `provision_try` →
-  `motor_init` → `audio_init` → `sound_init` → `dcc_init` + регистрация колбэков →
-  `web_init` (миграция `func_bind` → `sound_reload_bindings`) →
-  восстановление метаданных (манифест, иначе из имён файлов) → `track_init` →
-  задача `safety` → `provision_listener_start`.
+  `motor_init` (inhibited) → `audio_init` → `sound_init` → `dcc_init`
+  (control disabled) → recovery метаданных → `web_init` (AUX/map readiness) →
+  `track_init` → persistence worker → safety/WDT/heartbeat handshake →
+  регистрация callbacks и reload DCC → actuation admission → listener.
+  Отказ обязательного этапа запрещает движение и подтверждение OTA.
 - Колбэки DCC: скорость → `motor_set_speed` + `web_motion_changed`; функции →
   `web_apply_function` (в режиме схемы — `sound_function`); CV write/read →
-  `settings_cv_*`; reset → `motor_stop` + гашение функций + `sound_stop_all`.
+  `settings_cv_*`; reset/e-stop → немедленный coast. Hard Reset меняет только
+  CV19/29/31/32. Service/long Ops writes подтверждаются по правилам NMRA.
   В режиме «Веб» колбэки скорости/функций игнорируются.
-- Задача: **`safety`**, стек 3072, prio 6, период 50 мс (flush отложенных
-  настроек + таймаут CV11 в режиме «Рельсы»).
+- Задача **`safety`**, стек 3072, prio 6, период 50 мс: heartbeat и CV11 только
+  в фактически активном DCC. Никаких NVS/FS операций. CONTROL, SAFETY и
+  DCC_TIMEOUT имеют независимые inhibit-флаги; stall сохраняет запрет до restart.
+- Задача **`settings`**, стек 4096, prio 3, период 100 мс: persistence и
+  отложенное гашение функций. Threshold 200 мс не является аппаратной
+  гарантией latency: нужны замеры планировщика и cache/flash пауз.
 
 ---
 
@@ -516,13 +542,14 @@ firmware/
 |---|---|---|---|---|---|
 | `dcc` | 8192 | 10 | 1 | очередь полупериодов | dcc.c |
 | `dcc_ack` | 2048 | 5 | — | запрос на ACK (service mode) | dcc.c |
-| `pipe_wr` | 16384 | 10 | 1 | загрузка файла (по запросу) | web.c |
+| `web_transfer` | 16384 | 6 | — | async upload/OTA (по запросу) | web.c |
 | `dns_hijack` | 4096 | 9 | — | UDP :53 | web.c |
 | `motor` | 3072 | 7 | — | 10 мс | motor.c |
 | `track_adc` | 3072 | 7 | — | 50 мс | track.c |
 | `audio_mix` | 4096 | 7 | 1 | блок 256 сэмплов | audio.c |
 | `sound` | 4096 | 6 | 1 | 20 мс | sound.c |
 | `safety` | 3072 | 6 | — | 50 мс | app_main.c |
+| `settings` | 4096 | 3 | — | 100 мс | app_main.c |
 | `aux_fx` | 3072 | 6 | — | 20 мс | auxio.c |
 | `bemf_cal` | 3072 | 6 | — | по запросу | motor.c |
 | `prov_listen` | 8192 | 4 | — | UART | provision.c |
@@ -595,8 +622,9 @@ flowchart TD
 | `slot` | u8 | активный звуковой слот |
 | `csrc` | u8 | 0=рельсы, 1=веб |
 | `dev_name` | str | имя устройства |
-| `cv` | blob 513 Б | все CV (индекс 1..512) |
-| `cv_crc` | u32 | CRC32 (FNV-1a) для `cv` |
+| `cv_record` | blob 523 Б | versioned header + CV 1..512 и CRC32, одна запись |
+| `cv` | blob 513 Б | legacy CV, чтение при миграции |
+| `cv_crc` | u32 | legacy FNV-1a для `cv`, не CRC32 |
 | `tracks` | blob | до 20 треков (`settings_track_t`) |
 | `track_cat` | blob | категории слотов (двигатель/эффекты) |
 | `func_map` | blob | карта F0..F28 (`settings_func_map_t`) |
@@ -625,7 +653,7 @@ flowchart TD
 | 63 | 20 | алиас общей громкости (`mvol`), чтение/запись через CV |
 | 17/18 | 0 | длинный адрес |
 | 19 | 0 | consist (бит 7 = реверс) |
-| 29 | 0x02 | 28/128 шагов, DCC (бит 4 = таблица CV67..94, бит 2 = DC) |
+| 29 | 0x02 | bit0 direction invert; bit1 14/28; bit2 разрешает analog conversion, не принудительный DC; bit4 speed table |
 | 54/55/56 | 128/60/32 | BEMF PID Kp/Ki/Kd |
 | 65 | 0 | кикстарт при трогании (0=выкл) |
 | 67..94 | линейно 0..255 | 28-точечная таблица скорости |
@@ -656,7 +684,7 @@ flowchart TD
 |---|---|---|
 | GET | `/` | веб-страница |
 | GET/POST | `/api/control/source` | источник управления (рельсы/веб) |
-| GET/POST | `/api/mode` | DCC/DC (CV29 бит 2) |
+| GET/POST | `/api/mode` | состояние DCC/DC и analog permission (CV29.bit2), не принудительный DC |
 | GET | `/api/bemf/cal` | прогресс/параметры калибровки BEMF (+ `use`) |
 | GET | `/api/bemf/base` | базовая кривая BEMF |
 | POST | `/api/bemf/calibrate` | старт калибровки / `reset=1` — сброс |
@@ -669,7 +697,7 @@ flowchart TD
 | GET | `/api/audio/tracks` | список слотов |
 | POST | `/api/audio/play` / `/api/audio/stop` | проиграть слот / стоп |
 | POST | `/api/audio/volume` | громкости |
-| POST | `/api/audio/upload` | загрузка WAV (chunked, через `pipe_wr`) |
+| POST | `/api/audio/upload` | async WAV upload через `web_transfer`, validated staging и canonical rename |
 | POST | `/api/audio/delete` | удалить слот |
 | POST | `/api/track/category` | категория слота (двигатель/эффект) |
 | GET/POST | `/api/func-map` | карта функций; `?view=bind\|matrix` — канонические привязки, `POST ?bind=1[&remove=1&idx=N]` — добавить/удалить привязку |
@@ -700,7 +728,8 @@ flowchart TD
 
 ## 11. Мотор (алгоритм)
 
-Частота ШИМ 20 кГц, разрешение 10 бит (0..1023). Период управления — 10 мс.
+Частота ШИМ 20 кГц, разрешение 10 бит (0..1023). Номинальный период
+управления — 10 мс; ожидание ADC-mutex и планирование задач могут его менять.
 
 1. **Целевая скорость** задаётся `motor_set_speed()` (0..126).
 2. **Разгон/торможение** CV3/CV4 (0 = мгновенно) — `s_ramp_acc`.
@@ -709,32 +738,58 @@ flowchart TD
    - иначе Vstart/Vmid/Vhigh (CV2/CV5/CV6), порядок принудительно
      `Vstart ≤ Vmid ≤ Vhigh`.
 4. **Кикстарт** CV65 — короткий буст (120 мс) при трогании.
-5. **BEMF-регулятор** (если `bemf_use=1`):
-   - на 1 мс мост переводится в Hi-Z («окно выбега»), ADC1 читает BEMF1/BEMF2;
-   - `bEMF = |V(BEMF1) − V(BEMF2)|` фильтруется; отсчёты «упора в рельс»
-     (> 0.85·rail) отбрасываются;
-   - цель = доля напряжения рельса по калибровочной кривой
-     (`s_cal_frac_table[speed]`), иначе линейный фолбэк (8 %..90 %);
+5. **BEMF-регулятор** (`bemf_use=1` разрешает работу контура):
+   - при ненулевой скорости и готовом ADC мост переводится в Hi-Z,
+     выдерживается 1000 мкс, затем ADC1 последовательно читает BEMF1/BEMF2;
+   - `bEMF = |V(BEMF1) − V(BEMF2)|` фильтруется как
+     `filtered = 0.85·filtered + 0.15·bEMF`; значения > 0.85·rail
+     считаются «упором в рельс» и отбрасываются. Такой порог сам по себе
+     не доказывает остаточный ток: реальная ЭДС также может быть высокой;
+   - выбирается кривая из NVS, а при отсутствии или ошибке чтения — встроенная
+     `BEMF_CAL_BASE`. Цель = `rail·s_cal_frac_table[speed]/1024`.
+     Только при невалидности выбранной кривой применяется линейный фолбэк
+      линейная цель от 0.08 до acceptance ceiling (по умолчанию 0.85);
+   - PID применяется при готовом ADC, флаге валидности BEMF, `rail > 300 мВ`,
+      ненулевой скорости и отсутствии активной калибровки. Невалидная пара
+      не обновляет feedback. PWM при потере feedback не растёт: bounded hold
+      последнего valid duty до 100 мс, затем coast и persistent feedback fault.
+      Без предыдущего valid feedback слепой kickstart запрещён;
    - коррекция ШИМ добавляется к open-loop: `duty = duty_base + corr·0.4`,
-     но не ниже `0.5·duty_base`, с ограничением интегратора и anti-windup.
-   - если `bemf_use=0` — окно выбега и PID отключены, мотор едет open-loop по
-     кривой (CV2/CV5/CV6 или CV67..94).
+      с ограничением интегратора и anti-windup, без half-base floor.
+   - если `bemf_use=0` — при обычном движении окно выбега и PID отключены,
+     мотор едет open-loop по кривой (CV2/CV5/CV6 или CV67..94).
+     Калибровка и диагностический `BEMF-COAST` вызывают окно отдельно.
 6. **Калибровка BEMF** (без нагрузки) прогоняет мотор по 10 скоростям 12..126,
-   измеряет ЭДС как долю рельса, сохраняет в NVS, строит таблицу цели.
+   измеряет raw ЭДС как долю rail каждой свежей выборки и строит таблицу цели.
+   Нужны остановка/ADC/rail; потеря измерений отменяет прогон. Перед сохранением
+   проверяются все точки и пригодность конечной доли (>50/1024); неудачный
+   результат сохраняет предыдущую кривую. Export поддерживает все 16 точек.
+
+**Безопасность:** stop/inhibit отменяют калибровку и не допускают stale PWM.
+Сохранение авторизуется после settings lock: отмена до admission сохраняет
+старый NVS; полностью измеренная уже допущенная запись может завершиться.
+Feedback fault снимают STOP или явный BEMF disable, не повтор ненулевой команды;
+чужие safety/timeout gates не снимаются. Цель всё ещё доля rail, не постоянные RPM.
+Аппаратная достаточность gap и ceiling не доказана. Статусы и стендовый порядок — в
+[BEMF_DIAGNOSTICS.md](BEMF_DIAGNOSTICS.md).
 
 Диагностика (UART): `BEMF-RAW` (rail, bemf1/2, фильтр, duty, error, integral,
 corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
+Для записи колебаний использовать `BEMF-RAW`: сериализованный `BEMF-COAST`
+всё равно создаёт дополнительное окно и меняет исследуемое поведение.
 
 ---
 
 ## 12. Аудио
 
 - Один I2S-канал, 22050 Гц, моно, 16 бит, DMA 6×512 кадров.
-- 20 голосов (`AUDIO_MAX_VOICES`). Каждый голос: WAV (моно/стерео, любой
-  sample rate) → линейный ресемплинг → сумма с громкостями → клиппинг.
+- 20 голосов (`AUDIO_MAX_VOICES`), из них 18 dynamic FX и 2 reserved engine.
+  PCM16 WAV, 1–2 канала, sample rate 1..192000 Гц → линейный ресемплинг →
+  сумма с громкостями → клиппинг. Максимальная комбинация требует замера throughput.
 - `MIX_BLOCK = 256` сэмплов на блок.
-- Привязка F1..F20 ↔ слоты 1..20 ↔ голоса 0..19; для F1..F10 доступен второй
-  слот (`slot_b`) и второй голос (смещение `AUDIO_MAX_VOICES/2`).
+- Слоты 1..20 и optional `slot_b` сохраняются в bindings; FX-голоса выделяются
+  динамически, владение защищено generation handles. Фиксированных F→voice
+  индексов и half-array offsets нет; stale stop не останавливает нового владельца.
 - Громкость голоса = общая × (двигатель/эффекты) по категории слота.
 - Скорость воспроизведения на голос — `audio_voice_set_rate()` (permille,
   500..3000), сглаживается с ресемплером; на старте/стопе — анти-щёлчок фейд.
@@ -757,7 +812,7 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 ## 14. DCC
 
 - Вход GPIO9, прерывание по любому фронту, level-3 ISR на CPU1.
-- Полупериоды классифицируются по длительности: «1» < 82 мкс, «0» до 292 мкс,
+- Полупериоды классифицируются по длительности: «1» < 82 мкс, «0» до 10000 мкс,
   глитч < 35 мкс игнорируется.
 - Очередь 256 полупериодов → задача `dcc`.
 - Собираются пакеты MSB-first, проверяется checksum, поддерживаются:
@@ -779,7 +834,10 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
   по протоколу `PUT <slot> <size> <label>` + ACK, запись списка треков, reboot.
   Поскольку вход в провижининг стирает внешнюю NOR, перед стиранием прошивка
   запрашивает подтверждение (`PROV-CONFIRM?` → хост отвечает `PROV-CONFIRM`),
-  иначе отвечает `PROV-ABORT` и ничего не стирает.
+   иначе отвечает `PROV-ABORT` и ничего не стирает.
+  После подтверждения закрывается admission, ожидаются bounded quiescence
+  и file leases. Timeout отменяет форматирование. Firmware boot выбирается
+  только после `DONE`, WAV validation и успешной записи metadata.
   Скрипт: `provision_sounds.ps1`, обёртка `flash_firmware_and_sounds.bat`.
 - **OTA**: `POST /api/ota/update`. Поддерживается составной контейнер
   (`AURAOTA2`: заголовок + прошивка + список файлов) — прошивка и звуки одним
@@ -803,15 +861,15 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 |---|---|
 | Серийный лог 115200 | boot, backend хранилища, DCC-скорость, Wi-Fi события, BROWNOUT |
 | `BEMF-RAW` | живое состояние BEMF-PID (duty/error/integral/corr/target/pid_ok) |
-| `BEMF-ADC` / `BEMF-COAST` | сырые ADC / mV на клеммах двигателя |
+| `BEMF-ADC` / `BEMF-COAST` | сырые ADC / мВ на BEMF-делителях; `COAST` вмешивается в PWM |
 | `BEMF-TEST <spd> [rev]` | прямой прогон мотора |
 | `BEMF?` / `BEMF-HDR` / `BEMF=` | чтение/генерация/запись кривой BEMF |
 | `SELFTEST` (UART/USB) | самотест подсистем: heap/pinmap/CV/NVS/LittleFS/ADC/audio/AUX/DCC; вывод `TEST <name> PASS|FAIL|SKIP` и `SELFTEST-END` |
 | `HIL-AUX/HIL-SOUND/HIL-MOTOR` (UART/USB) | активирующие команды: вкл. AUX/проигрыш слота/прогон мотора на `ms`, затем возврат состояния или стоп |
-| `HIL-FN/HIL-FN-SWEEP/HIL-AUX-SWEEP` (UART/USB) | нажатие функции F0..F28 (`web_apply_function`) и прогон всех 9 AUX |
+| `HIL-FN/HIL-FN-SWEEP/HIL-AUX-SWEEP` (UART/USB) | нажатие функции F0..F28 (`web_apply_function`) и прогон 9 световых выходов (F0F/F0R + AUX1..7) |
 | `HIL-ENGINE <0\|1>` / `HIL-SCHEME-SPEED <spd> <fwd>` (UART/USB) | вкл/выкл двигательный цикл схемы и подача скорости в звуковой движок |
 | `test/hil/run_hil.ps1` | HIL по USB: `SELFTEST`+`BEMF?`; с `-Actuate` — AUX/звук, `-Sweep` — все F и все AUX, `-MotorSpeed N` — мотор; код выхода 0/1 |
-| `test/hil/run_hil_web.ps1` | HIL по SoftAP: подключается к AP и прогоняет все safe REST-эндпоинты (F0..F28, AUX effect+cfg, звук, громкость, CV, func-map, мотор, mode, control source, device, BEMF, log); настройки возвращает |
+| `test/hil/run_hil_web.ps1` | HIL по SoftAP: проверяет REST-эндпоинты (F0..F28, AUX effect+cfg, звук, громкость, CV, func-map, остановка мотора `speed=0`, mode, control source, device, BEMF, log); настройки возвращает |
 | `/api/log` + веб-журнал | события управления, ошибки, статусы |
 | `/api/storage` | свободное место |
 | core dump в разделе `coredump` | разбор падений |
@@ -821,7 +879,12 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 ## 17. Использование ресурсов
 
-### 17.1 Сводка (сборка release, `idf.py`, версия 0.9)
+### 17.1 Размеры И Историческая Сводка
+
+Итоговая сборка исправлений 2026-10-02: `soft_decoder_v3.bin` **981136 байт**
+(`0xef890`), 49.9% OTA-слота 1966080 байт, свободно 984944 байта (около 50%).
+Таблицы и сравнение 0.8→0.9 ниже — **исторический снимок до текущего ревью**,
+не новые замеры DRAM/heap. Точный текущий RAM footprint нужен из `.map`/`idf.py size`.
 
 | Ресурс | Занято | Всего | % |
 |---|---|---|---|
@@ -835,14 +898,14 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 `web`-массивы. Flash-прирост: код `sound`/REST + встроенная страница
 (`web_ui.html` выросла). `firmware.bin`: 826 176 → 850 640 Б.
 
-> Запас в OTA-слоте большой (~1.1 МБ), поэтому рост кода не критичен. Дополнительно
+> В историческом снимке запас составлял ~1.1 МБ. Дополнительно
 > доступна **PSRAM 2 МБ** как heap. Веб-страница (`web_ui.html`) лежит в rodata и
 > весит ~60 КБ.
 
 Размеры ELF-секций (xtensa size) и разбивку по компонентам смотрите в актуальном
 `.map` после сборки (`idf.py size`).
 
-### 17.2 Flash по компонентам (порядок величин; точные цифры — в актуальном
+### 17.2 Исторический Flash По Компонентам (точные текущие цифры — в актуальном
 `.map` после сборки, `idf.py size`)
 
 | Компонент | Flash, Б | Комментарий |
@@ -888,9 +951,9 @@ API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~
 0.9; рост ≈ +28 КБ, в основном `s_scheme`). При нехватке DRAM `s_scheme` —
 первый кандидат на вынос в PSRAM.
 
-Стеки задач (из таблицы раздела 7): ~100 КБ в сумме, из них основные —
-`main` 16 КБ, HTTP 16 КБ, `pipe_wr` 16 КБ, `dcc` 8 КБ, `prov_listen` 8 КБ,
-HTTP-progress 4 КБ. При добавлении задач/увеличении стеков следите за DRAM.
+Текущие основные стеки: `main` 16 КБ, HTTP 16 КБ, `web_transfer` 16 КБ,
+`dcc` 8 КБ, `prov_listen` 8 КБ, HTTP-progress 4 КБ, `settings` 4 КБ.
+Сумма/peak зависит от активных tasks; измерять high-water marks и internal heap.
 
 ### 17.4 Куда смотреть при росте ресурсов
 
@@ -919,7 +982,8 @@ HTTP-progress 4 КБ. При добавлении задач/увеличени�
 
 **Ограничения/риски:**
 
-- Flash занят ~41 % (запас в OTA-слоте ~1.1 МБ) — рост кода не критичен.
+- Итоговый binary занимает 49.9% OTA-слота (запас около 962 КиБ);
+  рост кода и рабочих буферов требует повторного size/heap контроля.
 - **PSRAM включена** (2 МБ heap); крупные буферы могут уходить в неё, но не все
   (DMA-совместимость, `SPIRAM_MALLOC_ALWAYSINTERNAL`).
 - Внешняя NOR не форматируется автоматически — при повреждении FS нужен

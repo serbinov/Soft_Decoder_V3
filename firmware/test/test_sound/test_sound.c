@@ -6,6 +6,7 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <windows.h>
 #include <direct.h>
 #include <io.h>
 #define MKDIR(p) _mkdir(p)
@@ -17,12 +18,28 @@
 
 /* White-box include of the binary scheme store (CRC + header validation) and
  * the sound engine core, with the host ESP-IDF stubs. */
+static int sound_test_rename(const char *from, const char *to);
+#define rename sound_test_rename
 #define static
 #include "../../components/sound/src/sound_store.c"
+#undef rename
 #include "../../components/sound/src/sound.c"
 #undef static
 
 #include "../../test_libs/teststubs/stubs.c"
+
+static bool s_rename_fail;
+static int sound_test_rename(const char *from, const char *to)
+{
+    if (s_rename_fail) { errno = EIO; return -1; }
+#if defined(_WIN32) && defined(ESP_PLATFORM)
+    /* Exercise the target error branch with target-like atomic replacement,
+     * rather than the Windows CRT's refusal to replace an existing file. */
+    return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) ? 0 : -1;
+#else
+    return rename(from, to);
+#endif
+}
 
 /* Minimal storage stubs: the sound component only needs the mount flag/root. */
 static bool s_mounted = false;
@@ -30,10 +47,21 @@ static char s_root[512];
 
 bool storage_is_mounted(void) { return s_mounted; }
 const char *storage_get_root(void) { return s_root; }
+static int s_storage_leases;
+static bool s_storage_blocked;
+esp_err_t storage_access_begin(void)
+{
+    if (s_storage_blocked) { return ESP_ERR_INVALID_STATE; }
+    ++s_storage_leases;
+    return ESP_OK;
+}
+void storage_access_end(void) { --s_storage_leases; }
 
 /* ---- audio stubs (engine voice 18 + effect voices) ---- */
 static bool s_av_active[AUDIO_MAX_VOICES];
 static bool s_av_busy[AUDIO_MAX_VOICES];
+static uint32_t s_av_generation[AUDIO_MAX_VOICES];
+static bool s_av_pending[AUDIO_MAX_VOICES];
 static uint16_t s_av_rate[AUDIO_MAX_VOICES];
 static char s_av_path[AUDIO_MAX_VOICES][192];
 static int s_av_play_calls;
@@ -46,7 +74,9 @@ esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t v
     if (voice >= AUDIO_MAX_VOICES || path == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    s_av_active[voice] = true;
+    s_av_active[voice] = false;
+    s_av_pending[voice] = true;
+    ++s_av_generation[voice];
     s_av_play_calls++;
     snprintf(s_av_path[voice], sizeof(s_av_path[voice]), "%s", path);
     return ESP_OK;
@@ -58,13 +88,41 @@ esp_err_t audio_voice_stop(uint8_t voice)
         return ESP_ERR_INVALID_ARG;
     }
     s_av_active[voice] = false;
+    s_av_pending[voice] = false;
     s_av_stop_calls++;
     return ESP_OK;
 }
 
 bool audio_voice_is_active(uint8_t voice)
 {
-    return voice < AUDIO_MAX_VOICES && s_av_active[voice];
+    /* Legacy assertions test request existence, not the sequencer contract. */
+    return voice < AUDIO_MAX_VOICES && (s_av_active[voice] || s_av_pending[voice]);
+}
+
+esp_err_t audio_voice_play_generation(uint8_t voice, const char *path, bool loop,
+                                      uint8_t volume, audio_voice_handle_t *out)
+{
+    esp_err_t err = audio_voice_play(voice, path, loop, volume);
+    if (err == ESP_OK && out != NULL) {
+        *out = (audio_voice_handle_t){voice, s_av_generation[voice]};
+    }
+    return err;
+}
+
+audio_voice_state_t audio_voice_get_state(audio_voice_handle_t h)
+{
+    if (h.voice >= AUDIO_MAX_VOICES || h.generation != s_av_generation[h.voice]) {
+        return AUDIO_VOICE_FINISHED;
+    }
+    if (s_av_pending[h.voice]) { return AUDIO_VOICE_PENDING; }
+    return s_av_active[h.voice] ? AUDIO_VOICE_PLAYING : AUDIO_VOICE_FINISHED;
+}
+
+static void mock_audio_complete(uint8_t voice)
+{
+    s_av_pending[voice] = false;
+    s_av_active[voice] = false;
+    s_av_busy[voice] = false;
 }
 
 uint32_t audio_voice_position(uint8_t voice)
@@ -84,13 +142,39 @@ esp_err_t audio_voice_set_rate(uint8_t voice, uint16_t permille)
 
 uint8_t audio_voice_alloc(void)
 {
-    for (int i = 0; i < AUDIO_MAX_VOICES; ++i) {
+    for (int i = 0; i < AUDIO_DYNAMIC_VOICES; ++i) {
         if (!s_av_busy[i]) {
             s_av_busy[i] = true;
+            ++s_av_generation[i];
             return (uint8_t)i;
         }
     }
     return AUDIO_VOICE_NONE;
+}
+
+esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out)
+{
+    uint8_t v = audio_voice_alloc();
+    if (v == AUDIO_VOICE_NONE) { return ESP_ERR_NO_MEM; }
+    *out = (audio_voice_handle_t){v, s_av_generation[v]};
+    return ESP_OK;
+}
+
+esp_err_t audio_voice_play_owned(audio_voice_handle_t *h, const char *path,
+                                bool loop, uint8_t volume)
+{
+    if (h->voice >= AUDIO_DYNAMIC_VOICES || !s_av_busy[h->voice] ||
+        h->generation != s_av_generation[h->voice]) { return ESP_ERR_INVALID_STATE; }
+    return audio_voice_play_generation(h->voice, path, loop, volume, h);
+}
+
+void audio_voice_release_owned(audio_voice_handle_t h)
+{
+    if (h.voice < AUDIO_DYNAMIC_VOICES && h.generation == s_av_generation[h.voice]) {
+        (void)audio_voice_stop(h.voice);
+        s_av_busy[h.voice] = false;
+        ++s_av_generation[h.voice];
+    }
 }
 
 void audio_voice_release(uint8_t voice)
@@ -171,7 +255,13 @@ static void build_paths(void)
     if (t == NULL) {
         t = ".";
     }
-    snprintf(s_dir, sizeof(s_dir), "%s/dcc_test_sound", t);
+    /* Separate host/ESP-branch runs (and other host runners) must not share files. */
+#ifdef _WIN32
+    unsigned long pid = (unsigned long)GetCurrentProcessId();
+#else
+    unsigned long pid = (unsigned long)getpid();
+#endif
+    snprintf(s_dir, sizeof(s_dir), "%s/dcc_test_sound_%lu", t, pid);
     snprintf(s_file, sizeof(s_file), "%s/scheme.mds", s_dir);
 }
 
@@ -181,9 +271,14 @@ void setUp(void)
     (void)MKDIR(s_dir);
     (void)remove(s_file);
     s_mounted = false;
+    s_storage_leases = 0;
+    s_storage_blocked = false;
+    s_rename_fail = false;
     snprintf(s_root, sizeof(s_root), "/userdata");
 
     memset(s_av_active, 0, sizeof(s_av_active));
+    memset(s_av_pending, 0, sizeof(s_av_pending));
+    memset(s_av_generation, 0, sizeof(s_av_generation));
     memset(s_av_busy, 0, sizeof(s_av_busy));
     memset(s_av_rate, 0, sizeof(s_av_rate));
     s_av_play_calls = 0;
@@ -201,6 +296,9 @@ void setUp(void)
     s_forward = true;
     s_prev_speed = 0;
     s_accel = 0;
+    s_accel_q = 0;
+    s_inhibited = false;
+    s_control_armed = true;
     s_table = SOUND_TABLE_NONE;
     s_phase = TB_STOP;
     s_group = 0;
@@ -234,6 +332,9 @@ void setUp(void)
 void tearDown(void)
 {
     (void)remove(s_file);
+    char tmp[520];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", s_file);
+    (void)remove(tmp);
 }
 
 /* ---- defaults ---- */
@@ -1020,21 +1121,21 @@ static void test_sound_sequencer(void)
     TEST_ASSERT_EQUAL_UINT8(TB_INIT, s_phase);
     TEST_ASSERT_EQUAL_STRING("/userdata/i.wav", s_av_path[18]);
 
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_LOOP, s_phase);
     TEST_ASSERT_EQUAL_STRING("/userdata/l.wav", s_av_path[18]);
 
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance(); /* play 1 < max_plays */
     TEST_ASSERT_EQUAL_UINT8(TB_LOOP, s_phase);
 
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance(); /* reach max_plays -> End */
     TEST_ASSERT_EQUAL_UINT8(TB_END, s_phase);
     TEST_ASSERT_EQUAL_STRING("/userdata/e.wav", s_av_path[18]);
 
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_STOP, s_phase);
 
@@ -1043,7 +1144,7 @@ static void test_sound_sequencer(void)
     set_table_files(2, NULL, NULL, "onlyend.wav");
     tb_start(2);
     TEST_ASSERT_EQUAL_UINT8(TB_END, s_phase);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_STOP, s_phase);
 
@@ -1054,13 +1155,13 @@ static void test_sound_sequencer(void)
     snprintf(s_scheme.tables[3].init[1].file, SOUND_FILE_MAX, "c1.wav");
     tb_start(3);
     TEST_ASSERT_EQUAL_STRING("/userdata/c0.wav", s_av_path[18]);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_STRING("/userdata/c1.wav", s_av_path[18]);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance(); /* third group empty, no loop -> End */
     TEST_ASSERT_EQUAL_UINT8(TB_END, s_phase);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_STOP, s_phase);
 
@@ -1070,7 +1171,7 @@ static void test_sound_sequencer(void)
     snprintf(s_scheme.tables[4].init[2].file, SOUND_FILE_MAX, "g2.wav");
     tb_start(4);
     TEST_ASSERT_EQUAL_STRING("/userdata/g0.wav", s_av_path[18]);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_STRING("/userdata/g2.wav", s_av_path[18]);
 
@@ -1081,13 +1182,13 @@ static void test_sound_sequencer(void)
     s_scheme.tables[6].min_plays = 2;
     tb_start(6);
     TEST_ASSERT_EQUAL_UINT8(TB_LOOP, s_phase);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_LOOP, s_phase);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_LOOP, s_phase);
-    s_av_active[18] = false;
+    mock_audio_complete(18);
     tb_advance();
     TEST_ASSERT_EQUAL_UINT8(TB_END, s_phase);
 
@@ -1211,7 +1312,7 @@ static void test_sound_fx_guards(void)
     sound_function(13, false);
     sound_function(13, true); /* still active -> ignored */
     TEST_ASSERT_EQUAL_INT(1, s_av_play_calls);
-    s_av_active[vtrig] = false; /* sample finished */
+    mock_audio_complete(vtrig);
     sound_function(13, false);
     sound_function(13, true);
     TEST_ASSERT_EQUAL_INT(2, s_av_play_calls);
@@ -1526,7 +1627,11 @@ static void test_sound_tick_and_stop(void)
 
 static void test_sound_init_paths(void)
 {
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, sound_set_inhibited(true));
     TEST_ASSERT_EQUAL(ESP_OK, sound_init());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, sound_init());
+    vSemaphoreDelete(s_lock);
+    s_lock = NULL; /* Simulate a fresh boot for each independent init case. */
 
     s_test_bind_count = 2;
     s_test_binds[0].used = 1;
@@ -1534,19 +1639,292 @@ static void test_sound_init_paths(void)
     TEST_ASSERT_EQUAL(ESP_OK, sound_init());
     TEST_ASSERT_EQUAL_UINT32(2, s_bind_count);
     s_test_bind_ret = ESP_ERR_NOT_FOUND;
+    vSemaphoreDelete(s_lock);
+    s_lock = NULL;
 
     /* Non-empty active name with storage unmounted -> loader falls back. */
     snprintf(s_test_active, sizeof(s_test_active), "x");
     TEST_ASSERT_EQUAL(ESP_OK, sound_init());
     s_test_active[0] = '\0';
+    vSemaphoreDelete(s_lock);
+    s_lock = NULL;
 
     mock_mutex_create_fail = 1;
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, sound_init());
+    TEST_ASSERT_NULL(s_lock);
     mock_mutex_create_fail = 0;
 
     mock_task_create_ok = 0;
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, sound_init());
+    TEST_ASSERT_NULL(s_lock);
     mock_task_create_ok = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_init());
+}
+
+static void test_mds_semantic_corpus_crc_trusted(void)
+{
+    const struct { size_t offset; uint8_t value; } bad[] = {
+        {offsetof(sound_scheme_t, type), 255},
+        {offsetof(sound_scheme_t, table_count), 33},
+        {offsetof(sound_scheme_t, extra_count), 25},
+        {offsetof(sound_scheme_t, tables) + offsetof(sound_table_t, used), 2},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, sync_motion), 255},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, start_table), 32},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, stop_table), 32},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, shutdown_table), 32},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, drive), 32},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, accel), 32},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, coast), 32},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, engine_start_fn), 29},
+        {offsetof(sound_scheme_t, engine) + offsetof(sound_engine_t, flags), 128},
+        {offsetof(sound_scheme_t, tables) + offsetof(sound_table_t, end_table), 32},
+        {offsetof(sound_scheme_t, tables) + offsetof(sound_table_t, next_accel), 32},
+        {offsetof(sound_scheme_t, tables) + offsetof(sound_table_t, next_decel), 32},
+        {offsetof(sound_scheme_t, tables) + offsetof(sound_table_t, rate_scale), 128},
+        {offsetof(sound_scheme_t, extras) + offsetof(sound_extra_t, table), 32},
+        {offsetof(sound_scheme_t, extras) + offsetof(sound_extra_t, fn), 29},
+        {offsetof(sound_scheme_t, extras) + offsetof(sound_extra_t, dir), 3},
+        {offsetof(sound_scheme_t, extras) + offsetof(sound_extra_t, state), 3},
+        {offsetof(sound_scheme_t, extras) + offsetof(sound_extra_t, mode), 7},
+        {offsetof(sound_scheme_t, extras) + offsetof(sound_extra_t, volume), 101}
+    };
+    sound_scheme_t scheme, out;
+    uint8_t raw[SOUND_STORE_MAX_BYTES];
+    sound_store_hdr_t hdr = {{'M','D','S','1'}, 1, sizeof(scheme), 0};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]) + 5; ++i) {
+        sound_store_default(&scheme);
+        if (i < sizeof(bad) / sizeof(bad[0])) {
+            ((uint8_t *)&scheme)[bad[i].offset] = bad[i].value;
+        } else {
+            size_t string = i - sizeof(bad) / sizeof(bad[0]);
+            sound_table_t *last = &scheme.tables[SOUND_MAX_TABLES - 1];
+            if (string == 0) { memset(last->name, 'x', sizeof(last->name)); }
+            if (string == 1) { memset(last->init[3].file, 'x', SOUND_FILE_MAX); }
+            if (string == 2) { memset(last->loop[3].file, 'x', SOUND_FILE_MAX); }
+            if (string == 3) { memset(last->end[3].file, 'x', SOUND_FILE_MAX); }
+            if (string == 4) {
+                scheme.extras[SOUND_MAX_EXTRAS - 1].random_min_ms = 2;
+                scheme.extras[SOUND_MAX_EXTRAS - 1].random_max_ms = 1;
+            }
+        }
+        hdr.crc = crc32_bytes((const uint8_t *)&scheme, sizeof(scheme));
+        memcpy(raw, &hdr, sizeof(hdr));
+        memcpy(raw + sizeof(hdr), &scheme, sizeof(scheme));
+        TEST_ASSERT_EQUAL(ESP_FAIL, sound_store_verify(raw, sizeof(raw), &out));
+        TEST_ASSERT_EQUAL(SOUND_SCHEME_NONE, out.type);
+        FILE *f = fopen(s_file, "wb");
+        TEST_ASSERT_NOT_NULL(f);
+        fwrite(raw, 1, sizeof(raw), f);
+        fclose(f);
+        TEST_ASSERT_EQUAL(ESP_FAIL, sound_store_load(s_file, &out));
+        TEST_ASSERT_EQUAL(SOUND_SCHEME_NONE, out.type);
+        TEST_ASSERT_EQUAL(0, s_storage_leases);
+    }
+}
+
+static void test_store_rename_failure_preserves_both_copies(void)
+{
+    sound_scheme_t old, replacement, readback;
+    sound_store_default(&old);
+    old.type = SOUND_SCHEME_DIESEL;
+    replacement = old;
+    replacement.type = SOUND_SCHEME_STEAM;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_store_save(s_file, &old));
+    s_rename_fail = true;
+    TEST_ASSERT_EQUAL(ESP_FAIL, sound_store_save(s_file, &replacement));
+    s_rename_fail = false;
+    TEST_ASSERT_EQUAL(ESP_OK, sound_store_load(s_file, &readback));
+    TEST_ASSERT_EQUAL(SOUND_SCHEME_DIESEL, readback.type);
+    char tmp[520];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", s_file);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_store_load(tmp, &readback));
+    TEST_ASSERT_EQUAL(SOUND_SCHEME_STEAM, readback.type);
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_pending_generation_sequencer_and_owner_reuse(void)
+{
+    s_scheme.type = SOUND_SCHEME_DIESEL;
+    set_table_files(1, "init.wav", "loop.wav", "end.wav");
+    tb_start(1);
+    audio_voice_handle_t init = s_engine_handle;
+    for (int i = 0; i < 10; ++i) { tb_advance(); }
+    TEST_ASSERT_EQUAL(TB_INIT, s_phase);
+    TEST_ASSERT_EQUAL(init.generation, s_engine_handle.generation);
+    s_av_pending[18] = false;
+    s_av_active[18] = true;
+    tb_advance();
+    TEST_ASSERT_EQUAL(TB_INIT, s_phase);
+    mock_audio_complete(18);
+    tb_advance();
+    TEST_ASSERT_EQUAL(TB_LOOP, s_phase);
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(s_engine_handle));
+
+    set_table_files(2, NULL, "fx.wav", NULL);
+    fx_play_table(2, false, &s_fn_voice[2]);
+    uint8_t reused = s_fn_voice[2];
+    mock_audio_complete(reused);
+    fx_play_table(2, true, &s_fn_voice[3]);
+    TEST_ASSERT_EQUAL(reused, s_fn_voice[3]);
+    int calls = s_av_stop_calls;
+    fx_voice_stop(&s_fn_voice[2]);
+    TEST_ASSERT_EQUAL(calls, s_av_stop_calls);
+    TEST_ASSERT_TRUE(fx_running(&s_fn_voice[3]));
+    fx_play_table(2, false, &s_fn_voice[2]);
+    TEST_ASSERT_NOT_EQUAL(reused, s_fn_voice[2]);
+}
+
+static void test_lifecycle_mute_disable_inhibit(void)
+{
+    s_lock = xSemaphoreCreateMutex();
+    s_scheme.type = SOUND_SCHEME_DIESEL;
+    s_scheme.engine.sync_motion = true;
+    s_scheme.engine.drive[1] = 1;
+    set_table_files(1, NULL, "fx.wav", NULL);
+    s_scheme.extra_count = 1;
+    s_scheme.extras[0] = (sound_extra_t){.table=1, .fn=SOUND_FN_NONE,
+                                      .mode=SOUND_MODE_STATE};
+    func_binding_t held = {.fn=2, .target_type=FUNC_TARGET_SOUND, .target_id=1,
+                           .mode=SOUND_MODE_LOOP_HELD};
+    binding_apply(&held, true);
+    s_mute_light = true;
+    binding_apply(&held, false); /* muted release still cleans up */
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, s_fn_voice[2]);
+    int plays = s_av_play_calls;
+    extras_tick();
+    TEST_ASSERT_EQUAL(plays, s_av_play_calls);
+    s_mute_light = false;
+    extras_tick();
+    TEST_ASSERT_TRUE(fx_running(&s_extra_voice[0]));
+    sound_set_speed(60, true);
+    sound_engine_power(true);
+    sound_tick();
+    TEST_ASSERT_EQUAL(ESP_OK, sound_type_set(SOUND_SCHEME_NONE));
+    TEST_ASSERT_FALSE(sound_engine_is_on());
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, s_extra_voice[0]);
+    TEST_ASSERT_EQUAL(TB_STOP, s_phase);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_type_set(SOUND_SCHEME_DIESEL));
+    plays = s_av_play_calls;
+    sound_tick();
+    TEST_ASSERT_EQUAL(plays, s_av_play_calls); /* no old sync-motion resurrection */
+    sound_set_speed(61, true);
+    sound_tick();
+    TEST_ASSERT_TRUE(s_av_play_calls > plays);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_set_inhibited(true));
+    sound_engine_power(true);
+    sound_function(1, true);
+    sound_set_speed(62, true);
+    plays = s_av_play_calls;
+    sound_tick();
+    TEST_ASSERT_EQUAL(plays, s_av_play_calls);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_set_inhibited(false));
+    sound_tick();
+    TEST_ASSERT_EQUAL(plays, s_av_play_calls);
+    TEST_ASSERT_FALSE(sound_engine_is_on());
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, sound_set_inhibited(true));
+    TEST_ASSERT_FALSE(s_inhibited);
+    mock_sem_take_fail = 0;
+    func_binding_t mute = {.fn=3, .target_type=FUNC_TARGET_LOGIC,
+                          .target_id=FUNC_LOGIC_MUTE_LIGHT, .dir=FUNC_DIR_FWD,
+                          .state=FUNC_STATE_MOVING};
+    s_forward = true;
+    s_speed = 60;
+    binding_apply(&mute, true);
+    TEST_ASSERT_TRUE(s_mute_light);
+    s_forward = false;
+    s_speed = 0;
+    binding_apply(&mute, false); /* Gate changes must not latch a mute forever. */
+    TEST_ASSERT_FALSE(s_mute_light);
+    vSemaphoreDelete(s_lock);
+    s_lock = NULL;
+}
+
+static void test_scheme_switch_clear_delete_release_only_owned_voices(void)
+{
+    s_mounted = true;
+    snprintf(s_root, sizeof(s_root), "%s", s_dir);
+    char proj[600];
+    snprintf(proj, sizeof(proj), "%s/projects", s_dir);
+    (void)MKDIR(proj);
+    for (int action = 0; action < 3; ++action) {
+        TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_create("lifecycle", SOUND_SCHEME_DIESEL));
+        set_table_files(1, NULL, "loop.wav", NULL);
+        s_scheme.engine.sync_motion = true;
+        s_scheme.extra_count = 1;
+        s_scheme.extras[0] = (sound_extra_t){.table=1, .fn=SOUND_FN_NONE,
+                                          .mode=SOUND_MODE_STATE};
+        TEST_ASSERT_NOT_EQUAL(AUDIO_VOICE_NONE, fx_play_table(1, true, &s_fn_voice[2]));
+        TEST_ASSERT_NOT_EQUAL(AUDIO_VOICE_NONE, fx_play_table(1, true, &s_extra_voice[0]));
+        s_extra_on[0] = 1;
+        uint8_t function = s_fn_voice[2], extra = s_extra_voice[0];
+        tb_start(1);
+        audio_voice_play(19, "secondary.wav", true, 100);
+        audio_voice_handle_t unrelated;
+        TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&unrelated));
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          audio_voice_play_owned(&unrelated, "other.wav", true, 100));
+        if (action == 0) {
+            sound_scheme_t replacement;
+            sound_store_default(&replacement);
+            replacement.type = SOUND_SCHEME_STEAM;
+            TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_set(&replacement));
+        } else if (action == 1) {
+            TEST_ASSERT_EQUAL(ESP_OK, sound_load_scheme(""));
+        } else {
+            TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_delete("lifecycle"));
+            TEST_ASSERT_EQUAL_STRING("", s_test_active);
+        }
+        TEST_ASSERT_FALSE(audio_voice_is_active(function));
+        TEST_ASSERT_FALSE(audio_voice_is_active(extra));
+        TEST_ASSERT_FALSE(audio_voice_is_active(18));
+        TEST_ASSERT_FALSE(audio_voice_is_active(19));
+        TEST_ASSERT_TRUE(audio_voice_is_active(unrelated.voice));
+        TEST_ASSERT_EQUAL(TB_STOP, s_phase);
+        TEST_ASSERT_EQUAL(SOUND_TABLE_NONE, s_table);
+        TEST_ASSERT_FALSE(s_control_armed);
+        TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, s_fn_voice[2]);
+        TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, s_extra_voice[0]);
+        int plays = s_av_play_calls;
+        sound_tick();
+        TEST_ASSERT_EQUAL(plays, s_av_play_calls);
+        audio_voice_release_owned(unrelated);
+    }
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_storage_admission_rejects_store_operations(void)
+{
+    sound_scheme_t scheme, out;
+    sound_store_default(&scheme);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_store_save(s_file, &scheme));
+    s_storage_blocked = true;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, sound_store_save(s_file, &scheme));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, sound_store_load(s_file, &out));
+    TEST_ASSERT_EQUAL(SOUND_SCHEME_NONE, out.type);
+    uint8_t raw[SOUND_STORE_MAX_BYTES];
+    size_t len = 123;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, sound_store_read(s_file, raw, sizeof(raw), &len));
+    TEST_ASSERT_EQUAL(0, len);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, sound_store_ensure_dir());
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_fixed_point_accel_decay(void)
+{
+    s_scheme.type = SOUND_SCHEME_DIESEL;
+    sound_set_speed(10, true);
+    sound_tick();
+    TEST_ASSERT_EQUAL(3, s_accel);
+    for (int i = 0; i < 40; ++i) { sound_tick(); }
+    TEST_ASSERT_EQUAL(0, s_accel);
+    TEST_ASSERT_EQUAL(0, s_accel_q);
+    sound_set_speed(0, true);
+    sound_tick();
+    TEST_ASSERT_EQUAL(-3, s_accel);
+    for (int i = 0; i < 40; ++i) { sound_tick(); }
+    TEST_ASSERT_EQUAL(0, s_accel);
+    TEST_ASSERT_EQUAL(0, s_accel_q);
 }
 
 int main(void)
@@ -1585,5 +1963,12 @@ int main(void)
     RUN_TEST(test_sound_binding_modes);
     RUN_TEST(test_sound_tick_and_stop);
     RUN_TEST(test_sound_init_paths);
+    RUN_TEST(test_mds_semantic_corpus_crc_trusted);
+    RUN_TEST(test_store_rename_failure_preserves_both_copies);
+    RUN_TEST(test_pending_generation_sequencer_and_owner_reuse);
+    RUN_TEST(test_lifecycle_mute_disable_inhibit);
+    RUN_TEST(test_scheme_switch_clear_delete_release_only_owned_voices);
+    RUN_TEST(test_storage_admission_rejects_store_operations);
+    RUN_TEST(test_fixed_point_accel_decay);
     return UNITY_END();
 }

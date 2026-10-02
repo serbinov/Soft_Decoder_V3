@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
@@ -11,6 +12,7 @@
 #include "freertos/task.h"
 
 #include "pinmap.h"
+#include "storage.h"
 
 static const char *TAG = "audio";
 
@@ -66,6 +68,7 @@ typedef struct {
     uint32_t played;        /* output samples produced since the last start */
     uint16_t env;           /* anti-click envelope, 0..AUDIO_ENV_ONE */
     bool stopping;          /* fading out towards silence, then close */
+    bool storage_lease;
 } voice_state_t;
 
 typedef struct {
@@ -77,6 +80,12 @@ typedef struct {
     uint8_t req_volume;
     uint16_t req_rate; /* per-voice playback rate, 1000 = nominal */
     char req_path[AUDIO_PATH_MAX];
+    uint32_t generation;
+    audio_voice_state_t state;
+    bool file_open;
+    bool published_active;
+    uint32_t published_position;
+    uint32_t mix_generation; /* mixer-only identity of the open playback */
 } voice_t;
 
 static i2s_chan_handle_t s_tx;
@@ -86,6 +95,10 @@ static SemaphoreHandle_t s_req_mutex;
 /* Voice allocator flags, protected by s_req_mutex (owner: alloc/release and
  * the mixer task when a voice ends on its own). */
 static bool s_busy[AUDIO_MAX_VOICES];
+static bool s_inhibited;
+static bool s_initialized;
+static bool s_mixer_work;
+static unsigned s_validate_work;
 /* Anti-click fade length in mix blocks; test hook (0 disables the envelope). */
 static uint8_t s_fade_blocks = 2;
 
@@ -101,6 +114,13 @@ static uint16_t rate_clamp(uint16_t permille)
 }
 
 static void mixer_task(void *arg);
+
+static void voice_close(voice_state_t *st)
+{
+    if (st->f != NULL) { fclose(st->f); st->f = NULL; }
+    if (st->storage_lease) { storage_access_end(); st->storage_lease = false; }
+    st->active = false;
+}
 
 static esp_err_t i2s_setup(void)
 {
@@ -135,6 +155,13 @@ static esp_err_t i2s_setup(void)
 
 esp_err_t audio_init(void)
 {
+    if (s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_req_mutex = xSemaphoreCreateMutex();
+    if (s_req_mutex == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
     for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
         s_busy[v] = false;
         s_voice[v].req_rate = 1000;
@@ -144,77 +171,110 @@ esp_err_t audio_init(void)
         .pin_bit_mask = 1ULL << PIN_AUDIO_SD_MODE,
         .mode = GPIO_MODE_OUTPUT,
     };
-    ESP_ERROR_CHECK(gpio_config(&sd));
-    gpio_set_level((gpio_num_t)PIN_AUDIO_SD_MODE, 1);
-
-    esp_err_t err = i2s_setup();
+    esp_err_t err = gpio_config(&sd);
+    if (err != ESP_OK) { goto fail; }
+    err = gpio_set_level((gpio_num_t)PIN_AUDIO_SD_MODE, 0);
+    if (err != ESP_OK) { goto fail; }
+    err = i2s_setup();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "I2S setup failed: %s", esp_err_to_name(err));
-        return err;
+        goto fail;
     }
 
-    s_req_mutex = xSemaphoreCreateMutex();
+    err = gpio_set_level((gpio_num_t)PIN_AUDIO_SD_MODE, 1);
+    if (err != ESP_OK) { goto fail; }
     if (xTaskCreatePinnedToCore(mixer_task, "audio_mix", 4096, NULL, 7, NULL, 1) != pdPASS) {
         ESP_LOGE(TAG, "mixer task create failed");
-        return ESP_ERR_NO_MEM;
+        err = ESP_ERR_NO_MEM;
+        goto fail;
     }
 
     ESP_LOGI(TAG, "Audio mixer initialized (%u Hz mono, %u voices)", MIX_RATE, AUDIO_MAX_VOICES);
+    s_inhibited = false;
+    s_initialized = true;
     return ESP_OK;
+fail:
+    (void)gpio_set_level((gpio_num_t)PIN_AUDIO_SD_MODE, 0);
+    if (s_tx != NULL) {
+        (void)i2s_channel_disable(s_tx);
+        (void)i2s_del_channel(s_tx);
+        s_tx = NULL;
+    }
+    vSemaphoreDelete(s_req_mutex);
+    s_req_mutex = NULL;
+    return err;
 }
 
-/* Skip `size` bytes plus the RIFF word-alignment pad byte for an odd size.
- * Returns false for an implausible size (would overflow the signed 32-bit
- * fseek offset and seek backwards). */
-static bool wav_skip(FILE *f, uint32_t size)
+/* Validate the complete RIFF chunk walk, including payload bounds and padding,
+ * before either accepting an upload or opening a mixer voice. */
+static bool wav_parse(FILE *f, wav_fmt_t *fmt, uint32_t *data_start, uint32_t *data_len)
 {
-    if (size > 0x7FFFFFFFU) {
-        return false;
+    if (fseek(f, 0, SEEK_END) != 0) { return false; }
+    long file_len = ftell(f);
+    if (file_len < 12 || fseek(f, 0, SEEK_SET) != 0) { return false; }
+    wav_riff_t riff;
+    if (fread(&riff, 1, sizeof(riff), f) != sizeof(riff) ||
+        memcmp(riff.riff, "RIFF", 4) || memcmp(riff.wave, "WAVE", 4) ||
+        riff.size < 4 || (uint64_t)riff.size + 8U > (uint64_t)file_len ||
+        (uint64_t)riff.size + 8U > LONG_MAX) { return false; }
+    uint64_t end = (uint64_t)riff.size + 8U;
+    uint64_t pos = 12;
+    bool has_fmt = false, has_data = false;
+    while (pos < end) {
+        wav_chunk_t ch;
+        if (end - pos < sizeof(ch) || fread(&ch, 1, sizeof(ch), f) != sizeof(ch)) {
+            return false;
+        }
+        pos += sizeof(ch);
+        uint64_t next = pos + ch.size + (ch.size & 1U);
+        if (next > end) { return false; }
+        if (!memcmp(ch.id, "fmt ", 4)) {
+            if (has_fmt || ch.size < sizeof(*fmt) ||
+                fread(fmt, 1, sizeof(*fmt), f) != sizeof(*fmt)) { return false; }
+            if (fmt->format != 1 || fmt->bits_per_sample != 16 ||
+                fmt->channels < 1 || fmt->channels > 2 ||
+                fmt->sample_rate == 0 || fmt->sample_rate > 192000 ||
+                fmt->block_align != 2U * fmt->channels ||
+                fmt->byte_rate != fmt->sample_rate * fmt->block_align) { return false; }
+            has_fmt = true;
+        } else if (!memcmp(ch.id, "data", 4)) {
+            if (has_data) { return false; }
+            *data_start = (uint32_t)pos;
+            *data_len = ch.size;
+            has_data = true;
+        }
+        if (fseek(f, (long)next, SEEK_SET) != 0) { return false; }
+        pos = next;
     }
-    return fseek(f, (long)(size + (size & 1U)), SEEK_CUR) == 0;
+    return has_fmt && has_data && *data_len >= 2U * fmt->block_align &&
+           *data_len % fmt->block_align == 0;
 }
 
 esp_err_t audio_validate_wav(const char *path)
 {
+    if (path == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    if (s_inhibited) {
+        if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t admission = storage_access_begin();
+    if (admission != ESP_OK) {
+        if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+        return admission;
+    }
+    ++s_validate_work;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
     FILE *f = fopen(path, "rb");
-    if (f == NULL) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    wav_riff_t riff;
-    if (fread(&riff, 1, sizeof(riff), f) != sizeof(riff)) {
-        fclose(f);
-        return ESP_FAIL;
-    }
-    if (memcmp(riff.riff, "RIFF", 4) != 0 || memcmp(riff.wave, "WAVE", 4) != 0) {
-        fclose(f);
-        return ESP_FAIL;
-    }
-    bool has_fmt = false;
-    bool has_data = false;
-    while (1) {
-        wav_chunk_t ch;
-        if (fread(&ch, 1, sizeof(ch), f) != sizeof(ch)) {
-            break;
-        }
-        if (memcmp(ch.id, "fmt ", 4) == 0) {
-            wav_fmt_t fmt;
-            if (fread(&fmt, 1, sizeof(fmt), f) == sizeof(fmt)) {
-                has_fmt = (fmt.format == 1U && fmt.bits_per_sample == 16U &&
-                           fmt.sample_rate > 0U && fmt.sample_rate <= 192000U &&
-                           fmt.channels >= 1U && fmt.channels <= 2U);
-            }
-            if (ch.size > sizeof(wav_fmt_t) && !wav_skip(f, ch.size - sizeof(wav_fmt_t))) {
-                break;
-            }
-        } else if (memcmp(ch.id, "data", 4) == 0) {
-            has_data = true;
-            break;
-        } else if (!wav_skip(f, ch.size)) {
-            break;
-        }
-    }
-    fclose(f);
-    return (has_fmt && has_data) ? ESP_OK : ESP_FAIL;
+    wav_fmt_t fmt;
+    uint32_t start, len;
+    bool valid = f != NULL && wav_parse(f, &fmt, &start, &len);
+    if (f != NULL) { fclose(f); }
+    storage_access_end();
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    --s_validate_work;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return f == NULL ? ESP_ERR_NOT_FOUND : (valid ? ESP_OK : ESP_FAIL);
 }
 
 /* Read the next mono source sample (downmixed), honouring loop/EOF. */
@@ -223,7 +283,7 @@ static bool voice_next_sample(voice_state_t *st, int16_t *out)
     for (;;) {
         if (st->samples_left == 0U) {
             if (st->loop && st->samples_total > 0U) {
-                fseek(st->f, (long)st->data_start, SEEK_SET);
+                if (fseek(st->f, (long)st->data_start, SEEK_SET) != 0) { return false; }
                 st->samples_left = st->samples_total;
                 continue;
             }
@@ -275,7 +335,7 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
                 st->env = (uint16_t)(e > AUDIO_ENV_ONE ? AUDIO_ENV_ONE : e);
             }
         }
-        double frac = st->pos - (double)st->cur_idx;
+        double frac = st->pos;
         int32_t s = (int32_t)st->s_cur +
                     (int32_t)((double)(st->s_next - st->s_cur) * frac);
         int32_t gain = (int32_t)st->volume * (int32_t)s_volume / 100;
@@ -294,26 +354,19 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
 
         /* A stop request fades the voice out; close only once silent. */
         if (env_step != 0 && st->stopping && st->env == 0U) {
-            st->active = false;
-            if (st->f != NULL) {
-                fclose(st->f);
-                st->f = NULL;
-            }
+            voice_close(st);
             return i + 1;
         }
 
         st->pos += step;
-        while (st->pos >= (double)(st->cur_idx + 1U)) {
+        while (st->pos >= 1.0) {
+            st->pos -= 1.0; /* bounded fractional phase, independent of index wrap */
             st->cur_idx++;
             st->s_cur = st->s_next;
             if (!voice_next_sample(st, &st->s_next)) {
-                st->active = false;
                 /* Close the file here: a one-shot that ends on its own would
                  * otherwise keep its descriptor until the voice is reused. */
-                if (st->f != NULL) {
-                    fclose(st->f);
-                    st->f = NULL;
-                }
+                voice_close(st);
                 return i + 1;
             }
         }
@@ -324,68 +377,30 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
 /* Open and initialise a voice (runs only in the mixer task). */
 static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uint8_t volume)
 {
-    if (st->f != NULL) {
-        fclose(st->f);
-        st->f = NULL;
-    }
-    st->active = false;
+    voice_close(st);
+    esp_err_t admission = storage_access_begin();
+    if (admission != ESP_OK) { return admission; }
 
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
+        storage_access_end();
         return ESP_ERR_NOT_FOUND;
     }
+    st->f = f;
+    st->storage_lease = true;
     if (setvbuf(f, NULL, _IOFBF, VOICE_IO_BUF) != 0) { (void)setvbuf(f, NULL, _IONBF, 0); }
 
-    wav_riff_t riff;
-    if (fread(&riff, 1, sizeof(riff), f) != sizeof(riff) ||
-        memcmp(riff.riff, "RIFF", 4) != 0 || memcmp(riff.wave, "WAVE", 4) != 0) {
-        fclose(f);
-        return ESP_FAIL;
-    }
-
-    uint32_t sample_rate = MIX_RATE;
-    uint16_t channels = 1;
-    uint16_t fmt_format = 0;
-    uint16_t fmt_bits = 0;
-    bool has_data = false;
+    wav_fmt_t fmt;
     uint32_t data_start = 0;
     uint32_t data_len = 0;
-    while (1) {
-        wav_chunk_t ch;
-        if (fread(&ch, 1, sizeof(ch), f) != sizeof(ch)) {
-            break;
-        }
-        if (memcmp(ch.id, "fmt ", 4) == 0) {
-            wav_fmt_t fmt;
-            if (fread(&fmt, 1, sizeof(fmt), f) == sizeof(fmt)) {
-                sample_rate = fmt.sample_rate;
-                channels = fmt.channels;
-                fmt_format = fmt.format;
-                fmt_bits = fmt.bits_per_sample;
-            }
-            if (ch.size > sizeof(wav_fmt_t) && !wav_skip(f, ch.size - sizeof(wav_fmt_t))) {
-                break;
-            }
-        } else if (memcmp(ch.id, "data", 4) == 0) {
-            data_start = (uint32_t)ftell(f);
-            data_len = ch.size;
-            has_data = true;
-            break;
-        } else if (!wav_skip(f, ch.size)) {
-            break;
-        }
-    }
-
-    if (!has_data || fmt_format != 1U || fmt_bits != 16U ||
-        sample_rate == 0U || sample_rate > 192000U ||
-        channels < 1U || channels > 2U) {
-        fclose(f);
+    if (!wav_parse(f, &fmt, &data_start, &data_len)) {
+        voice_close(st);
         return ESP_FAIL;
     }
 
-    uint32_t samples_total = data_len / (2U * (uint32_t)channels);
+    uint32_t samples_total = data_len / fmt.block_align;
     if (samples_total < 2U) {
-        fclose(f);
+        voice_close(st);
         return ESP_FAIL;
     }
 
@@ -394,10 +409,10 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
         rate = 1000; /* unset/invalid (e.g. zero-initialised state) -> nominal */
     }
 
-    fseek(f, (long)data_start, SEEK_SET);
+    if (fseek(f, (long)data_start, SEEK_SET) != 0) { voice_close(st); return ESP_FAIL; }
     st->f = f;
-    st->sample_rate = sample_rate;
-    st->channels = channels;
+    st->sample_rate = fmt.sample_rate;
+    st->channels = fmt.channels;
     st->data_start = data_start;
     st->samples_total = samples_total;
     st->samples_left = samples_total;
@@ -412,8 +427,7 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     st->env = (s_fade_blocks == 0U) ? AUDIO_ENV_ONE : 0U;
 
     if (!voice_next_sample(st, &st->s_cur)) {
-        fclose(f);
-        st->f = NULL;
+        voice_close(st);
         return ESP_FAIL;
     }
     if (!voice_next_sample(st, &st->s_next)) {
@@ -432,6 +446,12 @@ static void mixer_task(void *arg)
     int16_t mix[MIX_BLOCK];
     uint32_t iters = 0;
     while (s_mix_iter_cap == 0U || iters < s_mix_iter_cap) {
+        /* Publish in-flight filesystem work before dropping the short request
+         * lock. Slow FILE/I2S operations never block admission or sound locks. */
+        if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+        s_mixer_work = true;
+        if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+        memset(mix, 0, sizeof(mix));
         /* Apply pending play/stop requests, then mix one block. */
         for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
             voice_t *vo = &s_voice[v];
@@ -439,10 +459,9 @@ static void mixer_task(void *arg)
             uint8_t volume = 100;
             uint16_t rate = 1000;
             char path[AUDIO_PATH_MAX];
-
-            if (s_req_mutex != NULL) {
-                xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-            }
+            if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+            uint32_t generation = vo->generation;
+            bool inhibited = s_inhibited;
             play = vo->req_play;
             stop = vo->req_stop;
             loop = vo->req_loop;
@@ -452,92 +471,92 @@ static void mixer_task(void *arg)
             path[sizeof(path) - 1] = '\0';
             vo->req_play = false;
             vo->req_stop = false;
-            if (s_req_mutex != NULL) {
-                xSemaphoreGive(s_req_mutex);
-            }
+            if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
 
             if (stop) {
-                if (s_fade_blocks != 0U && vo->st.active) {
+                if (!inhibited && s_fade_blocks != 0U && vo->st.active) {
                     vo->st.stopping = true; /* fade out, then close in voice_fill */
                 } else {
-                    vo->st.active = false;
                     vo->st.stopping = false;
-                    if (vo->st.f != NULL) {
-                        fclose(vo->st.f);
-                        vo->st.f = NULL;
-                    }
-                    if (s_req_mutex != NULL) {
-                        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-                    }
-                    s_busy[v] = false;
-                    if (s_req_mutex != NULL) {
-                        xSemaphoreGive(s_req_mutex);
-                    }
+                    voice_close(&vo->st);
                 }
             }
-            if (play) {
+            if (play && !inhibited) {
+                vo->mix_generation = generation;
                 vo->st.stopping = false;
                 vo->st.rate_permille = rate;
-                if (voice_start(&vo->st, path, loop, volume) != ESP_OK) {
-                    /* The voice never became active (open/format error). Release
-                     * its allocator slot so a missing/corrupt WAV cannot leak a
-                     * voice forever (REV-A1). */
-                    if (s_req_mutex != NULL) {
-                        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-                    }
-                    s_busy[v] = false;
-                    if (s_req_mutex != NULL) {
-                        xSemaphoreGive(s_req_mutex);
-                    }
-                }
+                (void)voice_start(&vo->st, path, loop, volume);
             } else if (vo->st.active) {
                 vo->st.rate_permille = rate; /* live rate updates */
             }
-        }
-
-        memset(mix, 0, sizeof(mix));
-        for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
-            voice_state_t *st = &s_voice[v].st;
-            if (!st->active) {
-                continue;
-            }
-            (void)voice_fill(st, mix, MIX_BLOCK);
-            if (!st->active) {
-                /* Voice finished on its own; free its allocator slot. */
-                if (s_req_mutex != NULL) {
-                    xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-                }
-                s_busy[v] = false;
-                if (s_req_mutex != NULL) {
-                    xSemaphoreGive(s_req_mutex);
+            if (vo->st.active) { (void)voice_fill(&vo->st, mix, MIX_BLOCK); }
+            if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+            vo->file_open = vo->st.f != NULL;
+            vo->published_active = vo->st.active;
+            vo->published_position = vo->st.played;
+            /* EOF/failed open must not free or publish over a newer request. */
+            if (vo->generation == generation && !vo->req_play && !vo->req_stop &&
+                (play || stop || vo->mix_generation == generation)) {
+                if (!vo->st.active) {
+                    s_busy[v] = false;
+                    vo->state = AUDIO_VOICE_FINISHED;
+                } else if (!stop) {
+                    vo->state = AUDIO_VOICE_PLAYING;
                 }
             }
+            if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
         }
+        if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+        s_mixer_work = false;
+        if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
         size_t written = 0;
         (void)i2s_channel_write(s_tx, mix, sizeof(mix), &written, pdMS_TO_TICKS(1000));
         iters++;
     }
 }
 
-esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t volume)
+static uint32_t next_generation(voice_t *vo)
 {
-    if (voice >= AUDIO_MAX_VOICES || path == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
+    if (++vo->generation == 0) { ++vo->generation; }
+    return vo->generation;
+}
+
+static esp_err_t queue_play(uint8_t voice, const char *path, bool loop, uint8_t volume,
+                           audio_voice_handle_t *out)
+{
+    if (s_inhibited) { return ESP_ERR_INVALID_STATE; }
     voice_t *vo = &s_voice[voice];
-    if (s_req_mutex != NULL) {
-        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-    }
-    strncpy(vo->req_path, path, sizeof(vo->req_path) - 1);
-    vo->req_path[sizeof(vo->req_path) - 1] = '\0';
+    memcpy(vo->req_path, path, strlen(path) + 1);
     vo->req_loop = loop;
     vo->req_volume = volume > 100U ? 100U : volume;
     vo->req_play = true;
     vo->req_stop = false;
+    s_busy[voice] = true;
+    vo->state = AUDIO_VOICE_PENDING;
+    next_generation(vo);
+    if (out != NULL) { *out = (audio_voice_handle_t){voice, vo->generation}; }
+    return ESP_OK;
+}
+
+esp_err_t audio_voice_play_generation(uint8_t voice, const char *path, bool loop,
+                                      uint8_t volume, audio_voice_handle_t *out)
+{
+    if (voice >= AUDIO_MAX_VOICES || path == NULL || strlen(path) >= AUDIO_PATH_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_req_mutex != NULL) {
+        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+    }
+    esp_err_t err = queue_play(voice, path, loop, volume, out);
     if (s_req_mutex != NULL) {
         xSemaphoreGive(s_req_mutex);
     }
-    return ESP_OK;
+    return err;
+}
+
+esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t volume)
+{
+    return audio_voice_play_generation(voice, path, loop, volume, NULL);
 }
 
 esp_err_t audio_voice_stop(uint8_t voice)
@@ -551,6 +570,7 @@ esp_err_t audio_voice_stop(uint8_t voice)
     }
     vo->req_play = false;
     vo->req_stop = true;
+    vo->state = AUDIO_VOICE_FINISHED;
     if (s_req_mutex != NULL) {
         xSemaphoreGive(s_req_mutex);
     }
@@ -585,7 +605,10 @@ bool audio_voice_is_active(uint8_t voice)
     if (voice >= AUDIO_MAX_VOICES) {
         return false;
     }
-    return s_voice[voice].st.active;
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    bool active = s_voice[voice].published_active;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return active;
 }
 
 uint32_t audio_voice_position(uint8_t voice)
@@ -593,7 +616,10 @@ uint32_t audio_voice_position(uint8_t voice)
     if (voice >= AUDIO_MAX_VOICES) {
         return 0U;
     }
-    return s_voice[voice].st.played;
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    uint32_t played = s_voice[voice].published_position;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return played;
 }
 
 uint8_t audio_voice_alloc(void)
@@ -602,9 +628,11 @@ uint8_t audio_voice_alloc(void)
     if (s_req_mutex != NULL) {
         xSemaphoreTake(s_req_mutex, portMAX_DELAY);
     }
-    for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
-        if (!s_busy[v]) {
+    for (int v = 0; !s_inhibited && v < AUDIO_DYNAMIC_VOICES; ++v) {
+        if (!s_busy[v] && !s_voice[v].file_open && !s_voice[v].req_play &&
+            !s_voice[v].req_stop) {
             s_busy[v] = true;
+            next_generation(&s_voice[v]);
             found = (uint8_t)v;
             break;
         }
@@ -624,10 +652,109 @@ void audio_voice_release(uint8_t voice)
         xSemaphoreTake(s_req_mutex, portMAX_DELAY);
     }
     s_busy[voice] = false;
+    s_voice[voice].req_play = false;
+    s_voice[voice].req_stop = true;
+    s_voice[voice].state = AUDIO_VOICE_FINISHED;
+    next_generation(&s_voice[voice]);
     if (s_req_mutex != NULL) {
         xSemaphoreGive(s_req_mutex);
     }
-    (void)audio_voice_stop(voice);
+}
+
+esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out)
+{
+    if (out == NULL) { return ESP_ERR_INVALID_ARG; }
+    *out = (audio_voice_handle_t){AUDIO_VOICE_NONE, 0};
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    esp_err_t err = s_inhibited ? ESP_ERR_INVALID_STATE : ESP_ERR_NO_MEM;
+    for (int v = 0; !s_inhibited && v < AUDIO_DYNAMIC_VOICES; ++v) {
+        voice_t *vo = &s_voice[v];
+        if (!s_busy[v] && !vo->file_open && !vo->req_play && !vo->req_stop) {
+            s_busy[v] = true;
+            *out = (audio_voice_handle_t){(uint8_t)v, next_generation(vo)};
+            err = ESP_OK;
+            break;
+        }
+    }
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return err;
+}
+
+esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
+                                bool loop, uint8_t volume)
+{
+    if (handle == NULL || handle->voice >= AUDIO_DYNAMIC_VOICES || path == NULL ||
+        strlen(path) >= AUDIO_PATH_MAX) { return ESP_ERR_INVALID_ARG; }
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    uint8_t v = handle->voice;
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (s_busy[v] && s_voice[v].generation == handle->generation) {
+        err = queue_play(v, path, loop, volume, handle);
+    }
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return err;
+}
+
+void audio_voice_release_owned(audio_voice_handle_t handle)
+{
+    if (handle.voice >= AUDIO_DYNAMIC_VOICES) { return; }
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    voice_t *vo = &s_voice[handle.voice];
+    if (vo->generation == handle.generation) {
+        s_busy[handle.voice] = false;
+        vo->req_play = false;
+        vo->req_stop = true;
+        vo->state = AUDIO_VOICE_FINISHED;
+        next_generation(vo);
+    }
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+}
+
+audio_voice_state_t audio_voice_get_state(audio_voice_handle_t handle)
+{
+    if (handle.voice >= AUDIO_MAX_VOICES) { return AUDIO_VOICE_FINISHED; }
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    voice_t *vo = &s_voice[handle.voice];
+    audio_voice_state_t state = vo->generation == handle.generation ? vo->state :
+                               AUDIO_VOICE_FINISHED;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return state;
+}
+
+esp_err_t audio_set_inhibited(bool inhibited)
+{
+    if (s_req_mutex == NULL) { return ESP_ERR_INVALID_STATE; }
+    /* Never let maintenance wait unboundedly for slow filesystem I/O. */
+    if (xSemaphoreTake(s_req_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    s_inhibited = inhibited;
+    if (inhibited) {
+        for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
+            s_voice[v].req_play = false;
+            s_voice[v].req_stop = true;
+            s_voice[v].state = AUDIO_VOICE_FINISHED;
+            s_busy[v] = false;
+            next_generation(&s_voice[v]);
+        }
+    }
+    xSemaphoreGive(s_req_mutex);
+    return ESP_OK;
+}
+
+bool audio_is_quiescent(void)
+{
+    if (s_req_mutex == NULL) {
+        return !s_initialized && !s_mixer_work && s_validate_work == 0;
+    }
+    if (xSemaphoreTake(s_req_mutex, 0) != pdTRUE) { return false; }
+    bool quiet = !s_mixer_work && s_validate_work == 0;
+    for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
+        voice_t *vo = &s_voice[v];
+        if (vo->file_open || vo->req_play || vo->req_stop) { quiet = false; break; }
+    }
+    xSemaphoreGive(s_req_mutex);
+    return quiet;
 }
 
 void audio_set_volume(uint8_t vol)
@@ -645,12 +772,16 @@ uint8_t audio_get_volume(void)
 
 bool audio_is_playing(void)
 {
+    bool playing = false;
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
     for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
-        if (s_voice[v].st.active) {
-            return true;
+        if (s_voice[v].published_active) {
+            playing = true;
+            break;
         }
     }
-    return false;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return playing;
 }
 
 esp_err_t audio_play(const char *path)

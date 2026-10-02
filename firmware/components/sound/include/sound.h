@@ -17,6 +17,10 @@ esp_err_t sound_init(void);
 
 /* Emergency stop: silence every sound and reset the engine state. */
 void sound_stop_all(void);
+/* Reset/stop old runtime and reject new runtime requests while inhibited.
+ * Release does not resurrect engine/keys; sync-motion needs a new speed edge.
+ * Pair with audio inhibition and bounded audio_is_quiescent() before format. */
+esp_err_t sound_set_inhibited(bool inhibited);
 bool sound_engine_is_on(void);
 
 /* Scheme / table / extra access.

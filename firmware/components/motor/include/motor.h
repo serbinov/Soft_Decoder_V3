@@ -18,6 +18,23 @@ void motor_stop(void);
  * motor task is stuck. Use for resets / emergency stops instead of motor_stop()
  * when the stop must not depend on the motor task running. */
 void motor_emergency_stop(void);
+/* Persistent startup/maintenance gate. Boot defaults to inhibited. Setting
+ * true immediately coasts, clears the command and cancels calibration without
+ * waiting for the control task. Release only after safety is ready; false never
+ * restores an old command. Nonzero speed/calibration requests are rejected. */
+esp_err_t motor_set_inhibited(bool inhibited);
+typedef enum {
+    MOTOR_INHIBIT_CONTROL = 1U,
+    MOTOR_INHIBIT_SAFETY = 2U,
+    MOTOR_INHIBIT_DCC_TIMEOUT = 4U,
+} motor_inhibit_reason_t;
+/* Independent owners cannot clear another owner's inhibit. */
+esp_err_t motor_set_inhibit_reason(motor_inhibit_reason_t reason, bool inhibited);
+/* Also reports the motor-owned feedback fault: closed-loop feedback loss holds
+ * non-increasing duty for at most 100 ms, then coasts and rejects nonzero
+ * commands. Only speed=0 or explicit BEMF disable clears that fault; neither
+ * clears CONTROL, SAFETY or DCC_TIMEOUT. */
+bool motor_is_inhibited(void);
 /* Timestamp (us) of the last completed motor tick (0 before the first tick). */
 int64_t motor_last_tick_us(void);
 void motor_get_status(uint8_t *out_speed128, bool *out_forward);
@@ -26,7 +43,8 @@ void motor_get_status(uint8_t *out_speed128, bool *out_forward);
 void motor_get_applied_speed(uint8_t *out_speed128, bool *out_forward);
 
 /* Rail sense voltage (divider mV) fed by the track task; used for the BEMF
- * speed target and freewheel-clamp rejection. */
+ * speed target and freewheel-clamp rejection. Closed-loop/calibration accepts
+ * only adequate publications younger than 100 ms. */
 esp_err_t motor_set_rail_voltage_mv(uint32_t rail_mv);
 
 /* Serialize ADC1 between the track task (rail sense) and the motor task
@@ -71,6 +89,11 @@ esp_err_t motor_bemf_cal_reload(void);
  * settings_bemf_use_save(). */
 void motor_set_bemf_enabled(bool enabled);
 bool motor_get_bemf_enabled(void);
+/* Measurement acceptance ceiling, fraction of rail x1024 (82..1024). Default
+ * is the existing 85% rail-clamp heuristic, not a physical freewheel detector.
+ * Targets never exceed this ceiling; increase only from measured hardware data.
+ * Runtime-only: caller owns persistence if a setting is exposed. */
+esp_err_t motor_set_bemf_max_fraction(uint16_t fraction1024);
 
 /* Raw BEMF measurement diagnostics for debugging the calibration / PID. */
 typedef struct {
@@ -94,6 +117,7 @@ void motor_bemf_diag(motor_bemf_diag_t *d);
 
 /* Direct raw ADC read of the BEMF and rail sense pins (diagnostics). */
 void motor_bemf_adc_dump(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw);
+esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw);
 /* Force a coast window and read the BEMF terminals in mV (diagnostics). */
 void motor_bemf_coast_read(uint16_t *b1_mv, uint16_t *b2_mv);
 

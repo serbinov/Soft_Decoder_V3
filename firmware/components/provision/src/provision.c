@@ -1,6 +1,7 @@
 #include "provision.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -26,6 +27,7 @@
 #include "sound.h"
 
 static const char *TAG = "prov";
+static const esp_partition_t *s_pending_boot;
 
 #define NVS_NAMESPACE    "decoder"
 #define NVS_KEY_PROV     "prov"
@@ -41,9 +43,13 @@ static const char *TAG = "prov";
 
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
 #define PROV_MKDIR(p) _mkdir(p)
+#define PROV_FSYNC(f) _commit(_fileno(f))
 #else
+#include <unistd.h>
 #define PROV_MKDIR(p) mkdir((p), 0755)
+#define PROV_FSYNC(f) fsync(fileno(f))
 #endif
 
 /* Overridable so host tests can inject a write failure. */
@@ -306,8 +312,13 @@ static void handle_bemf_cmd(const char *line)
     }
     if (strcmp(line, "BEMF-ADC") == 0) {
         uint16_t b1 = 0, b2 = 0, rail = 0;
-        motor_bemf_adc_dump(&b1, &b2, &rail);
         char buf[96];
+        esp_err_t err = motor_bemf_adc_dump_checked(&b1, &b2, &rail);
+        if (err != ESP_OK) {
+            snprintf(buf, sizeof(buf), "BEMF-ADC-ERR %s", esp_err_to_name(err));
+            send_line(buf);
+            return;
+        }
         snprintf(buf, sizeof(buf), "BEMF-ADC %u %u %u", (unsigned)b1, (unsigned)b2,
                  (unsigned)rail);
         send_line(buf);
@@ -483,18 +494,13 @@ static esp_err_t provision_fw(const char *cmd)
         send_line("FW-ERR end");
         return err;
     }
-    err = esp_ota_set_boot_partition(update);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "provision: FW set boot %s", esp_err_to_name(err));
-        send_line("FW-ERR boot");
-        return err;
-    }
-    ESP_LOGW(TAG, "Firmware OTA received (%ld bytes), will boot it after DONE", size);
+    s_pending_boot = update;
+    ESP_LOGW(TAG, "Firmware OTA received (%ld bytes), boot selection deferred to DONE", size);
     return ESP_OK;
 }
 
 /* Returns true only when the session completed and the restart was issued. */
-static bool provision_run(void)
+static bool provision_transfer(bool *maintenance_started)
 {
     /* Destructive step ahead (erase + format of the external NOR): require an
      * explicit confirmation so a stray "PROV" line cannot wipe the sounds. */
@@ -516,26 +522,21 @@ static bool provision_run(void)
         return false;
     }
 
+    esp_err_t err = web_maintenance_begin(true);
+    if (err != ESP_OK) {
+        send_line("PROV-ERR busy");
+        return false;
+    }
+    *maintenance_started = true;
+    s_pending_boot = NULL;
     send_line("PROV-OK");
 
     /* Both sides switch to the fast baud for the bulk transfer. */
     uart_flush_input(UART_NUM_0);
     (void)uart_set_baudrate(UART_NUM_0, PROV_BAUD);
 
-    /* Erase the external NOR and remount a fresh LittleFS (clears old data).
-     * First make sure nothing is using the filesystem: stop the motor and the
-     * audio mixer (which holds open files), then refuse if a web upload/OTA is
-     * still writing. Formatting under an active writer would use-after-free the
-     * LittleFS state. */
-    motor_emergency_stop();
-    audio_stop_all();
-    vTaskDelay(pdMS_TO_TICKS(100));
-    if (web_fs_busy()) {
-        ESP_LOGW(TAG, "provision: web transfer in progress, aborting");
-        send_line("PROV-ERR busy");
-        return false;
-    }
-    esp_err_t err = storage_format();
+    /* Admission is closed and all file holders acknowledged quiescence. */
+    err = storage_format();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "provision: external NOR unavailable, aborting");
         send_line("PROV-ERR storage");
@@ -616,7 +617,12 @@ static bool provision_run(void)
             }
         }
         free(buf);
-        fclose(f);
+        bool written = fflush(f) == 0 && PROV_FSYNC(f) == 0;
+        if (fclose(f) != 0) { written = false; }
+        if (!written) {
+            send_line("PROV-ERR write");
+            return false;
+        }
 
         if (tcount < SETTINGS_MAX_TRACKS) {
             tracks[tcount].slot = (uint8_t)slot;
@@ -630,8 +636,25 @@ static bool provision_run(void)
         send_line("FILE-OK");
     }
 
-    if (tcount > 0) {
-        (void)settings_tracks_save(tracks, tcount);
+    /* Formatting is finished. Reopen filesystem leases for validation and
+     * metadata backup, while command/audio admission stays closed. */
+    storage_maintenance_end();
+    for (size_t i = 0; i < tcount; ++i) {
+        char path[160];
+        snprintf(path, sizeof(path), "%s/%s", storage_get_root(), tracks[i].file);
+        if (audio_validate_wav(path) != ESP_OK) {
+            send_line("PROV-ERR wav");
+            return false;
+        }
+    }
+    err = settings_tracks_save(tracks, tcount);
+    if (err != ESP_OK) {
+        send_line("PROV-ERR metadata");
+        return false;
+    }
+    if (s_pending_boot != NULL && esp_ota_set_boot_partition(s_pending_boot) != ESP_OK) {
+        send_line("FW-ERR boot");
+        return false;
     }
     send_line("DONE-OK");
     ESP_LOGW(TAG, "Provisioning complete (%u tracks), restarting", (unsigned)tcount);
@@ -639,6 +662,19 @@ static bool provision_run(void)
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     return true;
+}
+
+static bool provision_run(void)
+{
+    bool maintenance_started = false;
+    bool result = provision_transfer(&maintenance_started);
+    if (maintenance_started) {
+        web_maintenance_end();
+        (void)uart_set_baudrate(UART_NUM_0, 115200);
+    }
+    s_pending_boot = NULL;
+    s_provisioning = false;
+    return result;
 }
 
 bool provision_try(void)

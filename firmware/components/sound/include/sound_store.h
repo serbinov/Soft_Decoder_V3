@@ -21,6 +21,8 @@
 
 /* Fill `out` with the disabled default scheme (type NONE, start key F1). */
 esp_err_t sound_store_default(sound_scheme_t *out);
+/* Validate byte representations before reading bools or bounded strings. */
+esp_err_t sound_store_validate(const sound_scheme_t *scheme);
 
 /* On any header/size/CRC mismatch the loader fills `out` with the default
  * scheme and returns a non-OK error. */

@@ -7,10 +7,12 @@
  *
  * Format (text, one record per line, ';'-separated; file/label are last so a
  * label may contain spaces). Version 1 carries only tracks + the legacy
- * function map; version 2 adds the canonical function bindings. A v1 file is
+ * function map; version 2 adds canonical bindings; version 3 adds explicit
+ * track/binding counts (0 = intentionally empty, -1 = missing). A v1 file is
  * read fine (unknown records are ignored) and an old parser would skip the
  * new 'B;' records, so v1/v2 are mutually backwards compatible:
- *   AURA-TRACKS 2
+ *   AURA-TRACKS 3
+ *   C;<tracks_count>;<bindings_count>
  *   T;<slot>;<cat>;<enabled>;<file>;<label>
  *   F;<idx>;<slot_a>;<slot_b>;<aux_mask>;<dir>;<speed>
  *   B;<idx>;<fn>;<type>;<id>;<dir>;<state>;<mode>;<flags>;<short_table>;<short_ms>;<min_ms>;<fade_ms>
@@ -21,8 +23,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#if defined(_WIN32) && !defined(ESP_PLATFORM)
+#include <windows.h>
+#endif
 
 #include "esp_log.h"
+#include "storage.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "manifest";
 
@@ -31,7 +40,7 @@ static const char *TAG = "manifest";
 #endif
 #define MANIFEST_PATH    MANIFEST_DIR "/tracks.txt"
 #define MANIFEST_MAGIC   "AURA-TRACKS"
-#define MANIFEST_VERSION 2
+#define MANIFEST_VERSION 3
 #define MANIFEST_LINE_MAX 256
 
 /* The manifest read/write workspaces are several kilobytes (tracks + cats +
@@ -48,6 +57,48 @@ typedef struct {
 /* Set while restoring from the manifest so the NVS writes it performs do not
  * immediately rewrite the file being read. */
 static bool s_manifest_loading;
+static portMUX_TYPE s_manifest_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t s_manifest_owner;
+
+bool settings_manifest_write_allowed(void)
+{
+    TaskHandle_t caller = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_manifest_mux);
+    bool allowed = !s_manifest_loading || s_manifest_owner == caller;
+    portEXIT_CRITICAL(&s_manifest_mux);
+    return allowed;
+}
+
+static esp_err_t manifest_begin(bool loading)
+{
+    TaskHandle_t caller = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_manifest_mux);
+    if (s_manifest_owner != NULL) {
+        bool restoring_here = s_manifest_loading && s_manifest_owner == caller && !loading;
+        portEXIT_CRITICAL(&s_manifest_mux);
+        return restoring_here ? ESP_ERR_NOT_FOUND : ESP_ERR_TIMEOUT;
+    }
+    s_manifest_owner = caller;
+    s_manifest_loading = loading;
+    portEXIT_CRITICAL(&s_manifest_mux);
+    esp_err_t err = storage_access_begin();
+    if (err != ESP_OK) {
+        portENTER_CRITICAL(&s_manifest_mux);
+        s_manifest_owner = NULL;
+        s_manifest_loading = false;
+        portEXIT_CRITICAL(&s_manifest_mux);
+    }
+    return err;
+}
+
+static void manifest_end(void)
+{
+    storage_access_end();
+    portENTER_CRITICAL(&s_manifest_mux);
+    s_manifest_owner = NULL;
+    s_manifest_loading = false;
+    portEXIT_CRITICAL(&s_manifest_mux);
+}
 
 static void sanitize_field(char *s)
 {
@@ -75,28 +126,30 @@ static int split_semicolon(char *line, char *fields[], int max)
     return n;
 }
 
-esp_err_t settings_manifest_sync(void)
+static esp_err_t manifest_sync_owned(void)
 {
-    if (s_manifest_loading) {
-        return ESP_OK;
-    }
-
     manifest_ws_t *ws = malloc(sizeof(*ws));
     if (ws == NULL) {
         return ESP_ERR_NO_MEM;
     }
 
     size_t tcount = 0;
-    (void)settings_tracks_load(ws->tracks, &tcount);
+    esp_err_t err = settings_tracks_load(ws->tracks, &tcount);
+    bool tracks_present = err == ESP_OK;
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) { free(ws); return err; }
 
     size_t ccount = 0;
-    (void)settings_track_cats_load(ws->cats, &ccount);
+    err = settings_track_cats_load(ws->cats, &ccount);
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) { free(ws); return err; }
 
     size_t fcount = 0;
-    (void)settings_func_map_load(ws->fmap, &fcount);
+    err = settings_func_map_load(ws->fmap, &fcount);
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) { free(ws); return err; }
 
     size_t bcount = 0;
-    (void)settings_func_bind_load(ws->binds, &bcount);
+    err = settings_func_bind_load(ws->binds, &bcount);
+    bool bindings_present = err == ESP_OK;
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) { free(ws); return err; }
 
     /* Write to a temp file and rename it over the real manifest: fopen("w")
      * truncates the live file, so a reset or power loss mid-write would leave a
@@ -110,6 +163,9 @@ esp_err_t settings_manifest_sync(void)
     }
 
     bool ok = fprintf(f, "%s %d\n", MANIFEST_MAGIC, MANIFEST_VERSION) >= 0;
+    /* v3 declares emptiness explicitly; v1/v2 without T/B remain legacy-missing. */
+    ok = ok && fprintf(f, "C;%d;%d\n", tracks_present ? (int)tcount : -1,
+                        bindings_present ? (int)bcount : -1) >= 0;
 
     for (size_t i = 0; i < tcount && i < SETTINGS_MAX_TRACKS; ++i) {
         char file[SETTINGS_TRACK_FILE_MAX];
@@ -146,14 +202,36 @@ esp_err_t settings_manifest_sync(void)
     free(ws);
     if (!ok || rc_flush != 0 || rc_sync != 0 || rc_close != 0) { (void)remove(tmp); return ESP_FAIL; }
     if (rename(tmp, MANIFEST_PATH) != 0) {
-        /* Windows rename() refuses to replace an existing file. */
-        (void)remove(MANIFEST_PATH);
-        if (rename(tmp, MANIFEST_PATH) != 0) { (void)remove(tmp); return ESP_FAIL; }
+        /* LittleFS rename replaces atomically. Never unlink the valid live
+         * copy on any target failure. Windows uses its host-only replace API. */
+#if defined(_WIN32) && !defined(ESP_PLATFORM)
+        if (!MoveFileExA(tmp, MANIFEST_PATH, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return ESP_FAIL;
+#else
+        return ESP_FAIL;
+#endif
     }
     return ESP_OK;
 }
 
-esp_err_t settings_manifest_load(void)
+esp_err_t settings_manifest_sync(void)
+{
+    esp_err_t err = manifest_begin(false);
+    if (err == ESP_ERR_NOT_FOUND) return ESP_OK; /* same-task restore setter */
+    if (err != ESP_OK) { settings_manifest_result(err); return err; }
+    bool recovering = false;
+    err = settings_recovery_pending(&recovering);
+    if (err == ESP_OK && recovering) err = ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) err = settings_metadata_lock();
+    if (err == ESP_OK) {
+        err = manifest_sync_owned();
+        settings_manifest_result(err);
+        settings_metadata_unlock();
+    } else settings_manifest_result(err);
+    manifest_end();
+    return err;
+}
+
+static esp_err_t manifest_load_owned(void)
 {
     FILE *f = fopen(MANIFEST_PATH, "r");
     if (f == NULL) {
@@ -173,11 +251,15 @@ esp_err_t settings_manifest_load(void)
         ws->cats[i] = (uint8_t)SETTINGS_TRACK_CAT_DEFAULT_SLOT((uint8_t)(i + 1U));
     }
     size_t fcount = 0;
-    (void)settings_func_map_load(ws->fmap, &fcount); /* defaults + overrides below */
+    esp_err_t map_err = settings_func_map_load(ws->fmap, &fcount); /* defaults + overrides below */
+    if (map_err != ESP_OK && map_err != ESP_ERR_NOT_FOUND) { free(ws); (void)fclose(f); return map_err; }
     size_t bcount = 0;
     bool have_fmap = false;
     bool have_bind = false;
     bool magic = false;
+    bool declared = false;
+    int declared_tracks = -1;
+    int declared_bindings = -1;
 
     char line[MANIFEST_LINE_MAX];
     while (fgets(line, sizeof(line), f) != NULL) {
@@ -185,7 +267,8 @@ esp_err_t settings_manifest_load(void)
         if (line[0] == '\0') {
             continue;
         }
-        if (strncmp(line, MANIFEST_MAGIC, strlen(MANIFEST_MAGIC)) == 0) {
+        unsigned version = 0;
+        if (sscanf(line, MANIFEST_MAGIC " %u", &version) == 1 && version >= 1U && version <= MANIFEST_VERSION) {
             magic = true;
             continue;
         }
@@ -194,7 +277,11 @@ esp_err_t settings_manifest_load(void)
         if (n < 2) {
             continue;
         }
-        if (fields[0][0] == 'T' && fields[0][1] == '\0' && n >= 6) {
+        if (strcmp(fields[0], "C") == 0 && n == 3) {
+            declared_tracks = (int)strtol(fields[1], NULL, 10);
+            declared_bindings = (int)strtol(fields[2], NULL, 10);
+            declared = true;
+        } else if (fields[0][0] == 'T' && fields[0][1] == '\0' && n >= 6) {
             unsigned slot = (unsigned)strtoul(fields[1], NULL, 10);
             if (slot < 1U || slot > SETTINGS_MAX_TRACKS || tcount >= SETTINGS_MAX_TRACKS) {
                 continue;
@@ -240,27 +327,34 @@ esp_err_t settings_manifest_load(void)
             have_bind = true;
         }
     }
-    (void)fclose(f);
+    bool read_error = ferror(f) != 0;
+    int close_error = fclose(f);
+    if (read_error || close_error != 0) { free(ws); return ESP_FAIL; }
 
     if (!magic) {
         free(ws);
         return ESP_ERR_NOT_FOUND;
     }
 
-    s_manifest_loading = true;
-    if (tcount > 0U) {
-        (void)settings_tracks_save(ws->tracks, tcount);
-        (void)settings_track_cats_save(ws->cats, SETTINGS_MAX_TRACKS);
+    if (declared && (declared_tracks < -1 || declared_tracks > SETTINGS_MAX_TRACKS ||
+        (declared_tracks >= 0 && (size_t)declared_tracks != tcount) ||
+        (declared_tracks == -1 && tcount != 0U) ||
+        declared_bindings < -1 || declared_bindings > FUNC_BIND_MAX ||
+        (declared_bindings >= 0 && (size_t)declared_bindings != bcount))) {
+        free(ws);
+        return ESP_ERR_INVALID_SIZE;
     }
-    if (have_fmap) {
-        (void)settings_func_map_save(ws->fmap, SETTINGS_FUNC_MAP_COUNT);
-    }
-    if (have_bind) {
-        (void)settings_func_bind_save(ws->binds, bcount);
-    }
-    s_manifest_loading = false;
+    have_bind = have_bind || (declared && declared_bindings == 0);
+    esp_err_t err = settings_recovery_set_pending(true);
+    bool have_tracks = tcount > 0U || (declared && declared_tracks >= 0);
+    if (err == ESP_OK && have_tracks) err = settings_tracks_save(ws->tracks, tcount);
+    if (err == ESP_OK && have_tracks) err = settings_track_cats_save(ws->cats, SETTINGS_MAX_TRACKS);
+    if (err == ESP_OK && have_fmap) err = settings_func_map_save(ws->fmap, SETTINGS_FUNC_MAP_COUNT);
+    if (err == ESP_OK && have_bind) err = settings_func_bind_save(ws->binds, bcount);
+    if (err == ESP_OK) err = settings_recovery_set_pending(false);
+    if (err != ESP_OK) { settings_manifest_dirty(); free(ws); return err; }
 
-    if (tcount == 0U) {
+    if (!have_tracks) {
         /* No track records, but the F;/B; metadata was still restored above.
          * Report NOT_FOUND so the caller rebuilds the track list from the audio
          * files without losing the function map/bindings (REV-ST1). */
@@ -274,4 +368,19 @@ esp_err_t settings_manifest_load(void)
              MANIFEST_PATH);
     free(ws);
     return ESP_OK;
+}
+
+esp_err_t settings_manifest_load(void)
+{
+    esp_err_t err = manifest_begin(true);
+    if (err != ESP_OK) return err;
+    /* Admission barrier: an already-running setter must finish before restore;
+     * new competing setters see loading=true under their existing lock. */
+    err = settings_metadata_lock();
+    if (err == ESP_OK) {
+        settings_metadata_unlock();
+        err = manifest_load_owned();
+    }
+    manifest_end();
+    return err;
 }

@@ -225,6 +225,48 @@ static void test_ch_step_firebox_flicker_range(void)
     TEST_ASSERT_EQUAL_UINT8(0, ch->cur);
 }
 
+static void test_incandescent_scales_brightness_once(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->mode = AUXIO_EFFECT_INCANDESCENT;
+    ch->pwm_on = 128;
+    ch->enabled = true;
+    uint8_t duty = 0;
+    for (unsigned i = 0; i < 20; ++i) {
+        duty = ch_step(ch, 0, i * 20U);
+    }
+    TEST_ASSERT_EQUAL_UINT8(255, ch->cur);
+    TEST_ASSERT_EQUAL_UINT8(128, duty);
+    ch->enabled = false;
+    for (unsigned i = 0; i < 30; ++i) {
+        duty = ch_step(ch, 0, 400U + i * 20U);
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, duty);
+}
+
+static void test_firebox_initializes_at_large_uptime_and_wraps(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->mode = AUXIO_EFFECT_FIREBOX;
+    ch->pwm_on = 200;
+    ch->enabled = true;
+    uint32_t now = 0x90000000U;
+    TEST_ASSERT_TRUE(ch_step(ch, 0, now) >= 80U);
+    TEST_ASSERT_TRUE(ch->fx_scheduled);
+    now = UINT32_MAX - 10U;
+    ch->fx_scheduled = false;
+    (void)ch_step(ch, 0, now);
+    uint32_t next = ch->fx_next_ms;
+    TEST_ASSERT_TRUE((uint32_t)(next - now) <= 100U);
+    (void)ch_step(ch, 0, next);
+    TEST_ASSERT_TRUE(ch->fx_next_ms != next);
+    ch->enabled = false;
+    (void)ch_step(ch, 0, next);
+    TEST_ASSERT_FALSE(ch->fx_scheduled);
+    ch->enabled = true;
+    TEST_ASSERT_TRUE(ch_step(ch, 0, 0x90000000U) >= 80U);
+}
+
 /* ---- configuration API / validation ---- */
 
 static void test_auxio_set_output_applies_duty(void)
@@ -390,6 +432,8 @@ int main(void)
     RUN_TEST(test_ch_duty_short_period_falls_back_to_max);
     RUN_TEST(test_ch_step_incandescent_warm_and_cool);
     RUN_TEST(test_ch_step_firebox_flicker_range);
+    RUN_TEST(test_incandescent_scales_brightness_once);
+    RUN_TEST(test_firebox_initializes_at_large_uptime_and_wraps);
     RUN_TEST(test_auxio_set_output_applies_duty);
     RUN_TEST(test_auxio_set_enabled_validation);
     RUN_TEST(test_auxio_set_effect_validation);

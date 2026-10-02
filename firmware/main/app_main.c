@@ -10,6 +10,7 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -26,6 +27,10 @@
 #include "web.h"
 
 static const char *TAG = "soft_decoder";
+static QueueHandle_t s_safety_ready;
+static bool s_motor_stall_latched;
+static portMUX_TYPE s_safety_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_function_cleanup_requested;
 
 static void update_decoder_address(void)
 {
@@ -37,7 +42,7 @@ static void on_dcc_speed(uint8_t speed128, bool forward)
     if (track_is_dc_mode()) {
         return;
     }
-    if (web_control_is_rails()) {
+    if (web_control_rails_begin(NULL)) {
         /* Log every decoded speed change so the actual command received from
          * the throttle can be compared with what the motor does (only on a
          * change, so a refreshing command station does not flood the log). */
@@ -51,10 +56,13 @@ static void on_dcc_speed(uint8_t speed128, bool forward)
             ESP_LOGI(TAG, "DCC speed: %u %s", (unsigned)speed128,
                      forward ? "fwd" : "rev");
         }
-        (void)motor_set_speed(speed128, forward);
+        if (motor_set_speed(speed128, forward) == ESP_OK) {
+            track_note_dcc_motor_command();
         /* Re-evaluate the function direction/speed gates (web.c skips the
          * update when nothing actually changed). */
-        web_motion_changed(speed128, forward);
+            web_motion_changed(speed128, forward);
+        }
+        web_control_rails_end();
     }
 }
 
@@ -68,30 +76,33 @@ static void on_dcc_function(uint8_t fn, bool state)
     }
     /* Control source isolation: in web mode the DCC stream must not drive
      * functions/light/AUX — everything (including AUX) is web-controlled. */
-    if (!web_control_is_rails()) {
+    if (!web_control_rails_begin(NULL)) {
         return;
     }
     web_apply_function(fn, state);
+    web_control_rails_end();
 }
 
-static void on_dcc_cv_write(uint16_t cv, uint8_t value, bool service_mode)
+static esp_err_t on_dcc_cv_write(uint16_t cv, uint8_t value, bool service_mode)
 {
-    if (settings_cv_write(cv, value) == ESP_OK) {
-        /* Deferred: the flash commit happens in safety_task after the CVs have
-         * been stable, so this DCC callback (and service-mode programming) does
-         * not block the real-time task inside a flash program/erase. */
-        settings_cv_commit_deferred();
-        /* CV63 aliases the master volume: apply it live (updates the cached
-         * config + audio + persistence) so the next settings_save keeps it. */
-        if (cv == 63U) {
-            web_master_volume_changed((uint8_t)((uint16_t)value * 100U / 255U));
-        }
+    esp_err_t err = settings_cv_write(cv, value);
+    if (err != ESP_OK) {
+        return err;
+    }
+    /* Flash writes run in the persistence worker, never in the DCC callback. */
+    settings_cv_commit_deferred();
+    if (cv == 63U || (cv == 8U && value == 8U)) {
+        uint8_t volume = 0;
+        (void)settings_cv_read(63U, &volume);
+        web_master_volume_changed((uint8_t)((uint16_t)volume * 100U / 255U));
     }
     web_log_event("CV", "CV %u = %u (%s)", (unsigned)cv, (unsigned)value,
                   service_mode ? "сервис" : "DCC");
-    if (cv == 1 || cv == 17 || cv == 18 || cv == 19 || cv == 29) {
+    if (cv == 1 || cv == 8 || cv == 17 || cv == 18 || cv == 19 || cv == 21 ||
+        cv == 22 || cv == 29) {
         update_decoder_address();
     }
+    return ESP_OK;
 }
 
 static bool on_dcc_cv_read(uint16_t cv, uint8_t *out_value)
@@ -112,63 +123,146 @@ static void clear_functions(void)
 
 static void on_dcc_reset(void)
 {
-    if (!web_control_is_rails()) {
+    if (!web_control_rails_begin(NULL)) {
         return;
     }
     motor_emergency_stop();
+    track_note_dcc_motor_command();
     clear_functions();
     web_log_event("DCC", "сброс декодера (broadcast)");
     ESP_LOGI(TAG, "Decoder reset (broadcast)");
+    web_control_rails_end();
+}
+
+static void on_dcc_emergency_stop(void)
+{
+    if (!web_control_rails_begin(NULL)) {
+        return;
+    }
+    motor_emergency_stop();
+    track_note_dcc_motor_command();
+    web_motion_changed(0, true);
+    web_control_rails_end();
+}
+
+static void on_dcc_hard_reset(void)
+{
+    if (!web_control_rails_begin(NULL)) {
+        return;
+    }
+    if (settings_cv_hard_reset() == ESP_OK) {
+        update_decoder_address();
+    }
+    web_control_rails_end();
+}
+
+static bool dcc_packet_timed_out(int64_t now)
+{
+    if (!web_control_is_rails() || track_is_dc_mode()) {
+        return false;
+    }
+    uint8_t cv11 = 0;
+    (void)settings_cv_read(11, &cv11);
+    return cv11 != 0U && now - dcc_last_packet_us() > (int64_t)cv11 * 20000LL;
+}
+
+static void persistence_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        portENTER_CRITICAL(&s_safety_mux);
+        bool cleanup = s_function_cleanup_requested;
+        s_function_cleanup_requested = false;
+        bool stalled = s_motor_stall_latched;
+        portEXIT_CRITICAL(&s_safety_mux);
+        if (cleanup && (stalled || dcc_packet_timed_out(esp_timer_get_time()))) {
+            clear_functions();
+        }
+        esp_err_t err = settings_pending_flush();
+        if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "Settings flush deferred: %s", esp_err_to_name(err));
+        }
+    }
+}
+
+static void safety_step(bool *timeout_active)
+{
+    int64_t now = esp_timer_get_time();
+    int64_t tick = motor_last_tick_us();
+    if (!s_motor_stall_latched && (tick == 0 || now - tick > 200000LL)) {
+        portENTER_CRITICAL(&s_safety_mux);
+        s_motor_stall_latched = true;
+        s_function_cleanup_requested = true;
+        portEXIT_CRITICAL(&s_safety_mux);
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+        dcc_set_control_enabled(false);
+        ESP_LOGE(TAG, "Motor task stalled: output inhibited until restart");
+    }
+    bool timed_out = dcc_packet_timed_out(now);
+    if (timed_out != *timeout_active) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_DCC_TIMEOUT, timed_out);
+        if (timed_out) {
+            portENTER_CRITICAL(&s_safety_mux);
+            s_function_cleanup_requested = true;
+            portEXIT_CRITICAL(&s_safety_mux);
+            ESP_LOGW(TAG, "CV11 packet timeout: output inhibited");
+        }
+    }
+    *timeout_active = timed_out;
 }
 
 static void safety_task(void *arg)
 {
     (void)arg;
     bool timeout_active = false;
-    /* Subscribe to the task watchdog: if this loop ever wedges, the system
-     * reboots instead of leaving the motor bridge driven. The loop yields every
-     * 50 ms and commits settings/flashes CVs, so reset it here. */
-    (void)esp_task_wdt_add(NULL);
+    esp_err_t ready = esp_task_wdt_add(NULL);
+    int64_t deadline = esp_timer_get_time() + 2000000LL;
+    if (ready == ESP_OK) {
+        while (motor_last_tick_us() == 0 && esp_timer_get_time() < deadline) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            (void)esp_task_wdt_reset();
+        }
+        int64_t tick = motor_last_tick_us();
+        if (tick == 0 || esp_timer_get_time() - tick > 200000LL) {
+            ready = ESP_ERR_TIMEOUT;
+        }
+    }
+    if (ready != ESP_OK) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+    }
+    /* Queue remains allocated for the boot lifetime: a late worker may publish
+     * after the main task's readiness deadline without touching freed memory. */
+    (void)xQueueSend(s_safety_ready, &ready, 0);
+    if (ready != ESP_OK) {
+        (void)esp_task_wdt_delete(NULL);
+        vTaskDelete(NULL);
+        return;
+    }
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(50));
         (void)esp_task_wdt_reset();
-        int64_t now_ms = esp_timer_get_time();
-
-        /* Fail-safe: if the motor task has not completed a tick recently it is
-         * stuck (e.g. in a flash/NVS operation) and a normal motor_stop() would
-         * never be applied. Coast the bridge directly from here. */
-        int64_t motor_tick = motor_last_tick_us();
-        if (motor_tick != 0 && (now_ms - motor_tick) > 200000LL) {
-            ESP_LOGW(TAG, "Motor task stalled: emergency coast");
-            motor_emergency_stop();
-        }
-
-        /* Flush a staged (deferred) settings write once the UI has been idle,
-         * so slider drags do not each trigger a flash program/erase cycle. */
-        settings_pending_flush();
-
-        /* CV11 packet timeout: value x 20 ms without an addressed packet.
-         * Only applies while the rails (DCC) control the decoder — in web mode
-         * there may be no DCC stream at all, so a missing stream must not stop
-         * the web-controlled motor/functions. */
-        bool timed_out = false;
-        if (web_control_is_rails()) {
-            uint8_t cv11 = 0;
-            (void)settings_cv_read(11, &cv11);
-            if (cv11 != 0U) {
-                int64_t now = esp_timer_get_time();
-                timed_out = (now - dcc_last_packet_us()) > (int64_t)cv11 * 20000LL;
-            }
-        }
-        if (timed_out && !timeout_active) {
-            ESP_LOGW(TAG, "CV11 packet timeout: stop");
-            web_log_event("DCC", "таймаут пакетов: стоп");
-            motor_emergency_stop();
-            clear_functions();
-        }
-        timeout_active = timed_out;
+        safety_step(&timeout_active);
     }
+}
+
+static esp_err_t safety_start(void)
+{
+    s_safety_ready = xQueueCreate(1, sizeof(esp_err_t));
+    if (s_safety_ready == NULL ||
+        xTaskCreate(safety_task, "safety", 3072, NULL, 6, NULL) != pdPASS) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t ready = ESP_ERR_TIMEOUT;
+    if (xQueueReceive(s_safety_ready, &ready, pdMS_TO_TICKS(3000)) != pdTRUE) {
+        ready = ESP_ERR_TIMEOUT;
+    }
+    if (ready != ESP_OK) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+    }
+    return ready;
 }
 
 static void ensure_audio_dir(void)
@@ -182,6 +276,10 @@ static void recover_tracks_from_storage(void)
 {
     track_recover_result_t r;
     track_recover_from_storage("/userdata/audio", "/userdata", &r);
+    if (r.error != ESP_OK) {
+        ESP_LOGW(TAG, "Track recovery incomplete: %s (retry=%u)",
+                 esp_err_to_name(r.error), r.retry_pending ? 1U : 0U);
+    }
     if (r.had_nvs) {
         ESP_LOGI(TAG, "track list present in NVS (%u slots)", (unsigned)r.count);
     } else if (r.from_manifest) {
@@ -244,12 +342,6 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(dcc_init());
-    dcc_register_speed_cb(on_dcc_speed);
-    dcc_register_function_cb(on_dcc_function);
-    dcc_register_cv_write_cb(on_dcc_cv_write);
-    dcc_register_cv_read_cb(on_dcc_cv_read);
-    dcc_register_reset_cb(on_dcc_reset);
-    update_decoder_address();
 
     /* Restore manifest metadata BEFORE web_init(): web_init() caches the
      * categories and the function map in RAM, so recovering afterwards would
@@ -260,21 +352,48 @@ void app_main(void)
     {
         esp_err_t err = web_init();
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Web init failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Control consumers not ready: %s", esp_err_to_name(err));
+            (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+            return;
         }
     }
 
     {
         esp_err_t err = track_init();
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Track init failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Track init failed: %s", esp_err_to_name(err));
+            (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+            return;
         }
     }
 
-    if (xTaskCreate(safety_task, "safety", 3072, NULL, 6, NULL) != pdPASS) {
-        ESP_LOGW(TAG, "Safety task create failed");
+    if (xTaskCreate(persistence_task, "settings", 4096, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Persistence worker create failed");
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+        return;
     }
 
+    esp_err_t safety_err = safety_start();
+    if (safety_err != ESP_OK) {
+        ESP_LOGE(TAG, "Safety not ready: %s; motion and OTA confirmation denied",
+                 esp_err_to_name(safety_err));
+        return;
+    }
+    dcc_register_speed_cb(on_dcc_speed);
+    dcc_register_function_cb(on_dcc_function);
+    dcc_register_cv_write_cb(on_dcc_cv_write);
+    dcc_register_cv_read_cb(on_dcc_cv_read);
+    dcc_register_reset_cb(on_dcc_reset);
+    dcc_register_emergency_stop_cb(on_dcc_emergency_stop);
+    dcc_register_hard_reset_cb(on_dcc_hard_reset);
+    update_decoder_address();
+    esp_err_t ready_err = web_set_actuation_ready(true);
+    if (ready_err != ESP_OK) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+        ESP_LOGE(TAG, "Control admission failed: %s", esp_err_to_name(ready_err));
+        return;
+    }
+    dcc_set_control_enabled(true);
     provision_listener_start();
 
     /* OTA rollback guard: after esp_ota_set_boot_partition() the new image boots

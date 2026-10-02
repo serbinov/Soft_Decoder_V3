@@ -23,6 +23,7 @@ typedef struct {
     uint16_t period_ms;
     uint8_t cur;          /* current level for stateful effects */
     uint32_t fx_next_ms;  /* next change time for firebox flicker */
+    bool fx_scheduled;
     bool ledc;
     ledc_channel_t ledc_ch;
     mcpwm_cmpr_handle_t mcpwm_cmpr;
@@ -150,7 +151,7 @@ static uint8_t ch_step(auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
     uint8_t maxv = (hi > lo) ? hi : lo;
 
     if (ch->mode == AUXIO_EFFECT_INCANDESCENT) {
-        uint8_t target = ch->enabled ? maxv : 0U;
+        uint8_t target = ch->enabled ? 255U : 0U;
         uint8_t step_up = 24U;   /* ~200 ms warm-up */
         uint8_t step_dn = 12U;   /* ~400 ms cool-down */
         if (ch->cur < target) {
@@ -163,13 +164,15 @@ static uint8_t ch_step(auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
     } else if (ch->mode == AUXIO_EFFECT_FIREBOX) {
         if (!ch->enabled) {
             ch->cur = 0U;
-        } else if ((int32_t)(now_ms - ch->fx_next_ms) >= 0) {
+            ch->fx_scheduled = false;
+        } else if (!ch->fx_scheduled || (int32_t)(now_ms - ch->fx_next_ms) >= 0) {
             uint32_t floor40 = ((uint32_t)maxv * 40U) / 100U;
             uint32_t range = (uint32_t)maxv - floor40;
             uint32_t r = (now_ms * 1103515245U) + 12345U + (uint32_t)idx * 2654435761U;
             r ^= r >> 15;
             ch->cur = (uint8_t)(floor40 + (range ? (r % range) : 0U));
             ch->fx_next_ms = now_ms + 30U + (r % 71U);
+            ch->fx_scheduled = true;
         }
     } else {
         ch->cur = 0U;
@@ -330,6 +333,7 @@ esp_err_t auxio_set_output(uint8_t channel, bool enabled, uint8_t pwm)
     s_ch[channel].period_ms = 800;
     s_ch[channel].cur = 0;
     s_ch[channel].fx_next_ms = 0;
+    s_ch[channel].fx_scheduled = false;
     xSemaphoreGive(s_lock);
     return apply_now(channel);
 }
@@ -352,6 +356,7 @@ esp_err_t auxio_set_effect(uint8_t channel, bool enabled,
     s_ch[channel].period_ms = period_ms;
     s_ch[channel].cur = 0;
     s_ch[channel].fx_next_ms = 0;
+    s_ch[channel].fx_scheduled = false;
     xSemaphoreGive(s_lock);
     return apply_now(channel);
 }
@@ -385,6 +390,7 @@ esp_err_t auxio_config(uint8_t channel, uint8_t pwm_on, uint8_t pwm_off,
     s_ch[channel].period_ms = period_ms;
     s_ch[channel].cur = 0;
     s_ch[channel].fx_next_ms = 0;
+    s_ch[channel].fx_scheduled = false;
     xSemaphoreGive(s_lock);
     return apply_now(channel);
 }

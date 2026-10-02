@@ -3,6 +3,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
+static esp_err_t g_set_error;
+static esp_err_t g_commit_error;
+static unsigned g_set_calls;
+static unsigned g_commit_calls;
+static unsigned g_fail_at;
+static void (*g_blob_hook)(void);
+static void (*g_before_take_hook)(void);
+static unsigned g_lock_depth;
+static BaseType_t test_settings_take(SemaphoreHandle_t lock, TickType_t ticks);
+static BaseType_t test_settings_give(SemaphoreHandle_t lock);
+static esp_err_t test_set_u8(nvs_handle_t h, const char *key, uint8_t value);
+static esp_err_t test_set_u16(nvs_handle_t h, const char *key, uint16_t value);
+static esp_err_t test_set_str(nvs_handle_t h, const char *key, const char *value);
+static esp_err_t test_set_blob(nvs_handle_t h, const char *key, const void *value, size_t len);
+static esp_err_t test_commit(nvs_handle_t h);
+#define nvs_set_u8 test_set_u8
+#define nvs_set_u16 test_set_u16
+#define nvs_set_str test_set_str
+#define nvs_set_blob test_set_blob
+#define nvs_commit test_commit
+#define xSemaphoreTake test_settings_take
+#define xSemaphoreGive test_settings_give
 
 /* White-box include of the CV store (CRC + factory reset + read-only CVs).
  * Standard headers are pulled in before `static` is redefined so the test
@@ -11,14 +37,69 @@
 #define static
 #include "../../components/settings/src/settings.c"
 #undef static
+#undef nvs_set_u8
+#undef nvs_set_u16
+#undef nvs_set_str
+#undef nvs_set_blob
+#undef nvs_commit
+#undef xSemaphoreTake
+#undef xSemaphoreGive
 
 /* Host stubs for ESP-IDF services (nvs, freertos, ...). */
 #include "../../test_libs/teststubs/stubs.c"
+
+static BaseType_t test_settings_take(SemaphoreHandle_t lock, TickType_t ticks)
+{
+    if (g_before_take_hook != NULL) g_before_take_hook();
+    BaseType_t result = xSemaphoreTake(lock, ticks);
+    if (result == pdTRUE) ++g_lock_depth;
+    return result;
+}
+
+static BaseType_t test_settings_give(SemaphoreHandle_t lock)
+{
+    TEST_ASSERT_TRUE(g_lock_depth > 0U);
+    --g_lock_depth;
+    return xSemaphoreGive(lock);
+}
+
+static esp_err_t test_set_error(void)
+{
+    ++g_set_calls;
+    return g_set_error != ESP_OK && (g_fail_at == 0U || g_fail_at == g_set_calls) ? g_set_error : ESP_OK;
+}
+static esp_err_t test_set_u8(nvs_handle_t h, const char *key, uint8_t value)
+{
+    esp_err_t err = test_set_error();
+    return err == ESP_OK ? nvs_set_u8(h, key, value) : err;
+}
+static esp_err_t test_set_u16(nvs_handle_t h, const char *key, uint16_t value)
+{
+    esp_err_t err = test_set_error();
+    return err == ESP_OK ? nvs_set_u16(h, key, value) : err;
+}
+static esp_err_t test_set_str(nvs_handle_t h, const char *key, const char *value)
+{
+    esp_err_t err = test_set_error();
+    return err == ESP_OK ? nvs_set_str(h, key, value) : err;
+}
+static esp_err_t test_set_blob(nvs_handle_t h, const char *key, const void *value, size_t len)
+{
+    esp_err_t err = test_set_error();
+    if (g_blob_hook != NULL) g_blob_hook();
+    return err == ESP_OK ? nvs_set_blob(h, key, value, len) : err;
+}
+static esp_err_t test_commit(nvs_handle_t h)
+{
+    ++g_commit_calls;
+    return g_commit_error == ESP_OK ? nvs_commit(h) : g_commit_error;
+}
 
 /* settings.c calls the metadata-manifest sync on every save; the host build has
  * no VFS, so provide no-op stubs (the manifest itself is not under test here). */
 esp_err_t settings_manifest_sync(void) { return ESP_OK; }
 esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
+bool settings_manifest_write_allowed(void) { return true; }
 
 /* Guard against an out-of-band version bump: version.txt is the single source
  * of truth for the firmware version, and CV7 (decoder version) must match its
@@ -55,11 +136,31 @@ static void test_cv7_matches_version_txt(void)
 
 void setUp(void)
 {
+    mock_sem_take_fail = 0;
     mock_nvs_reset();
+    g_set_error = ESP_OK;
+    g_commit_error = ESP_OK;
+    g_set_calls = 0;
+    g_commit_calls = 0;
+    g_fail_at = 0;
+    g_blob_hook = NULL;
+    g_before_take_hook = NULL;
+    g_lock_depth = 0;
     mock_timer_now_us = 0;
     memset(&s_cv, 0, sizeof(s_cv));
     cv_set_defaults();
     s_lock = (SemaphoreHandle_t)1;
+    s_pending = false;
+    s_cv_pending = false;
+    s_manifest_pending = false;
+    s_pending_us = 0;
+    s_last_error = ESP_OK;
+    s_retries = 0;
+    s_cv_generation = 0;
+    s_cfg_valid = false;
+    s_ready = true;
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
 }
 
 void tearDown(void)
@@ -194,15 +295,16 @@ static void test_cv_commit_persists_blob_and_crc(void)
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(1, 42));
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_commit());
 
-    uint8_t blob[SETTINGS_CV_COUNT + 1];
+    uint8_t blob[CV_RECORD_SIZE];
     size_t len = sizeof(blob);
-    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_blob(s_h, "cv", blob, &len));
-    TEST_ASSERT_EQUAL_UINT32(sizeof(s_cv), (uint32_t)len);
-    TEST_ASSERT_EQUAL_UINT8(42, blob[1]);
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_blob(s_h, "cv_record", blob, &len));
+    TEST_ASSERT_EQUAL_UINT32(sizeof(blob), (uint32_t)len);
+    TEST_ASSERT_EQUAL_UINT8(42, blob[CV_RECORD_HEADER + 1U]);
 
     uint32_t crc = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u32(s_h, "cv_crc", &crc));
-    TEST_ASSERT_EQUAL_UINT32(cv_crc32(blob, len), crc);
+    for (unsigned i = 0; i < 4; ++i) crc |= (uint32_t)blob[sizeof(blob) - 4U + i] << (8U * i);
+    TEST_ASSERT_EQUAL_UINT32(record_crc32(blob, len - 4U), crc);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_u32(s_h, "cv_crc", &crc));
 }
 
 /* ---- settings_config_t ---- */
@@ -740,12 +842,12 @@ static void test_settings_save_api_timeouts(void)
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_track_cats_save(cats, 1));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_func_map_save(m, SETTINGS_FUNC_MAP_COUNT));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_aux_cfg_save(a, SETTINGS_AUX_COUNT));
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_cal_save(&cal));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_save(&cal));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_cal_clear());
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_use_save(true));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_factory_reset());
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_cv_write(5, 1));
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_cv_reset_to_factory());
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(5, 1));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_reset_to_factory());
     mock_sem_take_fail = 0;
 }
 
@@ -789,10 +891,15 @@ static void test_cv63_master_volume_alias(void)
 
     mock_nvs_reset();
     s_lock = (SemaphoreHandle_t)1;
+    s_cfg_valid = false;
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
     TEST_ASSERT_EQUAL_UINT8(51, v); /* default 20 % when mvol is absent */
 
     (void)nvs_set_u8(1, "mvol", 200); /* out-of-range % is clamped */
+    s_cfg_valid = false;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
     TEST_ASSERT_EQUAL_UINT8(255, v);
 
@@ -976,9 +1083,328 @@ static void test_active_scheme(void)
     TEST_ASSERT_EQUAL_STRING("diesel", buf);
 }
 
+static void test_rev_s20_deferred_is_ram_only(void)
+{
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    cfg.master_volume = 75;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save_deferred(&cfg));
+    TEST_ASSERT_EQUAL_UINT32(0, g_set_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_commit_calls);
+    uint8_t value;
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_u8(s_h, "mvol", &value));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(63, 255));
+    TEST_ASSERT_EQUAL_UINT32(0, g_set_calls);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(8, 8));
+    TEST_ASSERT_EQUAL_UINT32(0, g_set_calls);
+    mock_timer_now_us = SETTINGS_FLUSH_DELAY_US + 1;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+    TEST_ASSERT_TRUE(g_set_calls > 0);
+}
+
+static void test_rev_s21_all_config_setter_failures_retry(void)
+{
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    cfg.port = 8181;
+    for (unsigned failed = 1; failed <= 15U; ++failed) {
+        g_set_calls = g_commit_calls = 0;
+        g_set_error = ESP_FAIL;
+        g_fail_at = failed;
+        TEST_ASSERT_EQUAL(ESP_FAIL, settings_save(&cfg));
+        TEST_ASSERT_EQUAL_UINT32(0, g_commit_calls);
+        settings_flush_status_t state;
+        settings_flush_status(&state);
+        TEST_ASSERT_TRUE(state.config_pending);
+        TEST_ASSERT_EQUAL(ESP_FAIL, state.last_error);
+    }
+    g_set_error = ESP_OK;
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+    settings_flush_status_t state;
+    settings_flush_status(&state);
+    TEST_ASSERT_FALSE(state.config_pending);
+    uint16_t port = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u16(s_h, "port", &port));
+    TEST_ASSERT_EQUAL_UINT16(8181, port);
+}
+
+static void test_rev_s21_cv_failure_retains_dirty_bounded_retry(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(5, 91));
+    g_set_error = ESP_FAIL;
+    mock_timer_now_us = SETTINGS_FLUSH_DELAY_US + 1;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_pending_flush());
+    unsigned attempts = g_set_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+    TEST_ASSERT_EQUAL_UINT32(attempts, g_set_calls);
+    settings_flush_status_t state;
+    settings_flush_status(&state);
+    TEST_ASSERT_TRUE(state.cv_pending);
+    TEST_ASSERT_EQUAL_UINT32(1, state.retries);
+    g_set_error = ESP_OK;
+    g_commit_error = ESP_FAIL;
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_pending_flush());
+    settings_flush_status(&state);
+    TEST_ASSERT_TRUE(state.cv_pending);
+    g_commit_error = ESP_OK;
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+    settings_flush_status(&state);
+    TEST_ASSERT_FALSE(state.cv_pending);
+}
+
+static void test_rev_s22_legacy_migration_preserves_shipped_keys(void)
+{
+    s_cv[1] = 77;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("cv", s_cv, sizeof(s_cv)));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv))));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());
+    TEST_ASSERT_EQUAL_UINT8(77, s_cv[1]);
+    uint8_t legacy[sizeof(s_cv)];
+    size_t len = sizeof(legacy);
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_blob(s_h, "cv", legacy, &len));
+    TEST_ASSERT_EQUAL_UINT8(77, legacy[1]);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(1, 88));
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_cv_commit());
+    g_set_error = ESP_OK;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init()); /* power cut before atomic setter */
+    TEST_ASSERT_EQUAL_UINT8(77, s_cv[1]);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(1, 99));
+    g_commit_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_cv_commit());
+    g_commit_error = ESP_OK;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init()); /* setter physically wrote before commit */
+    TEST_ASSERT_EQUAL_UINT8(99, s_cv[1]);
+}
+
+static void test_rev_s22_power_cut_during_legacy_migration(void)
+{
+    uint8_t legacy[sizeof(s_cv)];
+    memcpy(legacy, s_cv, sizeof(legacy));
+    legacy[1] = 61;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("cv", legacy, sizeof(legacy)));
+    uint32_t crc = cv_crc32(legacy, sizeof(legacy));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u32(s_h, "cv_crc", crc));
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_init());
+    settings_flush_status_t state;
+    settings_flush_status(&state);
+    TEST_ASSERT_FALSE(state.ready);
+    TEST_ASSERT_TRUE(state.cv_pending);
+    uint8_t unchanged[sizeof(legacy)];
+    size_t len = sizeof(unchanged);
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_blob(s_h, "cv", unchanged, &len));
+    TEST_ASSERT_EQUAL_MEMORY(legacy, unchanged, sizeof(legacy));
+    uint32_t saved_crc = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u32(s_h, "cv_crc", &saved_crc));
+    TEST_ASSERT_EQUAL_UINT32(crc, saved_crc);
+    g_set_error = ESP_OK;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());
+    TEST_ASSERT_EQUAL_UINT8(61, s_cv[1]);
+    settings_flush_status(&state);
+    TEST_ASSERT_TRUE(state.ready);
+}
+
+static void concurrent_cv_update(void) { (void)settings_cv_write(5, 123); }
+static void test_cv_publish_generation_retains_newer_write(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(5, 71));
+    g_blob_hook = concurrent_cv_update;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_commit());
+    TEST_ASSERT_TRUE(s_cv_pending);
+    g_blob_hook = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_commit());
+    TEST_ASSERT_FALSE(s_cv_pending);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());
+    TEST_ASSERT_EQUAL_UINT8(123, s_cv[5]);
+}
+
+static void test_cv_snapshot_and_nmra_side_effects(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(29, 0x22));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(19, 25));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(1, 37));
+    uint8_t snapshot[SETTINGS_CV_COUNT + 1];
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_snapshot(snapshot));
+    TEST_ASSERT_EQUAL_UINT8(37, snapshot[1]);
+    TEST_ASSERT_EQUAL_UINT8(2, snapshot[29]);
+    TEST_ASSERT_EQUAL_UINT8(0, snapshot[19]);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(8, 8));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_snapshot(snapshot));
+    TEST_ASSERT_EQUAL_UINT8(3, snapshot[1]);
+    TEST_ASSERT_EQUAL_UINT8(255, snapshot[5]);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_snapshot(NULL));
+}
+
+static void test_rev_m11_reject_curve_as_unit(void)
+{
+    settings_bemf_cal_t cal = { .count = 2, .speed = { 0, 126 }, .frac = { 0, 1024 } };
+    TEST_ASSERT_TRUE(settings_bemf_cal_validate(&cal));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save(&cal));
+    for (unsigned defect = 0; defect < 5; ++defect) {
+        settings_bemf_cal_t bad = cal;
+        if (defect == 0) bad.count = 1;
+        if (defect == 1) bad.speed[1] = 127;
+        if (defect == 2) bad.speed[1] = 0;
+        if (defect == 3) bad.frac[0] = 1025;
+        if (defect == 4) { bad.frac[0] = 10; bad.frac[1] = 9; }
+        TEST_ASSERT_FALSE(settings_bemf_cal_validate(&bad));
+        TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_save(&bad));
+        TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("bemf_cal", &bad, sizeof(bad)));
+        settings_bemf_cal_t out;
+        TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_load(&out));
+        TEST_ASSERT_EQUAL_UINT8(0, out.count);
+    }
+    settings_bemf_cal_t full = { .count = SETTINGS_BEMF_CAL_MAX_POINTS };
+    for (unsigned i = 0; i < SETTINGS_BEMF_CAL_MAX_POINTS; ++i) {
+        full.speed[i] = (uint8_t)(i * 126U / (SETTINGS_BEMF_CAL_MAX_POINTS - 1U));
+        full.frac[i] = (uint16_t)(i * 1024U / (SETTINGS_BEMF_CAL_MAX_POINTS - 1U));
+    }
+    TEST_ASSERT_TRUE(settings_bemf_cal_validate(&full));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save(&full));
+}
+
+static void test_rev_s25_empty_bindings_are_present(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_save(NULL, 0));
+    func_binding_t bindings[FUNC_BIND_MAX];
+    size_t count = 99;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_load(bindings, &count));
+    TEST_ASSERT_EQUAL_UINT32(0, count);
+}
+
+static void test_hard_reset_changes_only_nmra_configuration_cvs(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(1, 45));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(19, 42));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(29, 0x37));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(31, 7));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(32, 9));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(54, 75));
+    int before = mock_nvs_set_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_hard_reset());
+    TEST_ASSERT_EQUAL_INT(before, mock_nvs_set_calls);
+    uint8_t value = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(1, &value));
+    TEST_ASSERT_EQUAL_UINT8(45, value);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(19, &value));
+    TEST_ASSERT_EQUAL_UINT8(0, value);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(29, &value));
+    TEST_ASSERT_EQUAL_UINT8(2, value);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(31, &value));
+    TEST_ASSERT_EQUAL_UINT8(0, value);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(32, &value));
+    TEST_ASSERT_EQUAL_UINT8(0, value);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(54, &value));
+    TEST_ASSERT_EQUAL_UINT8(75, value);
+}
+
+static bool g_save_cancelled;
+static unsigned g_authorize_calls;
+
+static bool authorize_cal_save(void *context)
+{
+    TEST_ASSERT_EQUAL_PTR(&g_save_cancelled, context);
+    TEST_ASSERT_EQUAL_UINT32(1, g_lock_depth); /* Persistence lock BEFORE mux check. */
+    ++g_authorize_calls;
+    return !*(bool *)context;
+}
+
+static void cancel_waiting_cal_save(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    g_save_cancelled = true;
+}
+
+static void cancel_admitted_cal_save(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(1, g_lock_depth);
+    TEST_ASSERT_EQUAL_UINT32(1, g_authorize_calls);
+    g_save_cancelled = true;
+}
+
+static void test_cal_save_guard_rejects_cancel_between_validation_and_lock(void)
+{
+    settings_bemf_cal_t old = { .count = 2, .speed = {12, 126}, .frac = {100, 700} };
+    settings_bemf_cal_t next = old;
+    next.frac[1] = 800;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save(&old));
+    unsigned writes = g_set_calls, commits = g_commit_calls;
+    g_save_cancelled = false;
+    g_authorize_calls = 0;
+    g_before_take_hook = cancel_waiting_cal_save;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+        settings_bemf_cal_save_guarded(&next, authorize_cal_save, &g_save_cancelled));
+    g_before_take_hook = NULL;
+    TEST_ASSERT_EQUAL_UINT32(1, g_authorize_calls);
+    TEST_ASSERT_EQUAL_UINT32(writes, g_set_calls);
+    TEST_ASSERT_EQUAL_UINT32(commits, g_commit_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    settings_bemf_cal_t got;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_load(&got));
+    TEST_ASSERT_EQUAL_MEMORY(&old, &got, sizeof(old));
+}
+
+static void test_cal_save_guard_cancel_after_admission_finishes_valid_curve(void)
+{
+    settings_bemf_cal_t cal = { .count = 2, .speed = {12, 126}, .frac = {100, 800} };
+    g_save_cancelled = false;
+    g_authorize_calls = 0;
+    g_blob_hook = cancel_admitted_cal_save;
+    TEST_ASSERT_EQUAL(ESP_OK,
+        settings_bemf_cal_save_guarded(&cal, authorize_cal_save, &g_save_cancelled));
+    TEST_ASSERT_TRUE(g_save_cancelled);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    settings_bemf_cal_t got;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_load(&got));
+    TEST_ASSERT_EQUAL_MEMORY(&cal, &got, sizeof(cal));
+}
+
+static void test_cal_save_guard_never_authorizes_invalid_or_unlocked_save(void)
+{
+    settings_bemf_cal_t cal = { .count = 1 };
+    g_authorize_calls = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+        settings_bemf_cal_save_guarded(&cal, authorize_cal_save, &g_save_cancelled));
+    cal.count = 2;
+    cal.speed[1] = 126;
+    cal.frac[1] = 100;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT,
+        settings_bemf_cal_save_guarded(&cal, authorize_cal_save, &g_save_cancelled));
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_EQUAL_UINT32(0, g_authorize_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save_guarded(&cal, NULL, NULL));
+}
+
+static void test_unusable_bemf_curve_cannot_replace_previous_record(void)
+{
+    settings_bemf_cal_t good = { .count = 2, .speed = {12, 126}, .frac = {100, 900} };
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save(&good));
+    settings_bemf_cal_t bad = { .count = 2, .speed = {12, 126}, .frac = {0, 0} };
+    TEST_ASSERT_FALSE(settings_bemf_cal_validate(&bad));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_save(&bad));
+    settings_bemf_cal_t loaded = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_load(&loaded));
+    TEST_ASSERT_EQUAL_MEMORY(&good, &loaded, sizeof(good));
+    bad.frac[1] = 50;
+    TEST_ASSERT_FALSE(settings_bemf_cal_validate(&bad));
+    bad.frac[1] = SETTINGS_BEMF_CAL_MIN_END_FRAC;
+    TEST_ASSERT_TRUE(settings_bemf_cal_validate(&bad));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_cal_save_guard_rejects_cancel_between_validation_and_lock);
+    RUN_TEST(test_cal_save_guard_cancel_after_admission_finishes_valid_curve);
+    RUN_TEST(test_cal_save_guard_never_authorizes_invalid_or_unlocked_save);
+    RUN_TEST(test_hard_reset_changes_only_nmra_configuration_cvs);
+    RUN_TEST(test_unusable_bemf_curve_cannot_replace_previous_record);
     RUN_TEST(test_crc32_deterministic);
     RUN_TEST(test_crc32_differs_on_change);
     RUN_TEST(test_defaults);
@@ -1028,5 +1454,14 @@ int main(void)
     RUN_TEST(test_func_bind_legacy_convert);
     RUN_TEST(test_func_bind_add_remove_find);
     RUN_TEST(test_active_scheme);
+    RUN_TEST(test_rev_s20_deferred_is_ram_only);
+    RUN_TEST(test_rev_s21_all_config_setter_failures_retry);
+    RUN_TEST(test_rev_s21_cv_failure_retains_dirty_bounded_retry);
+    RUN_TEST(test_rev_s22_legacy_migration_preserves_shipped_keys);
+    RUN_TEST(test_rev_s22_power_cut_during_legacy_migration);
+    RUN_TEST(test_cv_publish_generation_retains_newer_write);
+    RUN_TEST(test_cv_snapshot_and_nmra_side_effects);
+    RUN_TEST(test_rev_m11_reject_curve_as_unit);
+    RUN_TEST(test_rev_s25_empty_bindings_are_present);
     return UNITY_END();
 }

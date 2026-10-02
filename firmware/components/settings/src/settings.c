@@ -20,11 +20,54 @@ static const char *TAG = "settings";
 static nvs_handle_t s_h;
 static uint8_t s_cv[SETTINGS_CV_COUNT + 1];
 static SemaphoreHandle_t s_lock;
-static volatile bool s_pending;
-static volatile int64_t s_pending_us;
+static portMUX_TYPE s_cv_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_pending;
+static int64_t s_pending_us;
 /* A CV was written but not yet committed to flash (service-mode programming
  * and DCC CV writes must not block the real-time task on a flash commit). */
-static volatile bool s_cv_pending;
+static bool s_cv_pending;
+static uint32_t s_cv_generation;
+static settings_config_t s_cfg;
+static bool s_cfg_valid;
+static uint8_t s_master_volume = 20;
+static bool s_manifest_pending;
+static esp_err_t s_last_error;
+static uint32_t s_retries;
+static bool s_ready;
+
+#define CV_RECORD_HEADER 6U
+#define CV_RECORD_SIZE (CV_RECORD_HEADER + SETTINGS_CV_COUNT + 1U + 4U)
+
+static uint32_t record_crc32(const uint8_t *data, size_t len)
+{
+    uint32_t crc = UINT32_MAX;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (unsigned bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1U)));
+        }
+    }
+    return ~crc;
+}
+
+static esp_err_t cv_store_locked(void)
+{
+    uint8_t record[CV_RECORD_SIZE] = { 'C', 'V', 1, 0, 1, 2 };
+    uint32_t generation;
+    portENTER_CRITICAL(&s_cv_mux);
+    memcpy(record + CV_RECORD_HEADER, s_cv, sizeof(s_cv));
+    generation = s_cv_generation;
+    portEXIT_CRITICAL(&s_cv_mux);
+    uint32_t crc = record_crc32(record, sizeof(record) - 4U);
+    for (unsigned i = 0; i < 4; ++i) record[sizeof(record) - 4U + i] = (uint8_t)(crc >> (8U * i));
+    esp_err_t err = nvs_set_blob(s_h, "cv_record", record, sizeof(record));
+    if (err == ESP_OK) err = nvs_commit(s_h);
+    portENTER_CRITICAL(&s_cv_mux);
+    if (err == ESP_OK && generation == s_cv_generation) s_cv_pending = false;
+    else s_cv_pending = true;
+    portEXIT_CRITICAL(&s_cv_mux);
+    return err;
+}
 
 static uint32_t cv_crc32(const uint8_t *data, size_t len)
 {
@@ -39,6 +82,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
 #define SETTINGS_CV7_VERSION 9
+#define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
 static void cv_set_defaults(void)
@@ -50,7 +94,7 @@ static void cv_set_defaults(void)
     s_cv[6] = 128;    /* Vmid: half PWM at step 63 (linear 0..max curve) */
     s_cv[7] = SETTINGS_CV7_VERSION; /* decoder version (matches version.txt) */
     s_cv[8] = 0;      /* manufacturer (read-only) */
-    s_cv[29] = 0x02;  /* 28 speed steps, DCC (analog DC off by default) */
+    s_cv[29] = SETTINGS_CV29_DEFAULT; /* 28 steps, analog disabled */
     s_cv[54] = 128;   /* BEMF Kp (~1.05) */
     s_cv[55] = 60;    /* BEMF Ki (~0.07) */
     s_cv[56] = 32;    /* BEMF Kd (~0.10) */
@@ -73,9 +117,7 @@ static void cv_migrate_version(void)
         return;
     }
     s_cv[7] = SETTINGS_CV7_VERSION;
-    (void)nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-    (void)nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-    (void)nvs_commit(s_h);
+    s_cv_pending = true;
 }
 
 /* One-time migration: the old factory speed curve (Vstart=24 with Vmid/Vhigh
@@ -90,9 +132,7 @@ static void cv_migrate_curve(void)
     s_cv[2] = 0U;
     s_cv[5] = 255U;
     s_cv[6] = 128U;
-    (void)nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-    (void)nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-    (void)nvs_commit(s_h);
+    s_cv_pending = true;
     ESP_LOGI(TAG, "CV speed curve migrated: Vstart 24->0, Vmid=128, Vhigh=255");
 }
 
@@ -114,6 +154,7 @@ static esp_err_t nvs_read_str(const char *key, char *out, size_t len, const char
     if (err != ESP_OK) {
         /* Missing, truncated or corrupt: always fall back to the documented
          * default instead of leaving the field empty. */
+        if (err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_NVS_INVALID_LENGTH) return err;
         strncpy(out, def, len - 1);
         out[len - 1] = '\0';
     }
@@ -122,6 +163,7 @@ static esp_err_t nvs_read_str(const char *key, char *out, size_t len, const char
 
 esp_err_t settings_init(void)
 {
+    s_ready = false;
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         /* Losing NVS wipes every setting, including the sound track list that
@@ -129,8 +171,8 @@ esp_err_t settings_init(void)
          * visible in the boot log instead of resetting silently. */
         ESP_LOGE(TAG, "NVS unusable (%s): erasing NVS - saved settings and the "
                       "track list will be reset", esp_err_to_name(err));
-        (void)nvs_flash_erase();
-        err = nvs_flash_init();
+        err = nvs_flash_erase();
+        if (err == ESP_OK) err = nvs_flash_init();
     }
     if (err != ESP_OK) {
         return err;
@@ -146,26 +188,58 @@ esp_err_t settings_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    /* Load CVs from NVS (or defaults on first boot / corrupted store). */
+    s_pending = false;
+    s_cv_pending = false;
+    s_cfg_valid = false;
+    s_last_error = ESP_OK;
+    s_retries = 0;
+    /* One NVS blob is the atomic unit in IDF6. Never pair a new CV blob with a
+     * separately updated checksum. Keep shipped legacy records untouched. */
+    uint8_t record[CV_RECORD_SIZE];
+    size_t record_len = sizeof(record);
+    err = nvs_get_blob(s_h, "cv_record", record, &record_len);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_NVS_INVALID_LENGTH) return err;
+    bool valid_record = false;
+    if (err == ESP_OK && record_len == sizeof(record) &&
+        memcmp(record, "CV\1\0\1\2", CV_RECORD_HEADER) == 0) {
+        uint32_t crc = 0;
+        for (unsigned i = 0; i < 4; ++i) crc |= (uint32_t)record[sizeof(record) - 4U + i] << (8U * i);
+        valid_record = crc == record_crc32(record, sizeof(record) - 4U);
+    }
     uint8_t blob[SETTINGS_CV_COUNT + 1];
     size_t len = sizeof(blob);
-    err = nvs_get_blob(s_h, "cv", blob, &len);
+    esp_err_t legacy_err = nvs_get_blob(s_h, "cv", blob, &len);
     uint32_t stored_crc = 0;
-    (void)nvs_get_u32(s_h, "cv_crc", &stored_crc);
-    if (err == ESP_OK && len == sizeof(blob) && stored_crc == cv_crc32(blob, len)) {
-        memcpy(s_cv, blob, len);
+    esp_err_t crc_err = nvs_get_u32(s_h, "cv_crc", &stored_crc);
+    if (err == ESP_ERR_NVS_NOT_FOUND && legacy_err != ESP_OK &&
+        legacy_err != ESP_ERR_NVS_NOT_FOUND && legacy_err != ESP_ERR_NVS_INVALID_LENGTH) return legacy_err;
+    if (err == ESP_ERR_NVS_NOT_FOUND && legacy_err == ESP_OK && crc_err != ESP_OK &&
+        crc_err != ESP_ERR_NVS_NOT_FOUND) return crc_err;
+    if (valid_record || (err == ESP_ERR_NVS_NOT_FOUND && legacy_err == ESP_OK &&
+        crc_err == ESP_OK && len == sizeof(blob) && stored_crc == cv_crc32(blob, len))) {
+        memcpy(s_cv, valid_record ? record + CV_RECORD_HEADER : blob, sizeof(s_cv));
+        s_cv_pending = !valid_record;
         ESP_LOGI(TAG, "CV store loaded from NVS");
         cv_migrate_curve();
         cv_migrate_version();
     } else {
         cv_set_defaults();
-        (void)nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-        (void)nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-        (void)nvs_commit(s_h);
-        ESP_LOGI(TAG, "CV defaults written to NVS");
+        s_cv_pending = true;
+        ESP_LOGW(TAG, "CV defaults staged (missing or invalid record)");
     }
-
-    return ESP_OK;
+    err = s_cv_pending ? cv_store_locked() : ESP_OK;
+    s_last_error = err;
+    if (err != ESP_OK) return err;
+    settings_config_t cfg;
+    err = settings_load(&cfg);
+    bool recovering = false;
+    if (err == ESP_OK) err = settings_recovery_pending(&recovering);
+    portENTER_CRITICAL(&s_cv_mux);
+    s_ready = err == ESP_OK;
+    s_manifest_pending = recovering;
+    s_pending_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_cv_mux);
+    return err;
 }
 
 esp_err_t settings_load(settings_config_t *cfg)
@@ -173,49 +247,68 @@ esp_err_t settings_load(settings_config_t *cfg)
     if (cfg == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (s_lock == NULL || xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    if (s_cfg_valid) {
+        *cfg = s_cfg;
+        xSemaphoreGive(s_lock);
+        return ESP_OK;
+    }
     memset(cfg, 0, sizeof(*cfg));
 
-    nvs_read_u8("wifi_mode", &cfg->wifi_mode, 1);
-    nvs_read_str("ap_ssid", cfg->ap_ssid, sizeof(cfg->ap_ssid), "ADDITIPUS AURA-X");
-    nvs_read_str("ap_pass", cfg->ap_password, sizeof(cfg->ap_password), "");
-    nvs_read_str("ap_ip", cfg->ap_ip, sizeof(cfg->ap_ip), "192.168.100.1");
-    nvs_read_str("sta_ssid", cfg->sta_ssid, sizeof(cfg->sta_ssid), "");
-    nvs_read_str("sta_pass", cfg->sta_password, sizeof(cfg->sta_password), "");
-    nvs_read_u8("hold", &cfg->hold, 1);
-    nvs_read_u8("auto_off", &cfg->auto_off_min, 0);
-    nvs_read_u8("mvol", &cfg->master_volume, 20);
-    nvs_read_u8("evol", &cfg->engine_volume, 20);
-    nvs_read_u8("fvol", &cfg->effects_volume, 20);
-    nvs_read_u8("slot", &cfg->active_slot, 0);
-    nvs_read_u8("csrc", &cfg->control_source, 0);
-    nvs_read_str("dev_name", cfg->device_name, sizeof(cfg->device_name), "DECODER");
+    esp_err_t err;
+#define LOAD(call) do { err = (call); if (err != ESP_OK) { xSemaphoreGive(s_lock); return err; } } while (0)
+    LOAD(nvs_read_u8("wifi_mode", &cfg->wifi_mode, 1));
+    LOAD(nvs_read_str("ap_ssid", cfg->ap_ssid, sizeof(cfg->ap_ssid), "ADDITIPUS AURA-X"));
+    LOAD(nvs_read_str("ap_pass", cfg->ap_password, sizeof(cfg->ap_password), ""));
+    LOAD(nvs_read_str("ap_ip", cfg->ap_ip, sizeof(cfg->ap_ip), "192.168.100.1"));
+    LOAD(nvs_read_str("sta_ssid", cfg->sta_ssid, sizeof(cfg->sta_ssid), ""));
+    LOAD(nvs_read_str("sta_pass", cfg->sta_password, sizeof(cfg->sta_password), ""));
+    LOAD(nvs_read_u8("hold", &cfg->hold, 1));
+    LOAD(nvs_read_u8("auto_off", &cfg->auto_off_min, 0));
+    LOAD(nvs_read_u8("mvol", &cfg->master_volume, 20));
+    LOAD(nvs_read_u8("evol", &cfg->engine_volume, 20));
+    LOAD(nvs_read_u8("fvol", &cfg->effects_volume, 20));
+    LOAD(nvs_read_u8("slot", &cfg->active_slot, 0));
+    LOAD(nvs_read_u8("csrc", &cfg->control_source, 0));
+    LOAD(nvs_read_str("dev_name", cfg->device_name, sizeof(cfg->device_name), "DECODER"));
+#undef LOAD
 
     uint16_t port = 80;
-    (void)nvs_get_u16(s_h, "port", &port);
+    err = nvs_get_u16(s_h, "port", &port);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) { xSemaphoreGive(s_lock); return err; }
     cfg->port = port;
-
+    s_cfg = *cfg;
+    s_cfg_valid = true;
+    portENTER_CRITICAL(&s_cv_mux);
+    s_master_volume = cfg->master_volume;
+    portEXIT_CRITICAL(&s_cv_mux);
+    xSemaphoreGive(s_lock);
     return ESP_OK;
 }
 
-/* Stage every config key in the NVS cache (no flash write yet). Caller holds
- * s_lock. */
-static void settings_store_locked(const settings_config_t *cfg)
+/* IDF6 setters write flash immediately. Called only by synchronous save or the
+ * persistence worker, never by RAM-only deferred save. Caller holds s_lock. */
+static esp_err_t settings_store_locked(const settings_config_t *cfg)
 {
-    (void)nvs_set_u8(s_h, "wifi_mode", cfg->wifi_mode);
-    (void)nvs_set_str(s_h, "ap_ssid", cfg->ap_ssid);
-    (void)nvs_set_str(s_h, "ap_pass", cfg->ap_password);
-    (void)nvs_set_str(s_h, "ap_ip", cfg->ap_ip);
-    (void)nvs_set_str(s_h, "sta_ssid", cfg->sta_ssid);
-    (void)nvs_set_str(s_h, "sta_pass", cfg->sta_password);
-    (void)nvs_set_u16(s_h, "port", cfg->port);
-    (void)nvs_set_u8(s_h, "hold", cfg->hold);
-    (void)nvs_set_u8(s_h, "auto_off", cfg->auto_off_min);
-    (void)nvs_set_u8(s_h, "mvol", cfg->master_volume);
-    (void)nvs_set_u8(s_h, "evol", cfg->engine_volume);
-    (void)nvs_set_u8(s_h, "fvol", cfg->effects_volume);
-    (void)nvs_set_u8(s_h, "slot", cfg->active_slot);
-    (void)nvs_set_u8(s_h, "csrc", cfg->control_source);
-    (void)nvs_set_str(s_h, "dev_name", cfg->device_name);
+    esp_err_t err;
+#define STORE(call) do { err = (call); if (err != ESP_OK) return err; } while (0)
+    STORE(nvs_set_u8(s_h, "wifi_mode", cfg->wifi_mode));
+    STORE(nvs_set_str(s_h, "ap_ssid", cfg->ap_ssid));
+    STORE(nvs_set_str(s_h, "ap_pass", cfg->ap_password));
+    STORE(nvs_set_str(s_h, "ap_ip", cfg->ap_ip));
+    STORE(nvs_set_str(s_h, "sta_ssid", cfg->sta_ssid));
+    STORE(nvs_set_str(s_h, "sta_pass", cfg->sta_password));
+    STORE(nvs_set_u16(s_h, "port", cfg->port));
+    STORE(nvs_set_u8(s_h, "hold", cfg->hold));
+    STORE(nvs_set_u8(s_h, "auto_off", cfg->auto_off_min));
+    STORE(nvs_set_u8(s_h, "mvol", cfg->master_volume));
+    STORE(nvs_set_u8(s_h, "evol", cfg->engine_volume));
+    STORE(nvs_set_u8(s_h, "fvol", cfg->effects_volume));
+    STORE(nvs_set_u8(s_h, "slot", cfg->active_slot));
+    STORE(nvs_set_u8(s_h, "csrc", cfg->control_source));
+    STORE(nvs_set_str(s_h, "dev_name", cfg->device_name));
+#undef STORE
+    return nvs_commit(s_h);
 }
 
 esp_err_t settings_save(const settings_config_t *cfg)
@@ -226,9 +319,15 @@ esp_err_t settings_save(const settings_config_t *cfg)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    settings_store_locked(cfg);
-    esp_err_t err = nvs_commit(s_h);
-    s_pending = false;
+    s_cfg = *cfg;
+    s_cfg_valid = true;
+    esp_err_t err = settings_store_locked(cfg);
+    portENTER_CRITICAL(&s_cv_mux);
+    s_master_volume = cfg->master_volume;
+    s_pending = err != ESP_OK;
+    s_pending_us = esp_timer_get_time();
+    s_last_error = err;
+    portEXIT_CRITICAL(&s_cv_mux);
     xSemaphoreGive(s_lock);
     return err;
 }
@@ -238,41 +337,57 @@ esp_err_t settings_save_deferred(const settings_config_t *cfg)
     if (cfg == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    if (xSemaphoreTake(s_lock, 0) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    settings_store_locked(cfg);
+    s_cfg = *cfg;
+    s_cfg_valid = true;
+    portENTER_CRITICAL(&s_cv_mux);
+    s_master_volume = cfg->master_volume;
     s_pending_us = esp_timer_get_time();
     s_pending = true;
+    portEXIT_CRITICAL(&s_cv_mux);
     xSemaphoreGive(s_lock);
     return ESP_OK;
 }
 
-void settings_pending_flush(void)
+void settings_flush_status(settings_flush_status_t *out)
 {
-    if (!s_pending && !s_cv_pending) {
-        return;
-    }
-    if (esp_timer_get_time() - s_pending_us < SETTINGS_FLUSH_DELAY_US) {
-        return;
-    }
-    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        return;
-    }
-    bool commit = s_pending;
-    if (s_cv_pending) {
-        esp_err_t err = nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-        if (err == ESP_OK) {
-            (void)nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-        }
-        s_cv_pending = false;
-        commit = true;
-    }
-    if (commit) {
-        (void)nvs_commit(s_h);
-        s_pending = false;
-    }
+    if (out == NULL) return;
+    portENTER_CRITICAL(&s_cv_mux);
+    *out = (settings_flush_status_t){ s_pending, s_cv_pending, s_manifest_pending,
+                                    s_ready, s_last_error, s_retries };
+    portEXIT_CRITICAL(&s_cv_mux);
+}
+
+esp_err_t settings_pending_flush(void)
+{
+    portENTER_CRITICAL(&s_cv_mux);
+    bool due = (s_pending || s_cv_pending || s_manifest_pending) &&
+               esp_timer_get_time() - s_pending_us >= SETTINGS_FLUSH_DELAY_US;
+    portEXIT_CRITICAL(&s_cv_mux);
+    if (!due) return ESP_OK;
+    if (s_lock == NULL || xSemaphoreTake(s_lock, 0) != pdTRUE) return ESP_ERR_TIMEOUT;
+    portENTER_CRITICAL(&s_cv_mux);
+    bool config = s_pending, cv = s_cv_pending, manifest = s_manifest_pending;
+    s_pending_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_cv_mux);
+    esp_err_t err = config ? settings_store_locked(&s_cfg) : ESP_OK;
+    portENTER_CRITICAL(&s_cv_mux);
+    if (config && err == ESP_OK) s_pending = false;
+    portEXIT_CRITICAL(&s_cv_mux);
+    if (err == ESP_OK && cv) err = cv_store_locked();
     xSemaphoreGive(s_lock);
+    if (err == ESP_OK && manifest) {
+        bool recovering = false;
+        err = settings_recovery_pending(&recovering);
+        if (err == ESP_OK) err = recovering ? settings_manifest_load() : settings_manifest_sync();
+    }
+    portENTER_CRITICAL(&s_cv_mux);
+    s_last_error = err;
+    if (err != ESP_OK && s_retries != UINT32_MAX) ++s_retries;
+    portEXIT_CRITICAL(&s_cv_mux);
+    return err;
 }
 
 esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
@@ -284,15 +399,29 @@ esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
         /* CV63 aliases the persisted master volume so the sound UI can drive it
          * through the normal CV path (SOUND_ENGINE_ROADMAP.md R6.1). "mvol" is
          * stored as 0..100 %; report it on the CV 0..255 scale. */
-        uint8_t vol = 20U;
-        (void)nvs_get_u8(s_h, "mvol", &vol);
+        portENTER_CRITICAL(&s_cv_mux);
+        uint8_t vol = s_master_volume;
         if (vol > 100U) {
             vol = 100U;
         }
         *out = (uint8_t)((uint16_t)vol * 255U / 100U);
+        portEXIT_CRITICAL(&s_cv_mux);
         return ESP_OK;
     }
+    portENTER_CRITICAL(&s_cv_mux);
     *out = s_cv[idx];
+    portEXIT_CRITICAL(&s_cv_mux);
+    return ESP_OK;
+}
+
+esp_err_t settings_cv_snapshot(uint8_t out[SETTINGS_CV_COUNT + 1])
+{
+    if (out == NULL) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_cv_mux);
+    memcpy(out, s_cv, sizeof(s_cv));
+    uint8_t vol = s_master_volume > 100U ? 100U : s_master_volume;
+    out[63] = (uint8_t)((uint16_t)vol * 255U / 100U);
+    portEXIT_CRITICAL(&s_cv_mux);
     return ESP_OK;
 }
 
@@ -316,40 +445,56 @@ esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
          * value is 0..255; "mvol" is stored as 0..100 %. The live volume and the
          * cached config are updated by the caller (web_master_volume_changed). */
         uint8_t vol = (uint8_t)((uint16_t)value * 100U / 255U);
-        if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        if (xSemaphoreTake(s_lock, 0) != pdTRUE) {
             return ESP_ERR_TIMEOUT;
         }
+        if (!s_cfg_valid) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
+        s_cfg.master_volume = vol;
+        portENTER_CRITICAL(&s_cv_mux);
         s_cv[63] = value;
-        esp_err_t verr = nvs_set_u8(s_h, "mvol", vol);
+        s_master_volume = vol;
+        s_pending = true;
+        s_cv_pending = true;
+        ++s_cv_generation;
+        s_pending_us = esp_timer_get_time();
+        portEXIT_CRITICAL(&s_cv_mux);
         xSemaphoreGive(s_lock);
-        return verr;
+        return ESP_OK;
     }
-    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
+    portENTER_CRITICAL(&s_cv_mux);
     s_cv[idx] = value;
-    xSemaphoreGive(s_lock);
+    if (idx == 1U) { s_cv[29] &= (uint8_t)~0x20U; s_cv[19] = 0; }
+    ++s_cv_generation;
+    s_cv_pending = true;
+    s_pending_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_cv_mux);
+    return ESP_OK;
+}
+
+esp_err_t settings_cv_hard_reset(void)
+{
+    portENTER_CRITICAL(&s_cv_mux);
+    s_cv[19] = 0;
+    s_cv[29] = SETTINGS_CV29_DEFAULT;
+    s_cv[31] = 0;
+    s_cv[32] = 0;
+    ++s_cv_generation;
+    s_cv_pending = true;
+    s_pending_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_cv_mux);
     return ESP_OK;
 }
 
 esp_err_t settings_cv_reset_to_factory(void)
 {
-    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-    /* Keep cv_set_defaults() and the commit under the same lock as the readers
-     * so the motor task never observes a half-reset CV table. */
+    /* Reset publication is indivisible to readers; flash is worker-only. */
+    portENTER_CRITICAL(&s_cv_mux);
     cv_set_defaults();
-    esp_err_t err = nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-    if (err == ESP_OK) {
-        err = nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(s_h);
-    }
-    xSemaphoreGive(s_lock);
-    ESP_LOGI(TAG, "CV factory reset%s", err == ESP_OK ? "" : " (commit failed)");
-    return err;
+    ++s_cv_generation;
+    s_cv_pending = true;
+    s_pending_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_cv_mux);
+    return ESP_OK;
 }
 
 esp_err_t settings_factory_reset(void)
@@ -359,14 +504,16 @@ esp_err_t settings_factory_reset(void)
     }
     esp_err_t err = nvs_erase_all(s_h);
     if (err == ESP_OK) {
+        portENTER_CRITICAL(&s_cv_mux);
         cv_set_defaults();
-        err = nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-        if (err == ESP_OK) {
-            err = nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-        }
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(s_h);
+        ++s_cv_generation;
+        s_cv_pending = true;
+        s_pending = false;
+        s_manifest_pending = false;
+        s_master_volume = 20U;
+        s_cfg_valid = false;
+        portEXIT_CRITICAL(&s_cv_mux);
+        err = cv_store_locked();
     }
     xSemaphoreGive(s_lock);
     ESP_LOGI(TAG, "Full factory reset%s", err == ESP_OK ? "" : " (failed)");
@@ -378,13 +525,10 @@ esp_err_t settings_cv_commit(void)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t err = nvs_set_blob(s_h, "cv", s_cv, sizeof(s_cv));
-    if (err == ESP_OK) {
-        err = nvs_set_u32(s_h, "cv_crc", cv_crc32(s_cv, sizeof(s_cv)));
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(s_h);
-    }
+    esp_err_t err = cv_store_locked();
+    portENTER_CRITICAL(&s_cv_mux);
+    s_last_error = err;
+    portEXIT_CRITICAL(&s_cv_mux);
     xSemaphoreGive(s_lock);
     return err;
 }
@@ -394,8 +538,10 @@ esp_err_t settings_cv_commit(void)
  * real-time task inside a flash program/erase. */
 void settings_cv_commit_deferred(void)
 {
+    portENTER_CRITICAL(&s_cv_mux);
     s_pending_us = esp_timer_get_time();
     s_cv_pending = true;
+    portEXIT_CRITICAL(&s_cv_mux);
 }
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
@@ -407,7 +553,7 @@ esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
     esp_err_t err = nvs_get_blob(s_h, "tracks", tracks, &len);
     if (err != ESP_OK) {
         *count = 0;
-        return ESP_ERR_NOT_FOUND;
+        return err == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : err;
     }
     if ((len % sizeof(settings_track_t)) != 0U) { *count = 0; return ESP_ERR_INVALID_SIZE; }
     *count = len / sizeof(settings_track_t);
@@ -428,14 +574,16 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    if (!settings_manifest_write_allowed()) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
     esp_err_t err = nvs_set_blob(s_h, "tracks", tracks,
                                  sizeof(settings_track_t) * count);
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        (void)settings_manifest_sync();
+        err = settings_manifest_sync();
     }
     return err;
 }
@@ -452,7 +600,7 @@ esp_err_t settings_track_cats_load(uint8_t *cats, size_t *count)
             cats[i] = SETTINGS_TRACK_CAT_DEFAULT_SLOT((uint8_t)(i + 1U));
         }
         *count = SETTINGS_MAX_TRACKS;
-        return ESP_ERR_NOT_FOUND;
+        return err == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : err;
     }
     *count = len / sizeof(uint8_t);
     return ESP_OK;
@@ -467,13 +615,15 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    if (!settings_manifest_write_allowed()) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
     esp_err_t err = nvs_set_blob(s_h, "track_cat", cats, sizeof(uint8_t) * count);
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        (void)settings_manifest_sync();
+        err = settings_manifest_sync();
     }
     return err;
 }
@@ -502,7 +652,8 @@ esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count)
             map[i].speed = SETTINGS_FUNC_SPD_NONE;
         }
         *count = SETTINGS_FUNC_MAP_COUNT;
-        return ESP_ERR_NOT_FOUND;
+        return err == ESP_ERR_NVS_NOT_FOUND || err == ESP_ERR_INVALID_SIZE ||
+               err == ESP_ERR_NVS_INVALID_LENGTH ? ESP_ERR_NOT_FOUND : err;
     }
     *count = len / sizeof(settings_func_map_t);
     return ESP_OK;
@@ -517,14 +668,16 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    if (!settings_manifest_write_allowed()) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
     esp_err_t err = nvs_set_blob(s_h, "func_map", map,
                                  sizeof(settings_func_map_t) * count);
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        (void)settings_manifest_sync();
+        err = settings_manifest_sync();
     }
     return err;
 }
@@ -536,7 +689,7 @@ esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count)
     }
     size_t len = sizeof(func_binding_t) * FUNC_BIND_MAX;
     esp_err_t err = nvs_get_blob(s_h, "func_bind", bind, &len);
-    if (err == ESP_OK && (len == 0U || (len % sizeof(func_binding_t)) != 0U)) {
+    if (err == ESP_OK && (len % sizeof(func_binding_t)) != 0U) {
         err = ESP_ERR_INVALID_SIZE;
     }
     if (err != ESP_OK) {
@@ -559,13 +712,15 @@ esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    if (!settings_manifest_write_allowed()) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
     esp_err_t err = nvs_set_blob(s_h, "func_bind", bind, sizeof(func_binding_t) * count);
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        (void)settings_manifest_sync();
+        err = settings_manifest_sync();
     }
     return err;
 }
@@ -764,22 +919,48 @@ esp_err_t settings_bemf_cal_load(settings_bemf_cal_t *cal)
     if (cal == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    size_t len = sizeof(settings_bemf_cal_t);
-    esp_err_t err = nvs_get_blob(s_h, "bemf_cal", cal, &len);
+    memset(cal, 0, sizeof(*cal));
+    settings_bemf_cal_t candidate;
+    size_t len = sizeof(candidate);
+    esp_err_t err = nvs_get_blob(s_h, "bemf_cal", &candidate, &len);
     if (err != ESP_OK) {
         return err;
     }
-    if (len != sizeof(settings_bemf_cal_t) || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) { return ESP_ERR_INVALID_SIZE; }
+    if (len != sizeof(candidate) || candidate.count > SETTINGS_BEMF_CAL_MAX_POINTS) return ESP_ERR_INVALID_SIZE;
+    if (!settings_bemf_cal_validate(&candidate)) return ESP_ERR_INVALID_ARG;
+    *cal = candidate;
     return ESP_OK;
+}
+
+bool settings_bemf_cal_validate(const settings_bemf_cal_t *cal)
+{
+    if (cal == NULL || cal->count < 2U || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) return false;
+    for (size_t i = 0; i < cal->count; ++i) {
+        if (cal->speed[i] > 126U || cal->frac[i] > 1024U) return false;
+        if (i > 0U && (cal->speed[i] <= cal->speed[i - 1U] || cal->frac[i] < cal->frac[i - 1U])) return false;
+    }
+    return cal->frac[cal->count - 1U] >= SETTINGS_BEMF_CAL_MIN_END_FRAC;
 }
 
 esp_err_t settings_bemf_cal_save(const settings_bemf_cal_t *cal)
 {
-    if (cal == NULL) {
+    return settings_bemf_cal_save_guarded(cal, NULL, NULL);
+}
+
+esp_err_t settings_bemf_cal_save_guarded(const settings_bemf_cal_t *cal,
+                                       settings_bemf_cal_authorize_t authorize, void *context)
+{
+    if (!settings_bemf_cal_validate(cal)) {
         return ESP_ERR_INVALID_ARG;
     }
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
+    }
+    /* Authorization is the linearization point, not the pre-lock validation.
+     * The callback releases any output mux before the blocking NVS operation. */
+    if (authorize != NULL && !authorize(context)) {
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_STATE;
     }
     esp_err_t err = nvs_set_blob(s_h, "bemf_cal", cal, sizeof(*cal));
     if (err == ESP_OK) {
@@ -831,5 +1012,49 @@ esp_err_t settings_bemf_use_save(bool enabled)
         err = nvs_commit(s_h);
     }
     xSemaphoreGive(s_lock);
+    return err;
+}
+
+esp_err_t settings_metadata_lock(void)
+{
+    return s_lock != NULL && xSemaphoreTake(s_lock, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+void settings_metadata_unlock(void) { xSemaphoreGive(s_lock); }
+
+void settings_manifest_dirty(void)
+{
+    portENTER_CRITICAL(&s_cv_mux);
+    s_manifest_pending = true;
+    s_pending_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_cv_mux);
+}
+
+/* Called under the metadata lock so no newer save can be cleared. */
+void settings_manifest_result(esp_err_t error)
+{
+    portENTER_CRITICAL(&s_cv_mux);
+    s_manifest_pending = error != ESP_OK;
+    s_last_error = error;
+    portEXIT_CRITICAL(&s_cv_mux);
+}
+
+esp_err_t settings_recovery_pending(bool *out)
+{
+    if (out == NULL) return ESP_ERR_INVALID_ARG;
+    if (settings_metadata_lock() != ESP_OK) return ESP_ERR_TIMEOUT;
+    uint8_t value = 0;
+    esp_err_t err = nvs_get_u8(s_h, "recover", &value);
+    *out = value != 0U;
+    settings_metadata_unlock();
+    return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+}
+
+esp_err_t settings_recovery_set_pending(bool pending)
+{
+    if (settings_metadata_lock() != ESP_OK) return ESP_ERR_TIMEOUT;
+    esp_err_t err = nvs_set_u8(s_h, "recover", pending ? 1U : 0U);
+    if (err == ESP_OK) err = nvs_commit(s_h);
+    settings_metadata_unlock();
     return err;
 }

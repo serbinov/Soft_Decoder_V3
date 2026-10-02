@@ -104,6 +104,12 @@ int mock_httpd_register_err = 0;
 int mock_httpd_start_calls = 0;
 int mock_httpd_register_calls = 0;
 int mock_httpd_err_register_calls = 0;
+int mock_httpd_async_begin_err;
+int mock_httpd_async_live;
+int mock_httpd_async_complete_calls;
+int mock_httpd_trigger_close_calls;
+int mock_httpd_shutdown_calls;
+int mock_httpd_last_closed_fd;
 httpd_config_t mock_httpd_last_cfg;
 
 /* Route table (bounded), useful for assertions and for keeping the shim
@@ -126,6 +132,62 @@ int mock_recv_calls = 0;
 
 char mock_query[2048] = { 0 };
 char mock_header_name[160] = { 0 };
+
+size_t httpd_req_get_url_query_len(httpd_req_t *req)
+{
+    (void)req;
+    return strlen(mock_query);
+}
+
+size_t httpd_req_get_hdr_value_len(httpd_req_t *req, const char *field)
+{
+    (void)req;
+    (void)field;
+    return strlen(mock_header_name);
+}
+
+esp_err_t httpd_req_async_handler_begin(httpd_req_t *req, httpd_req_t **out)
+{
+    if (req == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }
+    *out = NULL;
+    if (mock_httpd_async_begin_err != ESP_OK) { return mock_httpd_async_begin_err; }
+    httpd_req_t *copy = malloc(sizeof(*copy));
+    if (copy == NULL) { return ESP_ERR_NO_MEM; }
+    *copy = *req;
+    *out = copy;
+    ++mock_httpd_async_live;
+    return ESP_OK;
+}
+
+esp_err_t httpd_req_async_handler_complete(httpd_req_t *req)
+{
+    if (req == NULL) { return ESP_ERR_INVALID_ARG; }
+    ++mock_httpd_async_complete_calls;
+    --mock_httpd_async_live;
+    free(req);
+    return ESP_OK;
+}
+
+int httpd_req_to_sockfd(httpd_req_t *req)
+{
+    return req != NULL ? 10 : -1;
+}
+
+esp_err_t httpd_sess_trigger_close(httpd_handle_t handle, int fd)
+{
+    (void)handle;
+    ++mock_httpd_trigger_close_calls;
+    mock_httpd_last_closed_fd = fd;
+    return ESP_OK;
+}
+
+int mock_shutdown(int fd, int how)
+{
+    (void)how;
+    ++mock_httpd_shutdown_calls;
+    mock_httpd_last_closed_fd = fd;
+    return 0;
+}
 
 /* Captured response. */
 char mock_resp_body[262144];
@@ -1104,6 +1166,16 @@ void sound_function(uint8_t fn, bool state)
 }
 void sound_stop_all(void) { mock_sound_stop_all_calls++; }
 
+int mock_sound_inhibit_ret;
+bool mock_sound_inhibited;
+esp_err_t sound_set_inhibited(bool inhibited)
+{
+    if (mock_sound_inhibit_ret != ESP_OK) { return mock_sound_inhibit_ret; }
+    mock_sound_inhibited = inhibited;
+    if (inhibited) { sound_stop_all(); }
+    return ESP_OK;
+}
+
 /* Scheme project files (create/select/delete/export/import/list). */
 int mock_sound_last_name_calls = 0;
 char mock_sound_last_name[64] = { 0 };
@@ -1249,6 +1321,79 @@ int mock_audio_set_volume_calls = 0;
 uint8_t mock_audio_last_volume = 0;
 uint8_t mock_audio_last_voice = 0;
 char mock_audio_last_path[200];
+int mock_audio_inhibit_ret;
+bool mock_audio_inhibited;
+bool mock_audio_quiescent = true;
+audio_voice_state_t mock_audio_owned_state[AUDIO_MAX_VOICES];
+uint32_t mock_audio_owned_generation[AUDIO_MAX_VOICES];
+bool mock_audio_owned_busy[AUDIO_MAX_VOICES];
+
+esp_err_t audio_set_inhibited(bool inhibited)
+{
+    if (mock_audio_inhibit_ret != ESP_OK) { return mock_audio_inhibit_ret; }
+    mock_audio_inhibited = inhibited;
+    if (inhibited) {
+        audio_stop_all();
+        memset(mock_audio_owned_state, 0, sizeof(mock_audio_owned_state));
+        memset(mock_audio_owned_busy, 0, sizeof(mock_audio_owned_busy));
+    }
+    return ESP_OK;
+}
+
+bool audio_is_quiescent(void)
+{
+    return mock_audio_quiescent;
+}
+
+esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out)
+{
+    if (out == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (mock_audio_inhibited) { return ESP_ERR_INVALID_STATE; }
+    for (uint8_t i = 0; i < AUDIO_DYNAMIC_VOICES; ++i) {
+        if (!mock_audio_owned_busy[i]) {
+            mock_audio_owned_busy[i] = true;
+            out->voice = i;
+            out->generation = ++mock_audio_owned_generation[i];
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NO_MEM;
+}
+
+audio_voice_state_t audio_voice_get_state(audio_voice_handle_t handle)
+{
+    if (handle.voice >= AUDIO_MAX_VOICES || !mock_audio_owned_busy[handle.voice] ||
+        mock_audio_owned_generation[handle.voice] != handle.generation) {
+        return AUDIO_VOICE_FINISHED;
+    }
+    return mock_audio_owned_state[handle.voice];
+}
+
+esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
+                                 bool loop, uint8_t volume)
+{
+    if (handle == NULL || handle->voice >= AUDIO_DYNAMIC_VOICES) { return ESP_ERR_INVALID_ARG; }
+    uint8_t voice = handle->voice;
+    if (mock_audio_inhibited || !mock_audio_owned_busy[voice] ||
+        mock_audio_owned_generation[voice] != handle->generation) { return ESP_ERR_INVALID_STATE; }
+    esp_err_t err = audio_voice_play(voice, path, loop, volume);
+    if (err == ESP_OK) {
+        handle->generation = ++mock_audio_owned_generation[voice];
+        mock_audio_owned_state[voice] = AUDIO_VOICE_PLAYING;
+    }
+    return err;
+}
+
+void audio_voice_release_owned(audio_voice_handle_t handle)
+{
+    if (handle.voice < AUDIO_DYNAMIC_VOICES && mock_audio_owned_busy[handle.voice] &&
+        mock_audio_owned_generation[handle.voice] == handle.generation) {
+        (void)audio_voice_stop(handle.voice);
+        mock_audio_owned_busy[handle.voice] = false;
+        mock_audio_owned_state[handle.voice] = AUDIO_VOICE_FINISHED;
+        ++mock_audio_owned_generation[handle.voice];
+    }
+}
 
 esp_err_t audio_validate_wav(const char *path)
 {
@@ -1318,6 +1463,29 @@ int mock_motor_stop_calls = 0;
 int mock_motor_set_speed_calls = 0;
 uint8_t mock_motor_set_speed_value = 0;
 bool mock_motor_set_speed_fwd = true;
+uint32_t mock_motor_inhibit_reasons;
+
+esp_err_t motor_set_inhibit_reason(motor_inhibit_reason_t reason, bool inhibited)
+{
+    if (inhibited) {
+        mock_motor_inhibit_reasons |= (uint32_t)reason;
+        motor_emergency_stop();
+        mock_motor_speed = 0;
+    } else {
+        mock_motor_inhibit_reasons &= ~(uint32_t)reason;
+    }
+    return ESP_OK;
+}
+
+esp_err_t motor_set_inhibited(bool inhibited)
+{
+    return motor_set_inhibit_reason(MOTOR_INHIBIT_CONTROL, inhibited);
+}
+
+bool motor_is_inhibited(void)
+{
+    return mock_motor_inhibit_reasons != 0;
+}
 
 motor_bemf_cal_info_t mock_bemf_cal_info;
 motor_bemf_base_info_t mock_bemf_base_info;
@@ -1341,6 +1509,7 @@ void motor_emergency_stop(void)
 
 esp_err_t motor_set_speed(uint8_t speed128, bool forward)
 {
+    if (motor_is_inhibited()) { return ESP_ERR_INVALID_STATE; }
     mock_motor_set_speed_calls++;
     mock_motor_set_speed_value = speed128;
     mock_motor_set_speed_fwd = forward;
@@ -1464,6 +1633,43 @@ int mock_storage_is_mounted = 1;
 int mock_storage_free_ret = 0;
 uint64_t mock_storage_free = 1234u;
 int64_t mock_storage_get_time_advance_us = 0;
+int mock_storage_access_ret;
+int mock_storage_maintenance_ret;
+int mock_storage_access_leases;
+TaskHandle_t mock_storage_maintenance_owner;
+
+esp_err_t storage_access_begin(void)
+{
+    if (mock_storage_access_ret != ESP_OK) { return mock_storage_access_ret; }
+    if (!mock_storage_is_mounted || mock_storage_maintenance_owner != NULL) { return ESP_ERR_INVALID_STATE; }
+    ++mock_storage_access_leases;
+    return ESP_OK;
+}
+
+void storage_access_end(void)
+{
+    if (mock_storage_access_leases > 0) { --mock_storage_access_leases; }
+}
+
+esp_err_t storage_maintenance_begin(void)
+{
+    if (mock_storage_maintenance_ret != ESP_OK) { return mock_storage_maintenance_ret; }
+    if (mock_storage_maintenance_owner != NULL) { return ESP_ERR_INVALID_STATE; }
+    mock_storage_maintenance_owner = xTaskGetCurrentTaskHandle();
+    return ESP_OK;
+}
+
+void storage_maintenance_end(void)
+{
+    if (mock_storage_maintenance_owner == xTaskGetCurrentTaskHandle()) {
+        mock_storage_maintenance_owner = NULL;
+    }
+}
+
+bool storage_is_quiescent(void)
+{
+    return mock_storage_access_leases == 0;
+}
 
 bool storage_is_mounted(void)
 {
@@ -1485,6 +1691,12 @@ esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
 /* ====================================================================== */
 
 int mock_dcc_reload_config_calls = 0;
+bool mock_dcc_control_enabled;
+
+void dcc_set_control_enabled(bool enabled)
+{
+    mock_dcc_control_enabled = enabled;
+}
 
 void dcc_reload_config(void)
 {
@@ -1525,6 +1737,21 @@ void mock_web_reset(void)
     mock_httpd_start_calls = 0;
     mock_httpd_register_calls = 0;
     mock_httpd_err_register_calls = 0;
+    mock_httpd_async_begin_err = mock_httpd_async_live = 0;
+    mock_httpd_async_complete_calls = mock_httpd_trigger_close_calls = 0;
+    mock_httpd_shutdown_calls = mock_httpd_last_closed_fd = 0;
+    mock_sound_inhibit_ret = 0;
+    mock_sound_inhibited = false;
+    mock_audio_inhibit_ret = 0;
+    mock_audio_inhibited = false;
+    mock_audio_quiescent = true;
+    memset(mock_audio_owned_busy, 0, sizeof(mock_audio_owned_busy));
+    memset(mock_audio_owned_state, 0, sizeof(mock_audio_owned_state));
+    memset(mock_audio_owned_generation, 0, sizeof(mock_audio_owned_generation));
+    mock_motor_inhibit_reasons = 0;
+    mock_storage_access_ret = mock_storage_maintenance_ret = mock_storage_access_leases = 0;
+    mock_storage_maintenance_owner = NULL;
+    mock_dcc_control_enabled = false;
     mock_route_count = 0;
     memset(&mock_httpd_last_cfg, 0, sizeof(mock_httpd_last_cfg));
     memset(mock_routes, 0, sizeof(mock_routes));

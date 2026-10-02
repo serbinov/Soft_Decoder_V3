@@ -64,6 +64,7 @@ static bool s_mute_move;
 static bool s_mute_light;
 static int64_t s_extra_next[SOUND_MAX_EXTRAS];
 static uint8_t s_extra_voice[SOUND_MAX_EXTRAS];
+static audio_voice_handle_t s_extra_handle[SOUND_MAX_EXTRAS];
 static uint8_t s_extra_on[SOUND_MAX_EXTRAS];
 /* Test hook: limit the task loop so the body can run on the host (0 = run
  * forever, as on target). Mirrors audio's s_mix_iter_cap. */
@@ -74,11 +75,17 @@ static func_binding_t s_binds[FUNC_BIND_MAX];
 static size_t s_bind_count;
 static bool s_fn_state[SOUND_FN_COUNT];
 static uint8_t s_fn_voice[SOUND_FN_COUNT];
+static audio_voice_handle_t s_fn_handle[SOUND_FN_COUNT];
+static audio_voice_handle_t s_engine_handle;
+static bool s_inhibited;
+static bool s_control_armed = true;
+static int32_t s_accel_q; /* Q10 retains fractional decay toward zero */
 static int64_t s_fn_time[SOUND_FN_COUNT];
 
 /* Forward declarations (effect playback is defined further down). */
 static uint8_t fx_play_table(uint8_t table, bool loop, uint8_t *slot);
 static void fx_voice_stop(uint8_t *slot);
+static void runtime_reset_locked(void);
 
 /* Serialize the engine's shared state: the 20 ms task, the DCC/web function
  * path and the REST mutators all touch s_scheme/s_engine_key/s_binds. */
@@ -109,22 +116,29 @@ static void build_path(const char *name, char *buf, size_t cap)
     }
 }
 
-static uint8_t fx_voice_alloc(void)
+static audio_voice_handle_t *fx_handle(uint8_t *slot)
 {
-    uint8_t v = audio_voice_alloc();
-    if (v != AUDIO_VOICE_NONE && v >= SOUND_VOICE_ENGINE) {
-        /* Keep 18/19 reserved for the engine. */
-        audio_voice_release(v);
-        v = AUDIO_VOICE_NONE;
+    for (size_t i = 0; i < SOUND_FN_COUNT; ++i) {
+        if (slot == &s_fn_voice[i]) { return &s_fn_handle[i]; }
     }
-    return v;
+    for (size_t i = 0; i < SOUND_MAX_EXTRAS; ++i) {
+        if (slot == &s_extra_voice[i]) { return &s_extra_handle[i]; }
+    }
+    return NULL;
+}
+
+static bool fx_running(uint8_t *slot)
+{
+    audio_voice_handle_t *h = fx_handle(slot);
+    return h != NULL && *slot != AUDIO_VOICE_NONE &&
+           audio_voice_get_state(*h) != AUDIO_VOICE_FINISHED;
 }
 
 static void fx_voice_stop(uint8_t *slot)
 {
     if (*slot != AUDIO_VOICE_NONE) {
-        (void)audio_voice_stop(*slot);
-        audio_voice_release(*slot);
+        audio_voice_handle_t *h = fx_handle(slot);
+        if (h != NULL) { audio_voice_release_owned(*h); }
         *slot = AUDIO_VOICE_NONE;
     }
 }
@@ -264,7 +278,8 @@ static bool tb_play_init(void)
     while (s_group < SOUND_MAX_GROUPS) {
         if (t->init[s_group].file[0] != '\0') {
             build_path(t->init[s_group].file, path, sizeof(path));
-            return audio_voice_play(SOUND_VOICE_ENGINE, path, false, 100) == ESP_OK;
+            return audio_voice_play_generation(SOUND_VOICE_ENGINE, path, false, 100,
+                                                &s_engine_handle) == ESP_OK;
         }
         s_group++;
     }
@@ -279,22 +294,26 @@ static bool tb_play_loop(void)
     }
     char path[SOUND_PATH_MAX];
     build_path(t->loop[0].file, path, sizeof(path));
-    return audio_voice_play(SOUND_VOICE_ENGINE, path, false, 100) == ESP_OK;
+    return audio_voice_play_generation(SOUND_VOICE_ENGINE, path, false, 100,
+                                        &s_engine_handle) == ESP_OK;
 }
 
 static void tb_play_end(void)
 {
+    s_engine_handle = (audio_voice_handle_t){AUDIO_VOICE_NONE, 0};
     const sound_table_t *t = table_at(s_table);
     if (t == NULL || t->end[0].file[0] == '\0') {
         return;
     }
     char path[SOUND_PATH_MAX];
     build_path(t->end[0].file, path, sizeof(path));
-    (void)audio_voice_play(SOUND_VOICE_ENGINE, path, false, 100);
+    (void)audio_voice_play_generation(SOUND_VOICE_ENGINE, path, false, 100,
+                                     &s_engine_handle);
 }
 
 static void tb_start(uint8_t idx)
 {
+    s_engine_handle = (audio_voice_handle_t){AUDIO_VOICE_NONE, 0};
     (void)audio_voice_stop(SOUND_VOICE_ENGINE);
     (void)audio_voice_set_rate(SOUND_VOICE_ENGINE, 1000);
     s_group = 0;
@@ -320,7 +339,7 @@ static void tb_advance(void)
     if (table_at(s_table) == NULL || s_phase == TB_STOP) {
         return;
     }
-    if (audio_voice_is_active(SOUND_VOICE_ENGINE)) {
+    if (audio_voice_get_state(s_engine_handle) != AUDIO_VOICE_FINISHED) {
         return;
     }
     switch (s_phase) {
@@ -377,10 +396,11 @@ esp_err_t sound_scheme_get(sound_scheme_t *out)
 
 esp_err_t sound_scheme_set(const sound_scheme_t *in)
 {
-    if (in == NULL) {
+    if (in == NULL || sound_store_validate(in) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
     sound_lock();
+    runtime_reset_locked();
     s_scheme = *in;
     sound_unlock();
     return ESP_OK;
@@ -396,7 +416,9 @@ uint8_t sound_type_get(void)
 
 esp_err_t sound_type_set(uint8_t type)
 {
+    if (type > SOUND_SCHEME_ELECTRIC) { return ESP_ERR_INVALID_ARG; }
     sound_lock();
+    if (s_scheme.type != type) { runtime_reset_locked(); }
     s_scheme.type = type;
     sound_unlock();
     return ESP_OK;
@@ -557,6 +579,7 @@ esp_err_t sound_load_scheme(const char *name)
     }
     if (name[0] == '\0') {
         sound_lock();
+        runtime_reset_locked();
         (void)sound_store_default(&s_scheme);
         s_active[0] = '\0';
         sound_unlock();
@@ -579,6 +602,7 @@ esp_err_t sound_load_scheme(const char *name)
      * be retried on every boot (REV-S8). */
     bool keep_name = (err == ESP_OK || err == ESP_ERR_INVALID_STATE);
     sound_lock();
+    runtime_reset_locked();
     s_scheme = s_io_scheme;
     if (keep_name) {
         snprintf(s_active, sizeof(s_active), "%s", name);
@@ -610,6 +634,7 @@ esp_err_t sound_scheme_create(const char *name, uint8_t type)
         return err;
     }
     sound_lock();
+    runtime_reset_locked();
     s_scheme = s_io_scheme;
     snprintf(s_active, sizeof(s_active), "%s", name);
     sound_unlock();
@@ -630,12 +655,17 @@ esp_err_t sound_scheme_delete(const char *name)
     if (err != ESP_OK) {
         return err;
     }
-    if (remove(path) != 0) {
+    err = storage_access_begin();
+    if (err != ESP_OK) { return err; }
+    int removed = remove(path);
+    storage_access_end();
+    if (removed != 0) {
         return ESP_ERR_NOT_FOUND;
     }
     bool was_active = false;
     sound_lock();
     if (strcmp(s_active, name) == 0) {
+        runtime_reset_locked();
         s_active[0] = '\0';
         (void)sound_store_default(&s_scheme);
         was_active = true;
@@ -679,6 +709,7 @@ esp_err_t sound_scheme_import(const char *name, const uint8_t *buf, size_t len, 
     }
     if (err == ESP_OK && activate) {
         sound_lock();
+        runtime_reset_locked();
         s_scheme = s_io_scheme;
         snprintf(s_active, sizeof(s_active), "%s", name);
         sound_unlock();
@@ -701,8 +732,11 @@ esp_err_t sound_scheme_list(char names[][SOUND_FILE_MAX], size_t max, size_t *co
     if (n < 0 || (size_t)n >= sizeof(dir)) {
         return ESP_ERR_INVALID_SIZE;
     }
+    esp_err_t admission = storage_access_begin();
+    if (admission != ESP_OK) { return admission; }
     DIR *d = opendir(dir);
     if (d == NULL) {
+        storage_access_end();
         return ESP_ERR_NOT_FOUND;
     }
     const size_t ext = strlen(SOUND_STORE_EXT);
@@ -722,6 +756,7 @@ esp_err_t sound_scheme_list(char names[][SOUND_FILE_MAX], size_t max, size_t *co
         (*count)++;
     }
     closedir(d);
+    storage_access_end();
     return ESP_OK;
 }
 
@@ -793,13 +828,16 @@ bool sound_scheme_enabled(void)
 void sound_engine_power(bool on)
 {
     sound_lock();
-    s_engine_key = on;
+    if (!s_inhibited) { s_engine_key = on; s_control_armed = true; }
     sound_unlock();
 }
 
 void sound_set_speed(uint8_t speed, bool forward)
 {
     sound_lock();
+    if (!s_inhibited && (s_speed != speed || s_forward != forward)) {
+        s_control_armed = true;
+    }
     s_speed = speed;
     s_forward = forward;
     sound_unlock();
@@ -822,6 +860,7 @@ void sound_reload_bindings(void)
 /* Play a table on a (possibly new) effect voice; returns the voice used. */
 static uint8_t fx_play_table(uint8_t table, bool loop, uint8_t *slot)
 {
+    if (s_inhibited || s_mute_light) { return AUDIO_VOICE_NONE; }
     const sound_table_t *t = table_at(table);
     if (t == NULL) {
         return AUDIO_VOICE_NONE;
@@ -830,13 +869,17 @@ static uint8_t fx_play_table(uint8_t table, bool loop, uint8_t *slot)
     if (table_first_file(t, path, sizeof(path)) == NULL) {
         return AUDIO_VOICE_NONE;
     }
-    if (*slot == AUDIO_VOICE_NONE) {
-        *slot = fx_voice_alloc();
+    audio_voice_handle_t *h = fx_handle(slot);
+    if (h == NULL) { return AUDIO_VOICE_NONE; }
+    if (!fx_running(slot)) {
+        *slot = AUDIO_VOICE_NONE;
+        if (audio_voice_alloc_owned(h) != ESP_OK) { return AUDIO_VOICE_NONE; }
+        *slot = h->voice;
     }
-    if (*slot == AUDIO_VOICE_NONE) {
+    if (audio_voice_play_owned(h, path, loop, 100) != ESP_OK) {
+        fx_voice_stop(slot);
         return AUDIO_VOICE_NONE;
     }
-    (void)audio_voice_play(*slot, path, loop, 100);
     return *slot;
 }
 
@@ -861,13 +904,25 @@ static void binding_apply(const func_binding_t *b, bool state)
         return;
     }
     if (b->target_type == FUNC_TARGET_LOGIC) {
-        if (!binding_gate_ok(b)) {
+        if (state && !binding_gate_ok(b)) {
             return;
         }
         switch (b->target_id) {
             case FUNC_LOGIC_MUTE_STOP:  s_mute_stop = state; break;
             case FUNC_LOGIC_MUTE_MOVE:  s_mute_move = state; break;
-            case FUNC_LOGIC_MUTE_LIGHT: s_mute_light = state; break;
+            case FUNC_LOGIC_MUTE_LIGHT:
+                s_mute_light = state;
+                if (state) {
+                    for (size_t i = 0; i < SOUND_FN_COUNT; ++i) {
+                        fx_voice_stop(&s_fn_voice[i]);
+                    }
+                    for (size_t i = 0; i < SOUND_MAX_EXTRAS; ++i) {
+                        fx_voice_stop(&s_extra_voice[i]);
+                        s_extra_on[i] = 0;
+                    }
+                    (void)audio_voice_stop(SOUND_VOICE_ENGINE_X);
+                }
+                break;
             default: break;
         }
         return;
@@ -875,7 +930,7 @@ static void binding_apply(const func_binding_t *b, bool state)
     if (b->target_type != FUNC_TARGET_SOUND) {
         return; /* SLOT/OUTPUT stay on the legacy/web path */
     }
-    if (s_mute_light) {
+    if (state && s_mute_light) {
         return; /* light-mute silences effect sounds */
     }
     int64_t now = esp_timer_get_time();
@@ -891,7 +946,7 @@ static void binding_apply(const func_binding_t *b, bool state)
             case SOUND_MODE_TRIGGER:
                 /* One run to completion: ignore a press while it is sounding. */
                 if (s_fn_voice[fn] == AUDIO_VOICE_NONE ||
-                    !audio_voice_is_active(s_fn_voice[fn])) {
+                    !fx_running(&s_fn_voice[fn])) {
                     fx_voice_stop(&s_fn_voice[fn]);
                     (void)fx_play_table(b->target_id, false, &s_fn_voice[fn]);
                 }
@@ -901,7 +956,7 @@ static void binding_apply(const func_binding_t *b, bool state)
                 (void)fx_play_table(b->target_id, true, &s_fn_voice[fn]);
                 break;
             case SOUND_MODE_LATCHED:
-                if (s_fn_voice[fn] == AUDIO_VOICE_NONE) {
+                if (!fx_running(&s_fn_voice[fn])) {
                     (void)fx_play_table(b->target_id, true, &s_fn_voice[fn]);
                 } else {
                     fx_voice_stop(&s_fn_voice[fn]);
@@ -915,7 +970,7 @@ static void binding_apply(const func_binding_t *b, bool state)
     /* Release: always release the voice; the short-tap sound keeps its gate. */
     int64_t dt_ms = (now - s_fn_time[fn]) / 1000;
     if (b->mode == SOUND_MODE_SHORT_LONG && b->short_table != SOUND_TABLE_NONE &&
-        dt_ms < (int64_t)b->short_ms && binding_gate_ok(b)) {
+        dt_ms < (int64_t)b->short_ms && binding_gate_ok(b) && !s_mute_light) {
         fx_voice_stop(&s_fn_voice[fn]);
         (void)fx_play_table(b->short_table, false, &s_fn_voice[fn]);
     } else if (b->mode == SOUND_MODE_LOOP_HELD || b->mode == SOUND_MODE_SHORT_LONG) {
@@ -929,7 +984,7 @@ static void extras_function(uint8_t fn, bool state)
 {
     for (uint8_t i = 0; i < s_scheme.extra_count && i < SOUND_MAX_EXTRAS; ++i) {
         const sound_extra_t *e = &s_scheme.extras[i];
-        if (e->fn != fn || e->table == SOUND_TABLE_NONE || s_mute_light) {
+        if (e->fn != fn || e->table == SOUND_TABLE_NONE || (state && s_mute_light)) {
             continue;
         }
         switch (e->mode) {
@@ -955,7 +1010,7 @@ static void extras_function(uint8_t fn, bool state)
                 break;
             case SOUND_MODE_TRIGGER:
                 if (state && (s_extra_voice[i] == AUDIO_VOICE_NONE ||
-                              !audio_voice_is_active(s_extra_voice[i]))) {
+                              !fx_running(&s_extra_voice[i]))) {
                     (void)fx_play_table(e->table, false, &s_extra_voice[i]);
                 }
                 break;
@@ -974,9 +1029,12 @@ void sound_function(uint8_t fn, bool state)
         return;
     }
     sound_lock();
+    if (s_inhibited || s_scheme.type == SOUND_SCHEME_NONE ||
+        s_scheme.type == SOUND_SCHEME_LEGACY) { sound_unlock(); return; }
     bool changed = (s_fn_state[fn] != state);
     s_fn_state[fn] = state;
     if (changed) {
+        s_control_armed = true;
         if (s_scheme.type != SOUND_SCHEME_NONE && s_scheme.type != SOUND_SCHEME_LEGACY &&
             fn == s_scheme.engine.engine_start_fn) {
             if (state) {
@@ -994,9 +1052,8 @@ void sound_function(uint8_t fn, bool state)
     sound_unlock();
 }
 
-void sound_stop_all(void)
+static void runtime_reset_locked(void)
 {
-    sound_lock();
     for (uint8_t i = 0; i < SOUND_FN_COUNT; ++i) {
         fx_voice_stop(&s_fn_voice[i]);
         s_fn_state[i] = false;
@@ -1017,8 +1074,29 @@ void sound_stop_all(void)
     s_table = SOUND_TABLE_NONE;
     s_phase = TB_STOP;
     s_accel = 0;
-    s_prev_speed = 0;
+    s_accel_q = 0;
+    s_prev_speed = s_speed;
+    s_group = 0;
+    s_plays = 0;
+    s_engine_handle = (audio_voice_handle_t){AUDIO_VOICE_NONE, 0};
+    s_control_armed = false;
+}
+
+void sound_stop_all(void)
+{
+    sound_lock();
+    runtime_reset_locked();
     sound_unlock();
+}
+
+esp_err_t sound_set_inhibited(bool inhibited)
+{
+    if (s_lock == NULL) { return ESP_ERR_INVALID_STATE; }
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) != pdTRUE) { return ESP_ERR_TIMEOUT; }
+    s_inhibited = inhibited;
+    if (inhibited) { runtime_reset_locked(); }
+    sound_unlock();
+    return ESP_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1038,6 +1116,14 @@ static void random_schedule(uint8_t i)
 /* Random and state-driven extra sounds (R6.4). */
 static void extras_tick(void)
 {
+    if (s_mute_light) {
+        for (size_t i = 0; i < SOUND_MAX_EXTRAS; ++i) {
+            fx_voice_stop(&s_extra_voice[i]);
+            s_extra_on[i] = 0;
+            s_extra_next[i] = 0;
+        }
+        return;
+    }
     int64_t now = esp_timer_get_time();
     uint8_t state = (s_speed != 0U) ? FUNC_STATE_MOVING : FUNC_STATE_STOPPED;
     uint8_t dir = s_forward ? FUNC_DIR_FWD : FUNC_DIR_REV;
@@ -1084,7 +1170,7 @@ static void extras_tick(void)
 static void brake_tick(void)
 {
     const sound_brake_t *b = &s_scheme.brake;
-    if (!s_engine_key || s_speed == 0U || b->min_brake_speed == 0U) {
+    if (s_mute_light || !s_engine_key || s_speed == 0U || b->min_brake_speed == 0U) {
         s_brake_done = false;
         return;
     }
@@ -1111,12 +1197,14 @@ static void brake_tick(void)
 static void sound_tick(void)
 {
     sound_lock();
-    if (s_scheme.type == SOUND_SCHEME_NONE || s_scheme.type == SOUND_SCHEME_LEGACY) {
+    if (s_inhibited || !s_control_armed || s_scheme.type == SOUND_SCHEME_NONE ||
+        s_scheme.type == SOUND_SCHEME_LEGACY) {
         sound_unlock();
         return;
     }
     int32_t d = (int32_t)s_speed - (int32_t)s_prev_speed;
-    s_accel += (d - s_accel) * 3 / 10; /* EMA alpha = 0.3 */
+    s_accel_q = (s_accel_q * 7 + d * 1024 * 3) / 10;
+    s_accel = s_accel_q / 1024;
     s_prev_speed = s_speed;
 
     /* sync_motion: the prime mover follows the wheels automatically. */
@@ -1171,6 +1259,7 @@ static void sound_task(void *arg)
 
 esp_err_t sound_init(void)
 {
+    if (s_lock != NULL) { return ESP_ERR_INVALID_STATE; }
     s_lock = xSemaphoreCreateMutex();
     if (s_lock == NULL) {
         return ESP_ERR_NO_MEM;
@@ -1199,6 +1288,8 @@ esp_err_t sound_init(void)
 
     if (xTaskCreatePinnedToCore(sound_task, "sound", 4096, NULL, 6, NULL, 1) != pdPASS) {
         ESP_LOGW(TAG, "sound task create failed");
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "sound engine ready (%s)", s_active[0] ? s_active : "no scheme");

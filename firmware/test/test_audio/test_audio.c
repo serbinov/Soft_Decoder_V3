@@ -11,13 +11,174 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "pinmap.h"
+#include "storage.h"
+#include "sound.h"
+#include "settings.h"
+#include "motor.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 /* White-box: expose voice_start / voice_next_sample / voice_fill / mixer state. */
+static size_t audio_test_fread(void *ptr, size_t size, size_t count, FILE *file);
+static FILE *audio_test_fopen(const char *path, const char *mode);
+static int audio_test_fclose(FILE *file);
+static int audio_test_fseek(FILE *file, long offset, int origin);
+static BaseType_t audio_test_take(SemaphoreHandle_t mutex, TickType_t ticks);
+static BaseType_t audio_test_give(SemaphoreHandle_t mutex);
+static esp_err_t audio_test_i2s_write(i2s_chan_handle_t channel, const void *data,
+                                     size_t size, size_t *written, uint32_t timeout);
+static esp_err_t audio_test_gpio_config(const gpio_config_t *cfg);
+static esp_err_t audio_test_gpio_level(gpio_num_t pin, uint32_t level);
+static esp_err_t audio_test_i2s_disable(i2s_chan_handle_t channel);
+static esp_err_t audio_test_i2s_delete(i2s_chan_handle_t channel);
+static esp_err_t audio_test_i2s_enable(i2s_chan_handle_t channel);
+#define i2s_channel_disable audio_test_i2s_disable
+#define i2s_del_channel audio_test_i2s_delete
+#define i2s_channel_enable audio_test_i2s_enable
+#define fread audio_test_fread
+#define fopen audio_test_fopen
+#define fclose audio_test_fclose
+#define fseek audio_test_fseek
+#define xSemaphoreTake audio_test_take
+#define xSemaphoreGive audio_test_give
+#define i2s_channel_write audio_test_i2s_write
+#define gpio_config audio_test_gpio_config
+#define gpio_set_level audio_test_gpio_level
 #define static
 #include "../../components/audio/src/audio.c"
+#undef i2s_channel_disable
+#undef i2s_del_channel
+#undef i2s_channel_enable
+#undef fread
+#undef fopen
+#undef fclose
+#undef fseek
+#undef xSemaphoreTake
+#undef xSemaphoreGive
+#undef i2s_channel_write
+#undef gpio_config
+#undef gpio_set_level
+#define TAG sound_test_tag
+#define s_inhibited sound_test_inhibited
+#define build_path sound_build_path
+#include "../../components/sound/src/sound_store.c"
+#include "../../components/sound/src/sound.c"
+#undef build_path
+#undef s_inhibited
+#undef TAG
 #undef static
 
 #include "../../test_libs/teststubs/stubs.c"
+
+static void (*s_read_interleave)(void);
+static unsigned s_request_lock_depth;
+static esp_err_t s_gpio_config_err, s_gpio_enable_err;
+static uint32_t s_amp_level;
+static int s_i2s_delete_calls, s_i2s_disable_calls;
+static esp_err_t s_i2s_enable_err;
+static BaseType_t audio_test_take(SemaphoreHandle_t mutex, TickType_t ticks)
+{
+    BaseType_t result = xSemaphoreTake(mutex, ticks);
+    if (result == pdTRUE) { ++s_request_lock_depth; }
+    return result;
+}
+static BaseType_t audio_test_give(SemaphoreHandle_t mutex)
+{
+    TEST_ASSERT_TRUE(s_request_lock_depth > 0);
+    --s_request_lock_depth;
+    return xSemaphoreGive(mutex);
+}
+static FILE *audio_test_fopen(const char *path, const char *mode)
+{
+    TEST_ASSERT_EQUAL(0, s_request_lock_depth);
+    return fopen(path, mode);
+}
+static int audio_test_fclose(FILE *file)
+{
+    TEST_ASSERT_EQUAL(0, s_request_lock_depth);
+    return fclose(file);
+}
+static int audio_test_fseek(FILE *file, long offset, int origin)
+{
+    TEST_ASSERT_EQUAL(0, s_request_lock_depth);
+    return fseek(file, offset, origin);
+}
+static esp_err_t audio_test_i2s_write(i2s_chan_handle_t channel, const void *data,
+                                     size_t size, size_t *written, uint32_t timeout)
+{
+    TEST_ASSERT_EQUAL(0, s_request_lock_depth);
+    return i2s_channel_write(channel, data, size, written, timeout);
+}
+static esp_err_t audio_test_gpio_config(const gpio_config_t *cfg)
+{
+    return s_gpio_config_err != ESP_OK ? s_gpio_config_err : gpio_config(cfg);
+}
+static esp_err_t audio_test_gpio_level(gpio_num_t pin, uint32_t level)
+{
+    if (level != 0 && s_gpio_enable_err != ESP_OK) { return s_gpio_enable_err; }
+    s_amp_level = level;
+    return gpio_set_level(pin, level);
+}
+static esp_err_t audio_test_i2s_disable(i2s_chan_handle_t channel)
+{
+    (void)channel;
+    ++s_i2s_disable_calls;
+    return ESP_OK;
+}
+static esp_err_t audio_test_i2s_delete(i2s_chan_handle_t channel)
+{
+    (void)channel;
+    ++s_i2s_delete_calls;
+    return ESP_OK;
+}
+static esp_err_t audio_test_i2s_enable(i2s_chan_handle_t channel)
+{
+    return s_i2s_enable_err != ESP_OK ? s_i2s_enable_err : i2s_channel_enable(channel);
+}
+static size_t audio_test_fread(void *ptr, size_t size, size_t count, FILE *file)
+{
+    TEST_ASSERT_EQUAL(0, s_request_lock_depth);
+    size_t n = fread(ptr, size, count, file);
+    if (s_read_interleave != NULL && s_voice[0].st.active && file == s_voice[0].st.f) {
+        void (*hook)(void) = s_read_interleave;
+        s_read_interleave = NULL;
+        hook();
+    }
+    return n;
+}
+
+static int s_storage_leases;
+static bool s_storage_blocked;
+esp_err_t storage_access_begin(void)
+{
+    if (s_storage_blocked) { return ESP_ERR_INVALID_STATE; }
+    ++s_storage_leases;
+    return ESP_OK;
+}
+void storage_access_end(void) { --s_storage_leases; }
+bool storage_is_mounted(void) { return true; }
+const char *storage_get_root(void) { return getenv("TEMP") != NULL ? getenv("TEMP") : "."; }
+esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
+{
+    (void)idx;
+    *out = 51;
+    return ESP_OK;
+}
+esp_err_t settings_active_scheme_get(char *out, size_t cap)
+{
+    (void)cap;
+    out[0] = 0;
+    return ESP_ERR_NOT_FOUND;
+}
+esp_err_t settings_active_scheme_set(const char *name) { (void)name; return ESP_OK; }
+esp_err_t settings_func_bind_load(func_binding_t *out, size_t *count)
+{
+    (void)out;
+    *count = 0;
+    return ESP_OK;
+}
+void motor_get_applied_speed(uint8_t *speed, bool *forward) { *speed = 0; *forward = true; }
 
 #define TMP_MONO   "dcc_test_mono.wav"
 #define TMP_STEREO "dcc_test_stereo.wav"
@@ -130,6 +291,31 @@ void setUp(void)
 
     memset(s_voice, 0, sizeof(s_voice));
     memset(s_busy, 0, sizeof(s_busy));
+    s_initialized = false;
+    s_inhibited = false;
+    s_tx = NULL;
+    s_req_mutex = NULL;
+    s_storage_leases = 0;
+    s_storage_blocked = false;
+    s_mixer_work = false;
+    s_validate_work = 0;
+    s_read_interleave = NULL;
+    s_request_lock_depth = 0;
+    s_gpio_config_err = ESP_OK;
+    s_gpio_enable_err = ESP_OK;
+    s_amp_level = 0;
+    s_i2s_delete_calls = 0;
+    s_i2s_disable_calls = 0;
+    s_i2s_enable_err = ESP_OK;
+    memset(&s_scheme, 0, sizeof(s_scheme));
+    memset(s_fn_voice, AUDIO_VOICE_NONE, sizeof(s_fn_voice));
+    memset(s_extra_voice, AUDIO_VOICE_NONE, sizeof(s_extra_voice));
+    s_lock = NULL;
+    sound_test_inhibited = false;
+    s_control_armed = true;
+    s_table = SOUND_TABLE_NONE;
+    s_phase = TB_STOP;
+    mock_mutex_create_fail = 0;
     s_volume = 100;
     /* The anti-click envelope is exercised by dedicated tests; keep the
      * amplitude/step expectations of the legacy tests exact by default. */
@@ -137,6 +323,8 @@ void setUp(void)
     mock_i2s_write_count = 0;
     mock_i2s_new_channel_err = 0;
     mock_i2s_init_std_err = 0;
+    mock_i2s_enable_err = 0;
+    mock_sem_take_fail = 0;
     mock_task_create_ok = 1;
     s_mix_iter_cap = 0;
     TEST_ASSERT_EQUAL(ESP_OK, audio_init());
@@ -144,6 +332,7 @@ void setUp(void)
 
 void tearDown(void)
 {
+    for (int v = 0; v < AUDIO_MAX_VOICES; ++v) { voice_close(&s_voice[v].st); }
     remove(s_path_mono);
     remove(s_path_stereo);
     remove(s_path_bad);
@@ -203,7 +392,7 @@ static void test_voice_start_parses_mono(void)
     TEST_ASSERT_EQUAL_UINT32(8, st.samples_total);
     TEST_ASSERT_TRUE(st.loop);
     TEST_ASSERT_EQUAL_UINT8(100, st.volume); /* clamped from 200 */
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_start_parses_stereo(void)
@@ -215,7 +404,7 @@ static void test_voice_start_parses_stereo(void)
     TEST_ASSERT_EQUAL_UINT16(2, st.channels);
     TEST_ASSERT_EQUAL_UINT32(10, st.samples_total);
     TEST_ASSERT_EQUAL_UINT8(50, st.volume);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_start_rejects_unusable(void)
@@ -244,7 +433,7 @@ static void test_voice_next_sample_downmix(void)
     /* Frame 0: L=1000, R=2000 -> downmixed to 1500; frame 1 -> 2500. */
     TEST_ASSERT_EQUAL_INT16(1500, st.s_cur);
     TEST_ASSERT_EQUAL_INT16(2500, st.s_next);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_fill_passes_samples(void)
@@ -258,7 +447,7 @@ static void test_voice_fill_passes_samples(void)
     (void)voice_fill(&st, mix, 2);
     TEST_ASSERT_EQUAL_INT16(1000, mix[0]);
     TEST_ASSERT_EQUAL_INT16(2000, mix[1]);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_fill_clips(void)
@@ -271,7 +460,7 @@ static void test_voice_fill_clips(void)
     int16_t mix[1] = { 32000 };
     (void)voice_fill(&st, mix, 1);
     TEST_ASSERT_EQUAL_INT16(32767, mix[0]); /* 32000 + 1000 saturates */
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_fill_applies_volume(void)
@@ -284,7 +473,7 @@ static void test_voice_fill_applies_volume(void)
     int16_t mix[1] = { 0 };
     (void)voice_fill(&st, mix, 1);
     TEST_ASSERT_EQUAL_INT16(500, mix[0]); /* 1000 * (50 * 100 / 100) / 100 */
-    fclose(st.f);
+    voice_close(&st);
 }
 
 /* ---- request / volume API ---- */
@@ -320,9 +509,9 @@ static void test_volume_clamp_and_playing(void)
     TEST_ASSERT_EQUAL_UINT8(30, audio_get_volume());
 
     TEST_ASSERT_FALSE(audio_is_playing());
-    s_voice[3].st.active = true;
+    s_voice[3].published_active = true;
     TEST_ASSERT_TRUE(audio_is_playing());
-    s_voice[3].st.active = false;
+    s_voice[3].published_active = false;
     TEST_ASSERT_FALSE(audio_is_playing());
 }
 
@@ -330,18 +519,54 @@ static void test_volume_clamp_and_playing(void)
 
 static void test_audio_init_error_paths(void)
 {
+    s_initialized = false;
+    s_tx = NULL;
+    mock_mutex_create_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, audio_init());
+    TEST_ASSERT_NULL(s_req_mutex);
+    mock_mutex_create_fail = 0;
+    s_gpio_config_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
+    TEST_ASSERT_NULL(s_req_mutex);
+    TEST_ASSERT_NULL(s_tx);
+    TEST_ASSERT_EQUAL(0, s_amp_level);
+    s_gpio_config_err = ESP_OK;
     mock_i2s_new_channel_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
     mock_i2s_new_channel_err = 0;
 
     mock_i2s_init_std_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
+    TEST_ASSERT_NULL(s_req_mutex);
+    TEST_ASSERT_NULL(s_tx);
+    TEST_ASSERT_EQUAL(1, s_i2s_delete_calls);
     mock_i2s_init_std_err = 0;
+
+    s_i2s_enable_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
+    TEST_ASSERT_NULL(s_req_mutex);
+    TEST_ASSERT_NULL(s_tx);
+    TEST_ASSERT_EQUAL(2, s_i2s_delete_calls);
+    s_i2s_enable_err = ESP_OK;
 
     mock_task_create_ok = 0;
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, audio_init());
+    TEST_ASSERT_NULL(s_req_mutex);
+    TEST_ASSERT_NULL(s_tx);
+    TEST_ASSERT_EQUAL(3, s_i2s_delete_calls);
+    TEST_ASSERT_EQUAL(3, s_i2s_disable_calls);
+    TEST_ASSERT_EQUAL(0, s_amp_level);
     mock_task_create_ok = 1;
+    s_gpio_enable_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, audio_init());
+    TEST_ASSERT_NULL(s_req_mutex);
+    TEST_ASSERT_NULL(s_tx);
+    TEST_ASSERT_EQUAL(4, s_i2s_delete_calls);
+    TEST_ASSERT_EQUAL(4, s_i2s_disable_calls);
+    TEST_ASSERT_EQUAL(0, s_amp_level);
+    s_gpio_enable_err = ESP_OK;
     TEST_ASSERT_EQUAL(ESP_OK, audio_init()); /* restore */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_init()); /* no duplicate task/resources */
 }
 
 static void test_validate_wav_short_and_empty(void)
@@ -364,7 +589,7 @@ static void make_wav_ext_fmt(const char *path, uint16_t channels, size_t frames)
 {
     FILE *f = fopen(path, "wb");
     fwrite("RIFF", 1, 4, f);
-    put_u32(f, 100);
+    put_u32(f, (uint32_t)(38U + frames * channels * 2U));
     fwrite("WAVE", 1, 4, f);
     fwrite("fmt ", 1, 4, f);
     put_u32(f, 18);
@@ -397,7 +622,7 @@ static void test_voice_start_reopens_and_skips_chunks(void)
     TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
     /* Second start closes the previous FILE first. */
     TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_start_bad_riff(void)
@@ -417,7 +642,7 @@ static void test_voice_start_extended_fmt(void)
     voice_state_t st;
     memset(&st, 0, sizeof(st));
     TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_bad, false, 100));
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_start_truncated_data(void)
@@ -460,9 +685,8 @@ static void test_voice_start_truncated_data(void)
     put_u16(f, 1000);
     fclose(f);
     memset(&st, 0, sizeof(st));
-    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_bad, false, 100));
-    TEST_ASSERT_EQUAL_INT16(1000, st.s_next); /* fell back to s_cur */
-    fclose(st.f);
+    TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+    TEST_ASSERT_NULL(st.f);
 
     /* Stereo: data claims 2 frames but the right channel is missing. */
     f = fopen(s_path_bad, "wb");
@@ -498,7 +722,7 @@ static void test_voice_fill_negative_clip(void)
     int16_t mix[1] = { -30000 };
     (void)voice_fill(&st, mix, 1);
     TEST_ASSERT_EQUAL_INT16(-32768, mix[0]);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_fill_ends_midway(void)
@@ -511,7 +735,7 @@ static void test_voice_fill_ends_midway(void)
     int produced = voice_fill(&st, mix, 64);
     TEST_ASSERT_FALSE(st.active);
     TEST_ASSERT_TRUE(produced > 0 && produced < 64);
-    fclose(st.f);
+    TEST_ASSERT_NULL(st.f);
 }
 
 static void test_mixer_task_processes_requests(void)
@@ -569,7 +793,7 @@ static void test_voice_next_sample_loops(void)
     for (int i = 0; i < 4; ++i) {
         TEST_ASSERT_TRUE(voice_next_sample(&st, &out));
     }
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_start_no_data_chunk(void)
@@ -599,7 +823,7 @@ static void make_wav_odd_chunk(const char *path)
     FILE *f = fopen(path, "wb");
     if (f == NULL) { TEST_FAIL_MESSAGE("cannot create temp wav"); return; }
     fwrite("RIFF", 1, 4, f);
-    put_u32(f, 0);
+    put_u32(f, 54);
     fwrite("WAVE", 1, 4, f);
     fwrite("JUNK", 1, 4, f);
     put_u32(f, 5); /* odd size -> one pad byte follows */
@@ -626,7 +850,7 @@ static void test_wav_odd_chunk_padding(void)
     voice_state_t st;
     memset(&st, 0, sizeof(st));
     TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_bad, false, 100));
-    if (st.f != NULL) { fclose(st.f); st.f = NULL; }
+    voice_close(&st);
 }
 
 /* A bogus (implausibly large) chunk size must abort the walk, not fseek
@@ -708,7 +932,7 @@ static void test_voice_start_rate_default_and_explicit(void)
     TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
     TEST_ASSERT_EQUAL_UINT16(1000, st.rate_permille);
     TEST_ASSERT_TRUE(st.rate_cur > 0.99 && st.rate_cur < 1.01);
-    fclose(st.f);
+    voice_close(&st);
 
     /* Explicit valid rate is honoured on start. */
     memset(&st, 0, sizeof(st));
@@ -716,7 +940,7 @@ static void test_voice_start_rate_default_and_explicit(void)
     TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, false, 100));
     TEST_ASSERT_EQUAL_UINT16(2000, st.rate_permille);
     TEST_ASSERT_TRUE(st.rate_cur > 1.99 && st.rate_cur < 2.01);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_set_rate_clips_and_validates(void)
@@ -738,8 +962,8 @@ static void test_voice_is_active_and_position(void)
     TEST_ASSERT_FALSE(audio_voice_is_active(AUDIO_MAX_VOICES));
     TEST_ASSERT_EQUAL_UINT32(0, audio_voice_position(AUDIO_MAX_VOICES));
 
-    s_voice[0].st.active = true;
-    s_voice[0].st.played = 42;
+    s_voice[0].published_active = true;
+    s_voice[0].published_position = 42;
     TEST_ASSERT_TRUE(audio_voice_is_active(0));
     TEST_ASSERT_EQUAL_UINT32(42, audio_voice_position(0));
 
@@ -751,19 +975,21 @@ static void test_voice_is_active_and_position(void)
     int16_t mix[10] = { 0 };
     (void)voice_fill(&st, mix, 10);
     TEST_ASSERT_EQUAL_UINT32(10, st.played);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 /* ---- R0: voice allocator ---- */
 
 static void test_voice_alloc_release(void)
 {
-    for (uint8_t i = 0; i < AUDIO_MAX_VOICES; ++i) {
+    for (uint8_t i = 0; i < AUDIO_DYNAMIC_VOICES; ++i) {
         TEST_ASSERT_EQUAL_UINT8(i, audio_voice_alloc());
     }
     TEST_ASSERT_EQUAL_UINT8(AUDIO_VOICE_NONE, audio_voice_alloc());
 
     audio_voice_release(7);
+    s_mix_iter_cap = 1;
+    mixer_task(NULL);
     TEST_ASSERT_EQUAL_UINT8(7, audio_voice_alloc());
 
     audio_voice_release(AUDIO_MAX_VOICES); /* invalid: no-op */
@@ -810,7 +1036,7 @@ static void test_voice_fade_in_ramps(void)
     TEST_ASSERT_TRUE(mix[0] < 10);        /* first samples are faded in */
     TEST_ASSERT_EQUAL_INT16(1000, mix[511]); /* ramp complete after 2 blocks */
     TEST_ASSERT_EQUAL_UINT16(AUDIO_ENV_ONE, st.env);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_voice_fade_out_on_stop(void)
@@ -828,7 +1054,7 @@ static void test_voice_fade_out_on_stop(void)
 
     st.stopping = true;
     memset(mix, 0, sizeof(mix));
-    (void)voice_fill(&st, mix, 520); /* ramp down and close */
+    (void)voice_fill(&st, mix, 512); /* ramp down and close */
     TEST_ASSERT_FALSE(st.active);
     TEST_ASSERT_NULL(st.f);
 }
@@ -844,7 +1070,7 @@ static void test_voice_fade_step_clamped(void)
     int16_t mix[1] = { 0 };
     (void)voice_fill(&st, mix, 1);
     TEST_ASSERT_EQUAL_UINT16(1, st.env);
-    fclose(st.f);
+    voice_close(&st);
 }
 
 static void test_mixer_stop_fades_when_enabled(void)
@@ -869,6 +1095,210 @@ static void test_mixer_stop_fades_when_enabled(void)
     TEST_ASSERT_TRUE(s_voice[0].st.stopping);
     TEST_ASSERT_FALSE(s_voice[0].st.active);
     TEST_ASSERT_NULL(s_voice[0].st.f);
+}
+
+static void mixer_step(void)
+{
+    s_mix_iter_cap = 1;
+    mixer_task(NULL);
+}
+
+static audio_voice_handle_t s_race_handle;
+static void replace_during_read(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&s_race_handle, s_path_stereo, true, 100));
+}
+
+static void test_generation_eof_interleave_and_stale_release(void)
+{
+    make_wav_const(s_path_mono, 22050, 4, 1000);
+    make_wav_const(s_path_stereo, 22050, 2000, 2000);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&s_race_handle));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&s_race_handle, s_path_mono, false, 100));
+    audio_voice_handle_t old = s_race_handle;
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(old));
+    s_read_interleave = replace_during_read;
+    mixer_step(); /* old EOF must not clear replacement's allocator/state */
+    TEST_ASSERT_TRUE(s_busy[0]);
+    TEST_ASSERT_TRUE(s_voice[0].req_play);
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(s_race_handle));
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_FINISHED, audio_voice_get_state(old));
+    audio_voice_release_owned(old);
+    TEST_ASSERT_FALSE(s_voice[0].req_stop);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      audio_voice_play_owned(&old, s_path_mono, false, 100));
+    TEST_ASSERT_EQUAL_STRING(s_path_stereo, s_voice[0].req_path);
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(s_race_handle));
+    TEST_ASSERT_EQUAL(1, s_storage_leases);
+    audio_voice_release_owned(s_race_handle);
+    audio_voice_handle_t next;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&next));
+    TEST_ASSERT_NOT_EQUAL(0, next.voice); /* old FILE still owned by mixer */
+    mixer_step();
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+    audio_voice_handle_t reused;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&reused));
+    TEST_ASSERT_EQUAL(0, reused.voice);
+    audio_voice_release_owned(s_race_handle);
+    TEST_ASSERT_TRUE(s_busy[reused.voice]);
+    TEST_ASSERT_FALSE(s_voice[reused.voice].req_stop);
+}
+
+static void test_inhibit_confirmed_quiescence(void)
+{
+    SemaphoreHandle_t mutex = s_req_mutex;
+    s_req_mutex = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_set_inhibited(true));
+    TEST_ASSERT_FALSE(audio_is_quiescent());
+    s_req_mutex = mutex;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, audio_set_inhibited(true));
+    TEST_ASSERT_FALSE(audio_is_quiescent());
+    TEST_ASSERT_FALSE(s_inhibited);
+    mock_sem_take_fail = 0;
+    make_wav_const(s_path_mono, 22050, 2000, 1000);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play(18, s_path_mono, true, 100));
+    TEST_ASSERT_FALSE(audio_is_quiescent());
+    mixer_step();
+    TEST_ASSERT_EQUAL(1, s_storage_leases);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_set_inhibited(true));
+    TEST_ASSERT_FALSE(audio_is_quiescent());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_play(s_path_mono));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_validate_wav(s_path_mono));
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, audio_voice_alloc());
+    s_fade_blocks = 255; /* maintenance close must not wait for any fade */
+    mixer_step();
+    TEST_ASSERT_TRUE(audio_is_quiescent());
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_set_inhibited(false));
+    mixer_step();
+    TEST_ASSERT_FALSE(audio_is_playing());
+    s_mixer_work = true;
+    TEST_ASSERT_FALSE(audio_is_quiescent());
+    s_mixer_work = false;
+    s_validate_work = 1;
+    TEST_ASSERT_FALSE(audio_is_quiescent());
+    s_validate_work = 0;
+    s_storage_blocked = true;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_validate_wav(s_path_mono));
+    TEST_ASSERT_EQUAL(0, s_validate_work);
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_reserved_voices_survive_fx_saturation(void)
+{
+    make_wav_const(s_path_mono, 22050, 2000, 1000);
+    audio_voice_handle_t engine, secondary;
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      audio_voice_play_generation(18, s_path_mono, true, 100, &engine));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      audio_voice_play_generation(19, s_path_mono, true, 100, &secondary));
+    mixer_step();
+    audio_voice_handle_t effects[AUDIO_DYNAMIC_VOICES];
+    for (size_t i = 0; i < AUDIO_DYNAMIC_VOICES; ++i) {
+        TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&effects[i]));
+        TEST_ASSERT_EQUAL(i, effects[i].voice);
+    }
+    audio_voice_handle_t overflow;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, audio_voice_alloc_owned(&overflow));
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, overflow.voice);
+    s_scheme.type = SOUND_SCHEME_DIESEL;
+    s_scheme.tables[1].used = true;
+    snprintf(s_scheme.tables[1].loop[0].file, SOUND_FILE_MAX, "%s", TMP_MONO);
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, fx_play_table(1, true, &s_fn_voice[1]));
+    TEST_ASSERT_FALSE(s_voice[18].req_stop);
+    TEST_ASSERT_FALSE(s_voice[19].req_stop);
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(engine));
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(secondary));
+    TEST_ASSERT_EQUAL(2, s_storage_leases);
+    audio_stop_all();
+    mixer_step();
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_generation_wrap_skips_zero(void)
+{
+    s_voice[0].generation = UINT32_MAX;
+    audio_voice_handle_t owned;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&owned));
+    TEST_ASSERT_EQUAL(1, owned.generation);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&owned, s_path_bad, false, 100));
+    TEST_ASSERT_EQUAL(2, owned.generation);
+    mixer_step(); /* Failed open completes the queued generation and frees slot. */
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_FINISHED, audio_voice_get_state(owned));
+    TEST_ASSERT_FALSE(s_busy[0]);
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_resampler_accelerated_index_wrap(void)
+{
+    make_wav_const(s_path_mono, 192000, 64, 1000);
+    voice_state_t st = {0};
+    st.rate_permille = 3000;
+    TEST_ASSERT_EQUAL(ESP_OK, voice_start(&st, s_path_mono, true, 100));
+    st.cur_idx = UINT32_MAX;
+    st.pos = 0.25;
+    int16_t mix[8] = {0};
+    TEST_ASSERT_EQUAL(8, voice_fill(&st, mix, 8));
+    TEST_ASSERT_TRUE(st.active);
+    TEST_ASSERT_TRUE(st.pos >= 0 && st.pos < 1);
+    TEST_ASSERT_TRUE(st.cur_idx < 256);
+    for (size_t i = 0; i < 8; ++i) { TEST_ASSERT_EQUAL(1000, mix[i]); }
+    voice_close(&st);
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
+static void test_wav_malformed_corpus_common_parser(void)
+{
+    const struct { long offset; uint32_t value; } cases[] = {
+        {4, 3}, {4, 10000}, {4, 20}, {16, 0}, {16, 15}, {16, UINT32_MAX},
+        {28, 123}, {32, 0x00100001}, {40, 15}, {40, 18}, {40, 0}
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        make_wav(s_path_bad, 1, 22050, 1, 16, 8, false);
+        FILE *f = fopen(s_path_bad, "r+b");
+        TEST_ASSERT_NOT_NULL(f);
+        fseek(f, cases[i].offset, SEEK_SET);
+        put_u32(f, cases[i].value);
+        fclose(f);
+        TEST_ASSERT_EQUAL(ESP_FAIL, audio_validate_wav(s_path_bad));
+        voice_state_t st = {0};
+        TEST_ASSERT_EQUAL(ESP_FAIL, voice_start(&st, s_path_bad, false, 100));
+        TEST_ASSERT_NULL(st.f);
+        TEST_ASSERT_EQUAL(0, s_storage_leases);
+    }
+}
+
+static void test_real_async_sound_sequencer(void)
+{
+    make_wav_const(s_path_mono, 22050, 600, 1000);
+    make_wav_const(s_path_stereo, 22050, 2000, 2000);
+    s_scheme.type = SOUND_SCHEME_DIESEL;
+    s_scheme.tables[1].used = true;
+    snprintf(s_scheme.tables[1].init[0].file, SOUND_FILE_MAX, "%s", TMP_MONO);
+    snprintf(s_scheme.tables[1].loop[0].file, SOUND_FILE_MAX, "%s", TMP_STEREO);
+    tb_start(1);
+    audio_voice_handle_t init = s_engine_handle;
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(init));
+    for (int i = 0; i < 10; ++i) { tb_advance(); }
+    TEST_ASSERT_EQUAL(TB_INIT, s_phase);
+    TEST_ASSERT_EQUAL(init.generation, s_engine_handle.generation);
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(init));
+    tb_advance();
+    TEST_ASSERT_EQUAL(TB_INIT, s_phase);
+    mixer_step();
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_FINISHED, audio_voice_get_state(init));
+    tb_advance();
+    TEST_ASSERT_EQUAL(TB_LOOP, s_phase);
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(s_engine_handle));
+    TEST_ASSERT_NOT_EQUAL(init.generation, s_engine_handle.generation);
+    sound_stop_all();
+    mixer_step();
+    TEST_ASSERT_TRUE(audio_is_quiescent());
 }
 
 int main(void)
@@ -916,5 +1346,12 @@ int main(void)
     RUN_TEST(test_voice_fade_out_on_stop);
     RUN_TEST(test_voice_fade_step_clamped);
     RUN_TEST(test_mixer_stop_fades_when_enabled);
+    RUN_TEST(test_generation_eof_interleave_and_stale_release);
+    RUN_TEST(test_inhibit_confirmed_quiescence);
+    RUN_TEST(test_reserved_voices_survive_fx_saturation);
+    RUN_TEST(test_generation_wrap_skips_zero);
+    RUN_TEST(test_resampler_accelerated_index_wrap);
+    RUN_TEST(test_wav_malformed_corpus_common_parser);
+    RUN_TEST(test_real_async_sound_sequencer);
     return UNITY_END();
 }

@@ -3,6 +3,12 @@
 > Примечание: документ исторический. Сборка переведена на ESP-IDF 6.0
 > (`firmware\idf_build.ps1`); упоминания `pio run`/PlatformIO относятся к
 > ранним версиям.
+>
+> Дополнение 2026-10-02: выполнено новое полное ревью и начата реализация
+> его исправлений. Текущая матрица приведена в разделе 5; исходная проверка
+> BEMF сохранена в [BEMF_DIAGNOSTICS.md](BEMF_DIAGNOSTICS.md). Статусы FIXED ниже
+> относятся к конкретным исправлениям, а не к полной верификации моторного
+> контура или гарантии его устойчивости на реальном двигателе.
 
 Read-only ревью first-party кода (`components/`, `main/`) с последующими
 исправлениями.
@@ -105,7 +111,9 @@ Read-only ревью first-party кода (`components/`, `main/`) с после
 
 ## 4. Остаётся
 
-Все пункты отчёта закрыты в коде и покрыты тестами, кроме B1:
+Все пункты ревью от 2026-09-27 закрыты в коде и покрыты тестами, кроме B1.
+Статус новых пунктов проверки 2026-10-02 приведён в разделе 5. Исторические
+примеры неисправного BEMF относятся к исходникам до этих исправлений.
 
 - **B1 — открытый AP и неаутентифицированные разрушительные endpoint'ы.**
   Оставлено осознанно по требованию: пароль Wi-Fi по умолчанию **не задаётся**
@@ -118,10 +126,148 @@ Read-only ревью first-party кода (`components/`, `main/`) с после
 - HIL-прогон на плате: `run_hil.ps1` (SELFTEST/BEMF), `run_hil_web.ps1`
   (при открытом AP `-ApPass` не нужен; при заданном пароле — передать его).
 - Проверка Task Watchdog (`CONFIG_ESP_TASK_WDT_PANIC`, 10 с) и дебаунса CV на
-  реальных flash-операциях (OTA/провижининг): при ложных срабатываниях
-  поднять `CONFIG_ESP_TASK_WDT_TIMEOUT_S`.
+  реальных flash-операциях: сначала измерить задержки/lock ownership и
+  проверить progress. Не скрывать зависание увеличением watchdog timeout.
 - Service-mode ACK/программирование CV с командной станции (A1/A2), реверс под
   нагрузкой и аварийный стоп (A5/A6), поведение при просадке питания.
 - Формат coredump-раздела (128 КБ) ограничен разметкой 4 МБ (это последний
   раздел до конца flash) — расширить нельзя без уменьшения OTA; при необходимости
-  уменьшить стеки задач, а не раздел.
+   измерить фактический размер dump и high-water marks. Стеки нельзя уменьшать
+   вслепую; изменение разметки потребует отдельной USB-прошивки partition table.
+
+## 5. Исправления Ревью 2026-10-02
+
+База: `5cd9b1b`; изменения находятся в рабочем дереве, не закоммичены.
+**Программные исправления 78 пунктов реализованы и прошли общий host-прогон
+и сборку ESP-IDF 6.0. Аппаратная работоспособность не подтверждена.**
+
+`HOST` означает реализованное исправление с профильной host-регрессией;
+вся итоговая прошивка также собрана для ESP32-S3 на ESP-IDF 6.0.
+Аппаратные измерения не проводились ни для одного пункта.
+
+| ID | Реализация | Статус |
+|---|---|---|
+| REV-D1 | Analog permission отдельно от обнаруженного DC; отсутствие DCC/фронтов и устойчивая полярность | HOST |
+| REV-D2 | Отдельный emergency callback с прямым снятием PWM | HOST |
+| REV-D3 | Исправлены reserved stop/e-stop и 28-step mapping | HOST |
+| REV-D4 | F5..8: B*, F9..12: A* | HOST |
+| REV-D5 | Классификация locomotive/accessory/reserved адресов | HOST |
+| REV-D6 | Подтверждение service и long Ops Write; short CV23/24 не требует повтора | HOST |
+| REV-D7 | Service deadline 20 мс и выход по non-service пакетам любого адреса | HOST |
+| REV-D8 | Consist speed, CV21/22 и запрет long CV access через consist | HOST |
+| REV-D9 | CV callback возвращает результат; ACK только при ESP_OK | HOST |
+| REV-D10 | Точные длины; неподдерживаемый XPOM отвергается целиком | HOST |
+| REV-D11 | Stretched/asymmetric zero halves до 10000 мкс | HOST |
+| REV-D12 | IRAM interrupt, internal queue, DRAM ISR state | HOST |
+| REV-D13 | CV1 side effects атомарны; CV8 обновляет runtime DCC и volume alias | HOST |
+| REV-D14 | Rail sample freshness 100 мс и проверка перед DC-командой | HOST |
+| REV-D15 | Source lease/generation и отметка принятой DCC motor-команды | HOST |
+| REV-D16 | CV11 только в активном DCC; отдельный persistent inhibit | HOST |
+| REV-D17 | Hard Reset меняет только CV19/29/31/32, с source admission | HOST |
+| REV-D18 | Инверсия CV29.bit0 в опубликованной конфигурации | HOST |
+| REV-D19 | ISR startup handshake; control disabled до полной готовности | HOST |
+| REV-M1 / BEMF-01 | Отмена калибровки, запрет stale PWM и guarded save admission | HOST |
+| REV-M2 / BEMF-02 | Только свежая полная пара ADC; persistent loss приводит к coast/fault | HOST |
+| REV-M3 / BEMF-03 | Цель ограничена допустимым диапазоном; invalid feedback не повышает duty | HOST |
+| REV-M4 / BEMF-04 | Калибровка усредняет raw magnitudes, нормированные на rail каждой выборки | HOST |
+| REV-M5 / BEMF-05 | Убран half-base floor; kickstart сохранён | HOST |
+| REV-M6 | Epoch/inhibit и двухканальные LL-записи под коротким output mux | HOST |
+| REV-M7 | Snapshot команды; одинаковые DCC refresh не отменяют sampling | HOST |
+| REV-M8 | Требуются остановка, готовые ADC/rail; неработающая кривая не заменяет старую | HOST |
+| REV-M9 | Reservation до task creation и до конца save/cleanup | HOST |
+| REV-M10 | COAST сериализован с владельцем и не восстанавливает stale output | HOST |
+| REV-M11 | Единый валидатор count/speed/fraction/минимального конечного сигнала | HOST |
+| REV-M12 | Проверенный rail snapshot для деления | HOST |
+| REV-M13 | Атомарная публикация кривой; owner-applied reset и CV snapshot | HOST |
+| REV-M14 | Защищённые 64-битные heartbeat reads/writes | HOST |
+| REV-M15 | Просроченные циклы пропускаются без catch-up burst | HOST |
+| REV-M16 | Экспорт всех 16 точек | HOST |
+| REV-S20 | Deferred config/CV только в RAM до worker flush | HOST |
+| REV-S21 | Setter/commit errors возвращаются; dirty остаётся до успеха, retry ограничен | HOST |
+| REV-S22 | Versioned CV+CRC32 в одном blob; чтение shipped legacy cv/cv_crc | HOST |
+| REV-S23 | Ошибка rename сохраняет live и temp; исправлено также для MDS | HOST |
+| REV-S24 | Валидный пустой tracks store авторитетен | HOST |
+| REV-S25 | Empty bindings отличаются от missing; legacy не возрождает удалённые записи | HOST |
+| REV-S26 | Persistent recovery marker и retry всех metadata keys | HOST |
+| REV-S27 | Backup failure возвращается, manifest dirty повторяется worker-ом | HOST |
+| REV-R1 | Safety/WDT/heartbeat readiness обязательны до actuation и OTA acceptance | HOST |
+| REV-R2 | Safety не выполняет NVS; отдельный persistence/cleanup worker | HOST |
+| REV-R3 | Maintenance admission, file leases и bounded quiescence перед format | HOST |
+| REV-R4 | ADC error/timeout не считается нулевым успешным измерением | HOST |
+| REV-R6 | Callbacks/actuation допускаются после готовности AUX/map/safety | HOST |
+| REV-R7 | HIL-MOTOR немедленно coasts на deadline, независимо от CV4 | HOST |
+| REV-A3 | Семантическая проверка MDS после CRC, включая raw bool bytes и строки | HOST |
+| REV-A4 | PENDING отличается от PLAYING/FINISHED | HOST |
+| REV-A5 | Owned voice handles с generation; stale release не влияет на нового владельца | HOST |
+| REV-A6 | FX allocator не использует зарезервированные 18/19 | HOST |
+| REV-A7 | Нормализация fractional phase до переполнения индекса | HOST |
+| REV-A8 | Fixed-point EMA затухает к нулю | HOST |
+| REV-A9 | Смена/disable/delete сбрасывают старый runtime/owned voices | HOST |
+| REV-A10 | Mute блокирует starts, но не releases; gates для автоматических extras | HOST |
+| REV-A11 | Legacy web использует owned handles вместо пересекающихся индексов | HOST |
+| REV-A12 | Общий WAV parser проверяет fmt, RIFF/data bounds и frame alignment | HOST |
+| REV-A13 | Init rollback освобождает mutex/I2S и отключает amplifier | HOST |
+| REV-L1 | Нормированная incandescent envelope, масштаб PWM один раз | HOST |
+| REV-L2 | Отдельный scheduled flag, корректный initial deadline при большом uptime | HOST |
+| REV-W20 | Отмена debounce при stop, очередь команд и отбрасывание stale replies | HOST |
+| REV-W21 | Пустой пароль сохраняет старый; удаление отдельным явным флажком | HOST |
+| REV-W22 | Private staging, canonical MDS-compatible имена, backups и rollback вместо truncate | HOST |
+| REV-W23 | Все файлы проверяются до publication/boot; ошибки возвращают recovery evidence, не ok | HOST |
+| REV-W24 | Подтверждения deletion/overwrite ожидаются через await | HOST |
+| REV-W25 | Decode до проверки длины; malformed/NUL/overflow отвергаются | HOST |
+| REV-W26 | Upload slots ограничены 1..20 | HOST |
+| REV-W27 | Общий OR desired outputs и немедленное применение bindings | HOST |
+| REV-W28 | Deadline до полного чтения JSON body | HOST |
+| REV-W29 | Reporter errors поглощаются и rate-limited | HOST |
+| REV-W30 | Пригодный unicast AP host address и проверка netif/DHCP ошибок | HOST |
+| REV-W31 | Полные 32-byte SSID/64-hex PSK без тихого обрезания | HOST |
+| REV-W32 | Async transfer worker, maintenance и конечный total deadline | HOST |
+| REV-W33 | Bounded/nonoverlapping reconnect, upload timeout/abort, visibility guards | HOST |
+| REV-W34 | Cursor последней действительно переданной записи | HOST |
+| REV-W35 | Single-question DNS A/IN; AAAA получает корректный пустой ответ | HOST |
+
+### Итоговая Проверка
+
+- Все **16 C-наборов: 705 PASS**, zero ignored, zero failures.
+- JavaScript: **13 PASS** (`node --test test/test_web_ui.js`).
+- Финальная сборка ESP32-S3 / ESP-IDF 6.0 прошла. `soft_decoder_v3.bin`:
+  `0xef890` (981136 байт), около 50% минимального OTA-раздела остаётся свободно.
+- ELF-проверка интеграционной сборки: `dcc_isr`, `esp_timer_get_time` и
+  `xQueueGenericSendFromISR` находятся в `.iram0.text`, `s_last_edge_us` в DRAM.
+- Прошивка, motion/format HIL и испытания power-loss на плате не запускались.
+
+### Существенные Контракты
+
+- CONTROL, SAFETY и DCC_TIMEOUT являются независимыми inhibit-владельцами.
+  Maintenance/HIL не могут очистить чужой safety/timeout запрет.
+- При enabled BEMF потеря обратной связи не повышает PWM; возможен только
+  ограниченный по возрасту hold прежнего duty до 100 мс, затем coast и fault.
+  Fault снимается STOP или явным BEMF disable, но не повтором ненулевой команды.
+- Проверка разрешения сохранения калибровки после получения settings mutex
+  является save linearization point. Отмена до неё сохраняет старую запись;
+  уже допущенная полностью измеренная запись может закончиться после отмены.
+- Порог 85%, ADC conversion, gap 1000 мкс и PID CV54/55/56 не перенастраивались
+  без измерений. Устойчивость конкретного мотора и время свободного затухания
+  остаются аппаратной проверкой.
+- Старые NVS `cv`/`cv_crc` сохраняются при миграции, но будущие записи идут
+  в новый record. Это чтение legacy, не обещание двустороннего downgrade-sync.
+- Успешный host/target build не доказывает max latency, радиосовместимость,
+  waveform ACK, coredump headroom или максимальную audio throughput.
+
+### WAV И Combined OTA
+
+- Имя `audio/idle.wav` остаётся каноническим: существующий MDS получает новый
+  валидный asset, а не скрытый `u*.tmp`. Старые отличающиеся имена сохраняются,
+  поскольку они могут использоваться другими сохранёнными проектами.
+- Все payloads проверяются до публикации. Original copies `.bak` и record
+  `WAVTXN1` синхронизируются до первого rename; workspace находится в heap.
+- Некорректный/неполный контейнер, duplicate names/slots, недостаток места,
+  ошибка metadata или boot selection не объявляются успехом. По возможности
+  восстанавливаются metadata/файлы; uncertain результат сохраняет recovery path.
+- **Совместная атомарность FS/NVS/boot при power loss не гарантируется.**
+  Обрыв между отдельными rename может оставить валидные смешанные версии.
+  `.bak`/record являются данными для **ручного** восстановления, не automatic replay.
+- Cleanup после успеха может остаться pending. При partial/uncertain ответе
+  нельзя удалять recovery artifacts или форматировать NOR до их разбора.
+- Total deadline 120 с проверяется программно; nonpreemptible SDK/VFS calls
+  и rollback могут превышать его. Максимальную реальную latency нужно измерить.

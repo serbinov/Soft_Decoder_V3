@@ -10,6 +10,18 @@
 
 /* "No free voice" result of audio_voice_alloc(). */
 #define AUDIO_VOICE_NONE 0xFF
+#define AUDIO_DYNAMIC_VOICES 18 /* 18/19 belong exclusively to the sound engine */
+
+typedef struct {
+    uint8_t voice;
+    uint32_t generation;
+} audio_voice_handle_t;
+
+typedef enum {
+    AUDIO_VOICE_FINISHED = 0, /* also returned for an invalid/stale handle */
+    AUDIO_VOICE_PENDING,
+    AUDIO_VOICE_PLAYING
+} audio_voice_state_t;
 
 /* Playback-rate limits, per mille of the original sample rate (1000 = nominal). */
 #define AUDIO_RATE_MIN 500
@@ -17,6 +29,25 @@
 
 esp_err_t audio_init(void);
 esp_err_t audio_validate_wav(const char *path);
+/* Admission barrier, not a synchronous stop. Poll quiescence with a bounded
+ * deadline before touching the filesystem. Uninhibit never restores old plays. */
+esp_err_t audio_set_inhibited(bool inhibited);
+/* Quiescence is also true before initialization/after complete init rollback;
+ * mutex contention on an initialized mixer is never treated as quiet. */
+bool audio_is_quiescent(void);
+
+/* Atomic ownership API. alloc excludes 18/19. play updates the handle to the
+ * new playback generation; stale play/release cannot affect another owner.
+ * EOF frees the allocator slot, so callers must query/reallocate before replay.
+ * Index APIs below remain for legacy callers, without ownership guarantees. */
+esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out);
+esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
+                                bool loop, uint8_t volume);
+void audio_voice_release_owned(audio_voice_handle_t handle);
+audio_voice_state_t audio_voice_get_state(audio_voice_handle_t handle);
+/* Reserved/index caller: queue a new generation and return its exact identity. */
+esp_err_t audio_voice_play_generation(uint8_t voice, const char *path, bool loop,
+                                      uint8_t volume, audio_voice_handle_t *out);
 
 /* Start a mixer voice playing a WAV file (loop repeats). volume 0..100. */
 esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t volume);

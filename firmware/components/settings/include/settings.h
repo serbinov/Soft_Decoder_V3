@@ -17,6 +17,8 @@
 #define SETTINGS_TRACK_FILE_MAX 128
 #define SETTINGS_TRACK_LABEL_MAX 64
 #define SETTINGS_BEMF_CAL_MAX_POINTS 16
+/* Existing motor validity criterion: full-speed fraction must exceed 50/1024. */
+#define SETTINGS_BEMF_CAL_MIN_END_FRAC 51U
 
 /* Track slot categories: a slot is either an "engine" (prime mover, looping
  * motor sound) or an "effects" (horn, bell, ...) sound. The category selects
@@ -106,23 +108,38 @@ esp_err_t settings_init(void);
 esp_err_t settings_load(settings_config_t *cfg);
 esp_err_t settings_save(const settings_config_t *cfg);
 
-/* Same as settings_save(), but the NVS commit is deferred: values are staged
- * in the NVS cache and flushed by settings_pending_flush() after a short idle
+/* Same as settings_save(), but all values are staged in RAM and flushed
+ * by settings_pending_flush() after a short idle
  * period. Use for high-frequency UI actions (volume slider, slot category,
  * active slot) so a flash program/erase cycle cannot stall the Wi-Fi driver. */
 esp_err_t settings_save_deferred(const settings_config_t *cfg);
 
 /* Flush a staged settings_save_deferred() write once it has been idle for a
  * short guard interval. Cheap to call periodically from a low-rate task. */
-void settings_pending_flush(void);
+/* Worker-only: flash I/O may block, mutex admission never waits. Failures keep
+ * dirty data and are retried at a bounded rate (one attempt per guard interval). */
+esp_err_t settings_pending_flush(void);
+typedef struct {
+    bool config_pending;
+    bool cv_pending;
+    bool manifest_pending;
+    bool ready;
+    esp_err_t last_error;
+    uint32_t retries;
+} settings_flush_status_t;
+void settings_flush_status(settings_flush_status_t *out);
 
 esp_err_t settings_cv_read(uint16_t idx, uint8_t *out);
+/* All CVs from one coherent publication, including the CV63 volume alias. */
+esp_err_t settings_cv_snapshot(uint8_t out[SETTINGS_CV_COUNT + 1]);
 esp_err_t settings_cv_write(uint16_t idx, uint8_t value);
 esp_err_t settings_cv_commit(void);
 /* Stage a CV commit to run later from settings_pending_flush() (never blocks
  * the DCC/service-mode task in a flash write). */
 void settings_cv_commit_deferred(void);
 esp_err_t settings_cv_reset_to_factory(void);
+/* NMRA Hard Reset changes CV19/29/31/32 only, not the address or full store. */
+esp_err_t settings_cv_hard_reset(void);
 /* Erase the whole settings namespace and restore CV defaults. The WiFi config,
  * volumes, name, control source, sound tracks and BEMF calibration are cleared
  * and return to their factory defaults on the next load. */
@@ -143,8 +160,8 @@ esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count);
 esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count);
 
 /* Canonical function bindings (many-to-many, SOUND_ENGINE_IMPLEMENTATION.md
- * section 8.4). Stored under its own NVS key; a missing/empty store returns
- * count = 0 so the caller can migrate the legacy func_map exactly once. */
+ * section 8.4). Missing returns NOT_FOUND; a valid empty store returns OK and
+ * count = 0. Migrate the legacy map only on NOT_FOUND, never on count alone. */
 esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count);
 esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count);
 /* Convert a legacy settings_func_map_t[] into function bindings. */
@@ -167,9 +184,23 @@ esp_err_t settings_active_scheme_set(const char *name);
  * (/userdata/audio/tracks.txt). It survives a full NVS reset, so the track
  * names, categories and function map come back even after a chip erase.
  * settings_manifest_sync() rewrites it whenever that metadata changes;
- * settings_manifest_load() restores it (ESP_OK when tracks were restored). */
+ * settings_manifest_load() restores it (ESP_OK includes intentionally empty
+ * tracks). Saves propagate backup failures even if NVS itself was written:
+ * callers must not delete old WAVs until this backup succeeds. Worker retries. */
 esp_err_t settings_manifest_sync(void);
 esp_err_t settings_manifest_load(void);
+/* Persistent recovery marker: partial restores must be retried even if tracks
+ * were already saved. Marker is cleared only after ALL metadata saves succeed. */
+esp_err_t settings_recovery_pending(bool *out);
+esp_err_t settings_recovery_set_pending(bool pending);
+/* Internal manifest snapshot serialization; do not call setters while held. */
+esp_err_t settings_metadata_lock(void);
+void settings_metadata_unlock(void);
+void settings_manifest_dirty(void);
+void settings_manifest_result(esp_err_t error);
+/* Internal: called with settings metadata lock held, to exclude competing
+ * writers during a multi-key recovery without recursively taking that lock. */
+bool settings_manifest_write_allowed(void);
 
 /* Per-output PWM level and light effect (F0F, F0R, AUX1..AUX7). */
 #define SETTINGS_AUX_COUNT 9
@@ -182,7 +213,15 @@ esp_err_t settings_aux_cfg_load(settings_aux_cfg_t *cfg, size_t *count);
 esp_err_t settings_aux_cfg_save(const settings_aux_cfg_t *cfg, size_t count);
 
 esp_err_t settings_bemf_cal_load(settings_bemf_cal_t *cal);
+bool settings_bemf_cal_validate(const settings_bemf_cal_t *cal);
 esp_err_t settings_bemf_cal_save(const settings_bemf_cal_t *cal);
+/* Called after validation and persistence-lock acquisition, immediately before
+ * the first NVS write (save admission). Must be short/nonblocking and must not
+ * call settings APIs. False rejects with INVALID_STATE without changing NVS.
+ * Cancellation after admission may allow the complete valid curve to persist. */
+typedef bool (*settings_bemf_cal_authorize_t)(void *context);
+esp_err_t settings_bemf_cal_save_guarded(const settings_bemf_cal_t *cal,
+                                       settings_bemf_cal_authorize_t authorize, void *context);
 esp_err_t settings_bemf_cal_clear(void);
 
 /* Motor regulation mode: true = BEMF-PID closed loop (default), false = the

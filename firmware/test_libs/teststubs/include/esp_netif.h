@@ -6,6 +6,8 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#define ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED 0x5004
+#define ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED 0x5005
 
 typedef struct {
     uint32_t addr; /* network byte order (first octet in the low byte) */

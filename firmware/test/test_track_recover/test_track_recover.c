@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include "freertos/task.h"
+#define xTaskGetCurrentTaskHandle() ((TaskHandle_t)1)
 
 #ifdef _WIN32
 #include <direct.h>
@@ -16,8 +18,15 @@
 #endif
 
 #define static
+#define TAG storage_TAG
+#include "../../components/storage/src/storage.c"
+#undef TAG
+#undef static
+
+#define static
 #include "../../components/track/src/track_recover.c"
 #undef static
+#undef xTaskGetCurrentTaskHandle
 
 #include "../../test_libs/teststubs/stubs.c"
 
@@ -26,13 +35,21 @@ static settings_track_t g_tracks[SETTINGS_MAX_TRACKS];
 static size_t g_count;
 static bool g_manifest_ok;
 static int g_save_calls;
+static bool g_tracks_present;
+static bool g_recovery_pending;
+static esp_err_t g_manifest_error;
+static esp_err_t g_save_error;
+static esp_err_t g_load_error;
+
+esp_err_t settings_recovery_pending(bool *out) { *out = g_recovery_pending; return ESP_OK; }
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 {
     if (tracks == NULL || count == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (g_count == 0) {
+    if (g_load_error != ESP_OK) { *count = 0; return g_load_error; }
+    if (g_count == 0 && !g_tracks_present) {
         *count = 0;
         return ESP_ERR_NOT_FOUND;
     }
@@ -43,7 +60,9 @@ esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 
 esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
 {
+    if (g_save_error != ESP_OK) return g_save_error;
     memcpy(g_tracks, tracks, count * sizeof(settings_track_t));
+    g_tracks_present = true;
     g_count = count;
     g_save_calls++;
     return ESP_OK;
@@ -51,6 +70,7 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
 
 esp_err_t settings_manifest_load(void)
 {
+    if (g_manifest_error != ESP_OK) return g_manifest_error;
     if (!g_manifest_ok) {
         return ESP_ERR_NOT_FOUND;
     }
@@ -62,6 +82,7 @@ esp_err_t settings_manifest_load(void)
     g_tracks[0].enabled = true;
     g_tracks[1].slot = 2;
     g_count = 2;
+    g_recovery_pending = false;
     return ESP_OK;
 }
 
@@ -95,6 +116,17 @@ void setUp(void)
     g_count = 0;
     g_manifest_ok = false;
     g_save_calls = 0;
+    g_tracks_present = false;
+    g_recovery_pending = false;
+    g_manifest_error = ESP_OK;
+    g_save_error = ESP_OK;
+    g_load_error = ESP_OK;
+    s_leases = 0;
+    s_maintenance_owner = NULL;
+    s_lifecycle_busy = false;
+    s_mounted = false;
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
     memset(g_tracks, 0, sizeof(g_tracks));
     rm_tree();
     (void)MKDIR(DIR_AUDIO);
@@ -242,9 +274,67 @@ static void test_recover_root_fallback(void)
     TEST_ASSERT_EQUAL_STRING("slot2.wav", g_tracks[0].file);
 }
 
+static void test_rev_s24_intentionally_empty_nvs_survives_orphan_wav(void)
+{
+    g_tracks_present = true;
+    make_file(DIR_AUDIO "/horn.wav");
+    g_manifest_ok = true;
+    track_recover_result_t r;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_TRUE(r.had_nvs);
+    TEST_ASSERT_EQUAL_UINT32(0, r.count);
+    TEST_ASSERT_EQUAL_INT(0, g_save_calls);
+    TEST_ASSERT_FALSE(r.from_manifest);
+    TEST_ASSERT_EQUAL(ESP_OK, r.error);
+}
+
+static void test_rev_s26_existing_tracks_do_not_hide_partial_restore(void)
+{
+    g_count = 1;
+    g_recovery_pending = true;
+    g_manifest_error = ESP_FAIL;
+    track_recover_result_t r;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_FALSE(r.had_nvs);
+    TEST_ASSERT_TRUE(r.retry_pending);
+    TEST_ASSERT_EQUAL(ESP_FAIL, r.error);
+    g_manifest_error = ESP_OK;
+    g_manifest_ok = true;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_TRUE(r.from_manifest);
+    TEST_ASSERT_EQUAL_UINT32(2, r.count);
+    TEST_ASSERT_FALSE(r.retry_pending);
+}
+
+static void test_recover_errors_never_trigger_destructive_rebuild(void)
+{
+    make_file(DIR_AUDIO "/horn.wav");
+    track_recover_result_t r;
+    g_load_error = ESP_FAIL;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_EQUAL(ESP_FAIL, r.error);
+    TEST_ASSERT_TRUE(r.retry_pending);
+    TEST_ASSERT_EQUAL_INT(0, g_save_calls);
+    g_load_error = ESP_OK;
+    g_manifest_error = ESP_FAIL;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_EQUAL(ESP_FAIL, r.error);
+    TEST_ASSERT_EQUAL_INT(0, g_save_calls);
+    g_manifest_error = ESP_OK;
+    g_save_error = ESP_FAIL;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_EQUAL(ESP_FAIL, r.error);
+    TEST_ASSERT_TRUE(r.retry_pending);
+    TEST_ASSERT_FALSE(r.rebuilt);
+    TEST_ASSERT_TRUE(storage_is_quiescent());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_rev_s24_intentionally_empty_nvs_survives_orphan_wav);
+    RUN_TEST(test_rev_s26_existing_tracks_do_not_hide_partial_restore);
+    RUN_TEST(test_recover_errors_never_trigger_destructive_rebuild);
     RUN_TEST(test_recover_keeps_nvs_list);
     RUN_TEST(test_recover_from_manifest);
     RUN_TEST(test_recover_rebuilds_from_files);

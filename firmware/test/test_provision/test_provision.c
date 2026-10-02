@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
 #define MKDIR(p) _mkdir(p)
 #define RMDIR(p) _rmdir(p)
 #else
@@ -31,15 +32,37 @@ static void *mock_malloc(size_t n)
 
 /* fwrite failure injection for the PUT write-error branch. */
 static int g_prov_fwrite_fail = 0;
+static int g_prov_sync_fail, g_prov_flush_fail, g_prov_close_fail;
 static size_t mock_prov_fwrite(const void *p, size_t sz, size_t n, FILE *f);
+static int mock_prov_sync(int fd);
+static int mock_prov_flush(FILE *f);
+static int mock_prov_close(FILE *f);
 #define PROV_FWRITE(p, sz, n, f) mock_prov_fwrite((p), (sz), (n), (f))
+#define fflush mock_prov_flush
+#define fclose mock_prov_close
+#ifdef _WIN32
+#define _commit mock_prov_sync
+#else
+#define fsync mock_prov_sync
+#endif
 
 #define static
 #include "../../components/provision/src/provision.c"
 #undef static
 #undef malloc
+#undef fflush
+#undef fclose
+#ifdef _WIN32
+#undef _commit
+#else
+#undef fsync
+#endif
 
+#define esp_ota_set_boot_partition sdk_set_boot_partition
+#define uart_set_baudrate sdk_uart_set_baudrate
 #include "../../test_libs/teststubs/stubs.c"
+#undef esp_ota_set_boot_partition
+#undef uart_set_baudrate
 
 static size_t mock_prov_fwrite(const void *p, size_t sz, size_t n, FILE *f)
 {
@@ -47,6 +70,27 @@ static size_t mock_prov_fwrite(const void *p, size_t sz, size_t n, FILE *f)
         return 0;
     }
     return fwrite(p, sz, n, f);
+}
+
+static int mock_prov_flush(FILE *f)
+{
+    return g_prov_flush_fail ? EOF : fflush(f);
+}
+
+static int mock_prov_close(FILE *f)
+{
+    int result = fclose(f);
+    return g_prov_close_fail ? EOF : result;
+}
+
+static int mock_prov_sync(int fd)
+{
+    if (g_prov_sync_fail) { return -1; }
+#ifdef _WIN32
+    return _commit(fd);
+#else
+    return fsync(fd);
+#endif
 }
 
 /* ---- collaborator stubs ---- */
@@ -57,6 +101,69 @@ static esp_err_t g_storage_format_err = ESP_OK;
 static int g_storage_format_calls;
 static int g_tracks_save_calls;
 static int g_cv_write_calls;
+static int g_web_busy;
+static bool tx_has(const char *s);
+static esp_err_t g_adc_err, g_maintenance_err, g_wav_err, g_tracks_save_err;
+static int g_maintenance_depth, g_maintenance_begin_calls, g_maintenance_end_calls;
+static bool g_fs_closed;
+static int g_fs_release_calls, g_boot_calls, g_validate_calls;
+static uint32_t g_baud;
+
+esp_err_t web_maintenance_begin(bool exclusive_fs)
+{
+    TEST_ASSERT_TRUE(exclusive_fs);
+    ++g_maintenance_begin_calls;
+    if (g_web_busy || g_maintenance_err != ESP_OK) {
+        return g_maintenance_err != ESP_OK ? g_maintenance_err : ESP_ERR_INVALID_STATE;
+    }
+    ++g_maintenance_depth;
+    g_fs_closed = true;
+    return ESP_OK;
+}
+
+void web_maintenance_end(void)
+{
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    --g_maintenance_depth;
+    ++g_maintenance_end_calls;
+    g_fs_closed = false;
+}
+
+void storage_maintenance_end(void)
+{
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_TRUE(g_fs_closed);
+    g_fs_closed = false;
+    ++g_fs_release_calls;
+}
+
+const char *storage_get_root(void) { return "prov_tmp"; }
+
+esp_err_t audio_validate_wav(const char *path)
+{
+    TEST_ASSERT_NOT_NULL(path);
+    TEST_ASSERT_FALSE(g_fs_closed);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+    ++g_validate_calls;
+    return g_wav_err;
+}
+
+esp_err_t esp_ota_set_boot_partition(const esp_partition_t *partition)
+{
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_FALSE(g_fs_closed);
+    TEST_ASSERT_TRUE(g_tracks_save_calls > 0);
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    ++g_boot_calls;
+    return sdk_set_boot_partition(partition);
+}
+
+esp_err_t uart_set_baudrate(uart_port_t port, uint32_t baud)
+{
+    g_baud = baud;
+    return sdk_uart_set_baudrate(port, baud);
+}
 
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info)
 {
@@ -86,6 +193,12 @@ void motor_bemf_adc_dump(uint16_t *b1, uint16_t *b2, uint16_t *rail)
     if (rail) {
         *rail = 3;
     }
+}
+
+esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1, uint16_t *b2, uint16_t *rail)
+{
+    motor_bemf_adc_dump(b1, b2, rail);
+    return g_adc_err;
 }
 
 void motor_bemf_coast_read(uint16_t *b1, uint16_t *b2)
@@ -122,7 +235,6 @@ esp_err_t motor_set_speed(uint8_t speed128, bool forward)
 
 static int g_motor_es_calls;
 static int g_audio_stop_calls;
-static int g_web_busy;
 
 void motor_emergency_stop(void)
 {
@@ -163,11 +275,16 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
     (void)tracks;
     (void)count;
     g_tracks_save_calls++;
-    return ESP_OK;
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_FALSE(g_fs_closed);
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+    return g_tracks_save_err;
 }
 
 esp_err_t storage_format(void)
 {
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_TRUE(g_fs_closed);
     g_storage_format_calls++;
     return g_storage_format_err;
 }
@@ -307,6 +424,12 @@ void setUp(void)
     g_storage_format_calls = 0;
     g_tracks_save_calls = 0;
     g_cv_write_calls = 0;
+    g_adc_err = g_maintenance_err = g_wav_err = g_tracks_save_err = ESP_OK;
+    g_maintenance_depth = g_maintenance_begin_calls = g_maintenance_end_calls = 0;
+    g_fs_release_calls = g_boot_calls = g_validate_calls = 0;
+    g_fs_closed = false;
+    g_baud = 115200;
+    s_pending_boot = NULL;
     g_act_aux_err = ESP_OK;
     g_act_sound_err = ESP_OK;
     g_act_motor_err = ESP_OK;
@@ -328,6 +451,7 @@ void setUp(void)
     mock_ota_next_size = 4u * 1024u * 1024u;
     mock_esp_restart_calls = 0;
     g_malloc_fail = 0;
+    g_prov_fwrite_fail = g_prov_sync_fail = g_prov_flush_fail = g_prov_close_fail = 0;
     g_web_busy = 0;
     g_audio_stop_calls = 0;
     g_motor_es_calls = 0;
@@ -339,6 +463,9 @@ void setUp(void)
 
 void tearDown(void)
 {
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    TEST_ASSERT_FALSE(g_fs_closed);
+    TEST_ASSERT_EQUAL_UINT32(115200, g_baud);
     remove(PROV_AUDIO_DIR "/slot1.wav");
     remove(PROV_AUDIO_DIR "/slot99.wav");
 }
@@ -508,8 +635,10 @@ static void test_provision_fw_success_and_write_errors(void)
     feed("ABCD");
     mock_ota_set_boot_err = ESP_FAIL;
     tx_reset();
-    TEST_ASSERT_EQUAL(ESP_FAIL, provision_fw("FW 4"));
-    TEST_ASSERT_TRUE(tx_has("FW-ERR boot"));
+    TEST_ASSERT_EQUAL(ESP_OK, provision_fw("FW 4"));
+    TEST_ASSERT_NOT_NULL(s_pending_boot);
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+    TEST_ASSERT_FALSE(tx_has("FW-ERR boot"));
     mock_ota_set_boot_err = 0;
 }
 
@@ -564,8 +693,7 @@ static void test_provision_run_web_busy(void)
     TEST_ASSERT_FALSE(provision_run());
     TEST_ASSERT_TRUE(tx_has("PROV-ERR busy"));
     TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
-    TEST_ASSERT_EQUAL_INT(1, g_audio_stop_calls);
-    g_web_busy = 0;
+    TEST_ASSERT_EQUAL_INT(0, g_audio_stop_calls);
 }
 
 static void test_provision_run_put_and_done(void)
@@ -913,6 +1041,131 @@ static void test_provision_run_put_chunk_ack(void)
     TEST_ASSERT_TRUE(tx_has("DONE-OK"));
 }
 
+static void test_provision_quiescence_failure_never_formats(void)
+{
+    g_maintenance_err = ESP_ERR_TIMEOUT;
+    feed("PROV-CONFIRM\nDONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PROV-ERR busy"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_end_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+}
+
+static void test_provision_failed_put_paths_release_maintenance(void)
+{
+    const char *sessions[] = {
+        "PROV-CONFIRM\nPUT 99 4 x\n",
+        "PROV-CONFIRM\nPUT 1 4 x\n",
+        "PROV-CONFIRM\nPUT 1 4 x\nABCD\nDONE\n",
+        "PROV-CONFIRM\nPUT 1 4 x\nABCD\nDONE\n"
+    };
+    for (size_t i = 0; i < sizeof(sessions) / sizeof(sessions[0]); ++i) {
+        mock_uart_reset();
+        g_malloc_fail = i == 2;
+        g_prov_fwrite_fail = i == 3;
+        feed(sessions[i]);
+        TEST_ASSERT_FALSE(provision_run());
+        TEST_ASSERT_EQUAL_INT(i + 1, g_maintenance_end_calls);
+        TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+        TEST_ASSERT_EQUAL_UINT32(115200, g_baud);
+        TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+        TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    }
+    g_malloc_fail = g_prov_fwrite_fail = 0;
+}
+
+static void test_provision_wav_failure_after_fw_never_selects_boot(void)
+{
+    g_wav_err = ESP_FAIL;
+    feed("PROV-CONFIRM\nFW 4\nABCD\nPUT 1 4 x\nABCD\nDONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("FW-DONE"));
+    TEST_ASSERT_TRUE(tx_has("PROV-ERR wav"));
+    TEST_ASSERT_EQUAL_INT(1, g_fs_release_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_validate_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_tracks_save_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
+    TEST_ASSERT_NULL(s_pending_boot);
+}
+
+static void test_provision_put_durability_failures_release_without_boot(void)
+{
+    for (int failure = 0; failure < 3; ++failure) {
+        mock_uart_reset();
+        g_prov_flush_fail = failure == 0;
+        g_prov_sync_fail = failure == 1;
+        g_prov_close_fail = failure == 2;
+        feed("PROV-CONFIRM\nFW 4\nABCD\nPUT 1 4 x\nABCD\nDONE\n");
+        TEST_ASSERT_FALSE(provision_run());
+        TEST_ASSERT_TRUE(tx_has("PROV-ERR write"));
+        TEST_ASSERT_EQUAL_INT(failure + 1, g_maintenance_end_calls);
+        TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+        TEST_ASSERT_EQUAL_UINT32(115200, g_baud);
+        TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+        TEST_ASSERT_EQUAL_INT(0, g_tracks_save_calls);
+        TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+        TEST_ASSERT_NULL(s_pending_boot);
+    }
+    g_prov_flush_fail = g_prov_sync_fail = g_prov_close_fail = 0;
+}
+
+static void test_provision_metadata_failure_after_fw_never_selects_boot(void)
+{
+    g_tracks_save_err = ESP_FAIL;
+    feed("PROV-CONFIRM\nFW 4\nABCD\nDONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PROV-ERR metadata"));
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
+    TEST_ASSERT_NULL(s_pending_boot);
+}
+
+static void test_provision_later_put_failure_does_not_select_received_fw(void)
+{
+    feed("PROV-CONFIRM\nFW 4\nABCD\nPUT 99 4 x\nDONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("FW-DONE"));
+    TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_tracks_save_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
+}
+
+static void test_provision_done_selects_boot_once_after_valid_metadata(void)
+{
+    feed("PROV-CONFIRM\nFW 4\nABCD\nPUT 1 4 x\nABCD\nDONE\n");
+    TEST_ASSERT_TRUE(provision_run());
+    TEST_ASSERT_EQUAL_INT(1, g_validate_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_tracks_save_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_boot_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_fs_release_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_esp_restart_calls);
+    TEST_ASSERT_TRUE(tx_has("DONE-OK"));
+    TEST_ASSERT_NULL(s_pending_boot);
+}
+
+static void test_provision_done_boot_selection_failure_cleans_up(void)
+{
+    mock_ota_set_boot_err = ESP_FAIL;
+    feed("PROV-CONFIRM\nFW 4\nABCD\nDONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("FW-ERR boot"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(1, g_boot_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_esp_restart_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
+}
+
+static void test_bemf_adc_checked_error_is_not_zero_success(void)
+{
+    g_adc_err = ESP_ERR_TIMEOUT;
+    handle_bemf_cmd("BEMF-ADC");
+    TEST_ASSERT_TRUE(tx_has("BEMF-ADC-ERR"));
+    TEST_ASSERT_FALSE(tx_has("BEMF-ADC 1 2 3"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -951,5 +1204,14 @@ int main(void)
     RUN_TEST(test_provision_run_put_no_mem);
     RUN_TEST(test_provision_run_put_timeout);
     RUN_TEST(test_provision_run_put_chunk_ack);
+    RUN_TEST(test_provision_quiescence_failure_never_formats);
+    RUN_TEST(test_provision_failed_put_paths_release_maintenance);
+    RUN_TEST(test_provision_wav_failure_after_fw_never_selects_boot);
+    RUN_TEST(test_provision_put_durability_failures_release_without_boot);
+    RUN_TEST(test_provision_metadata_failure_after_fw_never_selects_boot);
+    RUN_TEST(test_provision_later_put_failure_does_not_select_received_fw);
+    RUN_TEST(test_provision_done_selects_boot_once_after_valid_metadata);
+    RUN_TEST(test_provision_done_boot_selection_failure_cleans_up);
+    RUN_TEST(test_bemf_adc_checked_error_is_not_zero_success);
     return UNITY_END();
 }

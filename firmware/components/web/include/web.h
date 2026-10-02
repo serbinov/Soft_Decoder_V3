@@ -15,8 +15,16 @@ void web_log_event(const char *tag, const char *fmt, ...);
 /* Function output states (F0..F28), shared with the DCC decoder. */
 bool web_get_function_state(uint8_t fn);
 
-/* True when rails (DCC) control is active; web throttle is ignored then. */
+/* True only when rails control is ready and maintenance is inactive. */
 bool web_control_is_rails(void);
+/* Source lease serializes a rail command with web/source handover. */
+bool web_control_rails_begin(uint32_t *generation);
+void web_control_rails_end(void);
+/* Default false until outputs, maps and safety consumer are ready. */
+esp_err_t web_set_actuation_ready(bool ready);
+esp_err_t web_maintenance_begin(bool exclusive_fs);
+void web_maintenance_end(void);
+bool web_maintenance_active(void);
 
 /* Per-voice volume (0..100) for a function/slot sound. Slot 1 is the engine
  * (uses engine volume), all other slots are effects (uses effects volume);
@@ -43,8 +51,7 @@ bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
  * CV63 write does not desync from /api/audio/volume. */
 void web_master_volume_changed(uint8_t vol0_100);
 
-/* True while an HTTP upload or OTA transfer is writing to the filesystem.
- * Provisioning uses this to avoid reformatting under an active writer. */
+/* Includes maintenance admission, not just the body-receive interval. */
 bool web_fs_busy(void);
 
 #endif

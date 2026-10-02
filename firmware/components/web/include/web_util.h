@@ -14,7 +14,8 @@
 #define DNS_MSG_MAX 512
 
 /* Extract `key` from an "a=1&b=2" query string, percent- and plus-decoding the
- * value into `out`. Returns false when the key is absent. */
+ * value directly from the source into `out`. Rejects overflow, malformed
+ * percent escapes and embedded NUL; false also means the key is absent. */
 bool parse_query(const char *query, const char *key, char *out, size_t out_len);
 
 /* Typed query parsers: reject empty, trailing garbage and out-of-range values. */
@@ -28,9 +29,8 @@ void json_escape(const char *in, char *out, size_t out_len);
 /* Bounded append: never overflows `buf` and never underflows on a full buffer. */
 void buf_appendf(char *buf, size_t cap, size_t *used, const char *fmt, ...);
 
-/* Build a DNS A response for a query, pointing at `ip` (4 bytes, network
- * order). Returns 0 when malformed or when the answer would not fit the
- * DNS_MSG_MAX buffer. */
+/* Standard single-question A/IN gets `ip`; AAAA/IN gets NOERROR/no answers.
+ * Unsupported/malformed packets return 0. Output capacity is DNS_MSG_MAX. */
 size_t dns_build_response(const uint8_t *q, int qlen, uint8_t *r, const uint8_t ip[4]);
 
 /* Percent-decode into `output`. */

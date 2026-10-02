@@ -2,10 +2,12 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "motor.h"
+#include "dcc.h"
 #include "pinmap.h"
 #include "settings.h"
 #include "web.h"
@@ -21,18 +23,39 @@ static const char *TAG = "track";
 /* Direction follows the DCC_IN static level (right rail positive -> low ->
  * forward); N consecutive agreeing samples are required to flip direction. */
 #define DC_POLARITY_DEBOUNCE 4
+/* S9.2 section C prohibits conversion while packet spacing <=30 ms.
+ * Four agreeing 50 ms samples add conservative entry hysteresis. */
+#define DC_DIGITAL_ABSENCE_US 30000
+#define DC_SAMPLE_EXPIRY_US  100000
 
 static bool s_dc_forward = true;
 static uint8_t s_dc_forward_votes = 0;
 static uint32_t s_rail_mv;
+static int64_t s_rail_sample_us;
+static bool s_rail_valid;
+static bool s_dc_detected;
+static bool s_dc_candidate_forward;
+static uint8_t s_dc_candidate_votes;
+static uint32_t s_dc_generation;
+static bool s_dcc_motor_owned;
+static portMUX_TYPE s_track_mux = portMUX_INITIALIZER_UNLOCKED;
+
+void track_note_dcc_motor_command(void)
+{
+    portENTER_CRITICAL(&s_track_mux);
+    s_dcc_motor_owned = true;
+    portEXIT_CRITICAL(&s_track_mux);
+}
 
 bool track_is_dc_mode(void)
 {
-    uint8_t cv29 = 0;
-    if (settings_cv_read(29, &cv29) != ESP_OK) {
-        return false;
-    }
-    return (cv29 & 0x04U) != 0;
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_track_mux);
+    bool detected = s_dc_detected && s_rail_valid &&
+                    now - s_rail_sample_us < DC_SAMPLE_EXPIRY_US;
+    portEXIT_CRITICAL(&s_track_mux);
+    return detected && now - dcc_last_signal_packet_us() > DC_DIGITAL_ABSENCE_US &&
+           dcc_signal_is_static(DC_DIGITAL_ABSENCE_US);
 }
 
 static uint32_t raw_to_mv(int raw)
@@ -68,27 +91,71 @@ static void track_adc_step(bool *was_driving)
         int raw = motor_adc_read_raw(PIN_RAIL_SENSE);
         motor_bemf_unlock();
         if (raw >= 0) {
+            portENTER_CRITICAL(&s_track_mux);
             s_rail_mv = raw_to_mv(raw);
+            s_rail_sample_us = esp_timer_get_time();
+            s_rail_valid = true;
+            portEXIT_CRITICAL(&s_track_mux);
         }
     }
-    (void)motor_set_rail_voltage_mv(s_rail_mv);
-
-    bool driving = track_is_dc_mode() && web_control_is_rails();
-    if (driving) {
-        uint8_t speed = dc_speed_step(s_rail_mv);
-
-        bool forward = (gpio_get_level((gpio_num_t)PIN_DCC_IN) == 0);
-        if (forward == s_dc_forward) {
-            s_dc_forward_votes = 0;
-        } else if (++s_dc_forward_votes >= DC_POLARITY_DEBOUNCE) {
+    int64_t now = esp_timer_get_time();
+    bool fresh = s_rail_valid && now - s_rail_sample_us < DC_SAMPLE_EXPIRY_US;
+    (void)motor_set_rail_voltage_mv(fresh ? s_rail_mv : 0U);
+    bool digital_absent = now - dcc_last_signal_packet_us() > DC_DIGITAL_ABSENCE_US &&
+                          dcc_signal_is_static(DC_DIGITAL_ABSENCE_US);
+    bool forward = (gpio_get_level((gpio_num_t)PIN_DCC_IN) == 0);
+    portENTER_CRITICAL(&s_track_mux);
+    if (!fresh || !digital_absent) {
+        s_dc_detected = false;
+        s_dc_candidate_votes = 0;
+        s_dc_forward_votes = 0;
+    } else if (!s_dc_detected) {
+        if (s_dc_candidate_votes == 0U || forward != s_dc_candidate_forward) {
+            s_dc_candidate_forward = forward;
+            s_dc_candidate_votes = 1;
+        } else if (++s_dc_candidate_votes >= DC_POLARITY_DEBOUNCE) {
             s_dc_forward = forward;
-            s_dc_forward_votes = 0;
+            s_dc_detected = true;
         }
-
-        (void)motor_set_speed(speed, s_dc_forward);
-    } else if (*was_driving) {
-        motor_stop();
+    } else if (forward == s_dc_forward) {
+        s_dc_forward_votes = 0;
+    } else if (++s_dc_forward_votes >= DC_POLARITY_DEBOUNCE) {
+        s_dc_forward = forward;
+        s_dc_forward_votes = 0;
     }
+    portEXIT_CRITICAL(&s_track_mux);
+
+    uint8_t cv29 = 0;
+    bool permitted = settings_cv_read(29, &cv29) == ESP_OK && (cv29 & 0x04U) != 0U;
+    uint32_t generation;
+    if (!web_control_rails_begin(&generation)) {
+        /* Source transition owns the stop. Former DC owners must never write
+         * a delayed zero over a new web command. */
+        *was_driving = false;
+        return;
+    }
+    /* CV access/source admission can yield. Recheck the sample at the actual
+     * command boundary, not against the beginning of this iteration. */
+    now = esp_timer_get_time();
+    if (!s_rail_valid || now - s_rail_sample_us >= DC_SAMPLE_EXPIRY_US) {
+        (void)motor_set_rail_voltage_mv(0U);
+    }
+    bool driving = track_is_dc_mode() && permitted;
+    if (driving) {
+        if (motor_set_speed(dc_speed_step(s_rail_mv),
+                            s_dc_forward ^ ((cv29 & 0x01U) != 0U)) == ESP_OK) {
+            s_dc_generation = generation;
+            s_dcc_motor_owned = false;
+        } else {
+            driving = false;
+        }
+    }
+    if (!driving && *was_driving && generation == s_dc_generation && !s_dcc_motor_owned) {
+        /* Only an accepted motor command hands ownership to DCC. Merely
+         * receiving addressed functions/CVs must not preserve old DC motion. */
+        motor_emergency_stop();
+    }
+    web_control_rails_end();
     *was_driving = driving;
 }
 

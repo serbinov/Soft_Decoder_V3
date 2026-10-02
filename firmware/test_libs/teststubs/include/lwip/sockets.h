@@ -15,6 +15,7 @@
 #define INADDR_ANY 0u
 #define SOL_SOCKET 0x0fff
 #define SO_RCVTIMEO 0x1006
+#define SHUT_RDWR 2
 
 typedef unsigned short mock_sa_family_t;
 
@@ -50,6 +51,7 @@ int mock_recvfrom(int sockfd, void *buf, size_t len, int flags,
 int mock_sendto(int sockfd, const void *buf, size_t len, int flags,
                 const struct sockaddr *dest_addr, mock_socklen_t addrlen);
 int mock_socket_close(int fd);
+int mock_shutdown(int fd, int how);
 
 #define htons  mock_lwip_htons
 #define htonl  mock_lwip_htonl
@@ -59,5 +61,6 @@ int mock_socket_close(int fd);
 #define recvfrom mock_recvfrom
 #define sendto mock_sendto
 #define close  mock_socket_close
+#define shutdown mock_shutdown
 
 #endif /* MOCK_LWIP_SOCKETS_H */

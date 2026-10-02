@@ -31,6 +31,8 @@ static int      g_fn_calls;
 static bool     g_fn_state[29];
 
 static int      g_reset_calls;
+static int      g_emergency_calls, g_hard_reset_calls;
+static esp_err_t g_write_result;
 
 static uint8_t  g_read_returns;
 static bool     g_read_ok;
@@ -40,12 +42,13 @@ static bool     g_read_ok;
 static uint8_t  g_cv_table[TEST_CV_MAX];
 static bool     g_cv_table_ok;
 
-static void on_cv_write(uint16_t cv, uint8_t value, bool service_mode)
+static esp_err_t on_cv_write(uint16_t cv, uint8_t value, bool service_mode)
 {
     g_cv_index = cv;
     g_cv_value = value;
     g_cv_service = service_mode;
     g_cv_write_calls++;
+    return g_write_result;
 }
 
 static void on_speed(uint8_t speed, bool forward)
@@ -66,6 +69,15 @@ static void on_function(uint8_t fn, bool state)
 static void on_reset(void)
 {
     g_reset_calls++;
+}
+static void on_emergency(void) { g_emergency_calls++; }
+static void on_hard_reset(void) { g_hard_reset_calls++; }
+
+static void startup_hook(void (*task)(void *), void *arg)
+{
+    (void)task;
+    esp_err_t result = dcc_receiver_start();
+    (void)xQueueSend((QueueHandle_t)arg, &result, 0);
 }
 
 static bool on_cv_read(uint16_t cv, uint8_t *out)
@@ -96,6 +108,8 @@ void setUp(void)
     g_fn_calls = 0;
     memset(g_fn_state, 0, sizeof(g_fn_state));
     g_reset_calls = 0;
+    g_emergency_calls = g_hard_reset_calls = 0;
+    g_write_result = ESP_OK;
     g_read_ok = false;
     g_read_returns = 0;
     g_cv_table_ok = false;
@@ -112,9 +126,12 @@ void setUp(void)
     mock_queue_send_calls = 0;
     mock_queue_send_fail = 0;
     mock_queue_send_fail_after = -1;
+    mock_gpio_isr_install_err = 0;
+    mock_gpio_isr_add_err = 0;
+    mock_task_startup_hook = startup_hook;
     /* Drop queues left over from a dcc_init() test so each test starts clean. */
     if (s_queue != NULL) {
-        vQueueDelete(s_queue);
+        vQueueDeleteWithCaps(s_queue);
         s_queue = NULL;
     }
     if (s_ack_queue != NULL) {
@@ -123,6 +140,10 @@ void setUp(void)
     }
     s_ack_worker = false;
     s_ack_iter_cap = 0;
+    s_initialized = false;
+    s_last_packet_us = s_last_signal_packet_us = s_last_edge_us = 0;
+    s_last_input_edge_us = s_init_us = 0;
+    s_isr_overruns = 0;
 
     s_decoder_addr = 3;
     s_decoder_long_addr = false;
@@ -130,6 +151,14 @@ void setUp(void)
     s_consist_addr = 0;
     s_consist_reverse = false;
     s_service_mode = false;
+    s_service_candidate = false;
+    s_service_deadline_us = 20000;
+    s_service_pending.len = s_ops_pending.len = 0;
+    s_control_enabled = true;
+    s_control_generation = s_seen_control_generation = 0;
+    s_direction_reverse = false;
+    s_function_forward = true;
+    s_cv21 = s_cv22 = 0;
 
     reset_parser();
 
@@ -138,6 +167,8 @@ void setUp(void)
     s_cv_write_cb = on_cv_write;
     s_cv_read_cb = on_cv_read;
     s_reset_cb = on_reset;
+    s_emergency_stop_cb = on_emergency;
+    s_hard_reset_cb = on_hard_reset;
 }
 
 void tearDown(void)
@@ -159,6 +190,12 @@ static void feed_packet(const uint8_t *bytes, size_t len, unsigned preamble_ones
         }
     }
     consume_bit(1); /* end bit -> dispatch */
+}
+
+static void feed_confirmed_packet(const uint8_t *bytes, size_t len, unsigned preamble)
+{
+    feed_packet(bytes, len, preamble);
+    feed_packet(bytes, len, preamble);
 }
 
 /* Feed a full DCC packet through the half-period pipeline: two equal
@@ -200,8 +237,10 @@ static void test_half_period_classification(void)
     TEST_ASSERT_EQUAL_UINT8(DCC_HALF_ZERO, (uint8_t)classify(292));
     TEST_ASSERT_EQUAL_UINT8(DCC_HALF_NONE, (uint8_t)classify(10));
     TEST_ASSERT_EQUAL_UINT8(DCC_HALF_NONE, (uint8_t)classify(34));
-    TEST_ASSERT_EQUAL_UINT8(DCC_HALF_NONE, (uint8_t)classify(293));
-    TEST_ASSERT_EQUAL_UINT8(DCC_HALF_NONE, (uint8_t)classify(5000));
+    TEST_ASSERT_EQUAL_UINT8(DCC_HALF_ZERO, (uint8_t)classify(293));
+    TEST_ASSERT_EQUAL_UINT8(DCC_HALF_ZERO, (uint8_t)classify(5000));
+    TEST_ASSERT_EQUAL_UINT8(DCC_HALF_ZERO, (uint8_t)classify(10000));
+    TEST_ASSERT_EQUAL_UINT8(DCC_HALF_NONE, (uint8_t)classify(10001));
 }
 
 /* Глитч (короче 35 мкс) должен сбрасывать незавершённый пакет: следующий
@@ -216,7 +255,7 @@ static void test_dcc_glitch_resets_parser(void)
     feed_half_period(20); /* glitch -> reset */
 
     const uint8_t packet[] = {0x03, 0xEC, 0x00, 0x2A, 0xC5};
-    feed_packet(packet, sizeof(packet), 12);
+    feed_confirmed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
 }
 
@@ -225,7 +264,7 @@ static void test_dcc_glitch_resets_parser(void)
 static void test_dcc_bit_order_ops_write(void)
 {
     const uint8_t packet[] = {0x03, 0xEC, 0x00, 0x2A, 0xC5};
-    feed_packet(packet, sizeof(packet), 12);
+    feed_confirmed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(1, g_cv_index);
@@ -256,7 +295,7 @@ static void test_dcc_long_address(void)
 
     const uint8_t packet[] = {0xC0, 0x0A, 0xEC, 0x00, 0x2A,
                               0xC0 ^ 0x0A ^ 0xEC ^ 0x00 ^ 0x2A};
-    feed_packet(packet, sizeof(packet), 12);
+    feed_confirmed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(1, g_cv_index);
@@ -287,9 +326,8 @@ static void test_dcc_128step_speed(void)
 {
     const uint8_t packet[] = {0x03, 0x3F, 0x81, 0x03 ^ 0x3F ^ 0x81}; /* raw 1 = estop */
     feed_packet(packet, sizeof(packet), 12);
-    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(0, g_speed);
-    TEST_ASSERT_TRUE(g_forward);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_emergency_calls);
 
     g_speed_calls = 0;
     const uint8_t packet2[] = {0x03, 0x3F, 0x80, 0x03 ^ 0x3F ^ 0x80}; /* raw 0 = stop */
@@ -321,7 +359,7 @@ static void test_dcc_service_write_direct(void)
 {
     const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
     s_service_mode = true;
-    feed_packet(packet, sizeof(packet), 22);
+    feed_confirmed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
@@ -336,7 +374,7 @@ static void test_dcc_service_verify_match(void)
     g_read_ok = true;
     g_read_returns = 100;
     s_service_mode = true;
-    feed_packet(packet, sizeof(packet), 22);
+    feed_confirmed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
@@ -348,7 +386,7 @@ static void test_dcc_service_verify_no_match(void)
     g_read_ok = true;
     g_read_returns = 50;
     s_service_mode = true;
-    feed_packet(packet, sizeof(packet), 22);
+    feed_confirmed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
@@ -362,7 +400,7 @@ static void test_dcc_service_bit_write(void)
     g_read_ok = true;
     g_read_returns = 0x00;
     s_service_mode = true;
-    feed_packet(packet, sizeof(packet), 22);
+    feed_confirmed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
@@ -378,10 +416,11 @@ static void test_dcc_service_mode_entered_by_reset(void)
 {
     const uint8_t reset[] = {0x00, 0x00, 0x00};
     feed_packet(reset, sizeof(reset), 22);
-    TEST_ASSERT_TRUE(s_service_mode);
+    TEST_ASSERT_TRUE(s_service_candidate);
+    TEST_ASSERT_FALSE(s_service_mode);
 
     const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
-    feed_packet(packet, sizeof(packet), 22);
+    feed_confirmed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(100, g_cv_value);
@@ -423,12 +462,12 @@ static void test_dcc_broadcast_reset(void)
 
 static void test_dcc_broadcast_estop(void)
 {
-    const uint8_t packet[] = {0x00, 0x01, 0x01};
+    const uint8_t packet[] = {0x00, 0x61, 0x61};
     feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(0, g_reset_calls);
-    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(0, g_speed);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_emergency_calls);
 }
 
 /* Broadcast reset 00 00 00 (ровно 3 байта) сбрасывает; 6-байтовый broadcast
@@ -467,9 +506,9 @@ static void test_dcc_28step_code_mapping(void)
         uint16_t expected;
         bool fwd;
     } cases[] = {
-        { 0x41, 1,   false }, /* code 2 -> speed 1 */
-        { 0x51, 5,   false }, /* code 3 -> speed 5 */
-        { 0x59, 74,  false }, /* code 19 -> speed 74 */
+        { 0x42, 1,   false }, /* code 4 -> step 1 */
+        { 0x52, 5,   false }, /* code 5 -> step 2 */
+        { 0x59, 70,  false }, /* code 19 -> step 16 */
         { 0x7F, 126, true  }, /* code 31 -> full 126 */
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
@@ -493,7 +532,7 @@ static void test_dcc_long_address_28step(void)
     feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(70, g_speed);
+    TEST_ASSERT_EQUAL_UINT16(65, g_speed);
     TEST_ASSERT_FALSE(g_forward);
 }
 
@@ -592,7 +631,7 @@ static void test_dcc_reload_config_long_address(void)
     const uint8_t packet[] = {0xE0, 0xFC, 0x49, 0x55};
     feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(70, g_speed);
+    TEST_ASSERT_EQUAL_UINT16(65, g_speed);
     TEST_ASSERT_FALSE(g_forward);
 
     /* The previous short address is no longer ours. */
@@ -663,9 +702,9 @@ static void test_dcc_ops_bit_write(void)
     g_cv_table_ok = true;
     g_cv_table[5] = 0x00;
     /* instr 0xE8 = 1110_10_00: cc=2 bit-manip, CV high bits 0, CV5.
-     * data 0x19 = 0b0001_1001: D=1 (write), value=1, bit=1. */
-    const uint8_t packet[] = {0x03, 0xE8, 0x04, 0x19, 0x03 ^ 0xE8 ^ 0x04 ^ 0x19};
-    feed_packet(packet, sizeof(packet), 12);
+     * data 0xF9: D=1 (write), value=1, bit=1. */
+    const uint8_t packet[] = {0x03, 0xE8, 0x04, 0xF9, 0x03 ^ 0xE8 ^ 0x04 ^ 0xF9};
+    feed_confirmed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(5, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0x02, g_cv_value);
@@ -677,7 +716,7 @@ static void test_dcc_ops_bit_verify_no_write(void)
 {
     g_cv_table_ok = true;
     g_cv_table[5] = 0x02;
-    const uint8_t packet[] = {0x03, 0xE8, 0x04, 0x09, 0x03 ^ 0xE8 ^ 0x04 ^ 0x09};
+    const uint8_t packet[] = {0x03, 0xE8, 0x04, 0xE9, 0x03 ^ 0xE8 ^ 0x04 ^ 0xE9};
     feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
@@ -687,7 +726,7 @@ static void test_dcc_ops_bit_verify_no_write(void)
 static void test_dcc_ops_write_high_cv(void)
 {
     const uint8_t packet[] = {0x03, 0xED, 0x2B, 0x55, 0x03 ^ 0xED ^ 0x2B ^ 0x55};
-    feed_packet(packet, sizeof(packet), 12);
+    feed_confirmed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(300, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0x55, g_cv_value);
@@ -708,9 +747,8 @@ static void test_dcc_function_f21_group(void)
 
 static void test_dcc_function_group2_f9_f12(void)
 {
-    /* Group 2 is a 2-byte packet: 1011_D_FFFF, the low nibble carries the
-     * states. D=1 selects F9..F12. 0xBA -> F10 + F12. */
-    const uint8_t packet[] = {0x03, 0xBA, 0x03 ^ 0xBA};
+    /* 1010_DDDD controls F9..F12. */
+    const uint8_t packet[] = {0x03, 0xAA, 0x03 ^ 0xAA};
     feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(4, g_fn_calls);
     TEST_ASSERT_TRUE(g_fn_state[10]);
@@ -726,9 +764,9 @@ static void test_dcc_service_bit_verify(void)
     g_cv_table_ok = true;
     g_cv_table[4] = 0x04; /* bit 2 set */
     /* 0x78 0x03 -> CV4; data 0x0A = value=1 bit=2, D=0 -> verify. */
-    const uint8_t packet[] = {0x78, 0x03, 0x0A, 0x78 ^ 0x03 ^ 0x0A};
+    const uint8_t packet[] = {0x78, 0x03, 0xEA, 0x78 ^ 0x03 ^ 0xEA};
     s_service_mode = true;
-    feed_packet(packet, sizeof(packet), 22);
+    feed_confirmed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
 
@@ -770,7 +808,7 @@ static void test_dcc_oversized_packet_resets(void)
         }
     }
     const uint8_t packet[] = {0x03, 0xEC, 0x00, 0x2A, 0xC5};
-    feed_packet(packet, sizeof(packet), 12);
+    feed_confirmed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
 }
 
@@ -881,9 +919,9 @@ static void test_dcc_service_bit_manip_clear(void)
     g_read_ok = true;
     g_read_returns = 0xFF;
     /* Service bit manipulation: write 0 to bit 0 of CV4 -> clear the bit. */
-    const uint8_t pkt[] = { 0x78, 0x03, 0x10, 0x78 ^ 0x03 ^ 0x10 };
+    const uint8_t pkt[] = { 0x78, 0x03, 0xF0, 0x78 ^ 0x03 ^ 0xF0 };
     s_service_mode = true;
-    feed_packet(pkt, sizeof(pkt), 20);
+    feed_confirmed_packet(pkt, sizeof(pkt), 20);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0xFE, g_cv_value);
@@ -894,8 +932,8 @@ static void test_dcc_ops_bit_manip_clear(void)
 {
     g_read_ok = true;
     g_read_returns = 0xFF;
-    const uint8_t pkt[] = { 0x03, 0xE8, 0x03, 0x10, 0x03 ^ 0xE8 ^ 0x03 ^ 0x10 };
-    feed_packet(pkt, sizeof(pkt), 12);
+    const uint8_t pkt[] = { 0x03, 0xE8, 0x03, 0xF0, 0x03 ^ 0xE8 ^ 0x03 ^ 0xF0 };
+    feed_confirmed_packet(pkt, sizeof(pkt), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT8(0xFE, g_cv_value);
 }
@@ -988,10 +1026,8 @@ static void test_dcc_task_isr_install_failure(void)
 {
     mock_gpio_isr_install_err = ESP_FAIL; /* covers the ESP_LOGE branch */
     mock_queue_create_fail = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
-    s_dcc_iter_cap = 1;
-    dcc_task(NULL);
-    s_dcc_iter_cap = 0;
+    TEST_ASSERT_EQUAL(ESP_FAIL, dcc_init());
+    TEST_ASSERT_NULL(s_queue);
     mock_gpio_isr_install_err = 0;
 }
 
@@ -1055,6 +1091,278 @@ static void test_fuzz_random_bits(void)
         consume_bit((uint8_t)(seed >> 31));
     }
     TEST_ASSERT_TRUE(true);
+}
+
+static void test_address_partitions_and_signal_clock(void)
+{
+    dcc_set_address(865, true);
+    mock_timer_now_us = 1234;
+    const uint8_t accessory[] = {0x83, 0x61, 0x7F, 0x9D};
+    feed_packet(accessory, sizeof(accessory), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    TEST_ASSERT_EQUAL_INT64(1234, dcc_last_signal_packet_us());
+    TEST_ASSERT_EQUAL_INT64(0, dcc_last_packet_us());
+    const uint8_t reserved[] = {0xE8, 0x61, 0x7F, 0xF6};
+    feed_packet(reserved, sizeof(reserved), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    const uint8_t bad[] = {0x03, 0x7F, 0x00};
+    mock_timer_now_us = 2000;
+    feed_packet(bad, sizeof(bad), 12);
+    TEST_ASSERT_EQUAL_INT64(1234, dcc_last_signal_packet_us());
+}
+
+static void test_stop_emergency_vectors_all_modes(void)
+{
+    const uint8_t emergency[][3] = {{0x03,0x61,0x62}, {0x03,0x71,0x72}};
+    const uint8_t stop[][3] = {{0x03,0x60,0x63}, {0x03,0x70,0x73}};
+    for (int mode = 0; mode < 2; mode++) {
+        s_speed_mode_14 = mode != 0;
+        for (int i = 0; i < 2; i++) {
+            feed_packet(emergency[i], 3, 12);
+            TEST_ASSERT_EQUAL_INT(mode * 2 + i + 1, g_emergency_calls);
+            TEST_ASSERT_EQUAL_INT(mode * 2 + i, g_speed_calls);
+            feed_packet(stop[i], 3, 12);
+            TEST_ASSERT_EQUAL_UINT8(0, g_speed);
+        }
+    }
+}
+
+static void test_function_group2_f5_f8(void)
+{
+    const uint8_t p[] = {0x03,0xB1,0xB2};
+    feed_packet(p, sizeof(p), 12);
+    TEST_ASSERT_TRUE(g_fn_state[5]);
+    TEST_ASSERT_FALSE(g_fn_state[9]);
+    TEST_ASSERT_EQUAL_INT(4, g_fn_calls);
+}
+
+static void test_ops_confirmation_invalidation(void)
+{
+    const uint8_t write[] = {0x03,0xEC,0x00,0x2A,0xC5};
+    const uint8_t other[] = {0x04,0x60,0x64};
+    const uint8_t own[] = {0x03,0x60,0x63};
+    const uint8_t broadcast[] = {0x00,0x60,0x60};
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(other, sizeof(other), 12);
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    feed_packet(write, sizeof(write), 12);
+    feed_packet(own, sizeof(own), 12);
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    feed_packet(broadcast, sizeof(broadcast), 12);
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(2, g_cv_write_calls);
+}
+
+static void test_service_entry_deadline_and_other_address_exit(void)
+{
+    const uint8_t reset[] = {0,0,0};
+    const uint8_t write[] = {0x7C,0x02,0x64,0x1A};
+    const uint8_t other[] = {0x04,0x60,0x64};
+    feed_packet(reset, sizeof(reset), 22);
+    feed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_TRUE(s_service_mode);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(other, sizeof(other), 12);
+    TEST_ASSERT_FALSE(s_service_mode);
+    feed_confirmed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(reset, sizeof(reset), 22);
+    mock_timer_now_us += 20000;
+    feed_confirmed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(reset, sizeof(reset), 22);
+    feed_packet(write, sizeof(write), 22);
+    const uint8_t reset_again[] = {0,0,0};
+    feed_packet(reset_again, sizeof(reset_again), 22);
+    feed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+}
+
+static void test_service_failure_and_verify_confirmation(void)
+{
+    const uint8_t reset[] = {0,0,0};
+    const uint8_t write[] = {0x7C,0x02,0x64,0x1A};
+    const uint8_t verify[] = {0x74,0x02,0x64,0x12};
+    feed_packet(reset, sizeof(reset), 22);
+    g_write_result = ESP_FAIL;
+    feed_confirmed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
+    g_read_ok = true;
+    g_read_returns = 100;
+    feed_packet(verify, sizeof(verify), 22);
+    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
+    feed_packet(verify, sizeof(verify), 22);
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
+}
+
+static void test_unsupported_xpom_and_service_lengths(void)
+{
+    const uint8_t xpom[] = {0x03,0xEC,0x01,0x02,0x04,0x2A,0xC2};
+    feed_confirmed_packet(xpom, sizeof(xpom), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    const uint8_t reset[] = {0,0,0};
+    feed_packet(reset, sizeof(reset), 22);
+    const uint8_t extra[] = {0x7C,0x01,0x02,0x03,0x7C};
+    feed_confirmed_packet(extra, sizeof(extra), 22);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+}
+
+static void test_consist_speed_functions_and_cv_routing(void)
+{
+    dcc_set_consist(2, false);
+    const uint8_t own[] = {0x03,0x7F,0x7C};
+    feed_packet(own, sizeof(own), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    const uint8_t group1[] = {0x02,0x9F,0x9D};
+    feed_packet(group1, sizeof(group1), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_fn_calls);
+    s_cv21 = 0x01; /* F1 only */
+    s_cv22 = 0x05; /* F0 forward, F9 */
+    feed_packet(group1, sizeof(group1), 12);
+    TEST_ASSERT_TRUE(g_fn_state[0]);
+    TEST_ASSERT_TRUE(g_fn_state[1]);
+    TEST_ASSERT_FALSE(g_fn_state[2]);
+    TEST_ASSERT_EQUAL_INT(2, g_fn_calls);
+    const uint8_t group2[] = {0x02,0xAF,0xAD};
+    feed_packet(group2, sizeof(group2), 12);
+    TEST_ASSERT_TRUE(g_fn_state[9]);
+    TEST_ASSERT_FALSE(g_fn_state[10]);
+    const uint8_t write[] = {0x02,0xEC,0x00,0x2A,0xC4};
+    feed_confirmed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    const uint8_t short_cv[] = {0x02,0xF2,0x10,0xE0};
+    feed_packet(short_cv, sizeof(short_cv), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    dcc_set_address(2, false);
+    const uint8_t same[] = {0x02,0x7F,0x7D};
+    feed_packet(same, sizeof(same), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+}
+
+static void test_direction_inversion_and_control_gate(void)
+{
+    g_cv_table_ok = true;
+    g_cv_table[1] = 3;
+    g_cv_table[29] = 3;
+    dcc_reload_config();
+    const uint8_t speed[] = {0x03,0x7F,0x7C};
+    feed_packet(speed, sizeof(speed), 12);
+    TEST_ASSERT_FALSE(g_forward);
+    dcc_set_control_enabled(false);
+    mock_timer_now_us = 500;
+    feed_packet(speed, sizeof(speed), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+    TEST_ASSERT_EQUAL_INT64(500, dcc_last_signal_packet_us());
+    dcc_set_control_enabled(true);
+    feed_packet(speed, sizeof(speed), 12);
+    TEST_ASSERT_EQUAL_INT(2, g_speed_calls);
+}
+
+static void test_hard_reset_is_separate_operation(void)
+{
+    const uint8_t hard[] = {0x00,0x01,0x01};
+    feed_packet(hard, sizeof(hard), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_hard_reset_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_reset_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_emergency_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls); /* Never substitute factory CV8 reset. */
+}
+
+static void test_stretched_zero_pipeline(void)
+{
+    /* Asymmetric zero halves are valid: one stretched, the other normal. */
+    const uint8_t packet[] = {0x03,0x7F,0x7C};
+    for (int i = 0; i < 12; i++) {
+        feed_half_period(58); feed_half_period(58);
+    }
+    for (size_t i = 0; i < sizeof(packet); i++) {
+        feed_half_period(5000); feed_half_period(100);
+        for (int bit = 7; bit >= 0; bit--) {
+            bool one = (packet[i] & (1U << bit)) != 0;
+            feed_half_period(one ? 58 : 10000);
+            feed_half_period(one ? 58 : 100);
+        }
+    }
+    feed_half_period(58); feed_half_period(58);
+    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(126, g_speed);
+}
+
+static void test_signal_static_uses_all_edges_and_boot_deadline(void)
+{
+    s_queue = xQueueCreate(DCC_QUEUE_LEN, sizeof(dcc_half_t));
+    s_init_us = 1000;
+    mock_timer_now_us = 31000;
+    TEST_ASSERT_FALSE(dcc_signal_is_static(30000));
+    mock_timer_now_us++;
+    TEST_ASSERT_TRUE(dcc_signal_is_static(30000));
+    dcc_isr(NULL);
+    mock_timer_now_us += 20; /* Rejected parser glitch is still an input edge. */
+    dcc_isr(NULL);
+    mock_timer_now_us += 30000;
+    TEST_ASSERT_FALSE(dcc_signal_is_static(30000));
+    mock_timer_now_us++;
+    TEST_ASSERT_TRUE(dcc_signal_is_static(30000));
+}
+
+static void test_init_handler_failure_and_existing_service_rejected(void)
+{
+    mock_gpio_isr_add_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, dcc_init());
+    TEST_ASSERT_NULL(s_queue);
+    TEST_ASSERT_NULL(s_ack_queue);
+    TEST_ASSERT_NULL(s_start_queue);
+    TEST_ASSERT_FALSE(s_initialized);
+    mock_gpio_isr_add_err = 0;
+    mock_gpio_isr_install_err = ESP_ERR_INVALID_STATE;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, dcc_init());
+    TEST_ASSERT_NULL(s_queue);
+    mock_gpio_isr_install_err = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+    TEST_ASSERT_EQUAL(ESP_INTR_FLAG_LEVEL3 | ESP_INTR_FLAG_IRAM, mock_gpio_isr_flags);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, dcc_init());
+}
+
+static void test_init_start_queue_failure(void)
+{
+    mock_queue_create_fail_after = 2;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, dcc_init());
+    TEST_ASSERT_NULL(s_queue);
+    TEST_ASSERT_NULL(s_ack_queue);
+    TEST_ASSERT_NULL(s_start_queue);
+}
+
+static void test_control_reenable_invalidates_pending_write(void)
+{
+    const uint8_t write[] = {0x03,0xEC,0x00,0x2A,0xC5};
+    feed_packet(write, sizeof(write), 12);
+    dcc_set_control_enabled(false);
+    dcc_set_control_enabled(true); /* No intervening received packet. */
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+}
+
+static void test_consist_address_alias_keeps_baseline_functions(void)
+{
+    dcc_set_address(2, false);
+    dcc_set_consist(2, false);
+    const uint8_t fn[] = {0x02,0x9F,0x9D};
+    feed_packet(fn, sizeof(fn), 12);
+    TEST_ASSERT_EQUAL_INT(5, g_fn_calls);
+    dcc_set_address(2, true);
+    const uint8_t long_speed[] = {0xC0,0x02,0x7F,0xBD};
+    feed_packet(long_speed, sizeof(long_speed), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
 }
 
 int main(void)
@@ -1123,5 +1431,21 @@ int main(void)
     RUN_TEST(test_dcc_init_ack_task_fail);
     RUN_TEST(test_dcc_register_callbacks);
     RUN_TEST(test_fuzz_random_bits);
+    RUN_TEST(test_address_partitions_and_signal_clock);
+    RUN_TEST(test_stop_emergency_vectors_all_modes);
+    RUN_TEST(test_function_group2_f5_f8);
+    RUN_TEST(test_ops_confirmation_invalidation);
+    RUN_TEST(test_service_entry_deadline_and_other_address_exit);
+    RUN_TEST(test_service_failure_and_verify_confirmation);
+    RUN_TEST(test_unsupported_xpom_and_service_lengths);
+    RUN_TEST(test_consist_speed_functions_and_cv_routing);
+    RUN_TEST(test_direction_inversion_and_control_gate);
+    RUN_TEST(test_hard_reset_is_separate_operation);
+    RUN_TEST(test_stretched_zero_pipeline);
+    RUN_TEST(test_signal_static_uses_all_edges_and_boot_deadline);
+    RUN_TEST(test_init_handler_failure_and_existing_service_rejected);
+    RUN_TEST(test_init_start_queue_failure);
+    RUN_TEST(test_control_reenable_invalidates_pending_write);
+    RUN_TEST(test_consist_address_alias_keeps_baseline_functions);
     return UNITY_END();
 }

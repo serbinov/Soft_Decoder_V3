@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "freertos/task.h"
+static TaskHandle_t g_current_task = (TaskHandle_t)1;
+#define xTaskGetCurrentTaskHandle() g_current_task
 
 #ifdef _WIN32
 #include <direct.h>
@@ -21,21 +24,10 @@ int fsync(int fd); /* MinGW has no fsync(); provided at the bottom */
  * include so MOUNT_POINT and the benchmark path point at a temp directory). */
 #define STORAGE_MOUNT_POINT "st_tmp"
 
-/* malloc failure injection for the benchmark's allocation guard. */
-static int g_malloc_fail = 0;
-static void *mock_malloc(size_t n)
-{
-    if (g_malloc_fail) {
-        return NULL;
-    }
-    return malloc(n);
-}
-#define malloc(n) mock_malloc(n)
-
 #define static
 #include "../../components/storage/src/storage.c"
 #undef static
-#undef malloc
+#undef xTaskGetCurrentTaskHandle
 
 #include "../../test_libs/teststubs/stubs.c"
 
@@ -77,6 +69,10 @@ void setUp(void)
     s_ext_partition = NULL;
     s_mounted = false;
     s_backend = STORAGE_BACKEND_NONE;
+    s_leases = 0;
+    s_maintenance_owner = NULL;
+    s_lifecycle_busy = false;
+    g_current_task = (TaskHandle_t)1;
 
     (void)MKDIR(STORAGE_MOUNT_POINT);
     wipe_bench_file();
@@ -175,6 +171,7 @@ static void test_storage_mount_lfs_fail(void)
 
 static void test_storage_format_unavailable(void)
 {
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, storage_format());
 }
 
@@ -182,6 +179,7 @@ static void test_storage_format_ok(void)
 {
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
     TEST_ASSERT_EQUAL(ESP_OK, storage_format());
     TEST_ASSERT_TRUE(storage_is_mounted());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_EXTERNAL_NOR, storage_get_backend());
@@ -192,6 +190,7 @@ static void test_storage_format_ok(void)
 static void test_storage_format_lfs_fail(void)
 {
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
     mock_lfs_format_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, storage_format());
 }
@@ -199,6 +198,7 @@ static void test_storage_format_lfs_fail(void)
 static void test_storage_format_remount_fail(void)
 {
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
     mock_lfs_register_err = ESP_FAIL; /* format_partition OK, remount fails */
     TEST_ASSERT_EQUAL(ESP_FAIL, storage_format());
 }
@@ -226,6 +226,31 @@ static void test_storage_free_bytes(void)
     TEST_ASSERT_EQUAL(ESP_FAIL, storage_get_free_bytes(&freeb));
 }
 
+static void test_format_requires_drained_maintenance(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_format());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_access_begin());
+    TEST_ASSERT_FALSE(storage_is_quiescent());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_access_begin());
+    g_current_task = (TaskHandle_t)2;
+    storage_maintenance_end(); /* wrong task cannot reopen admission */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_format());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_access_begin());
+    g_current_task = (TaskHandle_t)1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_format());
+    TEST_ASSERT_EQUAL_INT(0, mock_lfs_unregister_calls);
+    storage_access_end();
+    TEST_ASSERT_TRUE(storage_is_quiescent());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_format());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_access_begin());
+    storage_maintenance_end();
+    TEST_ASSERT_EQUAL(ESP_OK, storage_access_begin());
+    storage_access_end();
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -244,5 +269,6 @@ int main(void)
     RUN_TEST(test_storage_format_lfs_fail);
     RUN_TEST(test_storage_format_remount_fail);
     RUN_TEST(test_storage_free_bytes);
+    RUN_TEST(test_format_requires_drained_maintenance);
     return UNITY_END();
 }

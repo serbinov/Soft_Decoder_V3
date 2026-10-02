@@ -139,7 +139,13 @@ static selftest_state_t check_storage(void)
 static selftest_state_t check_adc(void)
 {
     uint16_t b1 = 0, b2 = 0, rail = 0;
-    motor_bemf_adc_dump(&b1, &b2, &rail);
+    esp_err_t err = motor_bemf_adc_dump_checked(&b1, &b2, &rail);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return SELFTEST_SKIP;
+    }
+    if (err != ESP_OK) {
+        return SELFTEST_FAIL;
+    }
     if (b1 > 4095U || b2 > 4095U || rail > 4095U) {
         return SELFTEST_FAIL;
     }
@@ -249,12 +255,26 @@ esp_err_t selftest_act_motor(uint8_t speed, uint16_t ms)
         ms < SELFTEST_ACT_MS_MIN || ms > SELFTEST_ACT_MS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (motor_set_speed(speed, true) != ESP_OK) {
-        return ESP_FAIL;
+    esp_err_t err = web_maintenance_begin(false);
+    if (err != ESP_OK) {
+        return err;
     }
-    vTaskDelay(pdMS_TO_TICKS(ms));
-    motor_stop();
-    return ESP_OK;
+    err = motor_set_inhibited(false);
+    if (err == ESP_OK) {
+        err = motor_set_speed(speed, true);
+    }
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(ms));
+    }
+    /* The HIL deadline is independent of CV4 and task progress. */
+    (void)motor_set_inhibited(true);
+    uint8_t applied = 255;
+    motor_get_applied_speed(&applied, NULL);
+    if (applied != 0U) {
+        err = ESP_FAIL;
+    }
+    web_maintenance_end();
+    return err;
 }
 
 esp_err_t selftest_act_function(uint8_t fn, bool on)

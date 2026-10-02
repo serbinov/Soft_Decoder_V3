@@ -15,10 +15,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "esp_log.h"
 
 #include "settings.h"
+#include "storage.h"
 
 static const char *TAG = "recover";
 
@@ -57,22 +59,27 @@ static int cmp_names(const void *a, const void *b)
 /* Collect .wav file paths from one directory; `prefix` is prepended to build
  * the storage-relative path (e.g. "audio/"). */
 static size_t scan_wavs(const char *dirpath, const char *prefix,
-                        char rel[][SETTINGS_TRACK_FILE_MAX], size_t cap)
+                        char rel[][SETTINGS_TRACK_FILE_MAX], size_t cap, esp_err_t *error)
 {
     DIR *dir = opendir(dirpath);
     if (dir == NULL) {
+        if (errno != ENOENT) *error = ESP_FAIL;
         return 0;
     }
     size_t n = 0;
     struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL && n < cap) {
+    errno = 0;
+    while (n < cap && (ent = readdir(dir)) != NULL) {
         if (!name_is_wav(ent->d_name)) {
             continue;
         }
-        snprintf(rel[n], SETTINGS_TRACK_FILE_MAX, "%s%.120s", prefix, ent->d_name);
+        int written = snprintf(rel[n], SETTINGS_TRACK_FILE_MAX, "%s%s", prefix, ent->d_name);
+        if (written < 0 || written >= SETTINGS_TRACK_FILE_MAX) { *error = ESP_ERR_INVALID_SIZE; break; }
         n++;
+        errno = 0;
     }
-    closedir(dir);
+    if (errno != 0) *error = ESP_FAIL;
+    if (closedir(dir) != 0) *error = ESP_FAIL;
     return n;
 }
 
@@ -92,6 +99,8 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
     settings_track_t *tracks = malloc((size_t)SETTINGS_MAX_TRACKS * sizeof(*tracks));
     if (existing == NULL || rel == NULL || tracks == NULL) {
         ESP_LOGE(TAG, "recovery: out of memory");
+        out->error = ESP_ERR_NO_MEM;
+        out->retry_pending = true;
         free(existing);
         free(rel);
         free(tracks);
@@ -100,33 +109,52 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
 
     size_t count = 0;
     esp_err_t lerr = settings_tracks_load(existing, &count);
+    bool pending = false;
+    out->error = settings_recovery_pending(&pending);
+    if (out->error != ESP_OK) { out->retry_pending = true; goto done; }
+    if (lerr == ESP_OK && !pending) {
+        /* A stored zero-length list is intentionally empty, not absent. */
+        out->had_nvs = true;
+        out->count = count;
+        goto done;
+    }
+    if (lerr != ESP_OK && lerr != ESP_ERR_NOT_FOUND) {
+        out->error = lerr;
+        out->retry_pending = true;
+        goto done;
+    }
+    /* Metadata is authoritative even if a directory cannot be enumerated.
+     * A failed partial restore must never fall through to filename rebuild. */
+    esp_err_t merr = settings_manifest_load();
+    if (merr == ESP_OK) {
+        size_t rc = 0;
+        out->error = settings_tracks_load(existing, &rc);
+        if (out->error != ESP_OK) { out->retry_pending = true; goto done; }
+        out->from_manifest = true;
+        out->count = rc;
+        goto done;
+    }
+    if (pending || merr != ESP_ERR_NOT_FOUND) {
+        out->error = merr;
+        out->retry_pending = true;
+        goto done;
+    }
+    out->error = storage_access_begin();
+    if (out->error != ESP_OK) { out->retry_pending = true; goto done; }
 
-    /* Always list what is actually on the storage, for diagnosis. */
-    size_t na = (audio_dir != NULL) ? scan_wavs(audio_dir, "audio/", rel, SETTINGS_MAX_TRACKS) : 0;
+    /* No authoritative metadata: list storage before rebuilding filenames. */
+    size_t na = (audio_dir != NULL) ? scan_wavs(audio_dir, "audio/", rel, SETTINGS_MAX_TRACKS, &out->error) : 0;
     size_t nr = 0;
     if (na == 0 && root_dir != NULL) {
-        nr = scan_wavs(root_dir, "", rel, SETTINGS_MAX_TRACKS);
+        nr = scan_wavs(root_dir, "", rel, SETTINGS_MAX_TRACKS, &out->error);
     }
+    storage_access_end();
+    if (out->error != ESP_OK) { out->retry_pending = true; goto done; }
     size_t nf = na > 0 ? na : nr;
     ESP_LOGI(TAG, "nvs=%s count=%u | files: audio_dir=%u root_dir=%u",
              esp_err_to_name(lerr), (unsigned)count, (unsigned)na, (unsigned)nr);
     for (size_t i = 0; i < nf; ++i) {
         ESP_LOGI(TAG, "file %u/%u %s", (unsigned)(i + 1), (unsigned)nf, rel[i]);
-    }
-
-    if (lerr == ESP_OK && count > 0) {
-        out->had_nvs = true;
-        out->count = count;
-        goto done;
-    }
-
-    /* NVS list is gone: restore it from the metadata manifest if present. */
-    if (settings_manifest_load() == ESP_OK) {
-        size_t rc = 0;
-        (void)settings_tracks_load(existing, &rc);
-        out->from_manifest = true;
-        out->count = rc;
-        goto done;
     }
 
     out->files_found = nf;
@@ -139,6 +167,7 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
     bool used[SETTINGS_MAX_TRACKS + 1];
     memset(used, 0, sizeof(used));
     size_t n = 0;
+    memset(tracks, 0, (size_t)SETTINGS_MAX_TRACKS * sizeof(*tracks));
 
     /* Pass 1: honour a slot number encoded in the file name (provisioning). */
     for (size_t i = 0; i < nf && n < SETTINGS_MAX_TRACKS; ++i) {
@@ -150,7 +179,7 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
         }
         used[s] = true;
         tracks[n].slot = (uint8_t)s;
-        snprintf(tracks[n].file, sizeof(tracks[n].file), "%.120s", rel[i]);
+        memcpy(tracks[n].file, rel[i], sizeof(tracks[n].file));
         snprintf(tracks[n].label, sizeof(tracks[n].label), "Слот %d", s);
         tracks[n].enabled = true;
         n++;
@@ -169,7 +198,7 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
         /* n < SETTINGS_MAX_TRACKS here, so a free slot always exists. */
         used[s] = true;
         tracks[n].slot = (uint8_t)s;
-        snprintf(tracks[n].file, sizeof(tracks[n].file), "%.120s", rel[i]);
+        memcpy(tracks[n].file, rel[i], sizeof(tracks[n].file));
         snprintf(tracks[n].label, sizeof(tracks[n].label), "%.63s", base);
         char *dot = strrchr(tracks[n].label, '.');
         if (dot != NULL) {
@@ -179,9 +208,11 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
         n++;
     }
 
-    if (n > 0 && settings_tracks_save(tracks, n) == ESP_OK) {
-        out->rebuilt = true;
-        out->count = n;
+    if (n > 0) {
+        out->error = settings_tracks_save(tracks, n);
+        out->rebuilt = out->error == ESP_OK;
+        out->retry_pending = out->error != ESP_OK;
+        if (out->rebuilt) out->count = n;
     }
 
 done:

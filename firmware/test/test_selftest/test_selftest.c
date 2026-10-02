@@ -59,6 +59,7 @@ static uint32_t g_heap = 100000u;
 static esp_err_t g_pinmap_err = ESP_OK;
 static int g_cv_mode; /* 0 ok, 1 valid-read fail, 2/3 boundary not rejected */
 static uint16_t g_adc_b1 = 1, g_adc_b2 = 2, g_adc_rail = 3;
+static esp_err_t g_adc_err = ESP_OK;
 static uint8_t g_volume = 20;
 static esp_err_t g_aux_err = ESP_OK;
 static bool g_storage_mounted = true;
@@ -75,6 +76,15 @@ static size_t g_tracks_count;
 static settings_track_t g_tracks[SETTINGS_MAX_TRACKS];
 static esp_err_t g_motor_set_err = ESP_OK;
 static int g_motor_stop_calls;
+static bool g_motor_inhibited;
+static esp_err_t g_motor_release_err;
+static bool g_applied_nonzero;
+static int g_motor_set_calls;
+static int g_motor_ramp_stop_calls;
+static int g_motor_release_calls;
+static bool g_maintenance_exclusive;
+static esp_err_t g_maintenance_err = ESP_OK;
+static int g_maintenance_depth;
 static int g_apply_calls;
 static uint8_t g_apply_last_fn;
 static bool g_apply_last_on;
@@ -114,7 +124,7 @@ bool storage_is_mounted(void)
     return g_storage_mounted;
 }
 
-void motor_bemf_adc_dump(uint16_t *b1, uint16_t *b2, uint16_t *rail)
+esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1, uint16_t *b2, uint16_t *rail)
 {
     if (b1 != NULL) {
         *b1 = g_adc_b1;
@@ -125,6 +135,7 @@ void motor_bemf_adc_dump(uint16_t *b1, uint16_t *b2, uint16_t *rail)
     if (rail != NULL) {
         *rail = g_adc_rail;
     }
+    return g_adc_err;
 }
 
 uint8_t audio_get_volume(void)
@@ -188,12 +199,47 @@ esp_err_t motor_set_speed(uint8_t speed, bool forward)
 {
     (void)speed;
     (void)forward;
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_FALSE(g_motor_inhibited);
+    ++g_motor_set_calls;
     return g_motor_set_err;
 }
 
 void motor_stop(void)
 {
+    ++g_motor_ramp_stop_calls;
     g_motor_stop_calls++;
+}
+
+esp_err_t web_maintenance_begin(bool exclusive_fs)
+{
+    g_maintenance_exclusive = exclusive_fs;
+    if (g_maintenance_err != ESP_OK) { return g_maintenance_err; }
+    ++g_maintenance_depth;
+    return ESP_OK;
+}
+
+void web_maintenance_end(void)
+{
+    --g_maintenance_depth;
+}
+
+esp_err_t motor_set_inhibited(bool inhibited)
+{
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    if (!inhibited) {
+        ++g_motor_release_calls;
+        if (g_motor_release_err != ESP_OK) { return g_motor_release_err; }
+    }
+    g_motor_inhibited = inhibited;
+    if (inhibited) { ++g_motor_stop_calls; }
+    return ESP_OK;
+}
+
+void motor_get_applied_speed(uint8_t *speed, bool *forward)
+{
+    if (speed != NULL) { *speed = g_motor_inhibited && !g_applied_nonzero ? 0U : 60U; }
+    if (forward != NULL) { *forward = true; }
 }
 
 void web_apply_function(uint8_t fn, bool state)
@@ -231,6 +277,7 @@ void setUp(void)
     g_adc_b1 = 1;
     g_adc_b2 = 2;
     g_adc_rail = 3;
+    g_adc_err = ESP_OK;
     g_volume = 20;
     g_aux_err = ESP_OK;
     g_storage_mounted = true;
@@ -251,6 +298,13 @@ void setUp(void)
     memset(g_tracks, 0, sizeof(g_tracks));
     g_motor_set_err = ESP_OK;
     g_motor_stop_calls = 0;
+    g_motor_inhibited = false;
+    g_motor_release_err = ESP_OK;
+    g_applied_nonzero = false;
+    g_motor_set_calls = g_motor_ramp_stop_calls = g_motor_release_calls = 0;
+    g_maintenance_exclusive = false;
+    g_maintenance_err = ESP_OK;
+    g_maintenance_depth = 0;
     g_apply_calls = 0;
     g_apply_last_fn = 0;
     g_apply_last_on = false;
@@ -461,9 +515,14 @@ static void test_selftest_act_motor(void)
     g_motor_set_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, selftest_act_motor(10, 100));
     g_motor_set_err = ESP_OK;
+    g_motor_stop_calls = 0;
 
     TEST_ASSERT_EQUAL(ESP_OK, selftest_act_motor(10, 100));
     TEST_ASSERT_EQUAL_INT(1, g_motor_stop_calls);
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    g_maintenance_err = ESP_ERR_TIMEOUT;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, selftest_act_motor(10, 100));
 }
 
 static void test_selftest_act_function(void)
@@ -476,6 +535,38 @@ static void test_selftest_act_function(void)
     TEST_ASSERT_TRUE(g_apply_last_on);
     TEST_ASSERT_EQUAL(ESP_OK, selftest_act_function(3, false));
     TEST_ASSERT_FALSE(g_apply_last_on);
+}
+
+static void test_motor_maintenance_release_failure_still_coasts(void)
+{
+    g_motor_release_err = ESP_ERR_INVALID_STATE;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, selftest_act_motor(10, 100));
+    TEST_ASSERT_EQUAL_INT(0, g_motor_set_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_motor_release_calls);
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    TEST_ASSERT_EQUAL_INT(0, g_motor_ramp_stop_calls);
+}
+
+static void test_motor_deadline_coasts_without_cv4_ramp(void)
+{
+    int64_t start = mock_timer_now_us;
+    TEST_ASSERT_EQUAL(ESP_OK, selftest_act_motor(10, 100));
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_FALSE(g_maintenance_exclusive);
+    TEST_ASSERT_EQUAL_INT(1, g_motor_set_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_motor_stop_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_motor_ramp_stop_calls);
+    TEST_ASSERT_EQUAL_INT64(100000, mock_timer_now_us - start);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+}
+
+static void test_motor_nonzero_applied_output_fails_and_releases_maintenance(void)
+{
+    g_applied_nonzero = true;
+    TEST_ASSERT_EQUAL(ESP_FAIL, selftest_act_motor(10, 100));
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
 }
 
 static void test_selftest_act_fn_sweep(void)
@@ -497,6 +588,18 @@ static void test_selftest_act_aux_sweep(void)
     TEST_ASSERT_FALSE(g_aux_enabled);
 }
 
+static void test_adc_failure_cannot_be_reported_as_pass(void)
+{
+    g_adc_b1 = g_adc_b2 = g_adc_rail = 0;
+    TEST_ASSERT_EQUAL(SELFTEST_PASS, check_adc());
+    g_adc_err = ESP_ERR_TIMEOUT;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_adc());
+    g_adc_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_adc());
+    g_adc_err = ESP_ERR_INVALID_STATE;
+    TEST_ASSERT_EQUAL(SELFTEST_SKIP, check_adc());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -508,9 +611,13 @@ int main(void)
     RUN_TEST(test_selftest_settings_cv_fail_modes);
     RUN_TEST(test_selftest_nvs_failures);
     RUN_TEST(test_selftest_adc_audio_auxio_fail);
+    RUN_TEST(test_adc_failure_cannot_be_reported_as_pass);
     RUN_TEST(test_selftest_act_aux);
     RUN_TEST(test_selftest_act_sound);
     RUN_TEST(test_selftest_act_motor);
+    RUN_TEST(test_motor_maintenance_release_failure_still_coasts);
+    RUN_TEST(test_motor_deadline_coasts_without_cv4_ramp);
+    RUN_TEST(test_motor_nonzero_applied_output_fails_and_releases_maintenance);
     RUN_TEST(test_selftest_act_function);
     RUN_TEST(test_selftest_act_fn_sweep);
     RUN_TEST(test_selftest_act_aux_sweep);

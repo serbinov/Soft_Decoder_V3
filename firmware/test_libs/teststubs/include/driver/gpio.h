@@ -55,12 +55,16 @@ typedef struct {
 
 /* Interrupt allocation flags (subset used by dcc.c). */
 #define ESP_INTR_FLAG_LEVEL3 (1 << 3)
+#define ESP_INTR_FLAG_IRAM (1 << 10)
+extern int mock_gpio_isr_flags;
+extern int mock_gpio_isr_add_err;
 
 extern int mock_gpio_set_level_count;
 extern int mock_gpio_get_level;
 
 esp_err_t gpio_config(const gpio_config_t *pGPIOConfig);
 esp_err_t gpio_install_isr_service(int intr_alloc_flags);
+void gpio_uninstall_isr_service(void);
 esp_err_t gpio_isr_handler_add(gpio_num_t gpio_num, void (*isr_handler)(void *arg), void *args);
 esp_err_t gpio_isr_handler_remove(gpio_num_t gpio_num);
 esp_err_t gpio_set_level(gpio_num_t gpio_num, uint32_t level);

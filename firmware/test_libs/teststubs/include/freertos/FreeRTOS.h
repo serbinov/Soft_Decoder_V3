@@ -22,10 +22,13 @@ typedef void *SemaphoreHandle_t;
 #define portMAX_DELAY ((TickType_t)0xFFFFFFFFUL)
 #define portYIELD_FROM_ISR(...) do { } while (0)
 #define IRAM_ATTR
+#define DRAM_ATTR
 typedef int portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED 0
 #define portENTER_CRITICAL(mux) do { (void)(mux); } while (0)
 #define portEXIT_CRITICAL(mux)  do { (void)(mux); } while (0)
+#define portENTER_CRITICAL_ISR(mux) portENTER_CRITICAL(mux)
+#define portEXIT_CRITICAL_ISR(mux) portEXIT_CRITICAL(mux)
 
 QueueHandle_t xQueueCreate(UBaseType_t uxQueueLength, UBaseType_t uxItemSize);
 BaseType_t xQueueSend(QueueHandle_t xQueue, const void *pvItemToQueue, TickType_t xTicksToWait);

@@ -9,7 +9,7 @@ set "DST=..\release\ADDITIPUS_AURA-X_v%VERSION%.bin"
 echo ================================================
 echo  Build OTA firmware v%VERSION%
 echo ================================================
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0idf_build.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0idf_build.ps1" -Release
 if errorlevel 1 (
     echo.
     echo [FAIL] Build failed.
@@ -23,14 +23,7 @@ if not exist "%SRC%" (
     exit /b 1
 )
 
-if not exist "..\release" mkdir "..\release"
-
-copy /Y "%SRC%" "%DST%" >nul
-if errorlevel 1 (
-    echo [FAIL] Copy failed.
-    pause
-    exit /b 1
-)
+rem The versioned raw/OTA copies are published and checked by -Release.
 
 echo.
 echo [OK] OTA bin created: %DST%

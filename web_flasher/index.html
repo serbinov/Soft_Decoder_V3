@@ -177,10 +177,10 @@ async function refreshStatus(){
     $("st_port").textContent = s.port ? (s.port+" (ESP32-S3)") : "не найдена";
     $("st_idf").textContent  = s.idf ? s.idf : "не установлен (для прошивки не нужен)";
     $("st_flasher").textContent = (s.flasher === "esptool") ? "esptool (с проверкой хеша)" : "ROM-скрипт (без ESP-IDF)";
-    $("st_fw").textContent   = (s.firmware||0)+" файл(ов) — "+(s.fwDir||"release\\flash_download_tool");
+    $("st_fw").textContent   = (s.firmware||0)+"/4 файла"+(s.firmwareVersion?(" — v"+s.firmwareVersion):"")+" — "+(s.fwDir||"release\\flash_download_tool");
     $("st_snd").textContent  = (s.sounds||0)+" звук(ов)"+(s.sndDir?(" — "+s.sndDir):" (папка SOUND не найдена)");
     setAlert("", "");
-    if((s.firmware||0) === 0) setAlert("Нет файлов прошивки. Соберите firmware\\build_flash_tool_files.bat.","warn");
+    if(!s.firmwareReady) setAlert((s.firmwareErrors||[]).join("; ")+" Соберите build_firmware.bat.","warn");
     else if(!s.port) setAlert("Плата не найдена — подключите USB.","warn");
   }catch(e){
     setAlert("Нет связи с панелью. Откройте страницу через web_flasher\\start_flasher.bat.","warn");
@@ -247,7 +247,7 @@ async function run(action, label){
   try{
     const r = await fetch("/api/run?action="+encodeURIComponent(action),{cache:"no-store"});
     const j = await r.json();
-    if(!j.id) throw new Error("скрипт не запущен");
+    if(!r.ok || j.error || !j.id) throw new Error(j.error || "скрипт не запущен");
     let pos=0, done=false, code=null;
     while(!done){
       await sleep(400);

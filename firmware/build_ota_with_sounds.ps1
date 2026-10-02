@@ -18,6 +18,11 @@ if ($files.Count -eq 0) {
     Write-Host "[ERROR] No WAV files in $SoundDir" -ForegroundColor Red
     exit 1
 }
+if ($files.Count -gt 20) { throw "The decoder accepts at most 20 WAV files." }
+foreach ($file in $files) {
+    if ($file.Length -eq 0 -or $file.Length -gt 2MB) { throw "WAV exceeds the 2 MiB receiver limit: $($file.Name)" }
+    if ([Text.Encoding]::UTF8.GetByteCount($file.Name) -gt 63) { throw "UTF-8 label exceeds 63 bytes: $($file.Name)" }
+}
 
 Write-Host "================================================"
 Write-Host " Build OTA + sounds v$version"
@@ -35,7 +40,16 @@ if (-not (Test-Path $src)) {
 New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
 
 $fw = [System.IO.File]::ReadAllBytes($src)
-$out = [System.IO.File]::Create($dst)
+$packageLength = [int64]16 + $fw.Length
+$slot = 1
+foreach ($file in $files) {
+    $packageLength += 8 + [Text.Encoding]::UTF8.GetByteCount("slot$slot.wav") +
+                      [Text.Encoding]::UTF8.GetByteCount($file.Name) + $file.Length
+    $slot++
+}
+if ($fw.Length -gt 0x1e0000 -or $packageLength -gt 8MB) { throw "OTA package exceeds decoder limits." }
+$temporary = $dst + ".tmp"
+$out = [System.IO.File]::Create($temporary)
 $bw = New-Object System.IO.BinaryWriter($out)
 try {
     # Header: magic "AURAOTA2" + firmware length + file count (16 B total).
@@ -67,6 +81,15 @@ try {
     $out.Dispose()
 }
 
+try {
+    $infoText = & python (Join-Path $PSScriptRoot "tools\release_artifacts.py") inspect --input $temporary
+    if ($LASTEXITCODE -ne 0) { throw "Combined OTA integrity/format verification failed." }
+    $info = $infoText | ConvertFrom-Json
+    if ($info.role -ne "AURAOTA2" -or $info.version -cne $version) { throw "Stale application in OTA package." }
+    Move-Item -LiteralPath $temporary -Destination $dst -Force
+} finally {
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+}
 $size = (Get-Item $dst).Length
 Write-Host ""
 Write-Host ("[OK] Combined OTA created: {0} ({1:N0} bytes, {2} sounds)" -f $dst, $size, $files.Count) -ForegroundColor Green

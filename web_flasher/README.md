@@ -7,8 +7,10 @@
 
 ## Быстрый запуск
 
-1. Один раз соберите файлы: `firmware\build_flash_tool_files.bat` →
-   `release\flash_download_tool\`.
+1. Соберите **`build_firmware.bat`** в корне проекта. Он публикует и проверяет
+   `release\flash_download_tool\` (4 файла) и versioned raw/OTA images в `release\`.
+   Старые `firmware\build_flash_tool_files.bat` / `build_ota_bin.bat` также
+   используют общую проверенную публикацию.
 2. Запустите **`web_flasher\start_flasher.bat`** (двойной клик). Он поднимает
    локальный сервер на встроенном PowerShell (**ничего устанавливать не нужно**)
    и открывает браузер.
@@ -54,7 +56,30 @@
 
 Панель показывает: **порт платы** (авто-определение по USB VID_303A/PID_1001),
 найден ли **ESP-IDF** (для прошивки не требуется), сколько **файлов прошивки**
-и **звуков** найдено.
+и **звуков** найдено. Готовность требует всех четырёх BIN, актуального
+`release\manifest.json` и совпадения размеров/SHA256, версии и адресов.
+Один случайный `.bin` больше не считается готовой прошивкой.
+
+| Файл | Адрес | Формат |
+|---|---|---|
+| `flash_download_tool\bootloader.bin` | `0x0` | ESP32-S3 bootloader |
+| `flash_download_tool\partitions.bin` | `0x8000` | Partition table с MD5 |
+| `flash_download_tool\ota_data_initial.bin` | `0x1a000` | 8192 erased bytes |
+| `flash_download_tool\firmware.bin` | `0x20000` | Raw ESP32-S3 application |
+
+`ADDITIPUS_AURA-X_v<ver>.bin` и `_OTA.bin` — точные копии raw application,
+не merged full-flash image. Не заменять `firmware.bin` merged-образом.
+Исторические versioned файлы не выбираются USB-прошивальщиком автоматически.
+
+Полная офлайн-проверка release (Python, без платы):
+```powershell
+python firmware\tools\release_artifacts.py verify --release release
+python -B firmware\test\test_release_artifacts.py
+```
+ESP images проверяются по chip ID, сегментам, checksum и appended SHA256;
+partition binary сравнивается с CSV/планом сборки и проверяется по MD5.
+Пакеты `AURAOTA2`, если присутствуют, разбираются полностью с ограничениями
+декодера: максимум 20 PCM16 WAV, 2 МиБ/файл и 8 МиБ/контейнер, без trailing bytes.
 
 ## Требования
 
@@ -73,6 +98,7 @@
 
 - **Порт не найден** — подключите USB и нажмите «Обновить»; при необходимости
   зажмите **BOOT** и коротко нажмите **RST**.
-- **Нет файлов прошивки** — соберите `firmware\build_flash_tool_files.bat`.
+- **Нет/повреждены/устарели BIN** — соберите `build_firmware.bat`; не переименовывать
+  старый образ в новую версию. OTA-copy берёт версию только из проверенного manifest.
 - **Страница без сервера** — запускайте через `start_flasher.bat`, а не двойным
   кликом по `index.html` (тогда нет доступа к скриптам и статусу).

@@ -16,7 +16,8 @@ param(
     [switch]$Flash,
     [switch]$Erase,
     [switch]$Monitor,
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$Release
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,6 +76,14 @@ $steps += "idf.py build"
 if ($Erase) { $steps += "idf.py -p $Port erase-flash" }
 if ($Flash) { $steps += "idf.py -p $Port flash" }
 if ($Monitor) { $steps += "idf.py -p $Port monitor" }
+if ($Release) {
+    if ($Flash -or $Erase -or $Monitor) {
+        throw "Release packaging is build-only; do not combine it with device actions."
+    }
+    $releaseDir = Join-Path (Split-Path $fw -Parent) "release"
+    $steps += "python '$fw\tools\release_artifacts.py' publish --build '$fw\build' --release '$releaseDir' --version '$fw\version.txt' --partitions '$fw\partitions.csv'"
+    $steps += "powershell -NoProfile -ExecutionPolicy Bypass -File '$fw\tools\gen_flash_readme.ps1' -Out '$releaseDir\flash_download_tool\README.txt'"
+}
 
 Write-Host "ESP-IDF : $idf"
 Write-Host "Tools   : $env:IDF_TOOLS_PATH"
@@ -88,7 +97,7 @@ $inner = @(
     "`$env:IDF_TOOLS_PATH = '$env:IDF_TOOLS_PATH'",
     ". '$idf\export.ps1'",
     "Set-Location '$fw'",
-    ($steps -join "; ")
+    (($steps | ForEach-Object { $_ + '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }' }) -join "`n")
 ) -join "`n"
 
 & powershell -NoProfile -ExecutionPolicy Bypass -Command $inner

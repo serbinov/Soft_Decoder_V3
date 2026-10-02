@@ -11,5 +11,5 @@ desktop.ini
 # Flasher panel statistics (machine-local history)
 web_flasher/stats.json
 
-# Generated OTA image (created on demand by web_flasher\make_ota.ps1)
-release/*_OTA.bin
+# Release images (ADDITIPUS_AURA-X_v*_OTA.bin, *_with_sounds.bin, manifest) are
+# deliverables published by build_firmware.bat and are intentionally tracked.

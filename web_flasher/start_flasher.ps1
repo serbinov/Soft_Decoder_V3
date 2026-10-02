@@ -23,6 +23,7 @@ Add-Type -AssemblyName System.Web
 $web    = $PSScriptRoot
 $repo   = Split-Path $web -Parent
 $fwDir  = Join-Path $repo "release\flash_download_tool"
+. (Join-Path $web "release_info.ps1")
 
 $sndDir = $null
 foreach ($c in @((Join-Path (Split-Path $repo -Parent) "SOUND"), (Join-Path $repo "SOUND"))) {
@@ -91,8 +92,7 @@ function Add-Stat($rec) {
     } catch { }
 }
 function Get-RunDetails {
-    $ver = ""; $vf = Join-Path $repo "firmware\version.txt"
-    if (Test-Path -LiteralPath $vf) { $ver = (Get-Content -LiteralPath $vf -Raw).Trim() }
+    $ver = (Get-FirmwareRelease -RepoRoot $repo).version
     $fwBytes = 0; $fwb = Join-Path $fwDir "firmware.bin"
     if (Test-Path -LiteralPath $fwb) { $fwBytes = (Get-Item -LiteralPath $fwb).Length }
     $snd = 0; $sndBytes = 0
@@ -150,8 +150,10 @@ function Start-Action([string]$action) {
     $spec = Get-ActionSpec $action
     if (-not $spec) { return $null }
     if (-not (Test-Path -LiteralPath $spec.script)) { return $null }
+    $releaseInfo = Get-FirmwareRelease -RepoRoot $repo
+    if (-not $releaseInfo.ready) { throw ($releaseInfo.errors -join "; ") }
     if ($script:cur -and -not $script:cur.proc.HasExited) {
-        try { $script:cur.proc.Kill() } catch { }
+        throw "An operation is already running; it will not be interrupted."
     }
     $id  = [guid]::NewGuid().ToString("N")
     $log = Join-Path $env:TEMP "dcc_panel_$id.log"
@@ -227,11 +229,14 @@ while ($listener.IsListening) {
             Send-Text $ctx '{"ok":true}' "application/json; charset=utf-8"
         }
         elseif ($pathQ -eq "/api/status") {
-            $fwCount = @(Get-ChildItem -LiteralPath $fwDir -Filter *.bin -ErrorAction SilentlyContinue).Count
+            $releaseInfo = Get-FirmwareRelease -RepoRoot $repo
+            $fwCount = $releaseInfo.files
             $sndCount = if ($sndDir) { @(Get-ChildItem -LiteralPath $sndDir -Filter *.wav -ErrorAction SilentlyContinue).Count } else { 0 }
             $obj = [ordered]@{
                 port = (Get-DevicePort); idf = (Get-IdfPath)
                 firmware = $fwCount; sounds = $sndCount
+                firmwareReady = $releaseInfo.ready; firmwareVersion = $releaseInfo.version
+                firmwareErrors = @($releaseInfo.errors); firmwareMissing = @($releaseInfo.missing)
                 fwDir = "release\flash_download_tool"; sndDir = $sndDir
                 flasher = (Get-Flasher)
                 busy = [bool]($script:cur -and -not $script:cur.proc.HasExited)

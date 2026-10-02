@@ -98,11 +98,19 @@ cd firmware
 
 ## Сборка и прошивка
 
+Из корня проекта **`build_firmware.bat`** собирает без прошивки и публикует
+проверенный комплект в `release/`: `ADDITIPUS_AURA-X_v<ver>.bin`, `_OTA.bin`,
+четыре фиксированных файла в `release/flash_download_tool/` и `manifest.json`
+с версией, адресами и SHA256. Этот комплект использует `web_flasher`.
+Для автоматизации: `build_firmware.bat --no-pause`. Полная офлайн-проверка:
+`python firmware/tools/release_artifacts.py verify --release release`.
+
 Из каталога `firmware/`. Путь к ESP-IDF 6.0 задаётся через `-IdfPath`,
 переменную `$env:IDF_PATH` или файл `firmware\.idf_path`:
 
 ```powershell
 .\idf_build.ps1                     # сборка (idf.py build)
+.\idf_build.ps1 -Release            # сборка + публикация и проверка release
 .\idf_build.ps1 -Flash              # сборка + прошивка (автопоиск COM)
 .\idf_build.ps1 -Flash -Monitor     # + монитор порта
 .\idf_build.ps1 -Erase -Flash       # полное стирание чипа + прошивка

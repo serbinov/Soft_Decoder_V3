@@ -4,6 +4,9 @@
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
+. (Join-Path $PSScriptRoot "release_info.ps1")
+$info = Get-FirmwareRelease -RepoRoot $repo
+if (-not $info.ready) { throw ($info.errors -join "; ") }
 
 $src = Join-Path $repo "release\flash_download_tool\firmware.bin"
 if (-not (Test-Path -LiteralPath $src)) {
@@ -12,11 +15,12 @@ if (-not (Test-Path -LiteralPath $src)) {
     exit 1
 }
 
-$verFile = Join-Path $repo "firmware\version.txt"
-$ver = if (Test-Path -LiteralPath $verFile) { (Get-Content -LiteralPath $verFile -Raw).Trim() } else { "" }
+$ver = $info.version
 $rel = Join-Path $repo "release"
 if (-not (Test-Path -LiteralPath $rel)) { New-Item -ItemType Directory -Path $rel | Out-Null }
 $dst = Join-Path $rel ("ADDITIPUS_AURA-X" + ($(if ($ver) { "_v$ver" } else { "" })) + "_OTA.bin")
 
 Copy-Item -LiteralPath $src -Destination $dst -Force
+if ((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash) { throw "OTA copy verification failed." }
 Write-Host ("[OK]   OTA-файл создан: release\{0} ({1} Б)" -f (Split-Path $dst -Leaf), (Get-Item $dst).Length)

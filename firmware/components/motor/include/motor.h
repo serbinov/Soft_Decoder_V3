@@ -64,6 +64,26 @@ int motor_adc_read_raw(int gpio_num);
  * the no-load RPM is held even under load. */
 #define MOTOR_BEMF_CAL_MAX_POINTS 16
 
+typedef enum {
+    MOTOR_BEMF_CAL_IDLE,
+    MOTOR_BEMF_CAL_RUNNING,
+    MOTOR_BEMF_CAL_SAVING,
+    MOTOR_BEMF_CAL_SUCCEEDED,
+    MOTOR_BEMF_CAL_CANCELLED,
+    MOTOR_BEMF_CAL_FAILED,
+} motor_bemf_cal_state_t;
+
+typedef enum {
+    MOTOR_BEMF_CAL_ERR_NONE,
+    MOTOR_BEMF_CAL_ERR_ADC,
+    MOTOR_BEMF_CAL_ERR_RAIL,
+    MOTOR_BEMF_CAL_ERR_TIMEOUT,
+    MOTOR_BEMF_CAL_ERR_CONTROL,
+    MOTOR_BEMF_CAL_ERR_CURVE,
+    MOTOR_BEMF_CAL_ERR_STORAGE,
+    MOTOR_BEMF_CAL_ERR_START,
+} motor_bemf_cal_error_t;
+
 typedef struct {
     bool active;      /* calibration running */
     uint8_t step;     /* current step while active (1-based) */
@@ -73,9 +93,19 @@ typedef struct {
     uint16_t frac[MOTOR_BEMF_CAL_MAX_POINTS]; /* rail fraction * 1024 */
     bool valid;       /* a usable calibrated curve is loaded */
     bool stored;      /* the curve came from a stored calibration, not the base */
+    uint32_t run_id;  /* nonzero per admitted run; clear preserves this ID */
+    motor_bemf_cal_state_t result;
+    motor_bemf_cal_error_t reason;
+    esp_err_t error_code;
 } motor_bemf_cal_info_t;
 
 esp_err_t motor_bemf_cal_start(void);
+/* Independent 10 ms safety caller: no mutex, ADC, NVS, allocation or waits.
+ * Coasts on stale/low rail or an expired 100 ms worker-only drive lease. */
+void motor_bemf_cal_watchdog(void);
+/* Nonblocking, idempotent; inactive cancellation never stops normal motion.
+ * The active reservation survives cancellation/failure until worker cleanup. */
+esp_err_t motor_bemf_cal_cancel(void);
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info);
 esp_err_t motor_bemf_cal_clear(void);
 /* Re-read the stored calibration (or the firmware base curve) and apply it. */

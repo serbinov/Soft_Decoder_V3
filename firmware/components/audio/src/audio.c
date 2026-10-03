@@ -69,6 +69,7 @@ typedef struct {
     uint16_t env;           /* anti-click envelope, 0..AUDIO_ENV_ONE */
     bool stopping;          /* fading out towards silence, then close */
     bool storage_lease;
+    bool io_failed;
 } voice_state_t;
 
 typedef struct {
@@ -82,6 +83,7 @@ typedef struct {
     char req_path[AUDIO_PATH_MAX];
     uint32_t generation;
     audio_voice_state_t state;
+    audio_completion_t completion;
     bool file_open;
     bool published_active;
     uint32_t published_position;
@@ -250,11 +252,11 @@ static bool wav_parse(FILE *f, wav_fmt_t *fmt, uint32_t *data_start, uint32_t *d
            *data_len % fmt->block_align == 0;
 }
 
-esp_err_t audio_validate_wav(const char *path)
+static esp_err_t validate_wav_file(const char *path, bool allow_inhibited)
 {
     if (path == NULL) { return ESP_ERR_INVALID_ARG; }
     if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
-    if (s_inhibited) {
+    if (s_inhibited && !allow_inhibited) {
         if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
         return ESP_ERR_INVALID_STATE;
     }
@@ -277,13 +279,23 @@ esp_err_t audio_validate_wav(const char *path)
     return f == NULL ? ESP_ERR_NOT_FOUND : (valid ? ESP_OK : ESP_FAIL);
 }
 
+esp_err_t audio_validate_wav(const char *path)
+{
+    return validate_wav_file(path, false);
+}
+
+esp_err_t audio_inspect_wav(const char *path)
+{
+    return validate_wav_file(path, true);
+}
+
 /* Read the next mono source sample (downmixed), honouring loop/EOF. */
 static bool voice_next_sample(voice_state_t *st, int16_t *out)
 {
     for (;;) {
         if (st->samples_left == 0U) {
             if (st->loop && st->samples_total > 0U) {
-                if (fseek(st->f, (long)st->data_start, SEEK_SET) != 0) { return false; }
+                if (fseek(st->f, (long)st->data_start, SEEK_SET) != 0) { st->io_failed = true; return false; }
                 st->samples_left = st->samples_total;
                 continue;
             }
@@ -293,6 +305,7 @@ static bool voice_next_sample(voice_state_t *st, int16_t *out)
         if (st->channels == 1U) {
             int16_t l;
             if (fread(&l, 2, 1, st->f) != 1) {
+                st->io_failed = true;
                 return false;
             }
             *out = l;
@@ -300,6 +313,7 @@ static bool voice_next_sample(voice_state_t *st, int16_t *out)
         }
         int16_t l, r;
         if (fread(&l, 2, 1, st->f) != 1 || fread(&r, 2, 1, st->f) != 1) {
+            st->io_failed = true;
             return false;
         }
         *out = (int16_t)(((int32_t)l + (int32_t)r) / 2);
@@ -378,6 +392,7 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
 static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uint8_t volume)
 {
     voice_close(st);
+    st->io_failed = false;
     esp_err_t admission = storage_access_begin();
     if (admission != ESP_OK) { return admission; }
 
@@ -455,7 +470,7 @@ static void mixer_task(void *arg)
         /* Apply pending play/stop requests, then mix one block. */
         for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
             voice_t *vo = &s_voice[v];
-            bool play = false, stop = false, loop = false;
+            bool play = false, stop = false, loop = false, start_failed = false;
             uint8_t volume = 100;
             uint16_t rate = 1000;
             char path[AUDIO_PATH_MAX];
@@ -485,7 +500,7 @@ static void mixer_task(void *arg)
                 vo->mix_generation = generation;
                 vo->st.stopping = false;
                 vo->st.rate_permille = rate;
-                (void)voice_start(&vo->st, path, loop, volume);
+                start_failed = voice_start(&vo->st, path, loop, volume) != ESP_OK;
             } else if (vo->st.active) {
                 vo->st.rate_permille = rate; /* live rate updates */
             }
@@ -500,6 +515,10 @@ static void mixer_task(void *arg)
                 if (!vo->st.active) {
                     s_busy[v] = false;
                     vo->state = AUDIO_VOICE_FINISHED;
+                    if (vo->completion == AUDIO_COMPLETION_NONE) {
+                        vo->completion = start_failed || vo->st.io_failed ? AUDIO_COMPLETION_ERROR :
+                            (stop || inhibited || vo->st.stopping ? AUDIO_COMPLETION_STOPPED : AUDIO_COMPLETION_EOF);
+                    }
                 } else if (!stop) {
                     vo->state = AUDIO_VOICE_PLAYING;
                 }
@@ -518,6 +537,7 @@ static void mixer_task(void *arg)
 static uint32_t next_generation(voice_t *vo)
 {
     if (++vo->generation == 0) { ++vo->generation; }
+    vo->completion = AUDIO_COMPLETION_NONE;
     return vo->generation;
 }
 
@@ -533,6 +553,7 @@ static esp_err_t queue_play(uint8_t voice, const char *path, bool loop, uint8_t 
     vo->req_stop = false;
     s_busy[voice] = true;
     vo->state = AUDIO_VOICE_PENDING;
+    vo->completion = AUDIO_COMPLETION_NONE;
     next_generation(vo);
     if (out != NULL) { *out = (audio_voice_handle_t){voice, vo->generation}; }
     return ESP_OK;
@@ -571,6 +592,7 @@ esp_err_t audio_voice_stop(uint8_t voice)
     vo->req_play = false;
     vo->req_stop = true;
     vo->state = AUDIO_VOICE_FINISHED;
+    vo->completion = AUDIO_COMPLETION_STOPPED;
     if (s_req_mutex != NULL) {
         xSemaphoreGive(s_req_mutex);
     }
@@ -697,7 +719,7 @@ esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
 
 void audio_voice_release_owned(audio_voice_handle_t handle)
 {
-    if (handle.voice >= AUDIO_DYNAMIC_VOICES) { return; }
+    if (handle.voice >= AUDIO_MAX_VOICES) { return; }
     if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
     voice_t *vo = &s_voice[handle.voice];
     if (vo->generation == handle.generation) {
@@ -719,6 +741,31 @@ audio_voice_state_t audio_voice_get_state(audio_voice_handle_t handle)
                                AUDIO_VOICE_FINISHED;
     if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
     return state;
+}
+
+audio_completion_t audio_voice_completion(audio_voice_handle_t handle)
+{
+    if (handle.voice >= AUDIO_MAX_VOICES) { return AUDIO_COMPLETION_STALE; }
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    voice_t *vo = &s_voice[handle.voice];
+    audio_completion_t completion = vo->generation == handle.generation ? vo->completion :
+                                    AUDIO_COMPLETION_STALE;
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return completion;
+}
+
+esp_err_t audio_voice_set_rate_owned(audio_voice_handle_t handle, uint16_t permille)
+{
+    if (handle.voice >= AUDIO_MAX_VOICES) { return ESP_ERR_INVALID_ARG; }
+    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
+    voice_t *vo = &s_voice[handle.voice];
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (!s_inhibited && s_busy[handle.voice] && vo->generation == handle.generation) {
+        vo->req_rate = rate_clamp(permille);
+        err = ESP_OK;
+    }
+    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+    return err;
 }
 
 esp_err_t audio_set_inhibited(bool inhibited)

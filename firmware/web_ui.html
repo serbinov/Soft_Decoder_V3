@@ -5,80 +5,87 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ADDITIPUS AURA-X · v__VERSION__</title>
 <style>
-:root{--bg:#0f1115;--panel:#14171d;--panel2:#12161d;--text:#ffffff;--muted:#ffffff;--good:#8bd18b;--warn:#e0be63;--bad:#e07070;--line:#2a2d34;--accent:#3a6bb5;--accent2:#243041;--input:#101319}
+:root{--bg:#0f1420;--panel:#131a2b;--panel2:#0f1830;--text:#ffffff;--muted:#ffffff;--good:#3ecf8e;--warn:#ffd479;--bad:#ff6b6b;--line:#202a45;--accent:#4da3ff;--accent2:#4da3ff;--input:#0a0e18;--on-accent:#04101f;--on-good:#04101f;--btn-bg:#1c2740;--btn2-bg:#131a2b;--hd-bg:#131a2b;--log-bg:#0a0e18}
+html[data-theme=light]{--bg:#eef1f7;--panel:#ffffff;--panel2:#f4f6fb;--text:#000000;--muted:#000000;--good:#1f9d63;--warn:#b8791a;--bad:#d64545;--line:#d3dae8;--accent:#2f6fd0;--accent2:#2f6fd0;--input:#ffffff;--on-accent:#ffffff;--on-good:#ffffff;--btn-bg:#e8edf6;--btn2-bg:#f1f4fa;--hd-bg:#ffffff;--log-bg:#f7f9fd}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;background:var(--bg);color:var(--text)}
 button,input,select{font:inherit}
 button{cursor:pointer}
 input[type=range]{width:100%;accent-color:var(--accent)}
-.shell{max-width:1080px;margin:0 auto;padding:10px 12px}
+.shell{width:100%;max-width:100%;margin:0;padding:10px 12px 92px}
 
-.hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:#0d1018;border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+.hd{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--hd-bg);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
 .brand{font-size:16px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
-.brand small{font-size:10px;color:var(--muted);font-weight:500;margin-left:6px}
-.conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);white-space:nowrap}
+.brand small{font-size:10px;color:var(--text);font-weight:600;margin-left:6px}
+.conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);white-space:nowrap;font-weight:600}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex-shrink:0}
 .dot.ok{background:var(--good)}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
-.panel h2{margin:0;padding:10px 12px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+.panel h2{margin:0;padding:10px 12px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text);border-bottom:1px solid var(--line)}
 .panel .bd{padding:10px 12px}
 .panel-hd{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
 .panel-hd h2{border-bottom:0;flex:1}
-.panel-hd .chev{color:var(--muted);font-size:11px;padding-right:12px;transition:transform .15s}
+.panel-hd .chev{color:var(--text);font-size:11px;padding-right:12px;transition:transform .15s}
 .panel-hd.open .chev{transform:rotate(90deg)}
 
-.btn{border:1px solid var(--line);background:#1a1e26;color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;min-height:42px;touch-action:manipulation;user-select:none;white-space:nowrap}
+.btn{border:1px solid var(--line);background:var(--btn-bg);color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;min-height:42px;touch-action:manipulation;user-select:none;white-space:nowrap}
 .btn:hover{border-color:var(--accent)}
 .btn:active{transform:translateY(1px)}
-.btn.primary{background:var(--accent2);border-color:var(--accent2);color:#f3f6fb;font-weight:700}
+.btn.primary{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent);font-weight:700}
 .btn.bad,.btn.danger{border-color:#7b3030;color:var(--bad)}
-.btn:disabled{opacity:.45;cursor:default}
-.btn.active{background:var(--good);border-color:var(--good);color:#0b0f0b;font-weight:700}
+.btn:disabled{opacity:.65;cursor:default}
+.btn.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:700}
 .btn.sm{min-height:36px;padding:6px 10px;font-size:12px}
-.btn.ghost{background:#171b22}
-.btn.x{min-width:24px;min-height:24px;height:24px;padding:0;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;color:var(--bad);border-color:#7b3030;background:#171b22;margin-left:auto}
+.btn.ghost{background:var(--btn2-bg)}
+.btn.x{min-width:24px;min-height:24px;height:24px;padding:0;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;color:var(--bad);border-color:#7b3030;background:var(--btn2-bg);margin-left:auto}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
 .field{display:flex;flex-direction:column;gap:4px}
 .field.grow{flex:1;min-width:0}
-.field label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.field label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
 input[type=number],input[type=text],input[type=password],select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--text);width:100%;outline:none}
 input:focus,select:focus{border-color:var(--accent)}
 select{cursor:pointer}
-.muted{color:var(--muted)}
-.hint{font-size:12px;color:var(--muted)}
+.muted{color:var(--text)}
+label{color:var(--text);font-weight:600}
+.hint{font-size:12px;color:var(--text);font-weight:600}
+::placeholder{color:var(--text);opacity:1}
 
 .seg{display:flex;gap:6px;margin-bottom:8px}
 .seg .btn{flex:1}
 
 .speed-row{display:grid;grid-template-columns:70px 1fr 3.5em;gap:10px;align-items:center;margin-bottom:10px}
-.speed-row label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
-.speed-row .val{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;color:var(--good);text-align:right}
-.dir-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.speed-row label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
+.speed-row .val{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;color:var(--text);text-align:right}
+.dir-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.dir-row .btn{white-space:normal;line-height:1.1;padding:8px 4px;font-size:12px;min-height:48px}
+.nav-settings-btn{width:100%;margin-top:12px}
+.btn.emergency{background:var(--bad);border-color:var(--bad);color:#ffffff;font-weight:700}
+.btn.emergency:hover{border-color:#ffffff}
 .fn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:7px}
 .fn-grid .btn{min-height:44px;font-size:12px;font-weight:700}
 
-.locked{opacity:.45}
+.locked{opacity:.9}
 
 .vol{display:grid;grid-template-columns:70px 1fr 2.5em;gap:8px;align-items:center;margin-bottom:8px}
-.vol label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
-.vol .val{font-size:11px;font-family:ui-monospace,Consolas,monospace;color:var(--good);text-align:right}
+.vol label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
+.vol .val{font-size:11px;font-family:ui-monospace,Consolas,monospace;color:var(--text);text-align:right}
 
 .s-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .slot{border:1px solid var(--line);border-radius:8px;background:var(--panel2);padding:8px;display:grid;gap:6px;min-width:0}
-.slot.playing{border-color:var(--good);box-shadow:0 0 0 1px rgba(139,209,139,.15) inset}
+.slot.playing{border-color:var(--good);box-shadow:0 0 0 1px rgba(62,207,142,.15) inset}
 .slot .head{display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0}
-.slot .idx{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.slot .idx{font-size:11px;color:var(--text);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
 .slot .name{display:block;font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .slot .name .ni{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-.slot .file{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .file{font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .slot .acts{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
 .slot input[type=file]{display:none}
 .slot input[type=text]{flex:1;min-width:0;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--input);color:var(--text);font-size:12px}
-.up-bar{height:8px;border-radius:4px;background:var(--input);overflow:hidden;display:none}
+.up-bar{height:8px;border-radius:4px;background:var(--input);border:1px solid var(--line);overflow:hidden;display:none}
 .up-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
-.up-meta{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;display:none}
+.up-meta{font-size:11px;color:var(--text);font-family:ui-monospace,Consolas,monospace;display:none}
 
 .cv-quick{display:grid;grid-template-columns:130px 130px auto auto auto auto;gap:8px;align-items:end;margin-bottom:10px}
 .cv-list{display:grid;gap:6px}
@@ -87,13 +94,13 @@ select{cursor:pointer}
 .cv-card .head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .cv-card .name{font-size:13px;font-weight:700}
 .cv-card .vendor{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle}
-.cv-card .idx{font-size:12px;color:var(--good);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
-.cv-card .desc{font-size:11px;color:var(--muted)}
+.cv-card .idx{font-size:12px;color:var(--text);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.cv-card .desc{font-size:11px;color:var(--text)}
 .cv-card .ctrl{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:end}
 .mini{display:flex;gap:6px;flex-wrap:wrap}
 
 .log{display:grid;gap:5px;margin-top:8px;max-height:200px;overflow-y:auto}
-.log-row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:6px 8px;border:1px solid #232730;border-radius:6px;background:#14181f;font-size:11px}
+.log-row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--log-bg);font-size:11px}
 
 .ota-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 
@@ -105,7 +112,7 @@ select{cursor:pointer}
 .binds{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
 .binds th,.binds td{border:1px solid var(--line);padding:4px;text-align:center}
 .binds td.cell{cursor:pointer}
-.binds td.cell.on{background:#2e7d32;color:#fff}
+.binds td.cell.on{background:var(--good);color:var(--on-good)}
 
 @media(max-width:760px){
   .shell{padding:0 12px 10px}
@@ -118,18 +125,62 @@ select{cursor:pointer}
 }
 .fnmap-row{display:grid;grid-template-columns:14px 1fr 1fr 62px 58px;gap:5px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .fnmap-col{display:flex;flex-direction:column;gap:2px;min-width:0}
-.fnmap-lbl{font-size:10px;color:var(--muted)}
+.fnmap-lbl{font-size:11px;color:var(--text);font-weight:600}
 .fnmap-cbs{display:grid;gap:1px 6px;min-width:0}
 .fnmap-cbs.slots,.fnmap-cbs.outs{grid-template-columns:repeat(2,minmax(0,1fr))}
 .fnmap-cbs.one{grid-template-columns:1fr}
 .cb{display:flex;align-items:center;gap:3px;font-size:11px;white-space:nowrap;min-width:0;overflow:hidden}
 .cb input{margin:0;width:12px;height:12px;flex:0 0 auto}
 .fnmap-fn{font-weight:600;font-size:12px;padding-top:12px}
+.fnmap-sec{margin-bottom:16px}
+.fnmap-cap{font-size:12px;font-weight:800;margin:0 0 6px 0;letter-spacing:.02em}
+.fnmap-leg{font-size:11px;color:var(--text);margin:4px 0 0 0}
+.fnmap-tbl{border-collapse:collapse;font-size:11px}
+.fnmap-tbl th,.fnmap-tbl td{border:1px solid var(--line);padding:1px 3px;text-align:center;white-space:nowrap;background:var(--panel);color:var(--text)}
+.fnmap-tbl thead th{background:var(--panel2);font-weight:700}
+.fnmap-tbl th.lbl,.fnmap-tbl td.lbl{position:sticky;left:0;z-index:2;background:var(--panel);text-align:left;font-weight:600;min-width:92px}
+.fnmap-tbl thead th.lbl{z-index:3;background:var(--panel2)}
+.fnmap-tbl input.cbx{width:14px;height:14px;margin:0;vertical-align:middle;accent-color:var(--accent)}
+.fnmap-tbl.outmap{min-width:1180px}
+.fnmap-tbl.slottbl{min-width:620px}
+.fnmap-tbl.spdtbl{min-width:170px}
+.fnmap-scroll{overflow-x:auto;overflow-y:hidden;width:100%;padding-bottom:8px;scrollbar-width:thin;scrollbar-color:var(--accent) var(--panel2)}
+.fnmap-scroll::-webkit-scrollbar{height:14px}
+.fnmap-scroll::-webkit-scrollbar-track{background:var(--panel2);border-radius:7px}
+.fnmap-scroll::-webkit-scrollbar-thumb{background:var(--accent);border-radius:7px;border:3px solid var(--panel2)}
 .auxpwm-row{display:grid;grid-template-columns:36px 70px 1fr;gap:6px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .auxpwm-row .num{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px;font-size:12px;text-align:center}
-.auxpwm-row .num:disabled{background:var(--panel2);color:var(--muted);opacity:.55}
-.uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
-.uptime-line #uptime{color:var(--good);font-weight:700}
+.auxpwm-row .num:disabled{background:var(--panel2);color:var(--text);opacity:.8}
+.uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--text);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
+.uptime-line #uptime{color:var(--text);font-weight:700}
+/* top nav + theme switch */
+.hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.theme-btn{min-width:46px;font-size:15px;line-height:1}
+.nav{position:fixed;left:0;right:0;bottom:12px;margin-left:auto;margin-right:auto;z-index:60;display:flex;gap:6px;width:calc(100% - 24px);max-width:460px;padding:6px;background:var(--bg);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.nav-tab{flex:1;border:1px solid var(--line);background:var(--btn2-bg);color:var(--text);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;min-height:44px;cursor:pointer;touch-action:manipulation}
+.nav-tab.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+/* info grid */
+.info-grid{display:grid;gap:2px}
+.info-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.info-grid .info-row:last-child{border-bottom:0}
+.info-key{color:var(--text);white-space:nowrap;font-weight:600}
+.info-val{color:var(--text);text-align:right;min-width:0;overflow-wrap:anywhere}
+/* wide settings grids scroll instead of squashing on phones */
+#fnmap_rows,#snd_matrix{overflow-x:auto}
+/* On computers and laptops render the whole page 50% larger for readability.
+   zoom (not font-size) is used because the layout uses px sizes; it scales
+   text and controls together and the page reflows without horizontal scroll. */
+@media(min-width:1024px){body{zoom:1.5}}
+@media(max-width:760px){
+  .fn-grid{grid-template-columns:repeat(auto-fill,minmax(50px,1fr))}
+  .nav-tab{padding:9px 8px}
+}
+@media(max-width:600px){
+  .brand{font-size:14px}
+  .info-row{font-size:12px}
+  .fn-grid{grid-template-columns:repeat(auto-fill,minmax(44px,1fr))}
+  .fn-grid .btn{min-height:40px;padding:8px 4px}
+}
 </style>
 </head>
 <body>
@@ -137,10 +188,26 @@ select{cursor:pointer}
 
   <div class="hd">
     <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
-    <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
+    <div class="hd-right">
+      <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
+      <button class="btn sm ghost theme-btn" id="theme_btn" onclick="toggleTheme()" title="Светлая / тёмная тема">☀</button>
+    </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" data-page="settings" style="display:none">
+    <h2>Информация</h2>
+    <div class="bd">
+      <div class="info-grid">
+        <div class="info-row"><span class="info-key">Устройство</span><span class="info-val" id="info_name">—</span></div>
+        <div class="info-row"><span class="info-key">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
+        <div class="info-row"><span class="info-key">Адрес</span><span class="info-val" id="info_addr">—</span></div>
+        <div class="info-row"><span class="info-key">Состояние</span><span class="info-val" id="info_conn">—</span></div>
+        <div class="info-row"><span class="info-key">Время работы</span><span class="info-val" id="info_uptime">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" data-page="settings" style="display:none">
     <h2>Имя устройства</h2>
     <div class="bd">
       <div class="row">
@@ -152,7 +219,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" data-page="control">
     <h2>Управление через</h2>
     <div class="bd">
       <div class="seg">
@@ -168,7 +235,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" data-page="control">
     <h2>Управление</h2>
     <div class="bd" id="control_body">
       <div class="speed-row">
@@ -177,15 +244,17 @@ select{cursor:pointer}
         <span class="val" id="speed_v">0</span>
       </div>
       <div class="dir-row">
-        <button class="btn" id="btn_rev" onclick="setDir(false)">Назад</button>
-        <button class="btn danger" id="btn_stop" onclick="setStop()">Стоп</button>
-        <button class="btn" id="btn_fwd" onclick="setDir(true)">Вперёд</button>
+        <button class="btn" id="btn_rev" onclick="setDir(false)">◀ Назад</button>
+        <button class="btn danger" id="btn_stop" onclick="setStop()">■ Стоп</button>
+        <button class="btn emergency" id="btn_emergency" onclick="emergencyStop()">⛔ Экстренный Стоп</button>
+        <button class="btn" id="btn_fwd" onclick="setDir(true)">▶ Вперёд</button>
       </div>
       <div class="fn-grid" id="fn_grid"></div>
+      <button class="btn primary nav-settings-btn" id="nav_settings" onclick="showPage('settings')">⚙ Настройки</button>
     </div>
   </div>
 
-  <div class="panel" id="panel_bemf">
+  <div class="panel" data-page="settings" style="display:none" id="panel_bemf">
     <div class="panel-hd" id="hd_bemf" onclick="togglePanel('bemf')">
       <h2>Калибровка BEMF</h2>
       <span class="chev" id="chev_bemf">▸</span>
@@ -199,6 +268,7 @@ select{cursor:pointer}
       <div class="row" style="margin-bottom:8px">
         <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()">Калибровать</button>
         <button class="btn danger" id="bemf_clear_btn" onclick="clearBemfCal()">Сброс</button>
+        <button class="btn danger" id="bemf_cancel_btn" onclick="cancelBemfCal()" disabled>Отменить</button>
       </div>
       <div class="muted" id="bemf_status">Статус: —</div>
       <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
@@ -206,7 +276,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_snd">
+  <div class="panel" data-page="settings" style="display:none" id="panel_snd">
     <div class="panel-hd" id="hd_snd" onclick="togglePanel('snd')">
       <h2>Загрузка звуков</h2>
       <span class="chev" id="chev_snd">▸</span>
@@ -226,7 +296,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_fnmap">
+  <div class="panel" data-page="settings" style="display:none" id="panel_fnmap">
     <div class="panel-hd" id="hd_fnmap" onclick="togglePanel('fnmap')">
       <h2>Настройка функции F</h2>
       <span class="chev" id="chev_fnmap">▸</span>
@@ -236,7 +306,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_auxpwm">
+  <div class="panel" data-page="settings" style="display:none" id="panel_auxpwm">
     <div class="panel-hd" id="hd_auxpwm" onclick="togglePanel('auxpwm')">
       <h2>PWM и эффекты AUX</h2>
       <span class="chev" id="chev_auxpwm">▸</span>
@@ -246,12 +316,15 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_scheme">
+  <div class="panel" data-page="settings" style="display:none" id="panel_scheme">
     <div class="panel-hd" id="hd_scheme" onclick="togglePanel('scheme')">
       <h2>Звук: Схема</h2>
       <span class="chev" id="chev_scheme">▸</span>
     </div>
     <div class="bd" id="bd_scheme" style="display:none">
+      <div class="row" style="margin-bottom:10px">
+        <a class="btn primary" href="/sound-editor/">Редактор состояний и переходов</a>
+      </div>
       <div class="muted" id="snd_live">—</div>
       <div class="field">
         <label>Проект схемы</label>
@@ -296,40 +369,18 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_sndmap">
+  <div class="panel" data-page="settings" style="display:none" id="panel_sndmap">
     <div class="panel-hd" id="hd_sndmap" onclick="togglePanel('sndmap')">
       <h2>Звук: Функции</h2>
       <span class="chev" id="chev_sndmap">▸</span>
     </div>
     <div class="bd" id="bd_sndmap" style="display:none">
-      <div class="muted">Клик по ячейке привязывает функцию к таблице, повторный клик убирает.</div>
+      <div class="hint">Клик по ячейке привязывает функцию к таблице, повторный клик убирает.</div>
       <div id="snd_matrix"></div>
     </div>
   </div>
 
-  <div class="panel" id="panel_extra">
-    <div class="panel-hd" id="hd_extra" onclick="togglePanel('extra')">
-      <h2>Звук: Доп. звуки</h2>
-      <span class="chev" id="chev_extra">▸</span>
-    </div>
-    <div class="bd" id="bd_extra" style="display:none">
-      <div class="muted">Звуки по состоянию, случайные, переключение цилиндров.</div>
-      <div id="snd_extra"></div>
-    </div>
-  </div>
-
-  <div class="panel" id="panel_sparams">
-    <div class="panel-hd" id="hd_sparams" onclick="togglePanel('sparams')">
-      <h2>Звук: Параметры</h2>
-      <span class="chev" id="chev_sparams">▸</span>
-    </div>
-    <div class="bd" id="bd_sparams" style="display:none">
-      <div class="muted">CV30 (флаги), CV63 (общая громкость), CV114/115/116 (скорость звука).</div>
-      <div id="snd_cv"></div>
-    </div>
-  </div>
-
-  <div class="panel" id="panel_cv">
+  <div class="panel" data-page="settings" style="display:none" id="panel_cv">
     <div class="panel-hd" id="hd_cv" onclick="togglePanel('cv')">
       <h2>CV</h2>
       <span class="chev" id="chev_cv">▸</span>
@@ -350,7 +401,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_wifi">
+  <div class="panel" data-page="settings" style="display:none" id="panel_wifi">
     <div class="panel-hd" id="hd_wifi" onclick="togglePanel('wifi')">
       <h2>Настройки WiFi</h2>
       <span class="chev" id="chev_wifi">▸</span>
@@ -368,7 +419,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_ota">
+  <div class="panel" data-page="settings" style="display:none" id="panel_ota">
     <div class="panel-hd" id="hd_ota" onclick="togglePanel('ota')">
       <h2>Обновление</h2>
       <span class="chev" id="chev_ota">▸</span>
@@ -384,7 +435,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel" id="panel_bemf_base">
+  <div class="panel" data-page="settings" style="display:none" id="panel_bemf_base">
     <div class="panel-hd" id="hd_bemf_base" onclick="togglePanel('bemf_base')">
       <h2>Базовые настройки</h2>
       <span class="chev" id="chev_bemf_base">▸</span>
@@ -397,7 +448,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" data-page="settings" style="display:none">
     <h2>Журнал</h2>
     <div class="bd">
       <div class="row" style="justify-content:flex-end;margin-bottom:6px">
@@ -407,7 +458,11 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <div class="uptime-line"><span>Устройство работает:</span> <span id="uptime">—</span></div>
+  <div class="uptime-line" data-page="settings" style="display:none"><span>Устройство работает:</span> <span id="uptime">—</span></div>
+
+  <nav class="nav" data-page="settings" style="display:none">
+    <button class="nav-tab" id="nav_control" onclick="showPage('control')">◀ Управление</button>
+  </nav>
 
   <div class="modal" id="modal">
     <div class="box">
@@ -506,6 +561,7 @@ function setConnected(ok){
     var dot=byId('link_dot');
     if(dot)dot.classList.toggle('ok',ok);
     setText('connection',ok?'Онлайн':'Офлайн');
+    setText('info_conn',ok?'Онлайн':'Офлайн');
     /* The bottom uptime clock is only meaningful while the board answers: keep
        it running while online and stop the timer when the device is gone. */
     if(ok)startUptime();else stopUptime();
@@ -686,65 +742,105 @@ function renderMode(){
 }
 
 /* bemf calibration */
-var bemfPollTimer=null,bemfPollBusy=false,bemfPollActive=false;
+var bemfPollTimer=null,bemfPollBusy=false,bemfPollActive=false,bemfActive=false;
+var bemfCommandBusy=false,bemfCancelBusy=false,bemfDiscoverTries=0,bemfUnknown=false,bemfUseBusy=false,bemfUseActual=null,bemfRevision=0,bemfUseRevision=0;
+function renderBemfButtons(){
+  byId('bemf_cal_btn').disabled=bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown;
+  byId('bemf_clear_btn').disabled=bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown;
+  byId('bemf_cancel_btn').disabled=(!bemfActive&&!bemfUnknown)||bemfCancelBusy||bemfCommandBusy;
+}
 async function startBemfCal(){
+  if(bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown)return;
+  bemfCommandBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
-    var d=await api('/api/bemf/calibrate?start=1',{method:'POST'});
-    if(!d||!d.ok){log('BEMF','калибровка: '+(d&&d.error?d.error:'не удалось'));loadBemfCal();return;}
+    var d=await api('/api/bemf/calibrate?start=1',{method:'POST',timeout:3000});
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');
     log('BEMF','калибровка запущена, не трогайте мотор');
-    bemfStartPoll();
-  }catch(e){log('BEMF','калибровка: '+e.message);}
+  }catch(e){log('BEMF','калибровка: '+e.message);
+  }finally{bemfCommandBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
 }
 async function clearBemfCal(){
+  if(bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown)return;
   if(!confirm('Сбросить сохранённую калибровку BEMF?'))return;
+  bemfCommandBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
-    var d=await api('/api/bemf/calibrate?reset=1',{method:'POST'});
+    var d=await api('/api/bemf/calibrate?reset=1',{method:'POST',timeout:3000});
     if(!d||!d.ok)throw new Error('не удалось');
     log('BEMF','калибровка сброшена');
-    loadBemfCal();
-  }catch(e){log('BEMF','сброс: '+e.message);}
+  }catch(e){log('BEMF','сброс: '+e.message);
+  }finally{bemfCommandBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
 }
-function bemfStartPoll(){
+async function cancelBemfCal(){
+  if((!bemfActive&&!bemfUnknown)||bemfCancelBusy||bemfCommandBusy)return;
+  bemfCancelBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
+  try{
+    var d=await api('/api/bemf/calibrate?cancel=1',{method:'POST',timeout:3000});
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');
+    log('BEMF','отмена запрошена');
+  }catch(e){log('BEMF','отмена: '+e.message);
+  }finally{bemfCancelBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
+}
+function bemfStartPoll(immediate){
   bemfPollActive=true;
-  if(bemfPollTimer)clearInterval(bemfPollTimer);
-  bemfPollTimer=null;
   if(document.hidden||uploadBusy||rebooting)return;
-  bemfPollTimer=setInterval(loadBemfCal,1000);
-  loadBemfCal();
+  if(!bemfPollTimer)bemfPollTimer=setInterval(loadBemfCal,1000);
+  if(immediate!==false)loadBemfCal();
 }
 async function loadBemfCal(){
   if(bemfPollBusy||document.hidden||uploadBusy||rebooting)return;
   bemfPollBusy=true;
+  var revision=bemfRevision,useRevision=bemfUseRevision;
   try{
     var d=await api('/api/bemf/cal',{timeout:3000});
-    if(!d||!d.ok)return;
+    if(revision!==bemfRevision)return;
+    if(!d||!d.ok)throw new Error('не удалось');
     var active=d.active===true||d.active==='true';
+    var result=d.result||'idle';
+    bemfActive=active||result==='running'||result==='saving';
+    bemfUnknown=false;
+    bemfDiscoverTries=0;
     var bar=byId('bemf_bar'),barIn=byId('bemfbar');
-    if(active&&Number(d.total)>0){
+    if(result==='running'&&Number(d.total)>0){
       bar.style.display='block';
       barIn.style.width=Math.round((Number(d.progress)||0)/Number(d.total)*100)+'%';
-      setText('bemf_meta','Калибровка идёт, не трогайте мотор...');
       setText('bemf_status','Калибровка: шаг '+(Number(d.progress)||0)+' из '+d.total);
     }else{
       bar.style.display='none';
-      setText('bemf_meta','');
-      setText('bemf_status',d.stored?'Калибровка сохранена':'Калибровка не выполнялась');
+      var reasons={adc:'ошибка АЦП',rail:'нет допустимого напряжения рельс',timeout:'таймаут',control:'остановка управления',curve:'некорректная кривая',storage:'ошибка сохранения',start:'ошибка запуска'};
+      var labels={idle:'Калибровка не выполнялась',running:'Калибровка идёт, не трогайте мотор...',saving:'Сохранение калибровки...',succeeded:'Новая калибровка завершена и сохранена',cancelled:'Калибровка отменена',failed:'Калибровка не удалась'};
+      var status=labels[result]||labels.failed;
+      if((result==='failed'||result==='cancelled')&&reasons[d.error])status+=': '+reasons[d.error];
+      if(active&&(result==='failed'||result==='cancelled'))status+='; ожидание завершения очистки';
+      setText('bemf_status',status);
     }
+    setText('bemf_meta',d.stored&&result!=='succeeded'?'Сохраненная предыдущая калибровка доступна для двигателя.':(result==='running'?'Калибровка идёт, не трогайте мотор...':''));
     var useCb=byId('bemf_use');
-    if(useCb&&document.activeElement!==useCb&&typeof d.use!=='undefined'){
-      useCb.checked=(d.use===true||d.use==='true');
+    if(useCb&&!bemfUseBusy&&useRevision===bemfUseRevision&&typeof d.use!=='undefined'){
+      bemfUseActual=(d.use===true||d.use==='true');useCb.checked=bemfUseActual;
     }
-    if(!active){bemfPollActive=false;if(bemfPollTimer)clearInterval(bemfPollTimer);bemfPollTimer=null;}
-  }catch(e){}finally{bemfPollBusy=false;}
+    if(bemfActive||bemfCommandBusy)bemfStartPoll(false);
+    else{bemfPollActive=false;if(bemfPollTimer)clearInterval(bemfPollTimer);bemfPollTimer=null;}
+  }catch(e){
+    if(revision===bemfRevision&&bemfDiscoverTries>0&&--bemfDiscoverTries===0&&!bemfActive){
+      bemfPollActive=false;if(bemfPollTimer)clearInterval(bemfPollTimer);bemfPollTimer=null;
+      setText('bemf_status','Статус калибровки неизвестен: связь потеряна');
+    }
+  }finally{bemfPollBusy=false;renderBemfButtons();}
 }
 async function setBemfUse(){
-  var cb=byId('bemf_use');if(!cb)return;
+  var cb=byId('bemf_use');if(!cb||bemfUseBusy)return;
   var on=cb.checked;
+  bemfUseBusy=true;++bemfUseRevision;cb.disabled=true;
   try{
-    var d=await api('/api/bemf/use?enabled='+(on?1:0),{method:'POST'});
-    if(!d||!d.ok)throw new Error('не удалось');
-    log('BEMF',on?'регулятор включён':'регулятор выключен, движение только по ШИМ');
-  }catch(e){cb.checked=!on;log('BEMF','ошибка: '+e.message);}
+    var d=await api('/api/bemf/use?enabled='+(on?1:0),{method:'POST',timeout:3000});
+    if(d&&typeof d.enabled==='boolean'){bemfUseActual=d.enabled;cb.checked=d.enabled;}
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');
+    log('BEMF',d.enabled?'регулятор включён':'регулятор выключен, движение только по ШИМ');
+  }catch(e){
+    log('BEMF','ошибка: '+e.message);
+    try{var actual=await api('/api/bemf/use',{timeout:3000});if(actual&&actual.ok&&typeof actual.enabled==='boolean')bemfUseActual=actual.enabled;}catch(ignored){}
+    if(bemfUseActual!==null)cb.checked=bemfUseActual;
+  }finally{bemfUseBusy=false;cb.disabled=false;}
 }
 
 /* After a save/reset the board reboots and its HTTP server disappears for a
@@ -833,12 +929,24 @@ function setStop(){
   state.motor.speed=0;renderMotor();
   return queueMotorCommand(0,state.motor.forward);
 }
+function emergencyStop(){
+  clearTimeout(speedTimer);speedTimer=null;
+  motorRevision++;motorPending=0;
+  state.motor.speed=0;
+  for(var f=0;f<=28;f++)state.fnStates[f]=false;
+  renderMotor();renderFunctions();
+  log('Стоп','ЭКСТРЕННЫЙ СТОП');
+  return api('/api/emergency',{method:'POST',timeout:3000}).then(function(d){
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'команда не принята');
+    refreshStatus();
+  }).catch(function(e){log('Стоп','экстренный: '+e.message);});
+}
 
 /* functions — buttons come from the F map (no hard-coded bindings) */
 function renderFunctions(){
   var host=byId('fn_grid');if(!host)return;
   var html=[];
-  for(var f=0;f<=10;f++){
+  for(var f=0;f<=28;f++){
     var on=!!state.fnStates[f];
     html.push('<button class="btn'+(on?' active':'')+'" id="fn_'+f+'" onclick="toggleFn('+f+')">F'+f+'</button>');
   }
@@ -1206,111 +1314,186 @@ async function cvFactoryReset(){
   }catch(e){log('CV','сброс к заводским: '+e.message);}
 }
 
-/* F function mapping */
-var funcMap=[];
-var fnOutOpts=[{bit:0,t:'F0F'},{bit:1,t:'F0R'},{bit:2,t:'1'},{bit:3,t:'2'},{bit:4,t:'3'},{bit:5,t:'4'},{bit:6,t:'5'},{bit:7,t:'6'},{bit:8,t:'7'}];
-function dirChecks(fn,dir){
-  var f=(dir===1)?' checked':'';
-  var r=(dir===2)?' checked':'';
-  return '<label class="cb"><input type="checkbox" data-dir="1"'+f+' onclick="dirToggle('+fn+',this)">Впер.</label>'
-    +'<label class="cb"><input type="checkbox" data-dir="2"'+r+' onclick="dirToggle('+fn+',this)">Назад</label>';
-}
-function spdChecks(fn,spd){
-  var m=(spd===1)?' checked':'';
-  var s=(spd===2)?' checked':'';
-  return '<label class="cb"><input type="checkbox" data-spd="1"'+m+' onclick="spdToggle('+fn+',this)">Движ.</label>'
-    +'<label class="cb"><input type="checkbox" data-spd="2"'+s+' onclick="spdToggle('+fn+',this)">Стоп</label>';
-}
-function dirToggle(fn,cb){
-  var host=byId('fnmap_rows');if(!host)return;
-  var row=host.children[fn];if(!row)return;
-  var b=row.querySelectorAll('input[type=checkbox][data-dir]');
-  for(var i=0;i<b.length;i++){if(b[i]!==cb)b[i].checked=false;}
-  saveFuncMap(fn);
-}
-function spdToggle(fn,cb){
-  var host=byId('fnmap_rows');if(!host)return;
-  var row=host.children[fn];if(!row)return;
-  var b=row.querySelectorAll('input[type=checkbox][data-spd]');
-  for(var i=0;i<b.length;i++){if(b[i]!==cb)b[i].checked=false;}
-  saveFuncMap(fn);
-}
-function fnSlotChecks(fn,a,b){
-  var h='';
-  for(var s=1;s<=SOUND_SLOTS;s++){
-    var on=(a===s||b===s)?' checked':'';
-    h+='<label class="cb"><input type="checkbox" data-slot="'+s+'"'+on+' onclick="slotToggle('+fn+',this)">'+s+'</label>';
+/* F function mapping: canonical bindings (?view=bind) rendered as three tables */
+var FN_MAX=28;
+var OUT_LABELS=['Свет вперёд','Свет назад','AUX1','AUX2','AUX3','AUX4','AUX5','AUX6','AUX7'];
+var bindCache=[];
+var fnSpeed={};
+var bindQueue=Promise.resolve();
+function fnspeedGet(fn){var v=fnSpeed[fn];return (v===1||v===2)?v:0;}
+function deriveFnSpeed(){
+  for(var f=0;f<=FN_MAX;f++){
+    var mv=false,st=false,has=false;
+    for(var i=0;i<bindCache.length;i++){
+      var b=bindCache[i];
+      if(b.fn===f&&(b.type===1||b.type===3)){
+        has=true;
+        if(b.state===1)mv=true;else if(b.state===2)st=true;
+      }
+    }
+    if(mv&&!st)fnSpeed[f]=1;else if(st&&!mv)fnSpeed[f]=2;else if(has)fnSpeed[f]=0;
   }
-  return h;
 }
-function fnOutChecks(fn,aux){
-  var h='';
-  for(var i=0;i<fnOutOpts.length;i++){
-    var on=(aux&(1<<fnOutOpts[i].bit))?' checked':'';
-    h+='<label class="cb"><input type="checkbox" data-bit="'+fnOutOpts[i].bit+'"'+on+' onclick="saveFuncMap('+fn+')">'+esc(fnOutOpts[i].t)+'</label>';
+function outCellOn(fn,bit,dir){
+  for(var i=0;i<bindCache.length;i++){
+    var b=bindCache[i];
+    if(b.type===1&&b.fn===fn&&b.id===bit&&(b.dir===dir||b.dir===0))return true;
   }
-  return h;
+  return false;
 }
-function renderFnMap(){
+function slotCellOn(fn,slot){
+  for(var i=0;i<bindCache.length;i++){
+    var b=bindCache[i];
+    if(b.type===3&&b.fn===fn&&b.id===slot)return true;
+  }
+  return false;
+}
+function speedDisplay(fn){
+  var mv=false,st=false,has=false;
+  for(var i=0;i<bindCache.length;i++){
+    var b=bindCache[i];
+    if(b.fn===fn&&(b.type===1||b.type===3)){
+      has=true;
+      if(b.state===1)mv=true;else if(b.state===2)st=true;
+    }
+  }
+  if(mv&&!st)return 1;
+  if(st&&!mv)return 2;
+  if(!has)return fnspeedGet(fn);
+  return 0;
+}
+function bindAdd(fn,type,id,dir,state,mode){
+  var q='/api/func-map?bind=1&fn='+fn+'&type='+type+'&id='+id+'&dir='+dir+'&state='+state+'&mode='+(mode||0);
+  return api(q,{method:'POST'}).then(function(d){if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');return d;});
+}
+function bindRemove(idx){
+  return api('/api/func-map?bind=1&remove=1&idx='+idx,{method:'POST'}).then(function(d){if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');return d;});
+}
+/* Serialize binding mutations and reload the store after each completed one,
+   because a removal shifts the indices that later operations rely on. */
+function bindMutate(task){
+  bindQueue=bindQueue.catch(function(){}).then(task).catch(function(e){log('Функции',e&&e.message?e.message:'ошибка');}).then(function(){return loadFuncMap();});
+  return bindQueue;
+}
+function outMapToggle(fn,bit,dir,cb){
+  var on=!!cb.checked,opp=(dir===1)?2:1;
+  bindMutate(function(){
+    var exact=[],anyIdx=-1,anyState=0,oppIdx=-1;
+    for(var i=0;i<bindCache.length;i++){
+      var b=bindCache[i];
+      if(b.type===1&&b.fn===fn&&b.id===bit){
+        if(b.dir===0){anyIdx=i;anyState=b.state;}
+        else if(b.dir===dir)exact.push(i);
+        else if(b.dir===opp)oppIdx=i;
+      }
+    }
+    if(on){
+      if(exact.length>0||anyIdx>=0)return;
+      return bindAdd(fn,1,bit,dir,fnspeedGet(fn),0);
+    }
+    if(exact.length>0){
+      exact.sort(function(a,b){return b-a;});
+      var chain=Promise.resolve();
+      exact.forEach(function(idx){chain=chain.then(function(){return bindRemove(idx);});});
+      return chain;
+    }
+    if(anyIdx>=0){
+      return bindRemove(anyIdx).then(function(){
+        if(oppIdx<0)return bindAdd(fn,1,bit,opp,anyState,0);
+      });
+    }
+  });
+}
+function slotMapToggle(fn,slot,cb){
+  var on=!!cb.checked;
+  bindMutate(function(){
+    var idx=-1,checked=[];
+    for(var i=0;i<bindCache.length;i++){
+      var b=bindCache[i];
+      if(b.type===3&&b.fn===fn){checked.push(i);if(b.id===slot)idx=i;}
+    }
+    if(!on){if(idx>=0)return bindRemove(idx);return;}
+    if(idx>=0)return;
+    if(checked.length>=2){
+      var oldest=checked[0];
+      return bindRemove(oldest).then(function(){return bindAdd(fn,3,slot,0,fnspeedGet(fn),0);});
+    }
+    return bindAdd(fn,3,slot,0,fnspeedGet(fn),0);
+  });
+}
+function speedMapToggle(fn,col){
+  var next=(speedDisplay(fn)===col)?0:col;
+  fnSpeed[fn]=next;
+  bindMutate(function(){
+    var list=[];
+    for(var i=0;i<bindCache.length;i++){
+      var b=bindCache[i];
+      if(b.fn===fn&&(b.type===1||b.type===3))list.push({i:i,type:b.type,id:b.id,dir:b.dir,mode:b.mode||0});
+    }
+    if(list.length===0)return;
+    var chain=Promise.resolve();
+    list.forEach(function(x){chain=chain.then(function(){return bindAdd(fn,x.type,x.id,x.dir,next,x.mode);});});
+    list.slice().sort(function(a,b){return b.i-a.i;}).forEach(function(x){chain=chain.then(function(){return bindRemove(x.i);});});
+    return chain;
+  });
+}
+function renderOutMap(){
+  var h=['<table class="fnmap-tbl outmap"><thead><tr><th class="lbl" rowspan="2">Кнопка</th>'];
+  for(var f=0;f<=FN_MAX;f++)h.push('<th colspan="2">F'+f+'</th>');
+  h.push('</tr><tr>');
+  for(var f2=0;f2<=FN_MAX;f2++)h.push('<th>В</th><th>Н</th>');
+  h.push('</tr></thead><tbody>');
+  for(var bit=0;bit<9;bit++){
+    h.push('<tr><th class="lbl">'+esc(OUT_LABELS[bit])+'</th>');
+    for(var f3=0;f3<=FN_MAX;f3++){
+      h.push('<td><input class="cbx" type="checkbox"'+(outCellOn(f3,bit,1)?' checked':'')+' onclick="outMapToggle('+f3+','+bit+',1,this)"></td>');
+      h.push('<td><input class="cbx" type="checkbox"'+(outCellOn(f3,bit,2)?' checked':'')+' onclick="outMapToggle('+f3+','+bit+',2,this)"></td>');
+    }
+    h.push('</tr>');
+  }
+  h.push('</tbody></table>');
+  return h.join('');
+}
+function renderSlotTable(){
+  var h=['<table class="fnmap-tbl slottbl"><thead><tr><th class="lbl">Кнопка</th>'];
+  for(var s=1;s<=SOUND_SLOTS;s++)h.push('<th>'+s+'</th>');
+  h.push('</tr></thead><tbody>');
+  for(var f=0;f<=FN_MAX;f++){
+    h.push('<tr><th class="lbl">F'+f+'</th>');
+    for(var s2=1;s2<=SOUND_SLOTS;s2++)h.push('<td><input class="cbx" type="checkbox"'+(slotCellOn(f,s2)?' checked':'')+' onclick="slotMapToggle('+f+','+s2+',this)"></td>');
+    h.push('</tr>');
+  }
+  h.push('</tbody></table>');
+  return h.join('');
+}
+function renderSpeedTable(){
+  var h=['<table class="fnmap-tbl spdtbl"><thead><tr><th class="lbl">Кнопка</th><th>Движ.</th><th>Стоп</th></tr></thead><tbody>'];
+  for(var f=0;f<=FN_MAX;f++){
+    var st=speedDisplay(f);
+    h.push('<tr><th class="lbl">F'+f+'</th>');
+    h.push('<td><input class="cbx" type="checkbox"'+(st===1?' checked':'')+' onclick="speedMapToggle('+f+',1,this)"></td>');
+    h.push('<td><input class="cbx" type="checkbox"'+(st===2?' checked':'')+' onclick="speedMapToggle('+f+',2,this)"></td>');
+    h.push('</tr>');
+  }
+  h.push('</tbody></table>');
+  return h.join('');
+}
+function renderBindTables(){
   var host=byId('fnmap_rows');if(!host)return;
-  var rows=[];
-  for(var f=0;f<=10;f++){
-    var m=funcMap[f]||{a:0,b:0,aux:0,dir:0,speed:0};
-    rows.push('<div class="fnmap-row"><div class="fnmap-fn">F'+f+'</div>'
-      +'<div class="fnmap-col"><span class="fnmap-lbl">Звук</span><div class="fnmap-cbs slots">'+fnSlotChecks(f,m.a,m.b)+'</div></div>'
-      +'<div class="fnmap-col"><span class="fnmap-lbl">AUX</span><div class="fnmap-cbs outs">'+fnOutChecks(f,m.aux)+'</div></div>'
-      +'<div class="fnmap-col"><span class="fnmap-lbl">Напр.</span><div class="fnmap-cbs one">'+dirChecks(f,m.dir)+'</div></div>'
-      +'<div class="fnmap-col"><span class="fnmap-lbl">Ск.</span><div class="fnmap-cbs one">'+spdChecks(f,m.speed)+'</div></div>'
-      +'</div>');
-  }
-  host.innerHTML=rows.join('');
-}
-function slotToggle(fn,cb){
-  var host=byId('fnmap_rows');if(!host)return;
-  var row=host.children[fn];if(!row)return;
-  var boxes=row.querySelectorAll('input[type=checkbox][data-slot]');
-  var checked=[];
-  for(var i=0;i<boxes.length;i++){if(boxes[i].checked)checked.push(boxes[i]);}
-  for(var i=0;i<checked.length&&checked.length>2;i++){
-    if(checked[i]!==cb){checked[i].checked=false;checked.splice(i,1);i--;}
-  }
-  saveFuncMap(fn);
+  host.innerHTML='<div class="fnmap-sec"><div class="fnmap-cap">Карта выходов</div><div class="fnmap-scroll">'+renderOutMap()+'</div>'
+    +'<div class="fnmap-leg">В — направление движения вперёд</div><div class="fnmap-leg">Н — направление движения назад</div></div>'
+    +'<div class="fnmap-sec"><div class="fnmap-cap">Звуковые слоты</div><div class="fnmap-leg">Не более двух слотов на функцию; выбор третьего заменяет самый ранний.</div><div class="fnmap-scroll">'+renderSlotTable()+'</div></div>'
+    +'<div class="fnmap-sec"><div class="fnmap-cap">Условие скорости</div><div class="fnmap-leg">Движ. — только в движении, Стоп — только при остановке, пусто — в любом состоянии.</div><div class="fnmap-scroll">'+renderSpeedTable()+'</div></div>';
 }
 async function loadFuncMap(){
   try{
-    var d=await api('/api/func-map');
-    if(!d||!d.ok||!d.map)throw new Error('не удалось');
-    funcMap=d.map;
-    renderFnMap();
+    var d=await api('/api/func-map?view=bind');
+    if(!d||!d.ok||!d.binds)throw new Error('не удалось');
+    bindCache=d.binds;
+    deriveFnSpeed();
+    renderBindTables();
     renderFunctions();
   }catch(e){log('Функции','настройка: '+e.message);}
-}
-async function saveFuncMap(fn){
-  var host=byId('fnmap_rows');if(!host)return;
-  var row=host.children[fn];if(!row)return;
-  var slots=[];
-  var sb=row.querySelectorAll('input[type=checkbox][data-slot]');
-  for(var i=0;i<sb.length;i++){if(sb[i].checked)slots.push(Number(sb[i].getAttribute('data-slot')));}
-  var a=slots[0]||0,b=slots[1]||0;
-  var aux=0;
-  var ob=row.querySelectorAll('input[type=checkbox][data-bit]');
-  for(var i=0;i<ob.length;i++){if(ob[i].checked)aux|=(1<<Number(ob[i].getAttribute('data-bit')));}
-  var dir=0,df=false,dr=false;
-  var db=row.querySelectorAll('input[type=checkbox][data-dir]');
-  for(var i=0;i<db.length;i++){if(db[i].checked){if(Number(db[i].getAttribute('data-dir'))===1)df=true;else dr=true;}}
-  if(df&&!dr)dir=1;else if(dr&&!df)dir=2;else dir=0;
-  var spd=0,mv=false,st=false;
-  var pb=row.querySelectorAll('input[type=checkbox][data-spd]');
-  for(var i=0;i<pb.length;i++){if(pb[i].checked){if(Number(pb[i].getAttribute('data-spd'))===1)mv=true;else st=true;}}
-  if(mv&&!st)spd=1;else if(st&&!mv)spd=2;else spd=0;
-  var q='/api/func-map?fn='+fn+'&a='+a+'&b='+b+'&aux='+aux+'&dir='+dir+'&speed='+spd;
-  try{
-    var d=await api(q,{method:'POST'});
-    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'не удалось');
-    funcMap[fn]={a:a,b:b,aux:aux,dir:dir,speed:spd};
-    renderFunctions();
-    log('Функции','F'+fn+' сохранено');
-  }catch(e){log('Функции','F'+fn+': '+e.message);}
 }
 
 /* AUX PWM / light effects */
@@ -1431,8 +1614,10 @@ function fmtUptime(s){
   return (d>0?d+' д ':'')+p(h)+':'+p(m)+':'+p(x);
 }
 function renderUptime(){
-  var el=byId('uptime');if(!el)return;
-  el.textContent=uptimeAtMs?fmtUptime(uptimeBaseSec+(Date.now()-uptimeAtMs)/1000):'—';
+  var el=byId('uptime');
+  var txt=uptimeAtMs?fmtUptime(uptimeBaseSec+(Date.now()-uptimeAtMs)/1000):'—';
+  if(el)el.textContent=txt;
+  setText('info_uptime',txt);
 }
 
 /* Online heartbeat: test every 5 s that the device is reachable. A good answer
@@ -1485,6 +1670,9 @@ async function loadDevice(){
       uptimeBaseSec=Number(d.uptime)||0;
       uptimeAtMs=Date.now();
       renderUptime();
+      setText('info_name',savedDeviceName);
+      setText('info_version',d.version||'—');
+      setText('info_addr',location.hostname||'—');
     }
   }catch(e){log('Имя','ошибка: '+e.message);}
 }
@@ -1502,6 +1690,7 @@ async function saveDeviceName(){
     savedDeviceName=d.name;
     byId('device_name').value=d.name;
     onDeviceNameInput();
+    setText('info_name',d.name);
     log('Имя','сохранено: '+d.name);
   }catch(e){log('Имя','ошибка: '+e.message);}
 }
@@ -1717,7 +1906,7 @@ function renderSndMatrix(){
   var hr=document.createElement('tr');
   hr.innerHTML='<th>F</th>'+used.map(function(t){return '<th>'+esc(t.name||('#'+t.i))+'</th>';}).join('');
   tbl.appendChild(hr);
-  for(var fn=1;fn<=10;fn++){
+  for(var fn=1;fn<=28;fn++){
     var tr=document.createElement('tr');
     var html='<td>F'+fn+'</td>';
     used.forEach(function(t){
@@ -1779,6 +1968,34 @@ function loadSndCv(){
   });
 }
 
+/* theme: light or dark-navy, saved on the device browser */
+var THEME_KEY='aura_theme';
+function applyTheme(t){
+  if(t!=='light')t='dark';
+  if(document.documentElement&&document.documentElement.setAttribute)document.documentElement.setAttribute('data-theme',t);
+  var b=byId('theme_btn');
+  if(b)b.textContent=(t==='light')?'☾':'☀';
+  try{if(typeof localStorage!=='undefined')localStorage.setItem(THEME_KEY,t);}catch(e){}
+}
+function toggleTheme(){
+  var cur=(document.documentElement&&document.documentElement.getAttribute)?document.documentElement.getAttribute('data-theme'):'dark';
+  applyTheme(cur==='light'?'dark':'light');
+}
+function initTheme(){
+  var t='dark';
+  try{if(typeof localStorage!=='undefined'){var s=localStorage.getItem(THEME_KEY);if(s==='light'||s==='dark')t=s;}}catch(e){}
+  applyTheme(t);
+}
+/* pages: control (default) and settings, hash-routed */
+function showPage(name){
+  if(name!=='settings')name='control';
+  var els=[];
+  if(document.querySelectorAll)els=document.querySelectorAll('[data-page]');
+  for(var i=0;i<els.length;i++){els[i].style.display=(els[i].getAttribute('data-page')===name)?'':'none';}
+  try{if(typeof history!=='undefined'&&history.replaceState)history.replaceState(null,'',name==='settings'?'#settings':'#control');}catch(e){}
+}
+function pageFromHash(){return (location.hash||'').replace('#','')==='settings'?'settings':'control';}
+
 /* collapsible panels */
 function togglePanel(name){
   var bd=byId('bd_'+name);
@@ -1795,12 +2012,13 @@ function togglePanel(name){
   if(show&&name==='auxpwm'){loadAuxPwm();}
   if(show&&name==='scheme'){loadProjects();loadScheme();loadSndBinds();}
   if(show&&name==='sndmap'){loadScheme();loadSndBinds();}
-  if(show&&name==='extra'){loadScheme();}
-  if(show&&name==='sparams'){loadSndCv();}
 }
 
 /* init */
 function init(){
+  initTheme();
+  showPage(pageFromHash());
+  if(typeof addEventListener!=='undefined')addEventListener('hashchange',function(){showPage(pageFromHash());});
   byId('device_name').addEventListener('input',onDeviceNameInput);
   renderCvList();
   setActiveCv(1);
@@ -1812,6 +2030,7 @@ function init(){
   loadWifi();
   loadVolumes();
   loadTrackList();
+  loadBemfCal();
   refreshStatus();
   startStatusPoll();
   startHeartbeat();

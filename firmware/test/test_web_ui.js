@@ -74,6 +74,34 @@ test('API deadline includes a stalled JSON body', async t => {
   assert.equal(signal.aborted, true);
 });
 
+test('unknown calibration outcome keeps cancellation available and blocks a new run', async t => {
+  const { context, element, requests } = fixture(t);
+  let reachable = false;
+  context.fetch = async (url, options) => {
+    requests.push({ url, options });
+    if (!reachable) throw new TypeError('offline');
+    return response(url.includes('cancel=1') ? { ok: true } :
+      { ok: true, active: false, result: 'cancelled', error: 'none', stored: false });
+  };
+  await context.startBemfCal();
+  await wait(0);
+  for (let i = 0; i < 4; i++) await context.loadBemfCal();
+  assert.equal(context.bemfDiscoverTries, 0);
+  assert.equal(context.bemfUnknown, true);
+  assert.equal(element('bemf_cal_btn').disabled, true);
+  assert.equal(element('bemf_clear_btn').disabled, true);
+  assert.equal(element('bemf_cancel_btn').disabled, false);
+  await context.startBemfCal();
+  assert.equal(requests.filter(r => r.url.includes('start=1')).length, 1);
+  reachable = true;
+  await context.cancelBemfCal();
+  await wait(0);
+  assert.equal(requests.filter(r => r.url.includes('cancel=1')).length, 1);
+  assert.equal(context.bemfUnknown, false);
+  assert.equal(element('bemf_cal_btn').disabled, false);
+  assert.equal(element('bemf_cancel_btn').disabled, true);
+});
+
 test('client error reporting consumes failures and is rate limited', async t => {
   const { context, events } = fixture(t);
   let calls = 0;
@@ -174,6 +202,193 @@ test('BEMF polling never overlaps', async t => {
   finish({ ok: true, active: false });
   await first;
   assert.equal(context.bemfPollBusy, false);
+});
+
+test('page initialization discovers active BEMF and starts exactly one poll', async t => {
+  const { context, intervals, element } = fixture(t);
+  for (const name of ['renderCvList', 'setActiveCv', 'loadCvValues', 'loadFuncMap',
+    'loadDevice', 'loadWifi', 'loadVolumes', 'loadTrackList', 'refreshStatus',
+    'startStatusPoll', 'startHeartbeat']) context[name] = () => {};
+  let gets = 0;
+  context.api = async url => {
+    assert.equal(url, '/api/bemf/cal'); gets++;
+    return { ok: true, active: true, result: 'running', progress: 2, total: 10 };
+  };
+  context.init(); await wait(0);
+  assert.equal(gets, 1);
+  assert.equal(intervals.size, 1);
+  assert.equal(intervals.get(context.bemfPollTimer).ms, 1000);
+  assert.equal(element('bemf_cal_btn').disabled, true);
+  assert.equal(element('bemf_clear_btn').disabled, true);
+  assert.equal(element('bemf_cancel_btn').disabled, false);
+  await context.loadBemfCal();
+  assert.equal(intervals.size, 1);
+});
+
+test('lost BEMF start response discovers active job without retrying POST', async t => {
+  const { context, intervals } = fixture(t);
+  const calls = [];
+  context.api = async (url, options) => {
+    calls.push({ url, options });
+    if (options.method === 'POST') throw new Error('lost response');
+    return { ok: true, active: true, result: 'running', total: 10 };
+  };
+  await context.startBemfCal(); await wait(0);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /start=1$/);
+  assert.equal(calls[0].options.timeout, 3000);
+  assert.equal(calls[1].url, '/api/bemf/cal');
+  assert.equal(context.bemfActive, true);
+  assert.equal(intervals.size, 1);
+});
+
+test('unknown BEMF start outcome retries only GET and stops after bounded discovery', async t => {
+  const { context, intervals, element } = fixture(t);
+  let posts = 0, gets = 0;
+  context.api = async (url, options) => {
+    if (options.method === 'POST') posts++; else gets++;
+    throw new Error('offline');
+  };
+  await context.startBemfCal(); await wait(0);
+  for (let i = 0; i < 4; i++) await context.loadBemfCal();
+  assert.equal(posts, 1); assert.equal(gets, 5);
+  assert.equal(intervals.size, 0);
+  assert.equal(context.bemfDiscoverTries, 0);
+  assert.match(element('bemf_status').textContent, /неизвестен/);
+});
+
+test('rapid BEMF starts and resets are blocked while POST is pending', async t => {
+  const { context, element } = fixture(t);
+  let posts = 0, complete;
+  context.api = (url, options) => {
+    if (options.method !== 'POST') return Promise.resolve({ ok: true, active: true, result: 'running' });
+    posts++; return new Promise(resolve => { complete = resolve; });
+  };
+  const first = context.startBemfCal();
+  assert.equal(element('bemf_cal_btn').disabled, true);
+  assert.equal(element('bemf_clear_btn').disabled, true);
+  await context.startBemfCal(); await context.clearBemfCal();
+  assert.equal(posts, 1);
+  complete({ ok: true }); await first; await wait(0);
+  assert.equal(context.bemfActive, true);
+});
+
+test('terminal BEMF failure distinguishes previous stored curve from new success', async t => {
+  const { context, element, intervals } = fixture(t);
+  const reasons = ['adc', 'rail', 'timeout', 'control', 'curve', 'storage', 'start'];
+  for (const error of reasons) {
+    context.api = async () => ({ ok: true, active: false, result: 'failed', error,
+      stored: true, valid: true, runId: 8 });
+    await context.loadBemfCal();
+    assert.match(element('bemf_status').textContent, /не удалась:/);
+    assert.doesNotMatch(element('bemf_status').textContent, /завершена и сохранена/);
+    assert.match(element('bemf_meta').textContent, /предыдущая калибровка/);
+  }
+  assert.equal(intervals.size, 0);
+  context.api = async () => ({ ok: true, result: 'succeeded', active: false, stored: true });
+  await context.loadBemfCal();
+  assert.match(element('bemf_status').textContent, /Новая калибровка завершена и сохранена/);
+  assert.equal(element('bemf_meta').textContent, '');
+});
+
+test('saving and terminal cleanup reservations keep polling and disable start/reset', async t => {
+  const { context, element, intervals } = fixture(t);
+  for (const result of ['saving', 'cancelled', 'failed']) {
+    context.api = async () => ({ ok: true, active: true, result, error: 'storage', stored: true });
+    await context.loadBemfCal();
+    assert.equal(intervals.size, 1);
+    assert.equal(element('bemf_cal_btn').disabled, true);
+    assert.equal(element('bemf_clear_btn').disabled, true);
+    assert.equal(element('bemf_cancel_btn').disabled, false);
+    assert.equal(element('bemf_bar').style.display, 'none');
+    if (result !== 'saving') assert.match(element('bemf_status').textContent, /очистки/);
+  }
+});
+
+test('BEMF cancel in rails mode is immediate bodyless POST and never motor STOP', async t => {
+  const { context, requests, element } = fixture(t);
+  context.state.control_source = 'rails';
+  context.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return response(url.includes('calibrate') ? { ok: true } :
+      { ok: true, active: false, result: 'cancelled', error: 'control' });
+  };
+  context.bemfActive = true; context.renderBemfButtons();
+  assert.equal(element('bemf_cancel_btn').disabled, false);
+  await context.cancelBemfCal(); await wait(0);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].url, '/api/bemf/calibrate?cancel=1');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].options.body, undefined);
+  assert.equal(requests[1].url, '/api/bemf/cal');
+  assert.equal(requests.some(r => r.url.includes('/api/motor')), false);
+  assert.equal(element('bemf_cancel_btn').disabled, true);
+  await context.cancelBemfCal(); assert.equal(requests.length, 2);
+});
+
+test('BEMF visibility pauses and resumes one nonoverlapping poll', async t => {
+  const { context, events, intervals } = fixture(t);
+  context.startStatusPoll = context.startHeartbeat = context.refreshStatus = () => {};
+  let calls = 0, complete;
+  context.api = () => { calls++; return new Promise(resolve => { complete = resolve; }); };
+  context.bemfStartPoll();
+  const oldTimer = context.bemfPollTimer;
+  context.document.hidden = true; events.visibilitychange();
+  assert.equal(intervals.size, 0);
+  assert.equal(context.bemfPollActive, true);
+  context.document.hidden = false; events.visibilitychange();
+  assert.equal(calls, 1); assert.equal(intervals.size, 1);
+  assert.notEqual(context.bemfPollTimer, oldTimer);
+  await intervals.get(context.bemfPollTimer).fn(); assert.equal(calls, 1);
+  complete({ ok: true, active: true, result: 'saving' }); await wait(0);
+  assert.equal(intervals.size, 1);
+  assert.equal(context.bemfPollBusy, false);
+});
+
+test('stale calibration GET cannot erase lost POST discovery', async t => {
+  const { context, intervals } = fixture(t);
+  let complete, gets = 0;
+  context.api = (url, options) => {
+    if (options.method === 'POST') return Promise.reject(new Error('lost'));
+    gets++;
+    if (gets === 1) return new Promise(resolve => { complete = resolve; });
+    return Promise.resolve({ ok: true, active: true, result: 'running' });
+  };
+  const stale = context.loadBemfCal();
+  await context.startBemfCal();
+  complete({ ok: true, active: false, result: 'idle' }); await stale;
+  assert.equal(intervals.size, 1);
+  assert.equal(context.bemfDiscoverTries, 5);
+  await intervals.get(context.bemfPollTimer).fn();
+  assert.equal(context.bemfActive, true);
+  assert.equal(gets, 2);
+});
+
+test('BEMF mode failure restores actual server state instead of blindly inverting', async t => {
+  const { context, element } = fixture(t);
+  element('bemf_use').checked = true;
+  context.api = async (url, options) => options.method === 'POST' ?
+    { ok: false, enabled: true, error: 'storage failed' } : { ok: true, enabled: true };
+  await context.setBemfUse();
+  assert.equal(element('bemf_use').checked, true);
+  assert.equal(element('bemf_use').disabled, false);
+});
+
+test('lost mode response reloads actual mode and stale calibration GET cannot undo it', async t => {
+  const { context, element } = fixture(t);
+  let complete;
+  context.api = (url, options) => {
+    if (url === '/api/bemf/cal') return new Promise(resolve => { complete = resolve; });
+    if (options.method === 'POST') return Promise.reject(new Error('lost'));
+    assert.equal(url, '/api/bemf/use');
+    return Promise.resolve({ ok: true, enabled: true });
+  };
+  const stale = context.loadBemfCal();
+  element('bemf_use').checked = false;
+  await context.setBemfUse();
+  assert.equal(element('bemf_use').checked, true);
+  complete({ ok: true, active: false, result: 'idle', use: false }); await stale;
+  assert.equal(element('bemf_use').checked, true);
 });
 
 test('visibility does not restart normal polling during upload', t => {

@@ -120,7 +120,7 @@ int mock_route_count = 0;
 httpd_err_handler_func_t mock_err_handler;
 
 /* Request body / query / header script. */
-uint8_t mock_httpd_body[65536];
+uint8_t mock_httpd_body[131073];
 size_t mock_httpd_body_len = 0;
 size_t mock_httpd_body_pos = 0;
 int mock_recv_idle_n = 0;
@@ -132,6 +132,7 @@ int mock_recv_calls = 0;
 
 char mock_query[2048] = { 0 };
 char mock_header_name[160] = { 0 };
+char mock_content_type[96] = { 0 };
 
 size_t httpd_req_get_url_query_len(httpd_req_t *req)
 {
@@ -211,6 +212,7 @@ void mock_httpd_reset(void)
     mock_recv_calls = 0;
     mock_query[0] = '\0';
     mock_header_name[0] = '\0';
+    mock_content_type[0] = '\0';
     mock_resp_body_len = 0;
     mock_resp_body[0] = '\0';
     mock_resp_type[0] = '\0';
@@ -337,6 +339,11 @@ esp_err_t httpd_resp_send_err(httpd_req_t *req, httpd_err_code_t error, const ch
     return ESP_OK;
 }
 
+esp_err_t httpd_resp_send_chunk(httpd_req_t *req, const char *buf, ssize_t len)
+{
+    return httpd_resp_send(req, buf, (size_t)len);
+}
+
 esp_err_t httpd_req_get_url_query_str(httpd_req_t *req, char *buf, size_t buf_len)
 {
     (void)req;
@@ -355,15 +362,16 @@ esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *req, const char *field, char 
                                       size_t val_size)
 {
     (void)req;
-    (void)field;
     if (val == NULL || val_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (mock_header_name[0] == '\0') {
+    const char *header = strcmp(field, "Content-Type") == 0 ? mock_content_type : mock_header_name;
+    if (header[0] == '\0') {
         val[0] = '\0';
         return ESP_ERR_NOT_FOUND;
     }
-    snprintf(val, val_size, "%s", mock_header_name);
+    if (strlen(header) >= val_size) return ESP_ERR_INVALID_SIZE;
+    snprintf(val, val_size, "%s", header);
     return ESP_OK;
 }
 
@@ -1458,7 +1466,13 @@ esp_err_t audio_stop(void)
 /* ====================================================================== */
 
 uint8_t mock_motor_speed = 0;
+uint8_t mock_motor_applied_speed = 0;
 bool mock_motor_forward = true;
+void motor_get_applied_speed(uint8_t *speed, bool *forward)
+{
+    if (speed) *speed = mock_motor_applied_speed;
+    if (forward) *forward = mock_motor_forward;
+}
 int mock_motor_stop_calls = 0;
 int mock_motor_set_speed_calls = 0;
 uint8_t mock_motor_set_speed_value = 0;
@@ -1494,6 +1508,10 @@ int mock_bemf_cal_start_ret = 0;
 int mock_bemf_cal_clear_ret = 0;
 int mock_bemf_cal_start_calls = 0;
 int mock_bemf_cal_clear_calls = 0;
+int mock_bemf_cal_cancel_ret = ESP_OK;
+int mock_bemf_cal_cancel_calls = 0;
+int mock_bemf_set_enabled_calls = 0;
+int mock_bemf_set_before_save = 0;
 
 void motor_stop(void)
 {
@@ -1554,8 +1572,20 @@ esp_err_t motor_bemf_cal_clear(void)
     return (esp_err_t)mock_bemf_cal_clear_ret;
 }
 
+esp_err_t motor_bemf_cal_cancel(void)
+{
+    ++mock_bemf_cal_cancel_calls;
+    if (mock_bemf_cal_cancel_ret == ESP_OK && mock_bemf_cal_info.active) {
+        mock_bemf_cal_info.result = MOTOR_BEMF_CAL_CANCELLED;
+        mock_bemf_cal_info.reason = MOTOR_BEMF_CAL_ERR_CONTROL;
+    }
+    return mock_bemf_cal_cancel_ret;
+}
+
 void motor_set_bemf_enabled(bool enabled)
 {
+    ++mock_bemf_set_enabled_calls;
+    if (mock_bemf_use_save_calls == 0 || mock_bemf_use_save_ret != ESP_OK) ++mock_bemf_set_before_save;
     mock_bemf_enabled = enabled ? 1 : 0;
 }
 
@@ -1707,10 +1737,157 @@ void dcc_reload_config(void)
 /* reset                                                                   */
 /* ====================================================================== */
 
+/* Graph transport tests use the real parser with scripted durable/runtime I/O. */
+const unsigned char mock_editor_gzip[] = {0x1f, 0x8b, 0x08};
+const sound_editor_asset_t sound_editor_assets[] = {
+    {"/sound-editor/index.html", "text/html; charset=utf-8", mock_editor_gzip, 3, false},
+    {"/sound-editor/assets/editor-ab12.js", "text/javascript; charset=utf-8", mock_editor_gzip, 3, true},
+    {"/sound-editor/assets/editor-ab12.css", "text/css; charset=utf-8", mock_editor_gzip, 3, true},
+    {"/sound-editor/THIRD_PARTY_NOTICES.txt", "text/plain; charset=utf-8", mock_editor_gzip, 3, false}
+};
+const size_t sound_editor_asset_count = sizeof(sound_editor_assets) / sizeof(sound_editor_assets[0]);
+char mock_graph_json[SG_MAX_JSON + 1];
+uint32_t mock_graph_revision;
+esp_err_t mock_graph_save_err, mock_graph_read_err, mock_graph_select_err;
+esp_err_t mock_graph_assets_err, mock_graph_prepare_err, mock_graph_reference_err;
+bool mock_graph_referenced;
+unsigned mock_graph_save_calls, mock_graph_select_calls, mock_graph_commit_calls, mock_legacy_commit_calls;
+uint32_t mock_graph_primed;
+sound_graph_status_t mock_graph_status;
+struct sound_graph_prepared { char id[SG_ID_CAP]; uint32_t revision; };
+bool sound_graph_active(void) { return mock_graph_status.active; }
+void sound_graph_status_get(sound_graph_status_t *out) { *out = mock_graph_status; }
+void sound_graph_deactivate(void) { mock_graph_status.active = false; }
+bool sound_graph_file_used(const char *file) { (void)file; return mock_graph_referenced; }
+esp_err_t sound_graph_prepare(const sg_graph_t *graph, const char *id, uint32_t revision, sound_graph_prepared_t **out)
+{
+    (void)graph; *out = NULL;
+    if (mock_graph_prepare_err != ESP_OK) return mock_graph_prepare_err;
+    *out = malloc(sizeof(**out));
+    if (*out == NULL) return ESP_ERR_NO_MEM;
+    snprintf((*out)->id, sizeof((*out)->id), "%s", id); (*out)->revision = revision;
+    return ESP_OK;
+}
+void sound_graph_prepared_free(sound_graph_prepared_t *prepared) { free(prepared); }
+void sound_graph_commit(sound_graph_prepared_t *prepared)
+{
+    ++mock_graph_commit_calls; mock_graph_status.active = true;
+    snprintf(mock_graph_status.id, sizeof(mock_graph_status.id), "%s", prepared->id);
+    mock_graph_status.revision = prepared->revision; free(prepared);
+}
+void sound_graph_prime_functions(uint32_t levels) { mock_graph_primed = levels; }
+void sound_legacy_commit(const sound_scheme_t *scheme, const char *name)
+{
+    ++mock_legacy_commit_calls; mock_graph_status.active = false;
+    mock_sound_scheme = *scheme;
+    snprintf(mock_sound_active_name, sizeof(mock_sound_active_name), "%s", name);
+}
+esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, size_t len, uint32_t *revision, sg_diagnostic_t *diag)
+{
+    ++mock_graph_save_calls;
+    if (mock_graph_save_err != ESP_OK) return mock_graph_save_err;
+    sg_graph_t *graph = malloc(sizeof(*graph));
+    if (graph == NULL) return ESP_ERR_NO_MEM;
+    esp_err_t err = sg_parse(json, len, graph, diag);
+    if (err == ESP_OK && strcmp(id, graph->id)) err = ESP_ERR_INVALID_ARG;
+    free(graph);
+    if (err != ESP_OK) return err;
+    if (expected != mock_graph_revision) return ESP_ERR_INVALID_STATE;
+    memcpy(mock_graph_json, json, len); mock_graph_json[len] = '\0';
+    *revision = ++mock_graph_revision; return ESP_OK;
+}
+esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *len, uint32_t *actual)
+{
+    (void)id; *out = NULL;
+    if (mock_graph_read_err != ESP_OK) return mock_graph_read_err;
+    if (!mock_graph_revision || (revision && revision != mock_graph_revision)) return ESP_ERR_NOT_FOUND;
+    *len = strlen(mock_graph_json); *out = malloc(*len + 1);
+    if (*out == NULL) return ESP_ERR_NO_MEM;
+    memcpy(*out, mock_graph_json, *len + 1); *actual = mock_graph_revision; return ESP_OK;
+}
+esp_err_t sg_store_list(sg_store_descriptor_t *out, size_t capacity, size_t *count)
+{
+    (void)capacity; *count = 0;
+    if (!mock_graph_revision) return ESP_OK;
+    snprintf(out[0].id, sizeof(out[0].id), "demo");
+    snprintf(out[0].name, sizeof(out[0].name), "Demo");
+    out[0].revision = mock_graph_revision; *count = 1; return ESP_OK;
+}
+esp_err_t sg_store_select(const char *id, uint32_t revision)
+{
+    (void)id; (void)revision; ++mock_graph_select_calls; return mock_graph_select_err;
+}
+esp_err_t sg_store_select_legacy(void) { ++mock_graph_select_calls; return mock_graph_select_err; }
+esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag)
+{
+    (void)graph; (void)diag; return mock_graph_assets_err;
+}
+esp_err_t sg_asset_inspect(const char *file, sg_asset_t *out, sg_diagnostic_t *diag)
+{
+    (void)diag;
+    if (mock_graph_assets_err != ESP_OK) return mock_graph_assets_err;
+    memset(out, 0, sizeof(*out)); snprintf(out->file, sizeof(out->file), "%s", file);
+    snprintf(out->crc32, sizeof(out->crc32), "1234abcd");
+    out->size = 48; out->sampleRate = 22050; out->channels = 1; out->bits = 16; out->durationMs = 1;
+    return ESP_OK;
+}
+esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
+{
+    (void)file; *referenced = mock_graph_reference_err != ESP_OK || mock_graph_referenced;
+    return mock_graph_reference_err;
+}
+esp_err_t mock_legacy_validate_err, mock_legacy_name_err;
+unsigned mock_legacy_name_calls, mock_legacy_name_fail_at;
+char mock_persisted_legacy[SOUND_FILE_MAX];
+bool sound_store_name_ok(const char *name)
+{
+    if (name == NULL || !name[0] || strlen(name) >= SOUND_FILE_MAX) return false;
+    for (const char *p = name; *p; ++p)
+        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return false;
+    return true;
+}
+esp_err_t sound_store_path(char *out, size_t cap, const char *name)
+{
+    snprintf(out, cap, "web_tmp/projects/%s.mds", name); return ESP_OK;
+}
+esp_err_t sound_store_load(const char *path, sound_scheme_t *out)
+{
+    (void)path; *out = mock_sound_scheme; return mock_legacy_validate_err;
+}
+esp_err_t sound_store_default(sound_scheme_t *out)
+{
+    if (out == NULL) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    out->type = SOUND_SCHEME_NONE;
+    out->engine.engine_start_fn = 1;
+    return ESP_OK;
+}
+esp_err_t sound_store_validate(const sound_scheme_t *scheme) { (void)scheme; return mock_legacy_validate_err; }
+esp_err_t settings_active_scheme_get(char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", mock_persisted_legacy); return ESP_OK;
+}
+esp_err_t settings_active_scheme_set(const char *name)
+{
+    ++mock_legacy_name_calls;
+    if (mock_legacy_name_err != ESP_OK || mock_legacy_name_calls == mock_legacy_name_fail_at) return ESP_FAIL;
+    snprintf(mock_persisted_legacy, sizeof(mock_persisted_legacy), "%s", name); return ESP_OK;
+}
+
 /* Restore every mock flag/injector to its neutral default and clear the
  * web.c module state so each Unity test starts from a known baseline. */
 void mock_web_reset(void)
 {
+    mock_graph_json[0] = '\0'; mock_graph_revision = 0;
+    mock_graph_save_err = mock_graph_read_err = mock_graph_select_err = ESP_OK;
+    mock_graph_assets_err = mock_graph_prepare_err = mock_graph_reference_err = ESP_OK;
+    mock_graph_referenced = false;
+    mock_graph_save_calls = mock_graph_select_calls = mock_graph_commit_calls = mock_legacy_commit_calls = 0;
+    mock_graph_primed = 0; memset(&mock_graph_status, 0, sizeof(mock_graph_status));
+    mock_motor_applied_speed = 0;
+    mock_legacy_validate_err = mock_legacy_name_err = ESP_OK;
+    mock_legacy_name_calls = mock_legacy_name_fail_at = 0;
+    mock_persisted_legacy[0] = '\0';
     mock_httpd_reset();
     mock_alloc_fail_at = -1;
     mock_alloc_calls = 0;
@@ -1926,6 +2103,10 @@ void mock_web_reset(void)
     mock_bemf_cal_clear_ret = 0;
     mock_bemf_cal_start_calls = 0;
     mock_bemf_cal_clear_calls = 0;
+    mock_bemf_cal_cancel_ret = ESP_OK;
+    mock_bemf_cal_cancel_calls = 0;
+    mock_bemf_set_enabled_calls = 0;
+    mock_bemf_set_before_save = 0;
 
     mock_auxio_init_ret = 0;
     mock_auxio_set_enabled_calls = 0;

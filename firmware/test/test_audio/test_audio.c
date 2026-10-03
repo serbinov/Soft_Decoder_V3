@@ -3,6 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+#include <math.h>
+
+#include "../../components/sound/src/sound_graph.c"
+#include "../../components/sound/src/sound_graph_runner.c"
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
@@ -1166,6 +1171,7 @@ static void test_inhibit_confirmed_quiescence(void)
     TEST_ASSERT_FALSE(audio_is_quiescent());
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_play(s_path_mono));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_validate_wav(s_path_mono));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_inspect_wav(s_path_mono));
     TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, audio_voice_alloc());
     s_fade_blocks = 255; /* maintenance close must not wait for any fade */
     mixer_step();
@@ -1182,6 +1188,7 @@ static void test_inhibit_confirmed_quiescence(void)
     s_validate_work = 0;
     s_storage_blocked = true;
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_validate_wav(s_path_mono));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_inspect_wav(s_path_mono));
     TEST_ASSERT_EQUAL(0, s_validate_work);
     TEST_ASSERT_EQUAL(0, s_storage_leases);
 }
@@ -1301,6 +1308,67 @@ static void test_real_async_sound_sequencer(void)
     TEST_ASSERT_TRUE(audio_is_quiescent());
 }
 
+static void test_generation_scoped_completion_and_rate(void)
+{
+    make_wav_const(s_path_mono, 22050, 4, 1000);
+    audio_voice_handle_t handle;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&handle));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&handle, s_path_mono, false, 100));
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_NONE, audio_voice_completion(handle));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_set_rate_owned(handle, 1500));
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_EOF, audio_voice_completion(handle));
+    audio_voice_handle_t next;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&next));
+    TEST_ASSERT_EQUAL(handle.voice, next.voice);
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_STALE, audio_voice_completion(handle));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, audio_voice_set_rate_owned(handle, 2000));
+    TEST_ASSERT_EQUAL(1500, s_voice[next.voice].req_rate);
+    audio_voice_release_owned(next);
+    mixer_step();
+}
+
+static void test_async_failure_is_not_successful_eof(void)
+{
+    audio_voice_handle_t handle;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&handle));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&handle, "no_such_graph_sample_1.wav", false, 100));
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_FINISHED, audio_voice_get_state(handle));
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_ERROR, audio_voice_completion(handle));
+    mixer_step();
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_ERROR, audio_voice_completion(handle));
+    make_wav_const(s_path_mono, 22050, 2000, 1000);
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_generation(18, s_path_mono, false, 100, &handle));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_set_rate_owned(handle, 700));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_stop(handle.voice));
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_STOPPED, audio_voice_completion(handle));
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_STOPPED, audio_voice_completion(handle));
+    mixer_step();
+    TEST_ASSERT_EQUAL(AUDIO_COMPLETION_STOPPED, audio_voice_completion(handle));
+}
+
+static void test_reserved_generation_release_stops_only_current_owner(void)
+{
+    make_wav_const(s_path_mono, 22050, 2000, 1000);
+    audio_voice_handle_t first, second;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_generation(18, s_path_mono, true, 100, &first));
+    mixer_step();
+    TEST_ASSERT_TRUE(audio_voice_is_active(18));
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_generation(18, s_path_mono, true, 100, &second));
+    audio_voice_release_owned(first);
+    TEST_ASSERT_FALSE(s_voice[18].req_stop);
+    mixer_step();
+    audio_voice_release_owned(second);
+    TEST_ASSERT_TRUE(s_voice[18].req_stop);
+    s_fade_blocks = 0;
+    mixer_step();
+    TEST_ASSERT_FALSE(audio_voice_is_active(18));
+    TEST_ASSERT_EQUAL(0, s_storage_leases);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1353,5 +1421,8 @@ int main(void)
     RUN_TEST(test_resampler_accelerated_index_wrap);
     RUN_TEST(test_wav_malformed_corpus_common_parser);
     RUN_TEST(test_real_async_sound_sequencer);
+    RUN_TEST(test_generation_scoped_completion_and_rate);
+    RUN_TEST(test_async_failure_is_not_successful_eof);
+    RUN_TEST(test_reserved_generation_release_stops_only_current_owner);
     return UNITY_END();
 }

@@ -192,7 +192,7 @@ static void test_defaults(void)
     TEST_ASSERT_EQUAL_UINT8(0, s_cv[2]);           /* Vstart (slow low steps) */
     TEST_ASSERT_EQUAL_UINT8(255, s_cv[5]);         /* Vhigh = full */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[6]);         /* Vmid = half */
-    TEST_ASSERT_EQUAL_UINT8(9, s_cv[7]);           /* decoder version = version.txt */
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, s_cv[7]);
     TEST_ASSERT_EQUAL_UINT8(0, s_cv[8]);           /* manufacturer (read-only) */
     TEST_ASSERT_EQUAL_UINT8(0x02, s_cv[29]);       /* 28 steps, DCC */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[54]);
@@ -250,7 +250,7 @@ static void test_cv7_readonly(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_write(7, 5));
     uint8_t v = 0;
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(7, &v));
-    TEST_ASSERT_EQUAL_UINT8(9, v); /* unchanged default (version.txt) */
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, v);
 }
 
 static void test_cv8_not_factory_reset(void)
@@ -914,9 +914,9 @@ static void test_cv7_migrated_from_old_blob(void)
 {
     s_cv[7] = 7; /* simulate a device upgraded from an older firmware */
     cv_migrate_version();
-    TEST_ASSERT_EQUAL_UINT8(9, s_cv[7]);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, s_cv[7]);
     cv_migrate_version(); /* idempotent */
-    TEST_ASSERT_EQUAL_UINT8(9, s_cv[7]);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, s_cv[7]);
 }
 
 /* ---- function bindings (R1) ---- */
@@ -1397,9 +1397,59 @@ static void test_unusable_bemf_curve_cannot_replace_previous_record(void)
     TEST_ASSERT_TRUE(settings_bemf_cal_validate(&bad));
 }
 
+static void test_bemf_mode_save_propagates_persistence_errors(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_use_save(true));
+    unsigned writes = g_set_calls, commits = g_commit_calls;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_use_save(false));
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_EQUAL_UINT32(writes, g_set_calls);
+    TEST_ASSERT_EQUAL_UINT32(commits, g_commit_calls);
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_bemf_use_save(false));
+    TEST_ASSERT_EQUAL_UINT32(commits, g_commit_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    bool enabled = false;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_use_load(&enabled));
+    TEST_ASSERT_TRUE(enabled);
+    g_set_error = ESP_OK;
+    g_commit_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_bemf_use_save(false));
+    TEST_ASSERT_EQUAL_UINT32(commits + 1U, g_commit_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    /* The mock publishes setters immediately. A failed physical commit's
+     * durable value cannot be inferred from this host backend. */
+    g_commit_error = ESP_OK;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_use_save(true));
+}
+
+static void test_bemf_curve_save_propagates_io_errors(void)
+{
+    settings_bemf_cal_t old = { .count = 2, .speed = {12, 126}, .frac = {100, 700} };
+    settings_bemf_cal_t next = old;
+    next.frac[1] = 800;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save(&old));
+    unsigned commits = g_commit_calls;
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_bemf_cal_save(&next));
+    TEST_ASSERT_EQUAL_UINT32(commits, g_commit_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+    settings_bemf_cal_t loaded;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_load(&loaded));
+    TEST_ASSERT_EQUAL_MEMORY(&old, &loaded, sizeof(old));
+    g_set_error = ESP_OK;
+    g_commit_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_bemf_cal_save(&next));
+    TEST_ASSERT_EQUAL_UINT32(commits + 1U, g_commit_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_bemf_mode_save_propagates_persistence_errors);
+    RUN_TEST(test_bemf_curve_save_propagates_io_errors);
     RUN_TEST(test_cal_save_guard_rejects_cancel_between_validation_and_lock);
     RUN_TEST(test_cal_save_guard_cancel_after_admission_finishes_valid_curve);
     RUN_TEST(test_cal_save_guard_never_authorizes_invalid_or_unlocked_save);

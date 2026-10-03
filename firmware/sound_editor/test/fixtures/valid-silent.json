@@ -1,0 +1,1 @@
+{"format":"sound-graph","schemaVersion":1,"id":"test","name":"Silent","engine":{"entry":"off","fn":28},"hysteresis":32,"states":[{"id":"off","name":"Off","file":"","loop":false,"volume":100,"rate":1000}],"transitions":[],"effects":[],"assets":[],"editor":{"positions":{"off":{"x":12,"y":34}},"viewport":{"x":0,"y":0,"zoom":1}}}

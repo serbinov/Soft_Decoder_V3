@@ -23,12 +23,23 @@ typedef enum {
     AUDIO_VOICE_PLAYING
 } audio_voice_state_t;
 
+typedef enum {
+    AUDIO_COMPLETION_NONE = 0,
+    AUDIO_COMPLETION_EOF,
+    AUDIO_COMPLETION_ERROR,
+    AUDIO_COMPLETION_STOPPED,
+    AUDIO_COMPLETION_STALE
+} audio_completion_t;
+
 /* Playback-rate limits, per mille of the original sample rate (1000 = nominal). */
 #define AUDIO_RATE_MIN 500
 #define AUDIO_RATE_MAX 3000
 
 esp_err_t audio_init(void);
 esp_err_t audio_validate_wav(const char *path);
+/* Read-only inspection during graph Apply, after playback is quiescent.
+ * Still requires a storage lease; exclusive filesystem maintenance rejects it. */
+esp_err_t audio_inspect_wav(const char *path);
 /* Admission barrier, not a synchronous stop. Poll quiescence with a bounded
  * deadline before touching the filesystem. Uninhibit never restores old plays. */
 esp_err_t audio_set_inhibited(bool inhibited);
@@ -45,6 +56,10 @@ esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
                                 bool loop, uint8_t volume);
 void audio_voice_release_owned(audio_voice_handle_t handle);
 audio_voice_state_t audio_voice_get_state(audio_voice_handle_t handle);
+/* Completion and rate updates retain the playback generation, including the
+ * reserved engine voices. A stale caller cannot affect a new owner. */
+audio_completion_t audio_voice_completion(audio_voice_handle_t handle);
+esp_err_t audio_voice_set_rate_owned(audio_voice_handle_t handle, uint16_t permille);
 /* Reserved/index caller: queue a new generation and return its exact identity. */
 esp_err_t audio_voice_play_generation(uint8_t voice, const char *path, bool loop,
                                       uint8_t volume, audio_voice_handle_t *out);

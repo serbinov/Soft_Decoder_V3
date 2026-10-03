@@ -25,6 +25,9 @@ static void (*g_delay_hook)(TickType_t delay);
 static void (*g_create_hook)(void (*task)(void *), void *arg);
 static void (*g_validate_hook)(void);
 static void (*g_save_admission_hook)(void);
+static void (*g_save_commit_hook)(void);
+static void (*g_sem_take_hook)(SemaphoreHandle_t semaphore, TickType_t wait);
+static esp_err_t g_save_error;
 static uint32_t g_mutex_create_calls;
 static uint32_t g_mutex_fail_call;
 static TickType_t g_now_ticks;
@@ -34,6 +37,7 @@ static void test_task_delay(TickType_t ticks);
 static void test_delay_until(TickType_t *last, TickType_t period);
 static TickType_t test_tick_count(void);
 static SemaphoreHandle_t test_mutex_create(void);
+static BaseType_t test_sem_take(SemaphoreHandle_t semaphore, TickType_t wait);
 static BaseType_t test_task_create(void (*task)(void *), const char *name, uint32_t stack,
                                   void *arg, UBaseType_t priority, TaskHandle_t *handle);
 
@@ -46,6 +50,7 @@ static BaseType_t test_task_create(void (*task)(void *), const char *name, uint3
 #define vTaskDelayUntil test_delay_until
 #define xTaskGetTickCount test_tick_count
 #define xSemaphoreCreateMutex test_mutex_create
+#define xSemaphoreTake test_sem_take
 #define xTaskCreate test_task_create
 #include "../../components/motor/src/motor.c"
 #undef static
@@ -55,6 +60,7 @@ static BaseType_t test_task_create(void (*task)(void *), const char *name, uint3
 #undef vTaskDelayUntil
 #undef xTaskGetTickCount
 #undef xSemaphoreCreateMutex
+#undef xSemaphoreTake
 #undef xTaskCreate
 
 #include "../../test_libs/teststubs/stubs.c"
@@ -104,6 +110,12 @@ static SemaphoreHandle_t test_mutex_create(void)
 {
     ++g_mutex_create_calls;
     return g_mutex_create_calls == g_mutex_fail_call ? NULL : xSemaphoreCreateMutex();
+}
+
+static BaseType_t test_sem_take(SemaphoreHandle_t semaphore, TickType_t wait)
+{
+    if (g_sem_take_hook != NULL) g_sem_take_hook(semaphore, wait);
+    return xSemaphoreTake(semaphore, wait);
 }
 
 static BaseType_t test_task_create(void (*task)(void *), const char *name, uint32_t stack,
@@ -172,6 +184,8 @@ esp_err_t settings_bemf_cal_save(const settings_bemf_cal_t *cal)
     if (cal == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (g_save_commit_hook != NULL) g_save_commit_hook();
+    if (g_save_error != ESP_OK) return g_save_error;
     g_cal = *cal;
     g_cal_valid = true;
     return ESP_OK;
@@ -243,6 +257,9 @@ void setUp(void)
     g_create_hook = NULL;
     g_validate_hook = NULL;
     g_save_admission_hook = NULL;
+    g_save_commit_hook = NULL;
+    g_sem_take_hook = NULL;
+    g_save_error = ESP_OK;
     g_mutex_create_calls = 0;
     g_mutex_fail_call = 0;
     g_now_ticks = 0;
@@ -622,11 +639,11 @@ static void test_motor_bemf_adc_dump(void)
 
 static void test_motor_bemf_coast_read(void)
 {
-    mock_adc_raw[PIN_BEMF1 - 1] = 4095;
+    mock_adc_raw[PIN_BEMF1 - 1] = 4094;
     mock_adc_raw[PIN_BEMF2 - 1] = 0;
     uint16_t b1 = 0, b2 = 0;
     motor_bemf_coast_read(&b1, &b2);
-    TEST_ASSERT_EQUAL_UINT16(3100, b1);
+    TEST_ASSERT_EQUAL_UINT16(3099, b1);
     TEST_ASSERT_EQUAL_UINT16(0, b2);
     TEST_ASSERT_EQUAL_UINT32(1000, mock_rom_delay_us_total); /* BEMF_SETTLE_US */
 }
@@ -1859,7 +1876,7 @@ static void test_cal_stale_rail_aborts_first_step_without_full_run(void)
     bemf_cal_task((void *)(uintptr_t)s_output_generation);
     TEST_ASSERT_FALSE(g_cal_valid);
     TEST_ASSERT_EQUAL_UINT8(0, s_cal_step);
-    TEST_ASSERT_EQUAL_UINT32(BEMF_CAL_SETTLE_MS, g_now_ticks);
+    TEST_ASSERT_EQUAL_UINT32(120, g_now_ticks); /* Worker-only fallback; independent guard expires at 100 ms. */
     TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
 }
 
@@ -1910,9 +1927,567 @@ static void test_zero_bemf_calibration_preserves_working_curve(void)
     TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
 }
 
+static void start_valid_calibration(void)
+{
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 661;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start());
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_RUNNING, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+}
+
+static void assert_cal_failure(motor_bemf_cal_error_t reason)
+{
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, info.result);
+    TEST_ASSERT_EQUAL(reason, info.reason);
+    TEST_ASSERT_TRUE(info.run_id != 0U);
+    TEST_ASSERT_TRUE(info.error_code != ESP_OK);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_1]);
+}
+
+static void suspend_worker_with_healthy_ticks(TickType_t ticks)
+{
+    TEST_ASSERT_EQUAL_UINT32(40, ticks);
+    g_delay_hook = NULL;
+    int64_t lease = s_cal_drive_deadline_us;
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] > 0U);
+    for (int i = 0; i < 15; ++i) {
+        mock_timer_now_us += 10000;
+        motor_set_rail_voltage_mv(1000);
+        motor_bemf_cal_watchdog(); /* Independent safety caller, before normal tick. */
+        motor_tick();
+        TEST_ASSERT_EQUAL_INT64(mock_timer_now_us, motor_last_tick_us());
+        if (mock_timer_now_us < lease) {
+            TEST_ASSERT_EQUAL_INT64(lease, s_cal_drive_deadline_us);
+            TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] > 0U);
+        } else {
+            assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+        }
+    }
+    TEST_ASSERT_TRUE(s_cal_active);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_bemf_cal_start());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_set_speed(30, true));
+    uint32_t generation = s_output_generation;
+    motor_bemf_cal_watchdog();
+    motor_bemf_cal_cancel();
+    motor_bemf_cal_cancel();
+    TEST_ASSERT_EQUAL_UINT32(generation, s_output_generation);
+    motor_stop();
+    motor_emergency_stop();
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+}
+
+static void test_cal_worker_starvation_not_hidden_by_healthy_motor_heartbeat(void)
+{
+    start_valid_calibration();
+    uint32_t generation = s_output_generation;
+    g_delay_hook = suspend_worker_with_healthy_ticks;
+    bemf_cal_task((void *)(uintptr_t)generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+    TEST_ASSERT_FALSE(s_cal_active);
+    TEST_ASSERT_FALSE(g_cal_valid);
+    TEST_ASSERT_FALSE(bemf_cal_sample_apply(generation, 800, NULL));
+    TEST_ASSERT_FALSE(apply_pwm(800, true, generation));
+}
+
+static void blocked_control_guard(TickType_t ticks)
+{
+    (void)ticks;
+    g_delay_hook = NULL;
+    mock_timer_now_us = s_cal_drive_deadline_us;
+    motor_set_rail_voltage_mv(1000);
+    mock_sem_take_fail = 1; /* Guard must not attempt either mutex/ADC/storage. */
+    uint32_t adc_delays = mock_rom_delay_us_total;
+    motor_bemf_cal_watchdog();
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+    TEST_ASSERT_EQUAL_UINT32(adc_delays, mock_rom_delay_us_total);
+    TEST_ASSERT_TRUE(s_cal_active);
+    mock_sem_take_fail = 0;
+}
+
+static void test_cal_independent_guard_coasts_with_control_owner_blocked(void)
+{
+    start_valid_calibration();
+    g_delay_hook = blocked_control_guard;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+}
+
+static void lose_rail_inside_settle(TickType_t ticks)
+{
+    TEST_ASSERT_EQUAL_UINT32(40, ticks);
+    g_delay_hook = NULL;
+    motor_set_rail_voltage_mv(0);
+    motor_bemf_cal_watchdog();
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_RAIL);
+}
+
+static void test_cal_zero_rail_inside_settle_coasts_immediately(void)
+{
+    start_valid_calibration();
+    g_delay_hook = lose_rail_inside_settle;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_RAIL);
+    TEST_ASSERT_EQUAL_UINT32(40, g_now_ticks);
+}
+
+static void stale_rail_guard_inside_settle(TickType_t ticks)
+{
+    (void)ticks;
+    g_delay_hook = NULL;
+    while (mock_timer_now_us < 100000) {
+        mock_timer_now_us += 10000;
+        motor_bemf_cal_watchdog();
+    }
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_RAIL);
+}
+
+static void test_cal_stale_rail_guard_aborts_at_freshness_deadline(void)
+{
+    start_valid_calibration();
+    g_delay_hook = stale_rail_guard_inside_settle;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_EQUAL_INT64(100000, mock_timer_now_us);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_RAIL);
+}
+
+static void fail_adc_inside_settle(TickType_t ticks)
+{
+    TEST_ASSERT_EQUAL_UINT32(40, ticks);
+    g_delay_hook = NULL;
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_ok = 0;
+}
+
+static void test_cal_adc_loss_inside_settle_aborts_first_slice(void)
+{
+    start_valid_calibration();
+    g_delay_hook = fail_adc_inside_settle;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_ADC);
+    TEST_ASSERT_EQUAL_UINT32(40, g_now_ticks);
+}
+
+static void saturate_adc_inside_settle(TickType_t ticks)
+{
+    TEST_ASSERT_EQUAL_UINT32(40, ticks);
+    g_delay_hook = NULL;
+    motor_set_rail_voltage_mv(3000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 4095;
+    mock_adc_raw[PIN_BEMF2 - 1] = 1000; /* Differential alone would pass 85% rail. */
+}
+
+static void test_cal_saturated_individual_adc_inside_settle_aborts(void)
+{
+    start_valid_calibration();
+    g_delay_hook = saturate_adc_inside_settle;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_ADC);
+    TEST_ASSERT_EQUAL_UINT32(40, g_now_ticks);
+}
+
+static void test_feedback_rejects_each_saturated_or_negative_node_accepts_low_zero(void)
+{
+    mock_adc_raw[PIN_BEMF1 - 1] = 4095;
+    mock_adc_raw[PIN_BEMF2 - 1] = 1000;
+    TEST_ASSERT_FALSE(bemf_sample_window());
+    mock_adc_raw[PIN_BEMF1 - 1] = 1000;
+    mock_adc_raw[PIN_BEMF2 - 1] = 4095;
+    TEST_ASSERT_FALSE(bemf_sample_window());
+    mock_adc_raw[PIN_BEMF2 - 1] = -1;
+    TEST_ASSERT_FALSE(bemf_sample_window());
+    mock_adc_raw[PIN_BEMF1 - 1] = -1;
+    mock_adc_raw[PIN_BEMF2 - 1] = 1000;
+    TEST_ASSERT_FALSE(bemf_sample_window());
+    mock_adc_raw[PIN_BEMF1 - 1] = 0;
+    TEST_ASSERT_TRUE(bemf_sample_window());
+    TEST_ASSERT_EQUAL_UINT32(0, s_bemf1_mv);
+    mock_adc_raw[PIN_BEMF1 - 1] = 1000;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    TEST_ASSERT_TRUE(bemf_sample_window());
+}
+
+static uint32_t g_cal_slices;
+static void successful_guarded_slice(TickType_t ticks)
+{
+    TEST_ASSERT_EQUAL_UINT32(40, ticks);
+    ++g_cal_slices;
+    motor_set_rail_voltage_mv(1000);
+    motor_bemf_cal_watchdog();
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_RUNNING, s_cal_result);
+    motor_tick();
+}
+
+static void test_full_cal_worker_succeeds_all_steps_under_independent_guard(void)
+{
+    start_valid_calibration();
+    g_cal_slices = 0;
+    g_delay_hook = successful_guarded_slice;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_EQUAL_UINT32(10U * (10U + 8U), g_cal_slices);
+    TEST_ASSERT_EQUAL_UINT32(7200, g_now_ticks);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+    TEST_ASSERT_EQUAL_UINT8(10, s_cal_step);
+    TEST_ASSERT_EQUAL_UINT8(10, s_cal_count);
+    TEST_ASSERT_TRUE(g_cal_valid);
+    TEST_ASSERT_FALSE(s_cal_active);
+    TEST_ASSERT_FALSE(s_cal_drive_active);
+    TEST_ASSERT_EQUAL_INT64(0, s_cal_drive_deadline_us);
+}
+
+static void test_cal_storage_failure_reports_failure_preserves_runtime(void)
+{
+    g_cal = BEMF_CAL_BASE;
+    g_cal_valid = true;
+    settings_bemf_cal_t before = g_cal;
+    uint16_t table[127];
+    memcpy(table, s_cal_frac_table, sizeof(table));
+    start_valid_calibration();
+    g_delay_hook = refresh_calibration_rail;
+    g_save_error = ESP_FAIL;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_STORAGE);
+    TEST_ASSERT_EQUAL_MEMORY(table, s_cal_frac_table, sizeof(table));
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g_cal, sizeof(before));
+    TEST_ASSERT_FALSE(s_cal_active);
+}
+
+static void test_new_run_resets_error_progress_and_succeeds(void)
+{
+    start_valid_calibration();
+    uint32_t first = s_cal_run_id;
+    mock_adc_ok = 0;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_ADC);
+    mock_adc_ok = 1;
+    s_cal_run_speed[0] = 126;
+    s_cal_run_frac[0] = 800;
+    start_valid_calibration();
+    TEST_ASSERT_EQUAL_UINT32(first + 1U, s_cal_run_id);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cal_step);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cal_run_speed[0]);
+    TEST_ASSERT_EQUAL_UINT16(0, s_cal_run_frac[0]);
+    g_delay_hook = refresh_calibration_rail;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, s_cal_result);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_clear());
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_IDLE, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+    TEST_ASSERT_EQUAL_UINT32(first + 1U, s_cal_run_id);
+}
+
+static void explicit_cancel_inside_settle(TickType_t ticks)
+{
+    (void)ticks;
+    g_delay_hook = NULL;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_cancel());
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_cancel());
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_CANCELLED, s_cal_result);
+    TEST_ASSERT_TRUE(s_cal_active);
+    TEST_ASSERT_EQUAL_INT64(0, s_cal_drive_deadline_us);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_bemf_cal_start());
+}
+
+static void test_cal_cancel_nonblocking_reservation_and_inactive_motion(void)
+{
+    motor_set_bemf_enabled(false);
+    motor_set_speed(30, true);
+    motor_tick();
+    uint32_t duty = s_last_duty;
+    uint32_t generation = s_output_generation;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_cancel());
+    TEST_ASSERT_EQUAL_UINT32(duty, s_last_duty);
+    TEST_ASSERT_EQUAL_UINT32(generation, s_output_generation);
+    motor_emergency_stop();
+    motor_tick();
+    start_valid_calibration();
+    generation = s_output_generation;
+    g_delay_hook = explicit_cancel_inside_settle;
+    bemf_cal_task((void *)(uintptr_t)generation);
+    TEST_ASSERT_FALSE(s_cal_active);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_CANCELLED, s_cal_result);
+    TEST_ASSERT_FALSE(bemf_cal_sample_apply(generation, 900, NULL));
+    TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
+}
+
+static void stop_after_save_admission(void)
+{
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SAVING, info.result);
+    TEST_ASSERT_TRUE(info.active);
+    TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
+    mock_timer_now_us += 1000000;
+    motor_set_rail_voltage_mv(0);
+    motor_bemf_cal_watchdog(); /* No drive expiry or rail failure during NVS. */
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SAVING, s_cal_result);
+    motor_bemf_cal_cancel();
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_CANCELLED, s_cal_result);
+}
+
+static void test_cal_save_stop_after_admission_keeps_commit_but_not_runtime_success(void)
+{
+    uint16_t table[127];
+    memcpy(table, s_cal_frac_table, sizeof(table));
+    start_valid_calibration();
+    g_delay_hook = refresh_calibration_rail;
+    g_save_commit_hook = stop_after_save_admission;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_TRUE(g_cal_valid); /* Documented admission: commit already authorized. */
+    TEST_ASSERT_EQUAL_MEMORY(table, s_cal_frac_table, sizeof(table));
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_CANCELLED, s_cal_result);
+    TEST_ASSERT_FALSE(s_cal_active);
+}
+
+static void test_cal_creation_failure_explicit_start_result(void)
+{
+    motor_set_rail_voltage_mv(1000);
+    mock_task_create_ok = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, motor_bemf_cal_start());
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_START);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, s_cal_error_code);
+    TEST_ASSERT_FALSE(s_cal_active);
+}
+
+static void test_cal_late_sample_cannot_restore_expired_lease_while_coasted(void)
+{
+    start_valid_calibration();
+    uint32_t generation = s_output_generation;
+    TEST_ASSERT_TRUE(bemf_cal_sample_apply(generation, 500, NULL));
+    s_cal_drive_active = false;
+    pwm_write_locked(0, true);
+    mock_timer_now_us = s_cal_drive_deadline_us;
+    motor_set_rail_voltage_mv(1000);
+    motor_bemf_cal_watchdog();
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_RUNNING, s_cal_result); /* Safely off: guard skips lease. */
+    TEST_ASSERT_FALSE(bemf_cal_sample_apply(generation, 500, NULL));
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_RUNNING, s_cal_result); /* Worker failure publishes after cleanup. */
+    bemf_cal_task((void *)(uintptr_t)generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+}
+
+static void test_cal_control_mutex_failure_reports_control_and_releases_reservation(void)
+{
+    start_valid_calibration();
+    mock_sem_take_fail = 1;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_CONTROL);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, s_cal_error_code);
+    TEST_ASSERT_FALSE(s_cal_active);
+    TEST_ASSERT_EQUAL_UINT32(0, g_now_ticks);
+}
+
+static void low_curve_guarded_slice(TickType_t ticks)
+{
+    (void)ticks;
+    motor_set_rail_voltage_mv(1000);
+    motor_bemf_cal_watchdog();
+}
+
+static void test_cal_full_invalid_curve_reports_curve_preserves_old_runtime(void)
+{
+    start_valid_calibration();
+    mock_adc_raw[PIN_BEMF1 - 1] = 20; /* Measurable, but end fraction below trust threshold. */
+    g_delay_hook = low_curve_guarded_slice;
+    uint16_t table[127];
+    memcpy(table, s_cal_frac_table, sizeof(table));
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_CURVE);
+    TEST_ASSERT_EQUAL_UINT8(10, s_cal_step);
+    TEST_ASSERT_EQUAL_MEMORY(table, s_cal_frac_table, sizeof(table));
+    TEST_ASSERT_FALSE(g_cal_valid);
+}
+
+static void expire_during_adc_coast(void)
+{
+    g_coast_hook = NULL;
+    mock_timer_now_us = s_cal_drive_deadline_us;
+    motor_set_rail_voltage_mv(1000);
+    motor_bemf_cal_watchdog(); /* Bridge is off, so no guard failure yet. */
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_RUNNING, s_cal_result);
+}
+
+static void test_cal_lease_expiring_during_sample_never_renews_or_restores_pwm(void)
+{
+    start_valid_calibration();
+    uint32_t generation = s_output_generation;
+    TEST_ASSERT_TRUE(bemf_cal_sample_apply(generation, 600, NULL));
+    g_coast_hook = expire_during_adc_coast;
+    TEST_ASSERT_FALSE(bemf_cal_sample_apply(generation, 600, NULL));
+    TEST_ASSERT_EQUAL_INT64(0, s_cal_drive_deadline_us);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    bemf_cal_task((void *)(uintptr_t)generation);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_TIMEOUT);
+}
+
+static void cancel_during_worker_adc(int channel)
+{
+    (void)channel;
+    g_adc_hook = NULL;
+    motor_bemf_cal_cancel();
+}
+
+static void test_cal_cancel_between_adc_and_atomic_apply_never_renews_lease(void)
+{
+    start_valid_calibration();
+    uint32_t generation = s_output_generation;
+    g_adc_hook = cancel_during_worker_adc;
+    bemf_cal_task((void *)(uintptr_t)generation);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_CANCELLED, s_cal_result);
+    TEST_ASSERT_EQUAL_INT64(0, s_cal_drive_deadline_us);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_FALSE(g_cal_valid);
+}
+
+static motor_bemf_cal_error_t g_expected_cleanup_reason;
+static esp_err_t g_expected_cleanup_code;
+static bool g_cleanup_cancelled;
+
+static void cancel_on_cleanup_acquire(SemaphoreHandle_t semaphore, TickType_t wait)
+{
+    TEST_ASSERT_TRUE(semaphore == s_control_mutex);
+    TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(MOTOR_TICK_MS), wait);
+    g_sem_take_hook = NULL;
+    g_cleanup_cancelled = true;
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SAVING, s_cal_result);
+    TEST_ASSERT_EQUAL(g_expected_cleanup_reason, s_cal_reason);
+    TEST_ASSERT_EQUAL(g_expected_cleanup_code, s_cal_error_code);
+    TEST_ASSERT_TRUE(s_cal_active);
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_cancel());
+    motor_stop();
+    motor_emergency_stop();
+    TEST_ASSERT_EQUAL(g_expected_cleanup_reason, s_cal_reason);
+    TEST_ASSERT_EQUAL(g_expected_cleanup_code, s_cal_error_code);
+    TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
+    mock_sem_take_fail = 0;
+}
+
+static void arm_cleanup_cancel(void)
+{
+    g_sem_take_hook = cancel_on_cleanup_acquire;
+}
+
+static void test_cal_save_failure_latched_before_cleanup_cancel_preserves_runtime(void)
+{
+    g_cal = BEMF_CAL_BASE;
+    g_cal_valid = true;
+    settings_bemf_cal_t before = g_cal;
+    uint16_t table[127];
+    memcpy(table, s_cal_frac_table, sizeof(table));
+    start_valid_calibration();
+    g_delay_hook = refresh_calibration_rail;
+    g_expected_cleanup_reason = MOTOR_BEMF_CAL_ERR_STORAGE;
+    g_expected_cleanup_code = ESP_ERR_NOT_FOUND;
+    g_cleanup_cancelled = false;
+    g_save_error = g_expected_cleanup_code;
+    g_save_commit_hook = arm_cleanup_cancel;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_TRUE(g_cleanup_cancelled);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_STORAGE);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, s_cal_error_code);
+    TEST_ASSERT_EQUAL_MEMORY(table, s_cal_frac_table, sizeof(table));
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g_cal, sizeof(before));
+    TEST_ASSERT_FALSE(s_cal_active);
+}
+
+static void test_cal_curve_failure_latched_before_cleanup_cancel(void)
+{
+    start_valid_calibration();
+    mock_adc_raw[PIN_BEMF1 - 1] = 20;
+    g_delay_hook = refresh_calibration_rail;
+    g_expected_cleanup_reason = MOTOR_BEMF_CAL_ERR_CURVE;
+    g_expected_cleanup_code = ESP_ERR_INVALID_ARG;
+    g_cleanup_cancelled = false;
+    g_validate_hook = arm_cleanup_cancel;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    g_validate_hook = NULL;
+    TEST_ASSERT_TRUE(g_cleanup_cancelled);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_CURVE);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, s_cal_error_code);
+    TEST_ASSERT_FALSE(g_cal_valid);
+}
+
+static void fail_runtime_apply_acquire(SemaphoreHandle_t semaphore, TickType_t wait)
+{
+    (void)wait;
+    TEST_ASSERT_TRUE(semaphore == s_control_mutex);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SAVING, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+    mock_sem_take_fail = 1;
+    g_sem_take_hook = cancel_on_cleanup_acquire;
+}
+
+static void arm_runtime_apply_failure(void)
+{
+    g_sem_take_hook = fail_runtime_apply_acquire;
+}
+
+static void test_cal_apply_control_failure_latched_before_cleanup_cancel(void)
+{
+    uint16_t table[127];
+    memcpy(table, s_cal_frac_table, sizeof(table));
+    start_valid_calibration();
+    g_delay_hook = refresh_calibration_rail;
+    g_expected_cleanup_reason = MOTOR_BEMF_CAL_ERR_CONTROL;
+    g_expected_cleanup_code = ESP_ERR_TIMEOUT;
+    g_cleanup_cancelled = false;
+    g_save_commit_hook = arm_runtime_apply_failure;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_TRUE(g_cleanup_cancelled);
+    assert_cal_failure(MOTOR_BEMF_CAL_ERR_CONTROL);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, s_cal_error_code);
+    TEST_ASSERT_EQUAL_MEMORY(table, s_cal_frac_table, sizeof(table));
+    TEST_ASSERT_TRUE(g_cal_valid); /* Save completed before runtime admission failed. */
+}
+
+static void test_cal_cancel_before_storage_failure_detection_keeps_cancelled(void)
+{
+    start_valid_calibration();
+    g_delay_hook = refresh_calibration_rail;
+    g_save_error = ESP_ERR_NOT_FOUND;
+    g_save_commit_hook = stop_after_save_admission;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_CANCELLED, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+    TEST_ASSERT_EQUAL(ESP_OK, s_cal_error_code);
+    TEST_ASSERT_FALSE(s_cal_active);
+    TEST_ASSERT_FALSE(g_cal_valid);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_cal_save_failure_latched_before_cleanup_cancel_preserves_runtime);
+    RUN_TEST(test_cal_curve_failure_latched_before_cleanup_cancel);
+    RUN_TEST(test_cal_apply_control_failure_latched_before_cleanup_cancel);
+    RUN_TEST(test_cal_cancel_before_storage_failure_detection_keeps_cancelled);
+    RUN_TEST(test_cal_control_mutex_failure_reports_control_and_releases_reservation);
+    RUN_TEST(test_cal_full_invalid_curve_reports_curve_preserves_old_runtime);
+    RUN_TEST(test_cal_lease_expiring_during_sample_never_renews_or_restores_pwm);
+    RUN_TEST(test_cal_cancel_between_adc_and_atomic_apply_never_renews_lease);
+    RUN_TEST(test_cal_worker_starvation_not_hidden_by_healthy_motor_heartbeat);
+    RUN_TEST(test_cal_independent_guard_coasts_with_control_owner_blocked);
+    RUN_TEST(test_cal_zero_rail_inside_settle_coasts_immediately);
+    RUN_TEST(test_cal_stale_rail_guard_aborts_at_freshness_deadline);
+    RUN_TEST(test_cal_adc_loss_inside_settle_aborts_first_slice);
+    RUN_TEST(test_cal_saturated_individual_adc_inside_settle_aborts);
+    RUN_TEST(test_feedback_rejects_each_saturated_or_negative_node_accepts_low_zero);
+    RUN_TEST(test_full_cal_worker_succeeds_all_steps_under_independent_guard);
+    RUN_TEST(test_cal_storage_failure_reports_failure_preserves_runtime);
+    RUN_TEST(test_new_run_resets_error_progress_and_succeeds);
+    RUN_TEST(test_cal_cancel_nonblocking_reservation_and_inactive_motion);
+    RUN_TEST(test_cal_save_stop_after_admission_keeps_commit_but_not_runtime_success);
+    RUN_TEST(test_cal_creation_failure_explicit_start_result);
+    RUN_TEST(test_cal_late_sample_cannot_restore_expired_lease_while_coasted);
     RUN_TEST(test_repeated_dcc_command_does_not_cancel_sampling);
     RUN_TEST(test_normal_stop_keeps_feedback_history_for_cv4_ramp);
     RUN_TEST(test_zero_bemf_calibration_preserves_working_curve);

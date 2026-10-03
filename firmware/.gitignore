@@ -14,3 +14,6 @@ sdkconfig.old
 
 # Local ESP-IDF path pointer (written by setup.ps1 / idf_build.ps1)
 .idf_path
+
+# Python build/test caches
+__pycache__/

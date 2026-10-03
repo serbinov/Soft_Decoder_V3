@@ -91,6 +91,7 @@ static uint32_t s_bemf1_mv;
 static uint32_t s_bemf2_mv;
 static float s_bemf_filtered;
 static bool s_bemf_valid;
+static esp_err_t s_bemf_sample_error;
 static float s_pid_integral;
 static float s_pid_prev_error;
 static float s_pid_kp;
@@ -130,6 +131,12 @@ static uint8_t s_cal_speed[MOTOR_BEMF_CAL_MAX_POINTS];
 static uint16_t s_cal_frac[MOTOR_BEMF_CAL_MAX_POINTS];
 static uint8_t s_cal_run_speed[BEMF_CAL_POINTS];
 static uint16_t s_cal_run_frac[BEMF_CAL_POINTS];
+static uint32_t s_cal_run_id;
+static motor_bemf_cal_state_t s_cal_result;
+static motor_bemf_cal_error_t s_cal_reason;
+static esp_err_t s_cal_error_code;
+static int64_t s_cal_drive_deadline_us;
+static bool s_cal_drive_active;
 
 /* Interpolated rail-fraction curve indexed by applied speed 0..126. */
 static uint16_t s_cal_frac_table[127];
@@ -271,11 +278,69 @@ static void IRAM_ATTR pwm_write_locked(uint32_t duty, bool forward)
     }
 }
 
+/* Caller holds output mux. Keep a watchdog failure sticky through later STOPs. */
+static void IRAM_ATTR bemf_cal_stop_locked(motor_bemf_cal_error_t reason, esp_err_t code)
+{
+    if (!s_cal_active) return;
+    if (s_cal_reason == MOTOR_BEMF_CAL_ERR_NONE) {
+        s_cal_result = reason == MOTOR_BEMF_CAL_ERR_NONE ? MOTOR_BEMF_CAL_CANCELLED : MOTOR_BEMF_CAL_FAILED;
+        s_cal_reason = reason;
+        s_cal_error_code = code;
+    }
+    ++s_output_generation;
+    s_cal_cancelled = true;
+    s_cal_drive_active = false;
+    s_cal_drive_deadline_us = 0;
+    s_stop_requested = true;
+    s_target_speed = 0;
+    s_target_forward = true;
+    s_applied_state = 0x100U;
+    s_last_duty = 0;
+    pwm_write_locked(0, true);
+}
+
+/* Worker errors coast now but publish terminal state after bounded cleanup.
+ * The saved cause is already sticky if an independent STOP arrives meanwhile. */
+static void bemf_cal_worker_fail_locked(motor_bemf_cal_error_t reason, esp_err_t code)
+{
+    motor_bemf_cal_state_t previous = s_cal_result;
+    bool first = s_cal_reason == MOTOR_BEMF_CAL_ERR_NONE;
+    bemf_cal_stop_locked(reason, code);
+    if (first && (previous == MOTOR_BEMF_CAL_RUNNING || previous == MOTOR_BEMF_CAL_SAVING)) {
+        s_cal_result = previous;
+    }
+}
+
+void motor_bemf_cal_watchdog(void)
+{
+    portENTER_CRITICAL(&s_output_mux);
+    if (s_cal_active && !s_cal_cancelled && s_cal_drive_active) {
+        int64_t now = esp_timer_get_time();
+        if (s_rail_mv <= 300U || now - s_rail_update_us >= FEEDBACK_FRESH_US) {
+            bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_RAIL, ESP_ERR_INVALID_STATE);
+        } else if (now >= s_cal_drive_deadline_us) {
+            bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_TIMEOUT, ESP_ERR_TIMEOUT);
+        }
+    }
+    portEXIT_CRITICAL(&s_output_mux);
+}
+
+esp_err_t motor_bemf_cal_cancel(void)
+{
+    portENTER_CRITICAL(&s_output_mux);
+    if (s_cal_active && !s_cal_cancelled) {
+        bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_NONE, ESP_OK);
+    }
+    portEXIT_CRITICAL(&s_output_mux);
+    return ESP_OK;
+}
+
 static bool apply_pwm(uint32_t duty, bool forward, uint32_t generation)
 {
     portENTER_CRITICAL(&s_output_mux);
     bool accepted = generation == s_output_generation && !s_inhibited &&
-                    !s_feedback_fault && !s_stop_requested && !s_sample_active && !s_cal_cancelled;
+                    !s_feedback_fault && !s_stop_requested && !s_sample_active && !s_cal_cancelled &&
+                    !s_cal_active;
     if (accepted) {
         pwm_write_locked(duty, forward);
         s_last_duty = duty;
@@ -359,7 +424,12 @@ int motor_adc_read_raw(int gpio_num)
 static bool bemf_sample_window(void)
 {
     s_bemf_valid = false;
-    if (!s_bemf_adc_ready || !motor_bemf_lock()) {
+    s_bemf_sample_error = ESP_FAIL;
+    if (!s_bemf_adc_ready) {
+        return false;
+    }
+    if (!motor_bemf_lock()) {
+        s_bemf_sample_error = ESP_ERR_TIMEOUT;
         return false;
     }
     /* Coast the DRV8870 for the sample window: IN1=IN2=LOW (0% duty on both
@@ -372,6 +442,7 @@ static bool bemf_sample_window(void)
      * zero the measurement. */
     portENTER_CRITICAL(&s_output_mux);
     s_sample_active = true;
+    s_cal_drive_active = false;
     pwm_write_locked(0, true);
     portEXIT_CRITICAL(&s_output_mux);
     esp_rom_delay_us(BEMF_SETTLE_US);
@@ -381,9 +452,10 @@ static bool bemf_sample_window(void)
     portENTER_CRITICAL(&s_output_mux);
     s_sample_active = false;
     portEXIT_CRITICAL(&s_output_mux);
-    if (raw1 >= 0 && raw2 >= 0) {
+    if (raw1 >= 0 && raw1 < 4095 && raw2 >= 0 && raw2 < 4095) {
         s_bemf1_mv = (uint32_t)raw1 * 3100U / 4095U;
         s_bemf2_mv = (uint32_t)raw2 * 3100U / 4095U;
+        s_bemf_sample_error = ESP_OK;
         return true;
     }
     return false;
@@ -479,6 +551,7 @@ static void bemf_cal_reload(void)
 
 static void motor_tick(void)
 {
+    motor_bemf_cal_watchdog();
     if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
         return;
     }
@@ -872,6 +945,11 @@ esp_err_t motor_init(void)
     s_sample_active = false;
     s_cal_active = false;
     s_cal_task = NULL;
+    s_cal_result = MOTOR_BEMF_CAL_IDLE;
+    s_cal_reason = MOTOR_BEMF_CAL_ERR_NONE;
+    s_cal_error_code = ESP_OK;
+    s_cal_drive_active = false;
+    s_cal_drive_deadline_us = 0;
     s_inhibited = true;
     s_inhibit_reasons = MOTOR_INHIBIT_CONTROL;
     ++s_output_generation;
@@ -937,6 +1015,7 @@ void motor_stop(void)
 void IRAM_ATTR motor_emergency_stop(void)
 {
     portENTER_CRITICAL(&s_output_mux);
+    bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_NONE, ESP_OK);
     ++s_output_generation;
     s_stop_requested = true;
     s_cal_cancelled = true;
@@ -967,6 +1046,7 @@ esp_err_t motor_set_inhibit_reason(motor_inhibit_reason_t reason, bool inhibited
     }
     s_inhibited = s_inhibit_reasons != 0U;
     if (inhibited) {
+        bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_NONE, ESP_OK);
         ++s_output_generation;
         s_stop_requested = true;
         s_cal_cancelled = true;
@@ -1039,6 +1119,70 @@ static bool bemf_cal_save_authorized(void *context)
     return current;
 }
 
+/* Each worker sample and exact-duty restore is serialized with normal control.
+ * A late sample cannot resurrect an expired lease even while the bridge coasts. */
+static bool bemf_cal_sample_apply(uint32_t generation, uint32_t duty, uint32_t *fraction)
+{
+    motor_bemf_cal_error_t reason = MOTOR_BEMF_CAL_ERR_NONE;
+    esp_err_t code = ESP_OK;
+    if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
+        reason = MOTOR_BEMF_CAL_ERR_CONTROL;
+        code = ESP_ERR_TIMEOUT;
+    } else {
+        portENTER_CRITICAL(&s_output_mux);
+        bool current = generation == s_output_generation && !s_cal_cancelled && !s_inhibited;
+        bool expired = s_cal_drive_deadline_us != 0 && esp_timer_get_time() >= s_cal_drive_deadline_us;
+        portEXIT_CRITICAL(&s_output_mux);
+        if (current && expired) {
+            reason = MOTOR_BEMF_CAL_ERR_TIMEOUT;
+            code = ESP_ERR_TIMEOUT;
+        } else if (current) {
+            bool fresh = bemf_sample_window();
+            uint32_t rail = rail_snapshot();
+            uint32_t mag = s_bemf1_mv > s_bemf2_mv ? s_bemf1_mv - s_bemf2_mv : s_bemf2_mv - s_bemf1_mv;
+            if (!fresh) {
+                reason = s_bemf_sample_error == ESP_ERR_TIMEOUT ? MOTOR_BEMF_CAL_ERR_CONTROL : MOTOR_BEMF_CAL_ERR_ADC;
+                code = s_bemf_sample_error;
+            } else if (rail <= 300U) {
+                reason = MOTOR_BEMF_CAL_ERR_RAIL;
+                code = ESP_ERR_INVALID_STATE;
+            } else if (fraction != NULL && (mag == 0U || (float)mag > (float)rail * s_bemf_max_fraction)) {
+                reason = MOTOR_BEMF_CAL_ERR_CURVE;
+                code = ESP_ERR_INVALID_ARG;
+            } else {
+                if (fraction != NULL) *fraction = (uint32_t)((uint64_t)mag * BEMF_CAL_FRAC_SCALE / rail);
+                portENTER_CRITICAL(&s_output_mux);
+                int64_t now = esp_timer_get_time();
+                current = generation == s_output_generation && !s_cal_cancelled && !s_inhibited &&
+                          !s_feedback_fault && !s_sample_active;
+                if (current && (s_rail_mv <= 300U || now - s_rail_update_us >= FEEDBACK_FRESH_US)) {
+                    reason = MOTOR_BEMF_CAL_ERR_RAIL;
+                    code = ESP_ERR_INVALID_STATE;
+                } else if (current && s_cal_drive_deadline_us != 0 && now >= s_cal_drive_deadline_us) {
+                    reason = MOTOR_BEMF_CAL_ERR_TIMEOUT;
+                    code = ESP_ERR_TIMEOUT;
+                } else if (current) {
+                    s_cal_drive_deadline_us = now + FEEDBACK_FRESH_US;
+                    s_cal_drive_active = duty != 0U;
+                    pwm_write_locked(duty, true);
+                    s_last_duty = duty;
+                    applied_publish(s_target_speed, true);
+                }
+                portEXIT_CRITICAL(&s_output_mux);
+            }
+        }
+        xSemaphoreGive(s_control_mutex);
+        if (!current) return false;
+    }
+    if (reason != MOTOR_BEMF_CAL_ERR_NONE) {
+        portENTER_CRITICAL(&s_output_mux);
+        if (generation == s_output_generation) bemf_cal_worker_fail_locked(reason, code);
+        portEXIT_CRITICAL(&s_output_mux);
+        return false;
+    }
+    return true;
+}
+
 static void bemf_cal_task(void *arg)
 {
     uint32_t generation = (uint32_t)(uintptr_t)arg;
@@ -1049,13 +1193,18 @@ static void bemf_cal_task(void *arg)
     for (uint8_t i = 0; complete && i < BEMF_CAL_POINTS; ++i) {
         uint8_t spd = BEMF_CAL_SPEEDS[i];
         if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
+            portENTER_CRITICAL(&s_output_mux);
+            if (generation == s_output_generation) bemf_cal_worker_fail_locked(MOTOR_BEMF_CAL_ERR_CONTROL, ESP_ERR_TIMEOUT);
+            portEXIT_CRITICAL(&s_output_mux);
             complete = false;
             break;
         }
-        /* Intentional calibration drive still requires a fresh ADC pair and
-         * fresh adequate rail before every step, never a blind full-speed run. */
-        if (settings_cv_snapshot(s_tick_cv) != ESP_OK || !bemf_sample_window() || rail_snapshot() <= 300U) {
+        esp_err_t snapshot_err = settings_cv_snapshot(s_tick_cv);
+        if (snapshot_err != ESP_OK) {
             xSemaphoreGive(s_control_mutex);
+            portENTER_CRITICAL(&s_output_mux);
+            if (generation == s_output_generation) bemf_cal_worker_fail_locked(MOTOR_BEMF_CAL_ERR_CONTROL, snapshot_err);
+            portEXIT_CRITICAL(&s_output_mux);
             complete = false;
             break;
         }
@@ -1070,49 +1219,36 @@ static void bemf_cal_task(void *arg)
             s_target_forward = true;
         }
         portEXIT_CRITICAL(&s_output_mux);
-        if (!current || !apply_pwm(duty, true, generation)) {
+        if (!current || !bemf_cal_sample_apply(generation, duty, NULL)) {
             complete = false;
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(BEMF_CAL_SETTLE_MS));
+        for (uint32_t elapsed = 0; complete && elapsed < BEMF_CAL_SETTLE_MS; elapsed += BEMF_CAL_SAMPLE_MS) {
+            vTaskDelay(pdMS_TO_TICKS(BEMF_CAL_SAMPLE_MS));
+            complete = bemf_cal_sample_apply(generation, duty, NULL);
+        }
 
         uint32_t sum = 0;
         uint32_t n = 0;
-        for (uint8_t j = 0; j < BEMF_CAL_SAMPLES; ++j) {
-            if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
-                complete = false;
-                break;
-            }
-            portENTER_CRITICAL(&s_output_mux);
-            current = generation == s_output_generation && !s_cal_cancelled && !s_inhibited;
-            portEXIT_CRITICAL(&s_output_mux);
-            bool fresh = current && bemf_sample_window();
-            uint32_t rail = rail_snapshot();
-            fresh = fresh && rail > 300U;
-            uint32_t mag = s_bemf1_mv > s_bemf2_mv ? s_bemf1_mv - s_bemf2_mv : s_bemf2_mv - s_bemf1_mv;
-            if (fresh && mag > 0U && (float)mag <= (float)rail * s_bemf_max_fraction) {
-                /* Average fresh raw magnitudes normalized to EACH sample's
-                 * rail snapshot, never the PID IIR or the final rail value. */
-                sum += (uint32_t)((uint64_t)mag * BEMF_CAL_FRAC_SCALE / rail);
-                ++n;
-            } else {
-                complete = false;
-            }
-            current = complete && apply_pwm(duty, true, generation);
-            xSemaphoreGive(s_control_mutex);
-            if (!current || !complete) {
-                complete = false;
-                break;
-            }
+        for (uint8_t j = 0; complete && j < BEMF_CAL_SAMPLES; ++j) {
+            uint32_t fraction = 0;
+            complete = bemf_cal_sample_apply(generation, duty, &fraction);
+            if (!complete) break;
+            sum += fraction;
+            ++n;
             vTaskDelay(pdMS_TO_TICKS(BEMF_CAL_SAMPLE_MS));
         }
         if (complete && n == BEMF_CAL_SAMPLES) {
             cal.speed[i] = spd;
             cal.frac[i] = (uint16_t)(sum / n);
             portENTER_CRITICAL(&s_output_mux);
-            s_cal_step = (uint8_t)(i + 1U);
-            s_cal_run_speed[i] = spd;
-            s_cal_run_frac[i] = cal.frac[i];
+            if (generation == s_output_generation && !s_cal_cancelled) {
+                s_cal_step = (uint8_t)(i + 1U);
+                s_cal_run_speed[i] = spd;
+                s_cal_run_frac[i] = cal.frac[i];
+            } else {
+                complete = false;
+            }
             portEXIT_CRITICAL(&s_output_mux);
         }
     }
@@ -1122,27 +1258,71 @@ static void bemf_cal_task(void *arg)
     s_target_forward = true;
     s_applied_state = 0x100U;
     s_last_duty = 0;
+    s_cal_drive_active = false;
+    s_cal_drive_deadline_us = 0;
     s_stop_requested = true;
     current = generation == s_output_generation && !s_cal_cancelled && !s_inhibited;
+    if (complete && current) s_cal_result = MOTOR_BEMF_CAL_SAVING;
     portEXIT_CRITICAL(&s_output_mux);
-    if (complete && current && settings_bemf_cal_validate(&cal) &&
-        cal.frac[cal.count - 1U] >= SETTINGS_BEMF_CAL_MIN_END_FRAC &&
-        settings_bemf_cal_save_guarded(&cal, bemf_cal_save_authorized, &generation) == ESP_OK) {
-        if (xSemaphoreTake(s_control_mutex, portMAX_DELAY) == pdTRUE) {
+    bool succeeded = false;
+    motor_bemf_cal_error_t reason = MOTOR_BEMF_CAL_ERR_NONE;
+    esp_err_t code = ESP_OK;
+    uint16_t table[127];
+    if (complete && current) {
+        if (!bemf_cal_prepare_table(&cal, table)) {
+            reason = MOTOR_BEMF_CAL_ERR_CURVE;
+            code = ESP_ERR_INVALID_ARG;
+        } else if ((code = settings_bemf_cal_save_guarded(&cal, bemf_cal_save_authorized, &generation)) != ESP_OK) {
+            reason = MOTOR_BEMF_CAL_ERR_STORAGE;
+        } else if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) == pdTRUE) {
             portENTER_CRITICAL(&s_output_mux);
             current = generation == s_output_generation && !s_cal_cancelled && !s_inhibited;
-            portEXIT_CRITICAL(&s_output_mux);
             if (current) {
-                bemf_cal_apply(&cal);
+                s_cal_count = cal.count;
+                memcpy(s_cal_speed, cal.speed, cal.count * sizeof(*cal.speed));
+                memcpy(s_cal_frac, cal.frac, cal.count * sizeof(*cal.frac));
+                memcpy(s_cal_frac_table, table, sizeof(table));
+                s_cal_valid = true;
+                s_reset_requested = true;
+                succeeded = true;
             }
+            portEXIT_CRITICAL(&s_output_mux);
             xSemaphoreGive(s_control_mutex);
+        } else {
+            reason = MOTOR_BEMF_CAL_ERR_CONTROL;
+            code = ESP_ERR_TIMEOUT;
         }
     }
-    if (xSemaphoreTake(s_control_mutex, portMAX_DELAY) == pdTRUE) {
+    /* Latch a detected save/curve/apply failure before cleanup can wait. A
+     * cancellation that already invalidated this run still takes precedence. */
+    if (reason != MOTOR_BEMF_CAL_ERR_NONE) {
+        portENTER_CRITICAL(&s_output_mux);
+        if (generation == s_output_generation && !s_cal_cancelled) {
+            bemf_cal_worker_fail_locked(reason, code);
+        }
+        portEXIT_CRITICAL(&s_output_mux);
+    }
+    if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) == pdTRUE) {
         control_reset();
         xSemaphoreGive(s_control_mutex);
+    } else {
+        succeeded = false;
+        if (reason == MOTOR_BEMF_CAL_ERR_NONE) {
+            reason = MOTOR_BEMF_CAL_ERR_CONTROL;
+            code = ESP_ERR_TIMEOUT;
+        }
     }
     portENTER_CRITICAL(&s_output_mux);
+    if (generation == s_output_generation && !s_cal_cancelled) {
+        if (reason != MOTOR_BEMF_CAL_ERR_NONE) {
+            bemf_cal_stop_locked(reason, code);
+        } else if (succeeded) {
+            s_cal_result = MOTOR_BEMF_CAL_SUCCEEDED;
+            s_cal_reason = MOTOR_BEMF_CAL_ERR_NONE;
+            s_cal_error_code = ESP_OK;
+        }
+    }
+    if (s_cal_reason != MOTOR_BEMF_CAL_ERR_NONE) s_cal_result = MOTOR_BEMF_CAL_FAILED;
     /* Reservation survives cancellation and saving until the worker exits. */
     s_cal_active = false;
     s_cal_task = NULL;
@@ -1171,12 +1351,21 @@ esp_err_t motor_bemf_cal_start(void)
     s_stop_requested = false;
     s_reset_requested = true;
     s_cal_step = 0;
+    memset(s_cal_run_speed, 0, sizeof(s_cal_run_speed));
+    memset(s_cal_run_frac, 0, sizeof(s_cal_run_frac));
+    if (++s_cal_run_id == 0U) ++s_cal_run_id;
+    s_cal_result = MOTOR_BEMF_CAL_RUNNING;
+    s_cal_reason = MOTOR_BEMF_CAL_ERR_NONE;
+    s_cal_error_code = ESP_OK;
+    s_cal_drive_active = false;
+    s_cal_drive_deadline_us = 0;
     portEXIT_CRITICAL(&s_output_mux);
     xSemaphoreGive(s_control_mutex);
     /* Do not publish a task handle after creation: the worker may already have
      * completed on the other core. The pre-create reservation owns lifecycle. */
     if (xTaskCreate(bemf_cal_task, "bemf_cal", 3072, (void *)(uintptr_t)generation, 6, NULL) != pdPASS) {
         portENTER_CRITICAL(&s_output_mux);
+        bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_START, ESP_ERR_NO_MEM);
         s_cal_active = false;
         portEXIT_CRITICAL(&s_output_mux);
         return ESP_ERR_NO_MEM;
@@ -1195,6 +1384,10 @@ void motor_bemf_cal_info(motor_bemf_cal_info_t *info)
     info->step = s_cal_step;
     info->total = BEMF_CAL_POINTS;
     info->valid = s_cal_valid;
+    info->run_id = s_cal_run_id;
+    info->result = s_cal_result;
+    info->reason = s_cal_reason;
+    info->error_code = s_cal_error_code;
     if (s_cal_active) {
         /* Report the points measured so far while running. */
         uint8_t done = s_cal_step >= BEMF_CAL_POINTS ? BEMF_CAL_POINTS : s_cal_step;
@@ -1233,6 +1426,12 @@ esp_err_t motor_bemf_cal_clear(void)
     esp_err_t err = settings_bemf_cal_clear();
     if (err == ESP_OK) {
         bemf_cal_reload();
+        portENTER_CRITICAL(&s_output_mux);
+        s_cal_result = MOTOR_BEMF_CAL_IDLE;
+        s_cal_reason = MOTOR_BEMF_CAL_ERR_NONE;
+        s_cal_error_code = ESP_OK;
+        s_cal_step = 0;
+        portEXIT_CRITICAL(&s_output_mux);
     }
     xSemaphoreGive(s_control_mutex);
     return err;

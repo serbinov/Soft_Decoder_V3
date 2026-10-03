@@ -22,6 +22,7 @@
 #include "provision.h"
 #include "settings.h"
 #include "sound.h"
+#include "sound_graph_store.h"
 #include "storage.h"
 #include "track.h"
 #include "web.h"
@@ -142,6 +143,7 @@ static void on_dcc_emergency_stop(void)
     motor_emergency_stop();
     track_note_dcc_motor_command();
     web_motion_changed(0, true);
+    sound_request_stop();
     web_control_rails_end();
 }
 
@@ -188,6 +190,9 @@ static void persistence_task(void *arg)
 
 static void safety_step(bool *timeout_active)
 {
+    /* Calibration owns PWM separately from motor_tick. Its drive lease must
+     * expire even if the ordinary motor heartbeat is still healthy. */
+    motor_bemf_cal_watchdog();
     int64_t now = esp_timer_get_time();
     int64_t tick = motor_last_tick_us();
     if (!s_motor_stall_latched && (tick == 0 || now - tick > 200000LL)) {
@@ -196,6 +201,7 @@ static void safety_step(bool *timeout_active)
         s_function_cleanup_requested = true;
         portEXIT_CRITICAL(&s_safety_mux);
         (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+        sound_request_stop();
         dcc_set_control_enabled(false);
         ESP_LOGE(TAG, "Motor task stalled: output inhibited until restart");
     }
@@ -203,6 +209,7 @@ static void safety_step(bool *timeout_active)
     if (timed_out != *timeout_active) {
         (void)motor_set_inhibit_reason(MOTOR_INHIBIT_DCC_TIMEOUT, timed_out);
         if (timed_out) {
+            sound_request_stop();
             portENTER_CRITICAL(&s_safety_mux);
             s_function_cleanup_requested = true;
             portEXIT_CRITICAL(&s_safety_mux);
@@ -210,6 +217,38 @@ static void safety_step(bool *timeout_active)
         }
     }
     *timeout_active = timed_out;
+}
+
+static void restore_sound_graph(void)
+{
+    if (!storage_is_mounted()) { return; }
+    char id[SG_ID_CAP] = { 0 };
+    uint32_t revision = 0;
+    bool selected = false;
+    esp_err_t err = sg_store_selection(id, sizeof(id), &revision, &selected);
+    if (err == ESP_OK && !selected) { return; }
+    char *json = NULL;
+    size_t length = 0;
+    uint32_t actual = 0;
+    sg_graph_t *graph = NULL;
+    sg_diagnostic_t diagnostic = { 0 };
+    if (err == ESP_OK) {
+        graph = malloc(sizeof(*graph));
+        if (graph == NULL) { err = ESP_ERR_NO_MEM; }
+    }
+    if (err == ESP_OK) { err = sg_store_read(id, revision, &json, &length, &actual); }
+    if (err == ESP_OK) { err = sg_parse(json, length, graph, &diagnostic); }
+    if (err == ESP_OK) { err = sg_assets_validate(graph, &diagnostic); }
+    if (err == ESP_OK) { err = sound_graph_install(graph, id, actual); }
+    if (err != ESP_OK) {
+        /* A selected graph is not permission to resurrect legacy F-slot audio.
+         * Keep routing ownership but remain silent until explicit recovery. */
+        sound_graph_fail_closed();
+        ESP_LOGW(TAG, "Selected sound graph unavailable: %s (%s)",
+                 esp_err_to_name(err), diagnostic.message);
+    }
+    free(json);
+    free(graph);
 }
 
 static void safety_task(void *arg)
@@ -241,7 +280,7 @@ static void safety_task(void *arg)
     }
 
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(10));
         (void)esp_task_wdt_reset();
         safety_step(&timeout_active);
     }
@@ -338,6 +377,9 @@ void app_main(void)
         esp_err_t err = sound_init();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Sound init failed: %s", esp_err_to_name(err));
+            sound_graph_fail_closed();
+        } else {
+            restore_sound_graph();
         }
     }
 

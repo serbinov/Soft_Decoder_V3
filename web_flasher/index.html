@@ -71,9 +71,9 @@
 <div class="wrap">
   <h1>Панель прошивки ADDITIPUS</h1>
   <div class="note">
-    Прошивку выполняют <b>скрипты</b> (<code>flash_esptool.ps1</code>, <code>make_ota.ps1</code>).
-    Эта страница — настройка, статус, запуск и статистика. Открывать через
-    <code>start_flasher.bat</code> (Chrome/Edge).
+    Прошивку выполняют <b>скрипты</b> (<code>flash_esptool.ps1</code>, <code>make_ota.ps1</code>),
+    сборка бинарника — <code>build_firmware.bat</code>. Эта страница — настройка, статус,
+    запуск и статистика. Открывать через <code>start_flasher.bat</code> (Chrome/Edge).
   </div>
   <div class="alert" id="alert" style="display:none"></div>
 
@@ -95,6 +95,8 @@
 
     <section>
       <h2>Действия</h2>
+      <button class="big ghost" id="btn_build">Собрать прошивку (build_firmware.bat)</button>
+      <p class="hint">Собирает BIN из исходников и публикует <code>release\flash_download_tool\</code>. Нужен ESP-IDF.</p>
       <button class="big ghost" id="btn_ota">Создать OTA</button>
       <p class="hint">Создаёт <code>release\ADDITIPUS_AURA-X_vX_OTA.bin</code> для обновления через веб-интерфейс декодера.</p>
       <button class="big" id="btn_flash">Прошить</button>
@@ -139,10 +141,10 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const ACT_LABEL = { flash: "Прошить", flash_sounds: "Прошить + звуки", ota: "Создать OTA" };
+const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + звуки", ota: "Создать OTA" };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function setAlert(msg, kind){ const el=$("alert"); if(!msg){el.style.display="none";el.textContent="";return;} el.className="alert "+(kind||""); el.textContent=msg; el.style.display="block"; }
-function setButtons(on){ for(const id of ["btn_ota","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
+function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
 
 /* ---------- colored log ---------- */
 let logBuf="";
@@ -180,7 +182,7 @@ async function refreshStatus(){
     $("st_fw").textContent   = (s.firmware||0)+"/4 файла"+(s.firmwareVersion?(" — v"+s.firmwareVersion):"")+" — "+(s.fwDir||"release\\flash_download_tool");
     $("st_snd").textContent  = (s.sounds||0)+" звук(ов)"+(s.sndDir?(" — "+s.sndDir):" (папка SOUND не найдена)");
     setAlert("", "");
-    if(!s.firmwareReady) setAlert((s.firmwareErrors||[]).join("; ")+" Соберите build_firmware.bat.","warn");
+    if(!s.firmwareReady) setAlert((s.firmwareErrors||[]).join("; ")+" Нажмите «Собрать прошивку».","warn");
     else if(!s.port) setAlert("Плата не найдена — подключите USB.","warn");
   }catch(e){
     setAlert("Нет связи с панелью. Откройте страницу через web_flasher\\start_flasher.bat.","warn");
@@ -267,6 +269,7 @@ async function run(action, label){
 }
 
 $("btn_refresh").addEventListener("click", refreshStatus);
+$("btn_build").addEventListener("click", ()=>run("build", ACT_LABEL.build));
 $("btn_stats_refresh").addEventListener("click", refreshStats);
 $("btn_ota").addEventListener("click", ()=>run("ota", ACT_LABEL.ota));
 $("btn_flash").addEventListener("click", ()=>run("flash", ACT_LABEL.flash));

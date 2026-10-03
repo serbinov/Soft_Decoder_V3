@@ -129,6 +129,11 @@ $script:cur = $null
 function Get-ActionSpec([string]$action) {
     $esptool = Join-Path $repo "firmware\flash_esptool.ps1"
     $standalone = Join-Path $repo "firmware\flash_standalone.ps1"
+    if ($action -eq "build") {
+        # Same path as running build_firmware.bat by hand; it publishes and
+        # verifies release\ itself, so it must not require a ready release.
+        return @{ script = (Join-Path $repo "build_firmware.bat"); args = @("--no-pause"); needsRelease = $false }
+    }
     if ((Get-EsptoolExe) -or (Get-IdfPath)) {
         # Preferred: esptool writes and self-verifies the hash.
         switch ($action) {
@@ -150,8 +155,10 @@ function Start-Action([string]$action) {
     $spec = Get-ActionSpec $action
     if (-not $spec) { return $null }
     if (-not (Test-Path -LiteralPath $spec.script)) { return $null }
-    $releaseInfo = Get-FirmwareRelease -RepoRoot $repo
-    if (-not $releaseInfo.ready) { throw ($releaseInfo.errors -join "; ") }
+    if ($spec.needsRelease -ne $false) {
+        $releaseInfo = Get-FirmwareRelease -RepoRoot $repo
+        if (-not $releaseInfo.ready) { throw ($releaseInfo.errors -join "; ") }
+    }
     if ($script:cur -and -not $script:cur.proc.HasExited) {
         throw "An operation is already running; it will not be interrupted."
     }
@@ -160,8 +167,16 @@ function Start-Action([string]$action) {
     $wrapper = Join-Path $env:TEMP "dcc_panel_$id.ps1"
     $argLine = ($spec.args | ForEach-Object { if ($_ -match '\s') { "'" + ($_ -replace "'", "''") + "'" } else { $_ } }) -join " "
     # Capture every stream (Write-Host included) as UTF-8 into the log file and
-    # propagate the script's exit code to this wrapper.
-    $content = "& '" + ($spec.script -replace "'", "''") + "' $argLine *>&1 | Out-File -LiteralPath '" +
+    # propagate the child's exit code to this wrapper. Batch files go through
+    # cmd.exe so their stderr is merged at the cmd level; otherwise PowerShell
+    # 5.1 wraps each native stderr line in a noisy NativeCommandError record.
+    if ($spec.script -match '\.(bat|cmd)$') {
+        $argLineCmd = ($spec.args | ForEach-Object { if ($_ -match '\s') { '"' + ($_ -replace '"', '""') + '"' } else { $_ } }) -join " "
+        $invoke = "cmd /c `"`"$($spec.script)`" $argLineCmd 2>&1`""
+    } else {
+        $invoke = "& '" + ($spec.script -replace "'", "''") + "' $argLine *>&1"
+    }
+    $content = "$invoke | Out-File -LiteralPath '" +
                ($log -replace "'", "''") + "' -Encoding utf8`r`nexit `$LASTEXITCODE`r`n"
     Set-Content -LiteralPath $wrapper -Value $content -Encoding UTF8
     $p = Start-Process -FilePath "powershell" -PassThru -WindowStyle Hidden -ArgumentList @(
@@ -265,7 +280,7 @@ while ($listener.IsListening) {
                 if (-not $cur.done -and $cur.proc.HasExited) { $cur.done = $true; $cur.code = $cur.proc.ExitCode }
                 if ($cur.done -and -not $cur.recorded) {
                     $cur.recorded = $true
-                    try {
+                    if ($cur.action -ne "build") { try {
                         $d = Get-RunDetails
                         $fin = Get-Date
                         Add-Stat ([ordered]@{
@@ -285,7 +300,7 @@ while ($listener.IsListening) {
                             esptool = $d.esptool
                             idf = $d.idf
                         })
-                    } catch { }
+                    } catch { } }
                 }
                 $text = ""
                 if (Test-Path -LiteralPath $cur.log) {

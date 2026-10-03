@@ -55,6 +55,7 @@ esp_err_t test_netif_dns(esp_netif_t *netif, esp_netif_dns_type_t type, esp_neti
 esp_err_t test_metadata_sync(void);
 int test_atomic_rename(const char *from, const char *to);
 int test_binary_open(const char *path, int flags, int mode);
+esp_err_t httpd_resp_send_chunk(httpd_req_t *req, const char *buf, ssize_t len);
 
 #define MKDIR(p) _mkdir(p)
 #define RMDIR(p) _rmdir(p)
@@ -79,6 +80,8 @@ int web_mock_fclose(FILE *f);
 
 /* Log an upload-progress line on every 4 KB so the branch is cheap to reach. */
 #define WEB_UP_PROGRESS_STEP 4096
+
+#include "../../components/sound/src/sound_graph.c"
 
 #define static
 #include "../../components/web/src/web_util.c"
@@ -984,7 +987,154 @@ static void test_bemf_use_get_post(void)
     reset_resp();
     set_query("");
     TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
     TEST_ASSERT_EQUAL_INT(0, mock_bemf_enabled);
+}
+
+static void test_bemf_status_names_and_previous_curve(void)
+{
+    httpd_req_t req = make_req(0);
+    const char *results[] = {"idle", "running", "saving", "succeeded", "cancelled", "failed"};
+    const char *errors[] = {"none", "adc", "rail", "timeout", "control", "curve", "storage", "start"};
+    mock_bemf_cal_info.run_id = 42;
+    mock_bemf_cal_info.valid = mock_bemf_cal_info.stored = true;
+    mock_bemf_cal_info.count = 1;
+    mock_bemf_cal_info.speed[0] = 5;
+    mock_bemf_cal_info.frac[0] = 512;
+    mock_bemf_cal_info.error_code = ESP_FAIL;
+    for (unsigned i = 0; i < 8; ++i) {
+        reset_resp();
+        mock_bemf_cal_info.result = (motor_bemf_cal_state_t)(i % 6);
+        mock_bemf_cal_info.reason = (motor_bemf_cal_error_t)i;
+        TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_get(&req));
+        char expected[64];
+        snprintf(expected, sizeof(expected), "\"result\":\"%s\"", results[i % 6]);
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, expected));
+        snprintf(expected, sizeof(expected), "\"error\":\"%s\"", errors[i]);
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, expected));
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"runId\":42"));
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"errorCode\":-1"));
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"valid\":true,\"stored\":true"));
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":5,\"frac\":50"));
+    }
+}
+
+static void test_bemf_cancel_bypasses_admission_without_motor_control(void)
+{
+    httpd_req_t req = make_req(0);
+    esp_err_t (*handler)(httpd_req_t *) = bemf_cal_post;
+    req.user_ctx = &handler;
+    s_cfg.control_source = 0;
+    s_actuation_ready = false;
+    s_maintenance_owner = (TaskHandle_t)2;
+    mock_sem_take_fail = 1;
+    mock_motor_speed = 55;
+    mock_bemf_cal_info.active = true;
+    set_query("cancel=1");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_bemf_cal_cancel_calls);
+    TEST_ASSERT_EQUAL_INT(MOTOR_BEMF_CAL_CANCELLED, mock_bemf_cal_info.result);
+    TEST_ASSERT_TRUE(mock_bemf_cal_info.active); /* Worker retains its reservation. */
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_cal_start_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_motor_emergency_stop_calls);
+    TEST_ASSERT_EQUAL_INT(55, mock_motor_speed);
+    TEST_ASSERT_EQUAL_INT(0, s_mutation_count);
+    mock_bemf_cal_info.active = false;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(2, mock_bemf_cal_cancel_calls);
+    TEST_ASSERT_EQUAL_INT(55, mock_motor_speed);
+    req.content_len = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(2, mock_bemf_cal_cancel_calls);
+}
+
+static void test_bemf_action_queries_strict(void)
+{
+    httpd_req_t req = make_req(0);
+    const char *bad[] = {"cancel=", "cancel=2", "cancel=1&start=1", "reset=1&cancel=0",
+        "start=1&start=1", "start=0", "reset=maybe", "cancel=%", "cancel=%00", "other=1"};
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+        set_query(bad[i]); reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+        TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    }
+    memset(mock_query, 'a', WEB_QUERY_MAX);
+    mock_query[WEB_QUERY_MAX] = '\0'; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_cal_cancel_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_cal_start_calls);
+    set_query("cancel=%31"); reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_bemf_cal_cancel_calls);
+}
+
+static void test_bemf_start_reset_still_gated(void)
+{
+    httpd_req_t req = make_req(0);
+    set_query("start=1");
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control busy"));
+    mock_sem_take_fail = 0; s_actuation_ready = false; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "actuation unavailable"));
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_cal_start_calls);
+    s_actuation_ready = true; set_query("reset=1"); reset_resp();
+    mock_bemf_cal_clear_ret = ESP_ERR_INVALID_STATE;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "calibration busy"));
+}
+
+static void test_bemf_mode_durable_before_runtime(void)
+{
+    httpd_req_t req = make_req(0);
+    set_query("enabled=0");
+    mock_bemf_use_save_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false,\"enabled\":true"));
+    TEST_ASSERT_EQUAL_INT(1, mock_bemf_enabled);
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_set_enabled_calls);
+    mock_bemf_use_save_ret = ESP_OK; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_enabled);
+    TEST_ASSERT_EQUAL_INT(1, mock_bemf_set_enabled_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_set_before_save);
+}
+
+static void test_bemf_mode_queries_and_actuation_gates(void)
+{
+    httpd_req_t req = make_req(0);
+    const char *bad[] = {"", "enabled=", "enabled=2", "enabled=1&enabled=0", "enabled=%00", "enabled=%gg"};
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+        set_query(bad[i]); reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+        TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    }
+    set_query("enabled=0"); reset_resp(); mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control busy"));
+    mock_sem_take_fail = 0; s_actuation_ready = false; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "actuation unavailable"));
+    s_actuation_ready = true; s_maintenance_owner = (TaskHandle_t)2; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_use_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "actuation unavailable"));
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_use_save_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_set_enabled_calls);
+    esp_err_t (*handler)(httpd_req_t *) = bemf_use_post;
+    req.user_ctx = &handler;
+    set_query("enabled=invalid"); reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    handler = bemf_cal_post;
+    set_query("cancel=1&reset=1"); reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(0, mock_bemf_cal_cancel_calls);
 }
 
 static void test_motor_get_post(void)
@@ -1683,7 +1833,7 @@ static void test_func_map_get_post(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"map\":["));
 
     const char *bad[] = {
-        "fn=11&a=1&b=0&aux=0&dir=0&speed=0",
+        "fn=29&a=1&b=0&aux=0&dir=0&speed=0",
         "fn=1&a=21&b=0&aux=0&dir=0&speed=0",
         "fn=1&a=1&b=21&aux=0&dir=0&speed=0",
         "fn=1&a=1&b=0&aux=512&dir=0&speed=0",
@@ -3783,10 +3933,342 @@ static void test_combined_ota_transaction_heap_failure_leaves_originals(void)
     TEST_ASSERT_EQUAL_UINT32(0, staged_file_count());
 }
 
+static const char graph_fixture[] =
+    "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"demo\",\"name\":\"Demo\","
+    "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":3,"
+    "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+    "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
+
+static httpd_req_t graph_request(esp_err_t (*handler)(httpd_req_t *), const char *body)
+{
+    httpd_req_t req = make_req(body ? strlen(body) : 0);
+    snprintf(mock_content_type, sizeof(mock_content_type), "application/json; charset=utf-8");
+    if (body) set_body(body, req.content_len);
+    s_route_handlers[63] = handler; req.user_ctx = &s_route_handlers[63];
+    return req;
+}
+
+static void seed_graph(void)
+{
+    snprintf(mock_graph_json, sizeof(mock_graph_json), "%s", graph_fixture);
+    mock_graph_revision = 1;
+    mock_graph_status.active = true;
+    snprintf(mock_graph_status.id, sizeof(mock_graph_status.id), "previous");
+    mock_graph_status.revision = 7;
+    set_query("id=demo&revision=1");
+}
+
+static void test_graph_save_validate_do_not_actuate(void)
+{
+    set_query("id=demo&expectedRevision=0");
+    httpd_req_t req = graph_request(graph_save_post, graph_fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"revision\":1"));
+    TEST_ASSERT_EQUAL_STRING(graph_fixture, mock_graph_json);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    TEST_ASSERT_FALSE(mock_audio_inhibited);
+    TEST_ASSERT_FALSE(mock_sound_inhibited);
+    TEST_ASSERT_EQUAL_UINT32(0, s_mutation_count);
+    reset_resp();
+    req = graph_request(graph_validate_post, graph_fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"valid\":true"));
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    reset_resp();
+    req = graph_request(graph_save_post, graph_fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_revision);
+}
+
+static void test_graph_body_bounds_mime_and_eof(void)
+{
+    httpd_req_t req = graph_request(graph_validate_post, "{}");
+    req.content_len = SG_MAX_JSON + 1U;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("413 Payload Too Large", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_recv_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_httpd_shutdown_calls);
+    reset_resp(); req = graph_request(graph_validate_post, "{}");
+    snprintf(mock_content_type, sizeof(mock_content_type), "text/plain");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("415 Unsupported Media Type", mock_resp_status);
+    reset_resp(); req = graph_request(graph_validate_post, "{}");
+    req.content_len = 3;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+    reset_resp(); req = graph_request(graph_validate_post, "{}");
+    const char nul[] = {'{', 0}; set_body(nul, sizeof(nul));
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+    reset_resp(); req = graph_request(graph_validate_post, "{}");
+    mock_recv_idle_n = 4; mock_recv_idle_val = HTTPD_SOCK_ERR_TIMEOUT;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+    reset_resp(); req = graph_request(graph_validate_post, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+}
+
+static void test_graph_schema_and_allocation_failures(void)
+{
+    httpd_req_t req = graph_request(graph_validate_post, "{\"schemaVersion\":2}");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"valid\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"diagnostics\":[{"));
+    reset_resp(); req = graph_request(graph_validate_post, graph_fixture);
+    mock_alloc_fail_at = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("503 Service Unavailable", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "Connection: close"));
+    reset_resp(); req = graph_request(graph_save_post, "{}"); set_query("id=demo&expectedRevision=4294967296");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+}
+
+static void test_graph_exact_max_body_and_trailing_json(void)
+{
+    char *body = malloc(SG_MAX_JSON + 1U);
+    TEST_ASSERT_NOT_NULL(body);
+    memset(body, ' ', SG_MAX_JSON);
+    memcpy(body, graph_fixture, strlen(graph_fixture)); body[SG_MAX_JSON] = '\0';
+    httpd_req_t req = graph_request(graph_validate_post, body);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"valid\":true"));
+    TEST_ASSERT_EQUAL_UINT32(SG_MAX_JSON, mock_recv_bytes);
+    TEST_ASSERT_EQUAL_UINT32(32, mock_recv_calls);
+    reset_resp(); body[SG_MAX_JSON - 1U] = '{';
+    req = graph_request(graph_validate_post, body);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"valid\":false"));
+    free(body);
+}
+
+static void test_graph_maintenance_and_legacy_mutation_guards(void)
+{
+    httpd_req_t req = graph_request(graph_save_post, graph_fixture);
+    set_query("id=demo&expectedRevision=0");
+    s_maintenance_owner = (TaskHandle_t)2;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("503 Service Unavailable", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_recv_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_save_calls);
+    s_maintenance_owner = NULL; mock_graph_status.active = true;
+    reset_resp(); req = graph_request(sound_upload_post, "123");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    reset_resp(); req = make_req(0);
+    TEST_ASSERT_EQUAL(ESP_OK, sound_scheme_post_handler(&req));
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_sound_scheme_set_calls);
+    s_func_bind_count = 1; s_func_bind[0].target_type = FUNC_TARGET_SOUND;
+    reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, func_map_post_binding(&req, "remove=1&idx=0"));
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(1, s_func_bind_count);
+    reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, func_map_post_binding(&req, "fn=2&type=1&id=0"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_UINT32(2, s_func_bind_count);
+}
+
+static void test_graph_apply_motion_and_transaction_failures(void)
+{
+    seed_graph();
+    httpd_req_t req = graph_request(graph_apply_post, NULL);
+    mock_motor_speed = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    mock_motor_speed = 0; mock_motor_applied_speed = 1; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    mock_motor_applied_speed = 0; mock_graph_prepare_err = ESP_ERR_NO_MEM; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("503 Service Unavailable", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    mock_graph_prepare_err = ESP_OK; mock_graph_assets_err = ESP_ERR_INVALID_ARG; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_commit_calls);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_graph_status.id);
+    mock_graph_assets_err = ESP_OK; mock_graph_select_err = ESP_FAIL; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_commit_calls);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_graph_status.id);
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_EQUAL_UINT32(0, mock_storage_access_leases);
+    mock_graph_select_err = ESP_OK; s_fn[2] = true; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_commit_calls);
+    TEST_ASSERT_EQUAL_STRING("demo", mock_graph_status.id);
+    TEST_ASSERT_TRUE((mock_graph_primed & (1U << 2)) != 0);
+}
+
+static void test_graph_get_roundtrip_assets_and_routes(void)
+{
+    seed_graph(); httpd_req_t req = make_req(0);
+    TEST_ASSERT_EQUAL(ESP_OK, graph_project_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, graph_fixture));
+    reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, graph_capabilities_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"jsonBytes\":131072"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"engine_on\""));
+    reset_resp(); set_query("file=idle.wav"); TEST_ASSERT_EQUAL(ESP_OK, graph_asset_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"crc32\":\"1234abcd\""));
+    reset_resp(); req.uri = "/sound-editor/?v=3";
+    TEST_ASSERT_EQUAL(ESP_OK, sound_editor_get(&req));
+    TEST_ASSERT_EQUAL_STRING("text/html; charset=utf-8", mock_resp_type);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "Content-Encoding: gzip"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "Cache-Control: no-cache"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "nosniff"));
+    reset_resp(); req.uri = "/sound-editor/assets/editor-ab12.js?x=1";
+    TEST_ASSERT_EQUAL(ESP_OK, sound_editor_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "immutable"));
+    reset_resp(); req.uri = "/sound-editor/THIRD_PARTY_NOTICES.txt";
+    TEST_ASSERT_EQUAL(ESP_OK, sound_editor_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_hdr, "no-cache"));
+    reset_resp(); req.uri = "/sound-editor/unknown.js";
+    TEST_ASSERT_EQUAL(ESP_OK, sound_editor_get(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
+    reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, captive_handler(&req, HTTPD_404_NOT_FOUND));
+    TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
+    TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
+    reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
+    TEST_ASSERT_EQUAL_UINT32(63, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(63, mock_route_count);
+}
+
+static void test_graph_legacy_failure_preserves_active(void)
+{
+    seed_graph(); set_query("id=old");
+    snprintf(mock_persisted_legacy, sizeof(mock_persisted_legacy), "previous");
+    httpd_req_t req = graph_request(graph_legacy_post, NULL);
+    mock_legacy_validate_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_legacy_commit_calls);
+    mock_legacy_validate_err = ESP_OK; mock_graph_select_err = ESP_FAIL; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("previous", mock_persisted_legacy);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_legacy_commit_calls);
+    mock_legacy_name_fail_at = mock_legacy_name_calls + 2; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "restoration failed"));
+    TEST_ASSERT_FALSE(s_actuation_ready);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+}
+
+static void test_graph_referenced_uploads_fail_closed(void)
+{
+    mock_graph_referenced = true;
+    uint8_t data[16] = {1}; httpd_req_t req = make_req(sizeof(data));
+    set_body(data, sizeof(data)); set_query("slot=1");
+    snprintf(mock_header_name, sizeof(mock_header_name), "idle.wav");
+    TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, test_rename_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_tracks_save_calls);
+    mock_graph_referenced = false; mock_graph_reference_err = ESP_FAIL;
+    set_body(data, sizeof(data)); reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, test_rename_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_tracks_save_calls);
+    mock_graph_reference_err = ESP_OK; mock_graph_referenced = true;
+    size_t n = build_named_pair(ota_combined, "idle.wav", "brake.wav");
+    req = make_req(n); set_body(ota_combined, n); reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, ota_update_post(&req));
+    TEST_ASSERT_EQUAL_UINT32(0, test_rename_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, test_boot_calls);
+}
+
+static void test_graph_factory_reset_selection_and_failure(void)
+{
+    seed_graph();
+    httpd_req_t req = graph_request(factory_reset_post, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_select_calls);
+    TEST_ASSERT_FALSE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_esp_restart_calls);
+    TEST_ASSERT_EQUAL_STRING(graph_fixture, mock_graph_json);
+    s_maintenance_owner = NULL; s_mutation_count = 0;
+    mock_graph_status.active = true; mock_graph_select_err = ESP_FAIL;
+    mock_esp_restart_calls = 0; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("500 Internal Server Error", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "selector reset failed"));
+    TEST_ASSERT_EQUAL_UINT32(0, mock_esp_restart_calls);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_FALSE(s_actuation_ready);
+    TEST_ASSERT_TRUE(mock_motor_inhibit_reasons != 0);
+    TEST_ASSERT_TRUE(mock_sound_inhibited);
+    TEST_ASSERT_TRUE(mock_audio_inhibited);
+}
+
+static void test_graph_query_values_are_not_truncated_or_ambiguous(void)
+{
+    char value[SG_ID_CAP];
+    uint32_t revision = 0;
+    TEST_ASSERT_TRUE(graph_param("id=valid_graph&revision=1", "id", value, sizeof(value)));
+    TEST_ASSERT_EQUAL_STRING("valid_graph", value);
+    TEST_ASSERT_FALSE(graph_param("id=abcdefghijklmnopqrstuvwxyz0123456789", "id", value, sizeof(value)));
+    TEST_ASSERT_FALSE(graph_param("id=first&id=second", "id", value, sizeof(value)));
+    TEST_ASSERT_FALSE(graph_revision("revision=1&revision=2", "revision", &revision));
+    TEST_ASSERT_FALSE(graph_revision("revision=0000000000000000000001", "revision", &revision));
+    TEST_ASSERT_TRUE(graph_revision("revision=4294967295", "revision", &revision));
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, revision);
+    TEST_ASSERT_FALSE(graph_revision("revision=4294967296", "revision", &revision));
+}
+
+static void test_graph_can_return_to_none_without_legacy_file(void)
+{
+    seed_graph(); set_query("none=1");
+    snprintf(mock_persisted_legacy, sizeof(mock_persisted_legacy), "previous");
+    httpd_req_t req = graph_request(graph_legacy_post, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_FALSE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_legacy_commit_calls);
+    TEST_ASSERT_EQUAL_UINT8(SOUND_SCHEME_NONE, mock_sound_scheme.type);
+    TEST_ASSERT_EQUAL_STRING("", mock_persisted_legacy);
+    TEST_ASSERT_EQUAL_STRING(graph_fixture, mock_graph_json);
+}
+
+static void test_graph_disable_rejects_ambiguity_and_keeps_prior_selection_on_failure(void)
+{
+    seed_graph();
+    httpd_req_t req = graph_request(graph_legacy_post, NULL);
+    set_query("none=1&id=old");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_legacy_commit_calls);
+    reset_resp(); set_query("none=1&none=0");
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+    reset_resp(); set_query("none=1");
+    snprintf(mock_persisted_legacy, sizeof(mock_persisted_legacy), "previous");
+    mock_graph_select_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_persisted_legacy);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_legacy_commit_calls);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     UNITY_BEGIN();
+    RUN_TEST(test_graph_query_values_are_not_truncated_or_ambiguous);
+    RUN_TEST(test_graph_can_return_to_none_without_legacy_file);
+    RUN_TEST(test_graph_disable_rejects_ambiguity_and_keeps_prior_selection_on_failure);
+    RUN_TEST(test_graph_save_validate_do_not_actuate);
+    RUN_TEST(test_graph_body_bounds_mime_and_eof);
+    RUN_TEST(test_graph_schema_and_allocation_failures);
+    RUN_TEST(test_graph_exact_max_body_and_trailing_json);
+    RUN_TEST(test_graph_maintenance_and_legacy_mutation_guards);
+    RUN_TEST(test_graph_apply_motion_and_transaction_failures);
+    RUN_TEST(test_graph_get_roundtrip_assets_and_routes);
+    RUN_TEST(test_graph_legacy_failure_preserves_active);
+    RUN_TEST(test_graph_referenced_uploads_fail_closed);
+    RUN_TEST(test_graph_factory_reset_selection_and_failure);
     RUN_TEST(test_named_upload_preserves_persisted_mds_reference);
     RUN_TEST(test_named_replacement_failure_preserves_original);
     RUN_TEST(test_named_slot_rebind_retains_other_project_assets);
@@ -3867,6 +4349,12 @@ int main(void)
     RUN_TEST(test_bemf_base_get);
     RUN_TEST(test_bemf_cal_post_paths);
     RUN_TEST(test_bemf_use_get_post);
+    RUN_TEST(test_bemf_status_names_and_previous_curve);
+    RUN_TEST(test_bemf_cancel_bypasses_admission_without_motor_control);
+    RUN_TEST(test_bemf_action_queries_strict);
+    RUN_TEST(test_bemf_start_reset_still_gated);
+    RUN_TEST(test_bemf_mode_durable_before_runtime);
+    RUN_TEST(test_bemf_mode_queries_and_actuation_gates);
     RUN_TEST(test_motor_get_post);
     RUN_TEST(test_functions_get);
     RUN_TEST(test_function_post);

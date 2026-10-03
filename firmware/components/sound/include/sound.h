@@ -7,6 +7,32 @@
 
 #include "esp_err.h"
 #include "sound_types.h"
+#include "sound_graph.h"
+
+typedef struct {
+    bool active, engine, armed, fault;
+    char id[SG_ID_CAP];
+    uint32_t revision;
+    uint8_t speed;
+    uint8_t states[SG_MAX_EFFECTS + 1];
+    uint32_t failed_channels;
+} sound_graph_status_t;
+bool sound_graph_active(void);
+/* Invalid persisted graph retains routing ownership without playing anything. */
+void sound_graph_fail_closed(void);
+typedef struct sound_graph_prepared sound_graph_prepared_t;
+esp_err_t sound_graph_prepare(const sg_graph_t *graph, const char *id, uint32_t revision,
+                             sound_graph_prepared_t **out);
+void sound_graph_prepared_free(sound_graph_prepared_t *prepared);
+/* Consumes prepared after durable selector commit; caller holds admission inhibit. */
+void sound_graph_commit(sound_graph_prepared_t *prepared);
+void sound_graph_prime_functions(uint32_t levels);
+/* Caller has validated body/name and durably selected legacy before this no-fail swap. */
+void sound_legacy_commit(const sound_scheme_t *scheme, const char *name);
+esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t revision);
+void sound_graph_deactivate(void);
+void sound_graph_status_get(sound_graph_status_t *out);
+bool sound_graph_file_used(const char *file);
 
 /* Sound-scheme engine (SOUND_ENGINE_ROADMAP.md R3). Owns the active scheme,
  * the engine state machine, the Init/Loop/End table sequencer and the playback
@@ -17,6 +43,8 @@ esp_err_t sound_init(void);
 
 /* Emergency stop: silence every sound and reset the engine state. */
 void sound_stop_all(void);
+/* Nonblocking safety-path admission close; sound task performs owned cleanup. */
+void sound_request_stop(void);
 /* Reset/stop old runtime and reject new runtime requests while inhibited.
  * Release does not resurrect engine/keys; sync-motion needs a new speed edge.
  * Pair with audio inhibition and bounded audio_is_quiescent() before format. */

@@ -6,7 +6,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File test\coverage.ps1
 #   powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_settings
-param([string]$Only = "", [switch]$Sanitize)
+param([string[]]$Only = @(), [switch]$Sanitize)
 
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
@@ -54,10 +54,16 @@ $inc = @(
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
             "test_track_manifest", "test_storage", "test_track_recover", "test_provision",
-            "test_selftest", "test_web", "test_sound", "test_main")
-if ($Only) { $suites = @($Only) }
+            "test_selftest", "test_web", "test_sound", "test_sound_graph", "test_sound_graph_store", "test_main")
+if ($Only.Count -gt 0) {
+    foreach ($name in $Only) {
+        if ($name -notin $suites) { throw "Unknown test suite: $name" }
+    }
+    $suites = $Only
+}
 
 $lineCov = @{}
+$failed = 0
 
 foreach ($suite in $suites) {
     $dir = Join-Path $root "test\$suite"
@@ -72,8 +78,11 @@ foreach ($suite in $suites) {
     $extra = @()
     if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
     & $cc $inc $names "$unitySrc\unity.c" $extra --coverage -w -o $exe *> $null
-    if (-not (Test-Path $exe)) { Pop-Location; Write-Host "BUILD FAILED: $suite"; continue }
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) {
+        Pop-Location; Write-Host "BUILD FAILED: $suite"; $failed++; continue
+    }
     & $exe *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "TESTS FAILED: $suite"; $failed++ }
     $notes = @(Get-ChildItem $work -Filter "*.gcno" | Where-Object { $_.Name -notlike "*unity*" })
     if ($notes.Count -eq 0) { Pop-Location; Write-Host "no gcov notes: $suite"; continue }
     & $gcov -b ($notes | ForEach-Object { $_.Name }) *> $null
@@ -123,3 +132,7 @@ foreach ($src in ($lineCov.Keys | Sort-Object)) {
 $tp = if ($tt) { 100.0 * $tc / $tt } else { 0 }
 Write-Host ""
 "TOTAL (first-party): {0:N1}%  ({1}/{2})" -f $tp, $tc, $tt
+if ($failed -gt 0 -or $tt -eq 0) {
+    Write-Host "Coverage failed: $failed failing suite(s), $tt instrumented first-party lines."
+    exit 1
+}

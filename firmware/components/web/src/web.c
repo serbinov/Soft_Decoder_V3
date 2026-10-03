@@ -1,6 +1,8 @@
 #include "web.h"
 #include "web_html.h"
 #include "web_util.h"
+#include "sound_editor_assets.h"
+#include "sound_graph_store.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -322,6 +324,7 @@ static esp_err_t close_rejected_body(httpd_req_t *req, esp_err_t response)
 {
     /* IDF otherwise purges an unread body synchronously after the handler. */
     if (req->content_len != 0U) {
+        httpd_resp_set_hdr(req, "Connection", "close");
         int fd = httpd_req_to_sockfd(req);
         if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
     }
@@ -417,12 +420,25 @@ esp_err_t web_set_actuation_ready(bool ready)
     return err;
 }
 
-static esp_err_t maintenance_reserve(void)
+static bool graph_motor_stopped(void)
+{
+    uint8_t target = 0, applied = 0;
+    motor_get_status(&target, NULL);
+    motor_get_applied_speed(&applied, NULL);
+    return target == 0U && applied == 0U;
+}
+
+static esp_err_t maintenance_reserve_checked(bool stopped)
 {
     esp_err_t init_err = control_mutex_init();
     if (init_err != ESP_OK) return init_err;
     if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
     if (web_maintenance_active()) {
+        xSemaphoreGive(s_control_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* Check before inhibit can erase the target/applied-motion evidence. */
+    if (stopped && (!actuation_ready() || !graph_motor_stopped())) {
         xSemaphoreGive(s_control_mutex);
         return ESP_ERR_INVALID_STATE;
     }
@@ -448,6 +464,11 @@ static esp_err_t maintenance_reserve(void)
         web_maintenance_end();
     }
     return err;
+}
+
+static esp_err_t maintenance_reserve(void)
+{
+    return maintenance_reserve_checked(false);
 }
 
 static esp_err_t maintenance_quiesce(bool exclusive_fs)
@@ -802,7 +823,7 @@ bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
                       uint8_t dir, uint8_t speed)
 {
     if (fn >= SETTINGS_FUNC_MAP_COUNT || slot_a > SETTINGS_MAX_TRACKS ||
-        slot_b > SETTINGS_MAX_TRACKS || web_maintenance_active()) {
+        slot_b > SETTINGS_MAX_TRACKS || web_maintenance_active() || sound_graph_active()) {
         return false;
     }
     settings_func_map_t next[SETTINGS_FUNC_MAP_COUNT];
@@ -1155,6 +1176,10 @@ static esp_err_t wifi_start(const settings_config_t *cfg)
 static esp_err_t captive_handler(httpd_req_t *req, httpd_err_code_t err)
 {
     (void)err;
+    if (strncmp(req->uri, "/sound-editor", 13) == 0 ||
+        strncmp(req->uri, "/api/", 5) == 0) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
     /* Captive portal: redirect every unknown path to the page so the phone's
      * connectivity probe opens it automatically (the DNS hijack routes those
      * probes here). Targets the configured AP address. */
@@ -1226,6 +1251,332 @@ static void start_dns_hijack(void)
 static esp_err_t root_handler(httpd_req_t *req)
 {
     return send_html(req, s_page_html);
+}
+
+static esp_err_t sound_editor_get(httpd_req_t *req)
+{
+    size_t len = strcspn(req->uri, "?");
+    const char *path = req->uri;
+    if ((len == 13U && strncmp(path, "/sound-editor", len) == 0) ||
+        (len == 14U && strncmp(path, "/sound-editor/", len) == 0)) {
+        path = "/sound-editor/index.html";
+        len = strlen(path);
+    }
+    for (size_t i = 0; i < sound_editor_asset_count; ++i) {
+        const sound_editor_asset_t *a = &sound_editor_assets[i];
+        if (strlen(a->path) != len || strncmp(path, a->path, len) != 0) continue;
+        httpd_resp_set_type(req, a->mime);
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+        httpd_resp_set_hdr(req, "Cache-Control", a->immutable ? "public, max-age=31536000, immutable" : "no-cache");
+        return httpd_resp_send(req, (const char *)a->data, a->length);
+    }
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "asset not found");
+}
+
+static esp_err_t graph_error(httpd_req_t *req, const char *status, const char *message)
+{
+    char escaped[512], json[576];
+    json_escape(message, escaped, sizeof(escaped));
+    snprintf(json, sizeof(json), "{\"ok\":false,\"error\":\"%s\"}", escaped);
+    httpd_resp_set_status(req, status);
+    if (req->content_len != 0U) httpd_resp_set_hdr(req, "Connection", "close");
+    return send_json(req, json);
+}
+
+static esp_err_t graph_diagnostic_response(httpd_req_t *req, const sg_diagnostic_t *diag, bool validation)
+{
+    char message[768], code[192], id[SG_ID_CAP * 6], field[192], result[1600];
+    json_escape(diag->message, message, sizeof(message));
+    json_escape(diag->code[0] ? diag->code : "validation", code, sizeof(code));
+    json_escape(diag->id, id, sizeof(id));
+    json_escape(diag->field, field, sizeof(field));
+    snprintf(result, sizeof(result), "{\"ok\":%s,%s\"diagnostics\":[{\"code\":\"%s\",\"id\":\"%s\",\"field\":\"%s\",\"message\":\"%s\",\"offset\":%lu}]}",
+             validation ? "true" : "false", validation ? "\"valid\":false," : "\"error\":\"project validation failed\",", code, id, field, message, (unsigned long)diag->offset);
+    if (!validation) httpd_resp_set_status(req, "400 Bad Request");
+    return send_json(req, result);
+}
+
+static esp_err_t graph_result_error(httpd_req_t *req, esp_err_t err)
+{
+    const char *status = err == ESP_ERR_INVALID_ARG ? "400 Bad Request" :
+        err == ESP_ERR_NOT_FOUND ? "404 Not Found" :
+        err == ESP_ERR_INVALID_STATE ? "409 Conflict" :
+        (err == ESP_ERR_NO_MEM || err == ESP_ERR_TIMEOUT) ? "503 Service Unavailable" : "500 Internal Server Error";
+    return graph_error(req, status, esp_err_to_name(err));
+}
+
+static bool graph_query(httpd_req_t *req, char *query, size_t cap)
+{
+    esp_err_t err = httpd_req_get_url_query_str(req, query, cap);
+    return (err == ESP_OK || err == ESP_ERR_NOT_FOUND) && query_encoding_valid(query);
+}
+
+static bool graph_param(const char *query, const char *key, char *out, size_t capacity)
+{
+    char decoded[WEB_QUERY_MAX];
+    size_t matches = 0, key_length = strlen(key);
+    for (const char *p = query; p != NULL && *p != '\0'; p = strchr(p, '&')) {
+        if (*p == '&') ++p;
+        if (strncmp(p, key, key_length) == 0 && p[key_length] == '=') ++matches;
+    }
+    if (matches != 1U || !parse_query(query, key, decoded, sizeof(decoded)) ||
+        strlen(decoded) >= capacity) return false;
+    memcpy(out, decoded, strlen(decoded) + 1U);
+    return true;
+}
+
+static bool graph_revision(const char *query, const char *key, uint32_t *revision)
+{
+    char value[16];
+    if (!graph_param(query, key, value, sizeof(value)) || value[0] == '\0') return false;
+    uint32_t n = 0;
+    for (const char *p = value; *p; ++p) {
+        if (*p < '0' || *p > '9' || n > (UINT32_MAX - (uint32_t)(*p - '0')) / 10U) return false;
+        n = n * 10U + (uint32_t)(*p - '0');
+    }
+    *revision = n;
+    return true;
+}
+
+static esp_err_t graph_capabilities_get(httpd_req_t *req)
+{
+    return send_json(req, "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,\"limits\":{\"states\":57,\"soundStates\":31,\"transitions\":128,\"effects\":24,\"assets\":31,\"jsonBytes\":131072},\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\",\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\",\"sample_done\"]}");
+}
+
+static esp_err_t graph_projects_get(httpd_req_t *req)
+{
+    sg_store_descriptor_t *items = calloc(SG_STORE_MAX_PROJECTS, sizeof(*items));
+    char *json = malloc(32768U);
+    if (items == NULL || json == NULL) { free(items); free(json); return graph_result_error(req, ESP_ERR_NO_MEM); }
+    size_t count = 0, used = 0;
+    esp_err_t err = sg_store_list(items, SG_STORE_MAX_PROJECTS, &count);
+    if (err == ESP_OK) {
+        buf_appendf(json, 32768U, &used, "{\"ok\":true,\"projects\":[");
+        for (size_t i = 0; i < count; ++i) {
+            char name[SG_NAME_CAP * 6], id[SG_ID_CAP * 6];
+            json_escape(items[i].name, name, sizeof(name));
+            json_escape(items[i].id, id, sizeof(id));
+            buf_appendf(json, 32768U, &used, "%s{\"id\":\"%s\",\"name\":\"%s\",\"revision\":%lu}", i ? "," : "", id, name, (unsigned long)items[i].revision);
+        }
+        buf_appendf(json, 32768U, &used, "]}");
+        err = send_json(req, json);
+    } else err = graph_result_error(req, err);
+    free(items); free(json);
+    return err;
+}
+
+static esp_err_t graph_project_get(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = {0}, id[SG_ID_CAP];
+    uint32_t revision;
+    if (!graph_query(req, query, sizeof(query)) || !graph_param(query, "id", id, sizeof(id)) || !sg_id_valid(id) ||
+        !graph_revision(query, "revision", &revision)) return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    char *json = NULL; size_t len = 0; uint32_t actual = 0;
+    esp_err_t err = sg_store_read(id, revision, &json, &len, &actual);
+    if (err != ESP_OK) return graph_result_error(req, err);
+    char prefix[96];
+    snprintf(prefix, sizeof(prefix), "{\"ok\":true,\"revision\":%lu,\"project\":", (unsigned long)actual);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    err = httpd_resp_send_chunk(req, prefix, HTTPD_RESP_USE_STRLEN);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, json, len);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, "}", 1);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, NULL, 0);
+    free(json);
+    return err;
+}
+
+static esp_err_t graph_state_get(httpd_req_t *req)
+{
+    sound_graph_status_t st = {0};
+    sound_graph_status_get(&st);
+    char json[512], id[SG_ID_CAP * 6]; size_t used = 0;
+    json_escape(st.id, id, sizeof(id));
+    buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"active\":%s,\"id\":\"%s\",\"revision\":%lu,\"engine\":%s,\"armed\":%s,\"failedChannels\":%lu,\"states\":[", st.active ? "true" : "false", id, (unsigned long)st.revision, st.engine ? "true" : "false", st.armed ? "true" : "false", (unsigned long)st.failed_channels);
+    for (size_t i = 0; i < SG_MAX_EFFECTS + 1; ++i) buf_appendf(json, sizeof(json), &used, "%s%u", i ? "," : "", st.states[i]);
+    buf_appendf(json, sizeof(json), &used, "],\"speed\":%u,\"fault\":%s}", (unsigned)st.speed, st.fault ? "true" : "false");
+    return send_json(req, json);
+}
+
+static esp_err_t graph_asset_get(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = {0}, file[SG_FILE_CAP];
+    if (!graph_query(req, query, sizeof(query)) || !graph_param(query, "file", file, sizeof(file)) || !sg_filename_valid(file)) return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    sg_asset_t asset; sg_diagnostic_t diag = {0};
+    esp_err_t err = sg_asset_inspect(file, &asset, &diag);
+    if (err != ESP_OK) return graph_result_error(req, err);
+    char json[512];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"asset\":{\"file\":\"%s\",\"size\":%lu,\"crc32\":\"%s\",\"sampleRate\":%lu,\"channels\":%lu,\"bits\":%lu,\"durationMs\":%lu}}", asset.file, (unsigned long)asset.size, asset.crc32, (unsigned long)asset.sampleRate, (unsigned long)asset.channels, (unsigned long)asset.bits, (unsigned long)asset.durationMs);
+    return send_json(req, json);
+}
+
+static esp_err_t graph_receive(httpd_req_t *req, char **out)
+{
+    *out = NULL;
+    if (req->content_len == 0U || req->content_len > SG_MAX_JSON) {
+        return close_rejected_body(req, graph_error(req, req->content_len > SG_MAX_JSON ? "413 Payload Too Large" : "400 Bad Request", "invalid JSON body size"));
+    }
+    char mime[96];
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", mime, sizeof(mime)) != ESP_OK ||
+        strncasecmp(mime, "application/json", 16) != 0 || (mime[16] != '\0' && mime[16] != ';' && !isspace((unsigned char)mime[16]))) {
+        return close_rejected_body(req, graph_error(req, "415 Unsupported Media Type", "application/json required"));
+    }
+    const char *parameters = mime + 16;
+    while (isspace((unsigned char)*parameters)) ++parameters;
+    if (*parameters != '\0' && *parameters != ';')
+        return close_rejected_body(req, graph_error(req, "415 Unsupported Media Type", "invalid JSON media type"));
+    char *json = malloc(req->content_len + 1U);
+    if (json == NULL) return close_rejected_body(req, graph_result_error(req, ESP_ERR_NO_MEM));
+    size_t got = 0; unsigned retries = 0;
+    int64_t deadline = esp_timer_get_time() + 15000000;
+    while (got < req->content_len && esp_timer_get_time() < deadline) {
+        size_t wanted = req->content_len - got;
+        if (wanted > 4096U) wanted = 4096U;
+        int n = httpd_req_recv(req, json + got, wanted);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT && ++retries <= 3U) continue;
+        if (n <= 0 || (size_t)n > wanted) break;
+        got += (size_t)n;
+    }
+    if (got != req->content_len || esp_timer_get_time() >= deadline || memchr(json, '\0', got) != NULL) {
+        free(json);
+        return close_rejected_body(req, graph_error(req, "400 Bad Request", "incomplete or NUL JSON body"));
+    }
+    json[got] = '\0'; *out = json;
+    return ESP_OK;
+}
+
+static esp_err_t graph_validate_post(httpd_req_t *req)
+{
+    char *json = NULL;
+    esp_err_t response = graph_receive(req, &json);
+    if (json == NULL) return response;
+    sg_graph_t *graph = malloc(sizeof(*graph)); sg_diagnostic_t diag = {0};
+    if (graph == NULL) { free(json); return graph_result_error(req, ESP_ERR_NO_MEM); }
+    esp_err_t err = sg_parse(json, req->content_len, graph, &diag);
+    free(json); free(graph);
+    if (err == ESP_ERR_NO_MEM) return graph_result_error(req, err);
+    if (err == ESP_OK) return send_json(req, "{\"ok\":true,\"valid\":true,\"diagnostics\":[]}");
+    return graph_diagnostic_response(req, &diag, true);
+}
+
+static esp_err_t graph_save_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = {0}, id[SG_ID_CAP]; uint32_t expected;
+    if (!graph_query(req, query, sizeof(query)) || !graph_param(query, "id", id, sizeof(id)) || !sg_id_valid(id) || !graph_revision(query, "expectedRevision", &expected)) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
+    char *json = NULL;
+    esp_err_t response = graph_receive(req, &json);
+    if (json == NULL) return response;
+    uint32_t revision = 0; sg_diagnostic_t diag = {0};
+    esp_err_t err = sg_store_save(id, expected, json, req->content_len, &revision, &diag);
+    free(json);
+    if (err == ESP_ERR_INVALID_ARG && diag.message[0]) return graph_diagnostic_response(req, &diag, false);
+    if (err != ESP_OK) return graph_result_error(req, err);
+    char result[64];
+    snprintf(result, sizeof(result), "{\"ok\":true,\"revision\":%lu}", (unsigned long)revision);
+    return send_json(req, result);
+}
+
+static esp_err_t graph_apply_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = {0}, id[SG_ID_CAP]; uint32_t revision;
+    if (req->content_len != 0U) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
+    if (!graph_query(req, query, sizeof(query)) || !graph_param(query, "id", id, sizeof(id)) || !sg_id_valid(id) || !graph_revision(query, "revision", &revision) || revision == 0U) return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    if (!graph_motor_stopped()) return graph_error(req, "409 Conflict", "motor must be stopped");
+    char *json = NULL; size_t len = 0; uint32_t actual = 0;
+    sg_graph_t *graph = malloc(sizeof(*graph)); sg_diagnostic_t diag = {0};
+    if (graph == NULL) return graph_result_error(req, ESP_ERR_NO_MEM);
+    sound_graph_prepared_t *prepared = NULL;
+    esp_err_t err = sg_store_read(id, revision, &json, &len, &actual);
+    if (err == ESP_OK) err = sg_parse(json, len, graph, &diag);
+    free(json);
+    /* Reserve after preparation so validation/OOM never disturbs live audio. */
+    if (err == ESP_OK) err = sound_graph_prepare(graph, id, actual, &prepared);
+    bool maintenance = false, lease = false;
+    if (err == ESP_OK) {
+        err = maintenance_reserve_checked(true);
+        maintenance = err == ESP_OK;
+    }
+    if (err == ESP_OK && !graph_motor_stopped()) err = ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) err = maintenance_quiesce(false);
+    if (err == ESP_OK) { err = storage_access_begin(); lease = err == ESP_OK; }
+    if (err == ESP_OK) err = sg_assets_validate(graph, &diag);
+    if (err == ESP_OK) err = sg_store_select(id, actual);
+    if (err == ESP_OK) {
+        sound_graph_commit(prepared); prepared = NULL;
+        uint32_t levels = 0;
+        if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+        for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) if (s_fn[fn]) levels |= 1UL << fn;
+        sound_graph_prime_functions(levels);
+        if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+    }
+    sound_graph_prepared_free(prepared); free(graph);
+    if (lease) storage_access_end();
+    if (maintenance) web_maintenance_end();
+    if (err != ESP_OK && diag.message[0] && err != ESP_ERR_NO_MEM && err != ESP_ERR_TIMEOUT) return graph_diagnostic_response(req, &diag, false);
+    if (err != ESP_OK) return graph_result_error(req, err);
+    return send_json(req, "{\"ok\":true}");
+}
+
+static esp_err_t graph_legacy_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = {0}, name[SOUND_FILE_MAX] = {0}, previous[SOUND_FILE_MAX], path[192];
+    if (req->content_len != 0U) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
+    if (!graph_query(req, query, sizeof(query))) return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    bool disable = query_has_key(query, "none");
+    if (disable) {
+        char flag[4];
+        if (!graph_param(query, "none", flag, sizeof(flag)) || strcmp(flag, "1") != 0 || query_has_key(query, "id"))
+            return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    } else if (!graph_param(query, "id", name, sizeof(name)) || !sound_store_name_ok(name)) {
+        return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    }
+    if (!graph_motor_stopped()) return graph_error(req, "409 Conflict", "motor must be stopped");
+    sound_scheme_t *scheme = malloc(sizeof(*scheme));
+    if (scheme == NULL) return graph_result_error(req, ESP_ERR_NO_MEM);
+    esp_err_t err = storage_access_begin();
+    bool lease = err == ESP_OK, maintenance = false;
+    if (err == ESP_OK && !disable) err = sound_store_path(path, sizeof(path), name);
+    if (err == ESP_OK) err = disable ? sound_store_default(scheme) : sound_store_load(path, scheme);
+    if (err == ESP_OK) err = sound_store_validate(scheme);
+    if (lease) { storage_access_end(); lease = false; }
+    if (err != ESP_OK) {
+        free(scheme);
+        return graph_error(req, err == ESP_ERR_NOT_FOUND ? "404 Not Found" :
+            (err == ESP_ERR_INVALID_STATE || err == ESP_ERR_TIMEOUT) ? "503 Service Unavailable" : "400 Bad Request",
+            "legacy project unavailable or invalid; selection unchanged");
+    }
+    if (err == ESP_OK) { err = maintenance_reserve_checked(true); maintenance = err == ESP_OK; }
+    if (err == ESP_OK && !graph_motor_stopped()) err = ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) err = maintenance_quiesce(false);
+    if (err == ESP_OK) { err = storage_access_begin(); lease = err == ESP_OK; }
+    /* Reload after admission closes: an earlier MDS read is not a reservation. */
+    if (err == ESP_OK) err = disable ? sound_store_default(scheme) : sound_store_load(path, scheme);
+    if (err == ESP_OK) err = sound_store_validate(scheme);
+    if (err == ESP_OK) err = settings_active_scheme_get(previous, sizeof(previous));
+    bool name_attempted = false, restore_failed = false;
+    if (err == ESP_OK) {
+        name_attempted = true;
+        err = settings_active_scheme_set(name);
+    }
+    if (err == ESP_OK) err = sg_store_select_legacy();
+    if (err == ESP_OK) sound_legacy_commit(scheme, name);
+    else if (name_attempted) {
+        restore_failed = settings_active_scheme_set(previous) != ESP_OK;
+        if (restore_failed) {
+            portENTER_CRITICAL(&s_control_state_mux);
+            s_actuation_ready = false;
+            portEXIT_CRITICAL(&s_control_state_mux);
+        }
+    }
+    free(scheme);
+    if (lease) storage_access_end();
+    if (maintenance) web_maintenance_end();
+    if (restore_failed) return graph_error(req, "500 Internal Server Error", "legacy selection failed; previous name restoration failed; actuation disabled");
+    if (err != ESP_OK) return graph_error(req,
+        (err == ESP_ERR_NO_MEM || err == ESP_ERR_TIMEOUT) ? "503 Service Unavailable" : err == ESP_ERR_INVALID_STATE ? "409 Conflict" : "500 Internal Server Error",
+        "legacy switch failed; previous runtime and selector retained");
+    return send_json(req, "{\"ok\":true}");
 }
 
 static esp_err_t control_source_get(httpd_req_t *req)
@@ -1326,6 +1677,54 @@ static esp_err_t mode_post(httpd_req_t *req)
     return send_json(req, json);
 }
 
+static const char *bemf_result_name(motor_bemf_cal_state_t result)
+{
+    switch (result) {
+    case MOTOR_BEMF_CAL_IDLE: return "idle";
+    case MOTOR_BEMF_CAL_RUNNING: return "running";
+    case MOTOR_BEMF_CAL_SAVING: return "saving";
+    case MOTOR_BEMF_CAL_SUCCEEDED: return "succeeded";
+    case MOTOR_BEMF_CAL_CANCELLED: return "cancelled";
+    case MOTOR_BEMF_CAL_FAILED: return "failed";
+    default: return "failed";
+    }
+}
+
+static const char *bemf_error_name(motor_bemf_cal_error_t reason)
+{
+    switch (reason) {
+    case MOTOR_BEMF_CAL_ERR_NONE: return "none";
+    case MOTOR_BEMF_CAL_ERR_ADC: return "adc";
+    case MOTOR_BEMF_CAL_ERR_RAIL: return "rail";
+    case MOTOR_BEMF_CAL_ERR_TIMEOUT: return "timeout";
+    case MOTOR_BEMF_CAL_ERR_CONTROL: return "control";
+    case MOTOR_BEMF_CAL_ERR_CURVE: return "curve";
+    case MOTOR_BEMF_CAL_ERR_STORAGE: return "storage";
+    case MOTOR_BEMF_CAL_ERR_START: return "start";
+    default: return "start";
+    }
+}
+
+/* These actions accept one unambiguous boolean, never duplicate/extra keys. */
+static bool bemf_bool_query(const char *query, const char *key, bool *value)
+{
+    size_t n = strlen(key);
+    if (strncmp(query, key, n) != 0 || query[n] != '=' || strchr(query, '&') != NULL ||
+        !query_encoding_valid(query) || !query_bool_valid(query, key)) return false;
+    *value = parse_bool(query, key, false);
+    return true;
+}
+
+static int bemf_cal_action(const char *query)
+{
+    bool value = false;
+    if (query[0] == '\0') return 1; /* Existing bodyless callers start. */
+    if (bemf_bool_query(query, "start", &value) && value) return 1;
+    if (bemf_bool_query(query, "reset", &value) && value) return 2;
+    if (bemf_bool_query(query, "cancel", &value) && value) return 3;
+    return 0;
+}
+
 static esp_err_t bemf_cal_get(httpd_req_t *req)
 {
     motor_bemf_cal_info_t info;
@@ -1334,12 +1733,15 @@ static esp_err_t bemf_cal_get(httpd_req_t *req)
     size_t used = 0;
     buf_appendf(json, sizeof(json), &used,
                 "{\"ok\":true,\"active\":%s,\"progress\":%u,\"total\":%u,"
-                "\"valid\":%s,\"stored\":%s,\"use\":%s,\"points\":[",
+                "\"valid\":%s,\"stored\":%s,\"use\":%s,"
+                "\"runId\":%lu,\"result\":\"%s\",\"error\":\"%s\",\"errorCode\":%d,\"points\":[",
                 info.active ? "true" : "false",
                 (unsigned)info.step, (unsigned)info.total,
                 info.valid ? "true" : "false",
                 info.stored ? "true" : "false",
-                motor_get_bemf_enabled() ? "true" : "false");
+                motor_get_bemf_enabled() ? "true" : "false",
+                (unsigned long)info.run_id, bemf_result_name(info.result),
+                bemf_error_name(info.reason), (int)info.error_code);
     for (uint8_t i = 0; i < info.count; ++i) {
         uint16_t pct = (uint16_t)((info.frac[i] * 100U) / 1024U);
         buf_appendf(json, sizeof(json), &used,
@@ -1373,16 +1775,24 @@ static esp_err_t bemf_base_get(httpd_req_t *req)
 static esp_err_t bemf_cal_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    if (!query_bool_valid(query, "reset"))
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid reset");
+    esp_err_t query_err = httpd_req_get_url_query_str(req, query, sizeof(query));
+    int action = bemf_cal_action(query);
+    if (httpd_req_get_url_query_len(req) >= sizeof(query) ||
+        (query_err != ESP_OK && query_err != ESP_ERR_NOT_FOUND) ||
+        !query_encoding_valid(query) || action == 0 || req->content_len != 0U)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid calibration action");
+    if (action == 3) {
+        esp_err_t err = motor_bemf_cal_cancel();
+        return send_json(req, err == ESP_OK ? "{\"ok\":true}" :
+                         "{\"ok\":false,\"error\":\"cancel failed\"}");
+    }
     if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE)
         return send_json(req, "{\"ok\":false,\"error\":\"control busy\"}");
     if (!actuation_ready() || web_maintenance_active()) {
         xSemaphoreGive(s_control_mutex);
         return send_json(req, "{\"ok\":false,\"error\":\"actuation unavailable\"}");
     }
-    if (parse_bool(query, "reset", false)) {
+    if (action == 2) {
         esp_err_t err = motor_bemf_cal_clear();
         xSemaphoreGive(s_control_mutex);
         return send_json(req, err == ESP_OK
@@ -1411,14 +1821,26 @@ static esp_err_t bemf_use_get(httpd_req_t *req)
 static esp_err_t bemf_use_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    bool enabled = parse_bool(query, "enabled", motor_get_bemf_enabled());
-    motor_set_bemf_enabled(enabled);
-    (void)settings_bemf_use_save(enabled);
-    web_log_event("BEMF", "регулятор %s", enabled ? "включён" : "выключен, только ШИМ");
-    char json[48];
-    snprintf(json, sizeof(json), "{\"ok\":true,\"enabled\":%s}",
-             enabled ? "true" : "false");
+    esp_err_t query_err = httpd_req_get_url_query_str(req, query, sizeof(query));
+    bool enabled;
+    if (httpd_req_get_url_query_len(req) >= sizeof(query) || query_err != ESP_OK ||
+        !bemf_bool_query(query, "enabled", &enabled))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid enabled");
+    const char *error = NULL;
+    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        error = "control busy";
+    } else {
+        if (!actuation_ready() || web_maintenance_active()) error = "actuation unavailable";
+        else if (settings_bemf_use_save(enabled) != ESP_OK) error = "storage failed";
+        else motor_set_bemf_enabled(enabled);
+        enabled = motor_get_bemf_enabled();
+        xSemaphoreGive(s_control_mutex);
+    }
+    if (error != NULL) enabled = motor_get_bemf_enabled();
+    else web_log_event("BEMF", "регулятор %s", enabled ? "включён" : "выключен, только ШИМ");
+    char json[128];
+    snprintf(json, sizeof(json), "{\"ok\":%s,\"enabled\":%s,\"error\":\"%s\"}",
+             error == NULL ? "true" : "false", enabled ? "true" : "false", error == NULL ? "" : error);
     return send_json(req, json);
 }
 
@@ -1476,6 +1898,25 @@ static esp_err_t motor_post(httpd_req_t *req)
     snprintf(json, sizeof(json), "{\"ok\":true,\"speed\":%u,\"forward\":%s}",
              (unsigned)speed, forward ? "true" : "false");
     return send_json(req, json);
+}
+
+/* Emergency stop: cut the motor and all sound immediately. Deliberately not
+ * gated on the control source or actuation readiness so the safety action is
+ * always available while the board is responsive. */
+static esp_err_t emergency_post(httpd_req_t *req)
+{
+    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE)
+        return send_json(req, "{\"ok\":false,\"error\":\"control busy\"}");
+    motor_emergency_stop();
+    audio_stop_all();
+    sound_stop_all();
+    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    memset(s_fn, 0, sizeof(s_fn));
+    if (s_func_mutex != NULL) (void)xSemaphoreGive(s_func_mutex);
+    ++s_control_generation;
+    xSemaphoreGive(s_control_mutex);
+    web_log_event("Стоп", "ЭКСТРЕННЫЙ СТОП");
+    return send_json(req, "{\"ok\":true}");
 }
 
 static esp_err_t functions_get(httpd_req_t *req)
@@ -1779,6 +2220,7 @@ typedef struct {
     settings_config_t previous_cfg;
     size_t count, previous_count, file_count;
     char journal[160];
+    bool graph_asset_conflict;
 } wav_tx_t;
 
 static bool wav_artifacts_clean(wav_tx_t *tx)
@@ -1828,6 +2270,11 @@ static esp_err_t wav_files_prepare(wav_tx_t *tx)
 {
     uint64_t required = 65536U; /* bounded reserve for manifest + recovery record */
     for (size_t i = 0; i < tx->file_count; ++i) {
+        const char *name = strrchr(tx->files[i].canonical, '/');
+        bool referenced = true;
+        esp_err_t ref_err = sg_store_file_referenced(name ? name + 1 : tx->files[i].canonical, &referenced);
+        if (ref_err != ESP_OK) return ref_err;
+        if (referenced) { tx->graph_asset_conflict = true; return ESP_ERR_INVALID_STATE; }
         struct stat st;
         if (stat(tx->files[i].canonical, &st) == 0) {
             if (!S_ISREG(st.st_mode) || st.st_size < 0) return ESP_ERR_INVALID_STATE;
@@ -1882,6 +2329,14 @@ static esp_err_t wav_files_prepare(wav_tx_t *tx)
 
 static esp_err_t wav_files_publish(wav_tx_t *tx)
 {
+    /* Preflight every destination before publishing even the first file. */
+    for (size_t i = 0; i < tx->file_count; ++i) {
+        const char *name = strrchr(tx->files[i].canonical, '/');
+        bool referenced = true;
+        esp_err_t err = sg_store_file_referenced(name ? name + 1 : tx->files[i].canonical, &referenced);
+        if (err != ESP_OK) return err;
+        if (referenced) { tx->graph_asset_conflict = true; return ESP_ERR_INVALID_STATE; }
+    }
     for (size_t i = 0; i < tx->file_count; ++i) {
         if (transfer_expired() || rename(tx->files[i].staged, tx->files[i].canonical) != 0) return ESP_FAIL;
         tx->files[i].staged[0] = '\0';
@@ -1908,7 +2363,7 @@ static esp_err_t wav_tx_abort(httpd_req_t *req, wav_tx_t *tx, bool metadata_atte
              tx != NULL ? tx->journal : "");
     if (!clean && tx != NULL) ESP_LOGE(TAG, "WAV recovery record retained: %s", tx->journal);
     free(tx);
-    httpd_resp_set_status(req, "500 Internal Server Error");
+    httpd_resp_set_status(req, strncmp(reason, "graph asset", 11) == 0 ? "409 Conflict" : "500 Internal Server Error");
     return send_json(req, json);
 }
 
@@ -2073,10 +2528,12 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     count = w;
     tx->count = count;
 
-    if (wav_files_prepare(tx) != ESP_OK)
-        return wav_tx_abort(req, tx, false, false, "backup/space preflight failed");
-    if (wav_files_publish(tx) != ESP_OK)
-        return wav_tx_abort(req, tx, false, false, "canonical publication failed");
+    esp_err_t file_err = wav_files_prepare(tx);
+    if (file_err != ESP_OK)
+        return wav_tx_abort(req, tx, false, false, tx->graph_asset_conflict ? "graph asset referenced by saved project" : "backup/space preflight failed");
+    file_err = wav_files_publish(tx);
+    if (file_err != ESP_OK)
+        return wav_tx_abort(req, tx, false, false, tx->graph_asset_conflict ? "graph asset referenced by saved project" : "canonical publication failed");
 
     esp_err_t save_err = settings_tracks_save(tracks, count);
     ESP_LOGI(TAG, "UP: track bound slot=%u count=%u save=%s",
@@ -2320,6 +2777,8 @@ static esp_err_t func_map_post_binding(httpd_req_t *req, const char *query)
         if (!parse_u8(query, "idx", &idx) || (size_t)idx >= s_func_bind_count) {
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad idx");
         }
+        if (sound_graph_active() && (s_func_bind[idx].target_type == FUNC_TARGET_SOUND || s_func_bind[idx].target_type == FUNC_TARGET_SLOT))
+            return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
         if (!web_func_bind_remove(idx)) {
             return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
         }
@@ -2334,6 +2793,8 @@ static esp_err_t func_map_post_binding(httpd_req_t *req, const char *query)
     if (!parse_u8(query, "type", &type) || type < FUNC_TARGET_OUTPUT || type > FUNC_TARGET_LOGIC) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad type");
     }
+    if (sound_graph_active() && (type == FUNC_TARGET_SOUND || type == FUNC_TARGET_SLOT))
+        return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
     if (!parse_u8(query, "id", &id)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad id");
     }
@@ -2378,10 +2839,10 @@ static esp_err_t func_map_get(httpd_req_t *req)
         return func_bind_get(req);
     }
 
-    char json[1024];
+    char json[2048];
     size_t used = 0;
     buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"map\":[");
-    for (uint8_t f = 0; f <= 10U; ++f) {
+    for (uint8_t f = 0; f < WEB_FN_COUNT; ++f) {
         uint8_t sa = 0, sb = 0, dir = 0, spd = 0;
         uint16_t aux = 0;
         (void)web_func_map_get(f, &sa, &sb, &aux, &dir, &spd);
@@ -2401,9 +2862,10 @@ static esp_err_t func_map_post(httpd_req_t *req)
     if (parse_bool(query, "bind", false)) {
         return func_map_post_binding(req, query);
     }
+    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
     uint8_t fn = 0, sa = 0, sb = 0, dir = 0, spd = 0;
     uint16_t aux = 0;
-    if (!parse_u8(query, "fn", &fn) || fn > 10U) {
+    if (!parse_u8(query, "fn", &fn) || fn >= WEB_FN_COUNT) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad fn");
     }
     if (!parse_u8(query, "a", &sa) || sa > SETTINGS_MAX_TRACKS) {
@@ -2528,6 +2990,7 @@ static esp_err_t sound_scheme_handler(httpd_req_t *req)
 
 static esp_err_t sound_scheme_post_handler(httpd_req_t *req)
 {
+    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
     sound_engine_t eng;
@@ -2581,6 +3044,7 @@ static esp_err_t sound_scheme_post_handler(httpd_req_t *req)
 
 static esp_err_t sound_table_post(httpd_req_t *req)
 {
+    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
     uint8_t idx = 0;
@@ -2618,6 +3082,7 @@ static esp_err_t sound_table_post(httpd_req_t *req)
 
 static esp_err_t sound_extra_post(httpd_req_t *req)
 {
+    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
     uint8_t idx = 0;
@@ -2695,6 +3160,7 @@ static esp_err_t sound_projects_get(httpd_req_t *req)
 /* POST /api/sound/project — create=<name>[&type=N] | activate=<name> | delete=<name> */
 static esp_err_t sound_project_post(httpd_req_t *req)
 {
+    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
     char name[SOUND_FILE_MAX] = { 0 };
@@ -2752,6 +3218,7 @@ static esp_err_t sound_download_get(httpd_req_t *req)
 /* POST /api/sound/upload?name=N[&activate=0] — import a raw .mds body. */
 static esp_err_t sound_upload_post(httpd_req_t *req)
 {
+    if (sound_graph_active()) return close_rejected_body(req, graph_error(req, "409 Conflict", "graph mode: use /sound-editor/"));
     if (!storage_is_mounted()) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage unavailable");
     }
@@ -2979,9 +3446,21 @@ static esp_err_t factory_reset_post(httpd_req_t *req)
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
     web_log_event("Сброс", "заводские настройки, перезагрузка");
     if (settings_factory_reset() != ESP_OK) {
+        portENTER_CRITICAL(&s_control_state_mux);
+        s_actuation_ready = false;
+        portEXIT_CRITICAL(&s_control_state_mux);
         web_maintenance_end();
-        return send_json(req, "{\"ok\":false,\"error\":\"reset failed\"}");
+        return graph_error(req, "500 Internal Server Error", "reset failed; actuation disabled; no reboot");
     }
+    /* NVS and the external selector cannot form one atomic reset transaction. */
+    if ((storage_is_mounted() || sound_graph_active()) && sg_store_select_legacy() != ESP_OK) {
+        portENTER_CRITICAL(&s_control_state_mux);
+        s_actuation_ready = false;
+        portEXIT_CRITICAL(&s_control_state_mux);
+        web_maintenance_end();
+        return graph_error(req, "500 Internal Server Error", "settings reset but graph selector reset failed; actuation disabled; no reboot");
+    }
+    sound_graph_deactivate();
     send_json(req, "{\"ok\":true,\"reboot\":1}");
     motor_emergency_stop();
     audio_stop_all();
@@ -3432,12 +3911,12 @@ static esp_err_t ota_update_post(httpd_req_t *req)
         err = wav_files_prepare(tx);
         if (err != ESP_OK) {
             s_up_active = false; free(st); free(buf);
-            return wav_tx_abort(req, tx, false, false, "backup/space preflight failed; boot unchanged");
+            return wav_tx_abort(req, tx, false, false, tx->graph_asset_conflict ? "graph asset referenced by saved project; boot unchanged" : "backup/space preflight failed; boot unchanged");
         }
         err = wav_files_publish(tx);
         if (err != ESP_OK) {
             s_up_active = false; free(st); free(buf);
-            return wav_tx_abort(req, tx, false, false, "canonical publication failed; boot unchanged");
+            return wav_tx_abort(req, tx, false, false, tx->graph_asset_conflict ? "graph asset referenced by saved project; boot unchanged" : "canonical publication failed; boot unchanged");
         }
         metadata_attempted = true;
         err = settings_tracks_save(tracks, tn);
@@ -3657,21 +4136,35 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = { 0 };
     esp_err_t query_err = httpd_req_get_url_query_str(req, query, sizeof(query));
-    if ((query_err != ESP_OK && query_err != ESP_ERR_NOT_FOUND) || !query_encoding_valid(query))
+    if (httpd_req_get_url_query_len(req) >= sizeof(query) ||
+        (query_err != ESP_OK && query_err != ESP_ERR_NOT_FOUND) || !query_encoding_valid(query))
         return close_rejected_body(req, httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query"));
     esp_err_t (*handler)(httpd_req_t *) = *(esp_err_t (**)(httpd_req_t *))req->user_ctx;
+    if (handler == sound_upload_post && sound_graph_active())
+        return close_rejected_body(req, graph_error(req, "409 Conflict", "graph mode: use /sound-editor/"));
     if (handler == audio_upload_post || handler == ota_update_post || handler == sound_upload_post)
         return transfer_start(req, handler);
-    if (req->content_len != 0U)
+    if (req->content_len != 0U && handler != graph_validate_post && handler != graph_save_post)
         return close_rejected_body(req, httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unexpected body"));
+    /* Cancellation only closes its own calibration, even before actuation admission. */
+    if (handler == bemf_cal_post) {
+        int action = bemf_cal_action(query);
+        if (action == 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid calibration action");
+        if (action == 3) return handler(req);
+    }
+    if (handler == bemf_use_post) {
+        bool enabled;
+        if (!bemf_bool_query(query, "enabled", &enabled))
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid enabled");
+    }
     portENTER_CRITICAL(&s_control_state_mux);
     bool admitted = s_maintenance_owner == NULL;
     if (admitted) { ++s_mutation_count; s_mutation_owner = xTaskGetCurrentTaskHandle(); }
     bool ready = s_actuation_ready;
     portEXIT_CRITICAL(&s_control_state_mux);
-    if (!admitted) return send_json(req, "{\"ok\":false,\"error\":\"maintenance\"}");
+    if (!admitted) return close_rejected_body(req, graph_error(req, "503 Service Unavailable", "maintenance"));
     bool actuation = handler == motor_post || handler == function_post || handler == aux_effect_post ||
-                     handler == audio_play_post || handler == bemf_cal_post;
+                     handler == audio_play_post || handler == bemf_cal_post || handler == bemf_use_post;
     esp_err_t err;
     if (actuation && !ready) err = send_json(req, "{\"ok\":false,\"error\":\"actuation not ready\"}");
     else if (handler == audio_track_delete_post) {
@@ -3682,6 +4175,12 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
             web_maintenance_end();
         }
         if (err != ESP_OK) err = send_json(req, "{\"ok\":false,\"error\":\"delete admission failed\"}");
+    } else if (handler == graph_save_post || handler == graph_validate_post) {
+        err = storage_access_begin();
+        if (err == ESP_OK) {
+            err = handler(req);
+            storage_access_end();
+        } else err = close_rejected_body(req, graph_error(req, "503 Service Unavailable", "storage unavailable or maintenance"));
     } else err = handler(req);
     portENTER_CRITICAL(&s_control_state_mux);
     --s_mutation_count;
@@ -3727,6 +4226,17 @@ static esp_err_t start_http_server(void)
     }
 
     register_route("/", HTTP_GET, root_handler);
+    register_route("/sound-editor", HTTP_GET, sound_editor_get);
+    register_route("/sound-editor/*", HTTP_GET, sound_editor_get);
+    register_route("/api/sound/graph/capabilities", HTTP_GET, graph_capabilities_get);
+    register_route("/api/sound/graph/projects", HTTP_GET, graph_projects_get);
+    register_route("/api/sound/graph/project", HTTP_GET, graph_project_get);
+    register_route("/api/sound/graph/state", HTTP_GET, graph_state_get);
+    register_route("/api/sound/graph/asset", HTTP_GET, graph_asset_get);
+    register_route("/api/sound/graph/validate", HTTP_POST, graph_validate_post);
+    register_route("/api/sound/graph/save", HTTP_POST, graph_save_post);
+    register_route("/api/sound/graph/apply", HTTP_POST, graph_apply_post);
+    register_route("/api/sound/graph/legacy", HTTP_POST, graph_legacy_post);
     register_route("/api/control/source", HTTP_GET, control_source_get);
     register_route("/api/control/source", HTTP_POST, control_source_post);
     register_route("/api/mode", HTTP_GET, mode_get);
@@ -3738,6 +4248,7 @@ static esp_err_t start_http_server(void)
     register_route("/api/bemf/use", HTTP_POST, bemf_use_post);
     register_route("/api/motor", HTTP_GET, motor_get);
     register_route("/api/motor", HTTP_POST, motor_post);
+    register_route("/api/emergency", HTTP_POST, emergency_post);
     register_route("/api/functions", HTTP_GET, functions_get);
     register_route("/api/function", HTTP_POST, function_post);
     register_route("/api/aux/effect", HTTP_POST, aux_effect_post);

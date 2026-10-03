@@ -4,6 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+#include <math.h>
+
+#include "../../components/sound/src/sound_graph.c"
+#include "../../components/sound/src/sound_graph_runner.c"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -62,6 +67,8 @@ static bool s_av_active[AUDIO_MAX_VOICES];
 static bool s_av_busy[AUDIO_MAX_VOICES];
 static uint32_t s_av_generation[AUDIO_MAX_VOICES];
 static bool s_av_pending[AUDIO_MAX_VOICES];
+static audio_completion_t s_av_completion[AUDIO_MAX_VOICES];
+static uint8_t s_av_complete_on_state = AUDIO_VOICE_NONE;
 static uint16_t s_av_rate[AUDIO_MAX_VOICES];
 static char s_av_path[AUDIO_MAX_VOICES][192];
 static int s_av_play_calls;
@@ -76,6 +83,7 @@ esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t v
     }
     s_av_active[voice] = false;
     s_av_pending[voice] = true;
+    s_av_completion[voice] = AUDIO_COMPLETION_NONE;
     ++s_av_generation[voice];
     s_av_play_calls++;
     snprintf(s_av_path[voice], sizeof(s_av_path[voice]), "%s", path);
@@ -114,8 +122,25 @@ audio_voice_state_t audio_voice_get_state(audio_voice_handle_t h)
     if (h.voice >= AUDIO_MAX_VOICES || h.generation != s_av_generation[h.voice]) {
         return AUDIO_VOICE_FINISHED;
     }
+    if (s_av_complete_on_state == h.voice) {
+        s_av_complete_on_state = AUDIO_VOICE_NONE; s_av_pending[h.voice] = false;
+        s_av_active[h.voice] = false; s_av_busy[h.voice] = false;
+        s_av_completion[h.voice] = AUDIO_COMPLETION_EOF;
+    }
     if (s_av_pending[h.voice]) { return AUDIO_VOICE_PENDING; }
     return s_av_active[h.voice] ? AUDIO_VOICE_PLAYING : AUDIO_VOICE_FINISHED;
+}
+
+audio_completion_t audio_voice_completion(audio_voice_handle_t h)
+{
+    if (h.voice >= AUDIO_MAX_VOICES || h.generation != s_av_generation[h.voice]) { return AUDIO_COMPLETION_STALE; }
+    if (s_av_completion[h.voice] != AUDIO_COMPLETION_NONE) { return s_av_completion[h.voice]; }
+    return s_av_pending[h.voice] || s_av_active[h.voice] ? AUDIO_COMPLETION_NONE : AUDIO_COMPLETION_EOF;
+}
+esp_err_t audio_voice_set_rate_owned(audio_voice_handle_t h, uint16_t rate)
+{
+    if (h.voice >= AUDIO_MAX_VOICES || h.generation != s_av_generation[h.voice]) { return ESP_ERR_INVALID_STATE; }
+    return audio_voice_set_rate(h.voice,rate);
 }
 
 static void mock_audio_complete(uint8_t voice)
@@ -170,7 +195,7 @@ esp_err_t audio_voice_play_owned(audio_voice_handle_t *h, const char *path,
 
 void audio_voice_release_owned(audio_voice_handle_t h)
 {
-    if (h.voice < AUDIO_DYNAMIC_VOICES && h.generation == s_av_generation[h.voice]) {
+    if (h.voice < AUDIO_MAX_VOICES && h.generation == s_av_generation[h.voice]) {
         (void)audio_voice_stop(h.voice);
         s_av_busy[h.voice] = false;
         ++s_av_generation[h.voice];
@@ -267,6 +292,10 @@ static void build_paths(void)
 
 void setUp(void)
 {
+    free(s_graph_runner); free(s_graph); s_graph_runner = NULL; s_graph = NULL;
+    s_graph_fault = false;
+    atomic_store(&s_stop_requested,false);
+    atomic_store(&s_motion_epoch,0); s_motion_ready = true;
     build_paths();
     (void)MKDIR(s_dir);
     (void)remove(s_file);
@@ -280,6 +309,8 @@ void setUp(void)
     memset(s_av_pending, 0, sizeof(s_av_pending));
     memset(s_av_generation, 0, sizeof(s_av_generation));
     memset(s_av_busy, 0, sizeof(s_av_busy));
+    memset(s_av_completion,0,sizeof(s_av_completion));
+    s_av_complete_on_state = AUDIO_VOICE_NONE;
     memset(s_av_rate, 0, sizeof(s_av_rate));
     s_av_play_calls = 0;
     s_av_stop_calls = 0;
@@ -331,6 +362,7 @@ void setUp(void)
 
 void tearDown(void)
 {
+    if (s_graph) { sound_graph_deactivate(); }
     (void)remove(s_file);
     char tmp[520];
     snprintf(tmp, sizeof(tmp), "%s.tmp", s_file);
@@ -1927,6 +1959,139 @@ static void test_fixed_point_accel_decay(void)
     TEST_ASSERT_EQUAL(0, s_accel_q);
 }
 
+static sg_graph_t *make_graph(void)
+{
+    sg_graph_t *g = calloc(1,sizeof(*g)); TEST_ASSERT_NOT_NULL(g);
+    snprintf(g->id,sizeof(g->id),"graph"); snprintf(g->name,sizeof(g->name),"Graph");
+    snprintf(g->engine_entry,sizeof(g->engine_entry),"off"); g->engine_fn = 1; g->state_count = 2;
+    snprintf(g->states[0].id,SG_ID_CAP,"off"); g->states[0].volume = 100; g->states[0].rate = 1000;
+    snprintf(g->states[1].id,SG_ID_CAP,"run"); snprintf(g->states[1].file,SG_FILE_CAP,"run.wav");
+    g->states[1].volume = 80; g->states[1].rate = 1500; g->states[1].loop = true;
+    g->transition_count = 2;
+    snprintf(g->transitions[0].id,SG_ID_CAP,"start"); snprintf(g->transitions[0].source,SG_ID_CAP,"off"); snprintf(g->transitions[0].target,SG_ID_CAP,"run");
+    g->transitions[0].condition.type = SG_ENGINE_ON;
+    snprintf(g->transitions[1].id,SG_ID_CAP,"stop"); snprintf(g->transitions[1].source,SG_ID_CAP,"run"); snprintf(g->transitions[1].target,SG_ID_CAP,"off");
+    g->transitions[1].condition.type = SG_ENGINE_OFF;
+    TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,NULL)); return g;
+}
+static void test_graph_install_stopped_copy_and_legacy_guards(void)
+{
+    sg_graph_t *g = make_graph(); TEST_ASSERT_EQUAL(ESP_OK,sound_graph_install(g,"graph",7));
+    TEST_ASSERT_TRUE(sound_graph_active()); TEST_ASSERT_TRUE(sound_scheme_enabled());
+    sound_tick(); TEST_ASSERT_EQUAL(0,s_av_play_calls);
+    snprintf(g->states[1].file,SG_FILE_CAP,"changed.wav"); free(g);
+    TEST_ASSERT_TRUE(sound_graph_file_used("run.wav")); TEST_ASSERT_FALSE(sound_graph_file_used("changed.wav"));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,sound_type_set(SOUND_SCHEME_DIESEL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,sound_scheme_set(&s_scheme));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,sound_load_scheme(""));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,sound_scheme_create("x",SOUND_SCHEME_DIESEL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,sound_scheme_import("x",(const uint8_t *)"",0,true));
+    sound_function(1,true); sound_function(1,true); sound_tick();
+    TEST_ASSERT_EQUAL(1,s_av_play_calls); TEST_ASSERT_TRUE(sound_engine_is_on());
+    TEST_ASSERT_EQUAL_STRING("/userdata/audio/run.wav",s_av_path[18]); TEST_ASSERT_EQUAL_UINT16(1500,s_av_rate[18]);
+    sound_graph_status_t status; sound_graph_status_get(&status);
+    TEST_ASSERT_EQUAL_UINT32(7,status.revision); TEST_ASSERT_EQUAL_STRING("graph",status.id);
+    TEST_ASSERT_EQUAL_UINT8(1,status.states[0]); TEST_ASSERT_EQUAL_UINT8(SG_NONE,status.states[1]);
+    sound_graph_deactivate(); TEST_ASSERT_FALSE(sound_graph_active()); TEST_ASSERT_FALSE(sound_scheme_enabled());
+}
+static void test_graph_prepare_abort_commit_and_key_priming(void)
+{
+    sg_graph_t *g = make_graph(); sound_graph_prepared_t *p = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_prepare(g,"graph",1,&p)); TEST_ASSERT_FALSE(sound_graph_active());
+    sound_graph_prepared_free(p); TEST_ASSERT_FALSE(sound_graph_active());
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_prepare(g,"graph",2,&p)); free(g); sound_graph_commit(p);
+    sound_graph_prime_functions(UINT32_C(1) << 1); sound_function(1,true); sound_tick();
+    TEST_ASSERT_EQUAL(0,s_av_play_calls); TEST_ASSERT_FALSE(sound_engine_is_on());
+    sound_function(1,false); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+}
+static void test_graph_stop_inhibit_no_resume_or_held_retrigger(void)
+{
+    s_lock = xSemaphoreCreateMutex(); sg_graph_t *g = make_graph();
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_install(g,"graph",1)); free(g);
+    sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+    sound_stop_all(); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+    sound_function(1,false); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(2,s_av_play_calls);
+    TEST_ASSERT_EQUAL(ESP_OK,sound_set_inhibited(true)); sound_function(1,true);
+    TEST_ASSERT_EQUAL(ESP_OK,sound_set_inhibited(false)); sound_function(1,true); sound_tick();
+    TEST_ASSERT_EQUAL(2,s_av_play_calls); TEST_ASSERT_FALSE(sound_engine_is_on());
+    sound_function(1,false); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(3,s_av_play_calls);
+    sound_request_stop(); sound_function(1,false); sound_function(1,true); sound_engine_power(true);
+    sound_tick(); TEST_ASSERT_EQUAL(3,s_av_play_calls); TEST_ASSERT_FALSE(sound_engine_is_on());
+    sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(3,s_av_play_calls);
+    sound_function(1,false); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(4,s_av_play_calls);
+}
+static void test_graph_owned_cleanup_does_not_release_reused_generation(void)
+{
+    sg_graph_t *g = make_graph(); TEST_ASSERT_EQUAL(ESP_OK,sound_graph_install(g,"graph",1)); free(g);
+    sound_function(1,true); sound_tick(); audio_voice_handle_t other;
+    TEST_ASSERT_EQUAL(ESP_OK,audio_voice_play_generation(18,"other.wav",false,100,&other));
+    int stops = s_av_stop_calls; sound_stop_all(); TEST_ASSERT_EQUAL(stops,s_av_stop_calls);
+    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING,audio_voice_get_state(other));
+}
+static void test_graph_fail_closed_and_explicit_legacy_commit(void)
+{
+    sound_graph_fail_closed(); TEST_ASSERT_TRUE(sound_graph_active()); TEST_ASSERT_TRUE(sound_scheme_enabled());
+    sound_engine_power(true); sound_function(1,true); sound_set_speed(100,true); sound_tick();
+    TEST_ASSERT_EQUAL(0,s_av_play_calls); TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,sound_type_set(SOUND_SCHEME_DIESEL));
+    sound_graph_status_t status; sound_graph_status_get(&status); TEST_ASSERT_TRUE(status.fault);
+    sound_scheme_t *scheme = malloc(sizeof(*scheme)); TEST_ASSERT_NOT_NULL(scheme); sound_store_default(scheme); scheme->type = SOUND_SCHEME_DIESEL;
+    sound_legacy_commit(scheme,"legacy"); free(scheme);
+    TEST_ASSERT_FALSE(sound_graph_active()); TEST_ASSERT_EQUAL(SOUND_SCHEME_DIESEL,sound_type_get());
+    sound_tick(); TEST_ASSERT_EQUAL(0,s_av_play_calls); TEST_ASSERT_EQUAL_STRING("legacy",s_active);
+}
+static void test_graph_pool_exhaustion_and_async_error_are_channel_local(void)
+{
+    sg_graph_t *g = make_graph(); g->state_count = 4;
+    snprintf(g->states[2].id,SG_ID_CAP,"fxoff"); g->states[2].volume = 100; g->states[2].rate = 1000;
+    snprintf(g->states[3].id,SG_ID_CAP,"horn"); snprintf(g->states[3].file,SG_FILE_CAP,"horn.wav");
+    g->states[3].volume = 100; g->states[3].rate = 1000;
+    g->transition_count = 3; sg_transition_t *e = &g->transitions[2];
+    snprintf(e->id,SG_ID_CAP,"hornpress"); snprintf(e->source,SG_ID_CAP,"fxoff"); snprintf(e->target,SG_ID_CAP,"horn");
+    e->condition.type = SG_FN_PRESS; e->condition.has_fn = true; e->condition.fn = 2;
+    g->effect_count = SG_MAX_EFFECTS;
+    for (unsigned i = 0; i < SG_MAX_EFFECTS; ++i) {
+        snprintf(g->effects[i].id,SG_ID_CAP,"fx%u",i); snprintf(g->effects[i].entry,SG_ID_CAP,"fxoff"); g->effects[i].fn = 2;
+    }
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_install(g,"graph",1)); free(g);
+    sound_function(1,true); sound_function(2,true); sound_tick();
+    TEST_ASSERT_EQUAL(19,s_av_play_calls); TEST_ASSERT_TRUE(s_graph_runner->channels[0].playing);
+    for (unsigned i = 1; i <= SG_MAX_EFFECTS; ++i) {
+        TEST_ASSERT_EQUAL(i > 18,s_graph_runner->channels[i].failed);
+        if (i <= 18) { TEST_ASSERT_TRUE(s_graph_runner->channels[i].handle.voice < 18); }
+    }
+    s_av_completion[18] = AUDIO_COMPLETION_ERROR; sound_tick();
+    TEST_ASSERT_TRUE(s_graph_runner->channels[0].failed); TEST_ASSERT_FALSE(s_graph_runner->channels[0].playing);
+    TEST_ASSERT_TRUE(s_graph_runner->channels[1].playing);
+    sound_tick(); TEST_ASSERT_EQUAL(19,s_av_play_calls);
+}
+static void test_graph_safety_epoch_and_stopping_speed_cannot_rearm(void)
+{
+    sg_graph_t *g = make_graph(); g->transitions[0].condition.type = SG_FN_ON;
+    g->transitions[0].condition.has_fn = true; g->transitions[0].condition.fn = 1;
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_install(g,"graph",1)); free(g);
+    sound_set_speed(100,true); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+    unsigned old_epoch = atomic_load(&s_motion_epoch);
+    sound_request_stop(); sound_applied_speed(100,true,old_epoch); sound_tick();
+    TEST_ASSERT_FALSE(s_graph_runner->armed);
+    sound_applied_speed(0,true,atomic_load(&s_motion_epoch)); sound_tick();
+    TEST_ASSERT_EQUAL(1,s_av_play_calls); TEST_ASSERT_FALSE(s_graph_runner->armed);
+    sound_applied_speed(100,true,old_epoch); sound_tick();
+    TEST_ASSERT_EQUAL_UINT8(0,s_speed); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+    sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+    sound_applied_speed(10,true,atomic_load(&s_motion_epoch)); sound_tick();
+    TEST_ASSERT_EQUAL(2,s_av_play_calls); sound_stop_all();
+    sound_applied_speed(11,true,atomic_load(&s_motion_epoch)); sound_tick(); TEST_ASSERT_EQUAL(2,s_av_play_calls);
+    sound_function(1,false); sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(3,s_av_play_calls);
+}
+static void test_graph_completion_between_audio_queries_is_normal_eof(void)
+{
+    sg_graph_t *g = make_graph(); TEST_ASSERT_EQUAL(ESP_OK,sound_graph_install(g,"graph",1)); free(g);
+    sound_function(1,true); sound_tick(); TEST_ASSERT_EQUAL(1,s_av_play_calls);
+    s_av_complete_on_state = 18; sound_tick();
+    TEST_ASSERT_EQUAL(2,s_av_play_calls); TEST_ASSERT_FALSE(s_graph_runner->channels[0].failed);
+    TEST_ASSERT_TRUE(s_graph_runner->channels[0].playing);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1970,5 +2135,13 @@ int main(void)
     RUN_TEST(test_scheme_switch_clear_delete_release_only_owned_voices);
     RUN_TEST(test_storage_admission_rejects_store_operations);
     RUN_TEST(test_fixed_point_accel_decay);
+    RUN_TEST(test_graph_install_stopped_copy_and_legacy_guards);
+    RUN_TEST(test_graph_prepare_abort_commit_and_key_priming);
+    RUN_TEST(test_graph_stop_inhibit_no_resume_or_held_retrigger);
+    RUN_TEST(test_graph_owned_cleanup_does_not_release_reused_generation);
+    RUN_TEST(test_graph_fail_closed_and_explicit_legacy_commit);
+    RUN_TEST(test_graph_pool_exhaustion_and_async_error_are_channel_local);
+    RUN_TEST(test_graph_safety_epoch_and_stopping_speed_cannot_rearm);
+    RUN_TEST(test_graph_completion_between_audio_queries_is_normal_eof);
     return UNITY_END();
 }

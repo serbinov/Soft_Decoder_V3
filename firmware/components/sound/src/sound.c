@@ -10,6 +10,8 @@
 
 #include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "audio.h"
@@ -81,11 +83,60 @@ static bool s_inhibited;
 static bool s_control_armed = true;
 static int32_t s_accel_q; /* Q10 retains fractional decay toward zero */
 static int64_t s_fn_time[SOUND_FN_COUNT];
+static sg_graph_t *s_graph;
+static sg_runner_t *s_graph_runner;
+static char s_graph_id[SG_ID_CAP];
+static uint32_t s_graph_revision;
+static bool s_graph_fault;
+static atomic_bool s_stop_requested;
+static atomic_uint s_motion_epoch;
+static bool s_motion_ready = true;
+struct sound_graph_prepared {
+    sg_graph_t *graph;
+    sg_runner_t *runner;
+    char id[SG_ID_CAP];
+    uint32_t revision;
+};
 
 /* Forward declarations (effect playback is defined further down). */
 static uint8_t fx_play_table(uint8_t table, bool loop, uint8_t *slot);
 static void fx_voice_stop(uint8_t *slot);
 static void runtime_reset_locked(void);
+
+static void graph_audio_release(void *ctx, sg_handle_t h)
+{
+    (void)ctx; audio_voice_release_owned((audio_voice_handle_t){h.voice,h.generation});
+}
+static esp_err_t graph_audio_play(void *ctx, bool engine, const sg_state_t *state, sg_handle_t *out)
+{
+    (void)ctx;
+    if (s_inhibited || atomic_load(&s_stop_requested)) { return ESP_ERR_INVALID_STATE; }
+    char path[SOUND_PATH_MAX];
+    int path_len = snprintf(path,sizeof(path),"%s/audio/%s",storage_get_root(),state->file);
+    if (path_len < 0 || (size_t)path_len >= sizeof(path)) { return ESP_ERR_INVALID_SIZE; }
+    audio_voice_handle_t h = {AUDIO_VOICE_NONE,0}; esp_err_t err;
+    if (engine) { err = audio_voice_play_generation(SOUND_VOICE_ENGINE,path,false,state->volume,&h); }
+    else {
+        err = audio_voice_alloc_owned(&h);
+        if (err == ESP_OK) { err = audio_voice_play_owned(&h,path,false,state->volume); }
+    }
+    if (err == ESP_OK) { err = audio_voice_set_rate_owned(h,state->rate); }
+    if (err != ESP_OK) { audio_voice_release_owned(h); return err; }
+    *out = (sg_handle_t){h.voice,h.generation}; return ESP_OK;
+}
+static sg_audio_state_t graph_audio_poll(void *ctx, sg_handle_t h)
+{
+    (void)ctx; audio_voice_handle_t handle = {h.voice,h.generation};
+    audio_completion_t done = audio_voice_completion(handle);
+    if (done == AUDIO_COMPLETION_EOF) { return SG_AUDIO_DONE; }
+    if (done != AUDIO_COMPLETION_NONE) { return SG_AUDIO_FAILED; }
+    audio_voice_state_t state = audio_voice_get_state(handle);
+    if (state == AUDIO_VOICE_PENDING) { return SG_AUDIO_PENDING; }
+    if (state == AUDIO_VOICE_PLAYING) { return SG_AUDIO_PLAYING; }
+    /* EOF may have been published between the two generation-scoped queries. */
+    done = audio_voice_completion(handle);
+    return done == AUDIO_COMPLETION_EOF ? SG_AUDIO_DONE : SG_AUDIO_FAILED;
+}
 
 /* Serialize the engine's shared state: the 20 ms task, the DCC/web function
  * path and the REST mutators all touch s_scheme/s_engine_key/s_binds. */
@@ -400,6 +451,7 @@ esp_err_t sound_scheme_set(const sound_scheme_t *in)
         return ESP_ERR_INVALID_ARG;
     }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     runtime_reset_locked();
     s_scheme = *in;
     sound_unlock();
@@ -418,6 +470,7 @@ esp_err_t sound_type_set(uint8_t type)
 {
     if (type > SOUND_SCHEME_ELECTRIC) { return ESP_ERR_INVALID_ARG; }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     if (s_scheme.type != type) { runtime_reset_locked(); }
     s_scheme.type = type;
     sound_unlock();
@@ -441,6 +494,7 @@ esp_err_t sound_engine_set(const sound_engine_t *in)
         return ESP_ERR_INVALID_ARG;
     }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     s_scheme.engine = *in;
     sound_unlock();
     return ESP_OK;
@@ -463,6 +517,7 @@ esp_err_t sound_table_set(uint8_t idx, const sound_table_t *t)
         return ESP_ERR_INVALID_ARG;
     }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     s_scheme.tables[idx] = *t;
     if (idx + 1U > s_scheme.table_count) {
         s_scheme.table_count = (uint8_t)(idx + 1U);
@@ -488,6 +543,7 @@ esp_err_t sound_extra_set(uint8_t idx, const sound_extra_t *e)
         return ESP_ERR_INVALID_ARG;
     }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     s_scheme.extras[idx] = *e;
     if (idx + 1U > s_scheme.extra_count) {
         s_scheme.extra_count = (uint8_t)(idx + 1U);
@@ -513,6 +569,7 @@ esp_err_t sound_brake_set(const sound_brake_t *in)
         return ESP_ERR_INVALID_ARG;
     }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     s_scheme.brake = *in;
     sound_unlock();
     return ESP_OK;
@@ -526,8 +583,8 @@ void sound_status_get(sound_status_t *out)
     memset(out, 0, sizeof(*out));
     sound_lock();
     out->type = s_scheme.type;
-    out->enabled = (s_scheme.type != SOUND_SCHEME_NONE && s_scheme.type != SOUND_SCHEME_LEGACY);
-    out->engine = s_engine_key;
+    out->enabled = s_graph || s_graph_fault || (s_scheme.type != SOUND_SCHEME_NONE && s_scheme.type != SOUND_SCHEME_LEGACY);
+    out->engine = s_graph_runner ? s_graph_runner->engine_on : s_engine_key;
     out->table = s_table;
     out->phase = s_phase;
     out->speed = s_speed;
@@ -542,6 +599,7 @@ esp_err_t sound_scheme_save(void)
     /* Snapshot the name + scheme under the lock, then do the flash I/O with the
      * lock released (the DCC callback must not wait on a LittleFS fsync). */
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     snprintf(name, sizeof(name), "%s", s_active);
     s_io_scheme = s_scheme;
     sound_unlock();
@@ -569,6 +627,7 @@ esp_err_t sound_active_name_get(char *out, size_t cap)
 
 esp_err_t sound_load_scheme(const char *name)
 {
+    if (sound_graph_active()) { return ESP_ERR_INVALID_STATE; }
     if (name == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -579,6 +638,7 @@ esp_err_t sound_load_scheme(const char *name)
     }
     if (name[0] == '\0') {
         sound_lock();
+        if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
         runtime_reset_locked();
         (void)sound_store_default(&s_scheme);
         s_active[0] = '\0';
@@ -602,6 +662,7 @@ esp_err_t sound_load_scheme(const char *name)
      * be retried on every boot (REV-S8). */
     bool keep_name = (err == ESP_OK || err == ESP_ERR_INVALID_STATE);
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     runtime_reset_locked();
     s_scheme = s_io_scheme;
     if (keep_name) {
@@ -616,6 +677,7 @@ esp_err_t sound_load_scheme(const char *name)
 
 esp_err_t sound_scheme_create(const char *name, uint8_t type)
 {
+    if (sound_graph_active()) { return ESP_ERR_INVALID_STATE; }
     if (!sound_store_name_ok(name) || type > SOUND_SCHEME_ELECTRIC) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -634,6 +696,7 @@ esp_err_t sound_scheme_create(const char *name, uint8_t type)
         return err;
     }
     sound_lock();
+    if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
     runtime_reset_locked();
     s_scheme = s_io_scheme;
     snprintf(s_active, sizeof(s_active), "%s", name);
@@ -664,7 +727,7 @@ esp_err_t sound_scheme_delete(const char *name)
     }
     bool was_active = false;
     sound_lock();
-    if (strcmp(s_active, name) == 0) {
+    if (!s_graph && !s_graph_fault && strcmp(s_active, name) == 0) {
         runtime_reset_locked();
         s_active[0] = '\0';
         (void)sound_store_default(&s_scheme);
@@ -692,6 +755,7 @@ esp_err_t sound_scheme_export(const char *name, uint8_t *buf, size_t cap, size_t
 
 esp_err_t sound_scheme_import(const char *name, const uint8_t *buf, size_t len, bool activate)
 {
+    if (activate && sound_graph_active()) { return ESP_ERR_INVALID_STATE; }
     if (!sound_store_name_ok(name) || buf == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -709,6 +773,7 @@ esp_err_t sound_scheme_import(const char *name, const uint8_t *buf, size_t len, 
     }
     if (err == ESP_OK && activate) {
         sound_lock();
+        if (s_graph || s_graph_fault) { sound_unlock(); return ESP_ERR_INVALID_STATE; }
         runtime_reset_locked();
         s_scheme = s_io_scheme;
         snprintf(s_active, sizeof(s_active), "%s", name);
@@ -812,7 +877,7 @@ int sound_lint(char *out, size_t cap)
 bool sound_engine_is_on(void)
 {
     sound_lock();
-    bool on = s_engine_key;
+    bool on = s_graph_runner ? s_graph_runner->engine_on : s_engine_key;
     sound_unlock();
     return on;
 }
@@ -820,7 +885,7 @@ bool sound_engine_is_on(void)
 bool sound_scheme_enabled(void)
 {
     sound_lock();
-    bool on = (s_scheme.type != SOUND_SCHEME_NONE && s_scheme.type != SOUND_SCHEME_LEGACY);
+    bool on = s_graph || s_graph_fault || (s_scheme.type != SOUND_SCHEME_NONE && s_scheme.type != SOUND_SCHEME_LEGACY);
     sound_unlock();
     return on;
 }
@@ -828,18 +893,39 @@ bool sound_scheme_enabled(void)
 void sound_engine_power(bool on)
 {
     sound_lock();
-    if (!s_inhibited) { s_engine_key = on; s_control_armed = true; }
+    if (!s_graph_fault && !s_inhibited && !atomic_load(&s_stop_requested)) {
+        if (s_graph_runner) { sg_runner_power(s_graph_runner,on); }
+        else { s_engine_key = on; }
+        s_control_armed = true;
+    }
     sound_unlock();
 }
 
-void sound_set_speed(uint8_t speed, bool forward)
+static void sound_speed_locked(uint8_t speed, bool forward, bool applied)
 {
-    sound_lock();
-    if (!s_inhibited && (s_speed != speed || s_forward != forward)) {
+    bool armed = s_graph_runner ? s_graph_runner->armed : s_control_armed;
+    /* A stop-induced motor ramp is not a new command. Disarmed motion must
+     * first settle at zero before a later nonzero sample can rearm playback. */
+    bool fresh_motion = !applied || armed || (s_motion_ready && speed != 0);
+    if (!s_inhibited && !atomic_load(&s_stop_requested) && fresh_motion && (s_speed != speed || s_forward != forward)) {
         s_control_armed = true;
+        if (s_graph_runner) { s_graph_runner->armed = true; }
     }
     s_speed = speed;
     s_forward = forward;
+    if (speed == 0 || !applied) { s_motion_ready = true; }
+}
+void sound_set_speed(uint8_t speed, bool forward)
+{
+    sound_lock(); sound_speed_locked(speed,forward,false);
+    sound_unlock();
+}
+static void sound_applied_speed(uint8_t speed, bool forward, unsigned epoch)
+{
+    sound_lock();
+    if (epoch == atomic_load(&s_motion_epoch) && !atomic_load(&s_stop_requested)) {
+        sound_speed_locked(speed,forward,true);
+    }
     sound_unlock();
 }
 
@@ -1029,7 +1115,17 @@ void sound_function(uint8_t fn, bool state)
         return;
     }
     sound_lock();
-    if (s_inhibited || s_scheme.type == SOUND_SCHEME_NONE ||
+    if (s_graph_fault) { s_fn_state[fn] = state; sound_unlock(); return; }
+    if (s_graph_runner) {
+        s_fn_state[fn] = state;
+        if (s_inhibited || atomic_load(&s_stop_requested)) {
+            uint32_t bit = UINT32_C(1) << fn;
+            if (state) { s_graph_runner->fn_levels |= bit; }
+            else { s_graph_runner->fn_levels &= ~bit; }
+        } else { sg_runner_function(s_graph_runner,fn,state); }
+        sound_unlock(); return;
+    }
+    if (s_inhibited || atomic_load(&s_stop_requested) || s_scheme.type == SOUND_SCHEME_NONE ||
         s_scheme.type == SOUND_SCHEME_LEGACY) { sound_unlock(); return; }
     bool changed = (s_fn_state[fn] != state);
     s_fn_state[fn] = state;
@@ -1054,6 +1150,14 @@ void sound_function(uint8_t fn, bool state)
 
 static void runtime_reset_locked(void)
 {
+    atomic_fetch_add(&s_motion_epoch,1);
+    s_motion_ready = (s_speed == 0);
+    if (s_graph_runner) {
+        sg_runner_reset(s_graph_runner);
+        s_engine_key = false; s_accel = 0; s_accel_q = 0;
+        s_prev_speed = s_speed; s_control_armed = false;
+        return;
+    }
     for (uint8_t i = 0; i < SOUND_FN_COUNT; ++i) {
         fx_voice_stop(&s_fn_voice[i]);
         s_fn_state[i] = false;
@@ -1087,6 +1191,106 @@ void sound_stop_all(void)
     sound_lock();
     runtime_reset_locked();
     sound_unlock();
+}
+
+void sound_request_stop(void)
+{
+    atomic_store(&s_stop_requested,true);
+    atomic_fetch_add(&s_motion_epoch,1);
+}
+
+bool sound_graph_active(void)
+{
+    sound_lock(); bool active = s_graph != NULL || s_graph_fault; sound_unlock(); return active;
+}
+void sound_graph_fail_closed(void)
+{
+    sound_lock(); runtime_reset_locked();
+    sg_graph_t *old = s_graph; sg_runner_t *runner = s_graph_runner;
+    s_graph = NULL; s_graph_runner = NULL; s_graph_fault = true;
+    s_graph_id[0] = 0; s_graph_revision = 0;
+    sound_unlock(); free(runner); free(old);
+}
+esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t revision)
+{
+    sound_graph_prepared_t *prepared = NULL;
+    esp_err_t err = sound_graph_prepare(graph,id,revision,&prepared);
+    if (err == ESP_OK) { sound_graph_commit(prepared); } return err;
+}
+esp_err_t sound_graph_prepare(const sg_graph_t *graph, const char *id, uint32_t revision,
+                             sound_graph_prepared_t **out)
+{
+    if (!out) { return ESP_ERR_INVALID_ARG; } *out = NULL;
+    if (!graph || !sg_id_valid(id) || !sg_id_valid(graph->id) || strcmp(graph->id,id)) { return ESP_ERR_INVALID_ARG; }
+    sound_graph_prepared_t *prepared = malloc(sizeof(*prepared));
+    sg_graph_t *copy = malloc(sizeof(*copy)); sg_runner_t *runner = malloc(sizeof(*runner));
+    if (!copy || !runner || !prepared) { free(copy); free(runner); free(prepared); return ESP_ERR_NO_MEM; }
+    *copy = *graph; esp_err_t err = sg_validate(copy,NULL);
+    if (err != ESP_OK) { free(copy); free(runner); free(prepared); return err; }
+    sg_io_t io = {graph_audio_play,graph_audio_release,graph_audio_poll,NULL};
+    sg_runner_init(runner,copy,&io);
+    prepared->graph = copy; prepared->runner = runner; prepared->revision = revision;
+    snprintf(prepared->id,sizeof(prepared->id),"%s",id); *out = prepared; return ESP_OK;
+}
+void sound_graph_prepared_free(sound_graph_prepared_t *prepared)
+{
+    if (!prepared) { return; } free(prepared->runner); free(prepared->graph); free(prepared);
+}
+void sound_graph_commit(sound_graph_prepared_t *prepared)
+{
+    if (!prepared) { return; }
+    sound_lock();
+    uint32_t levels = s_graph_runner ? s_graph_runner->fn_levels : 0;
+    if (!s_graph_runner) { for (unsigned i = 0; i < SOUND_FN_COUNT && i <= 28; ++i) { if (s_fn_state[i]) { levels |= UINT32_C(1) << i; } } }
+    runtime_reset_locked();
+    sg_graph_t *old = s_graph; sg_runner_t *old_runner = s_graph_runner;
+    s_graph = prepared->graph; s_graph_runner = prepared->runner; s_graph_fault = false; s_graph_runner->fn_levels = levels;
+    snprintf(s_graph_id,sizeof(s_graph_id),"%s",prepared->id); s_graph_revision = prepared->revision;
+    sound_unlock(); free(old_runner); free(old); free(prepared);
+}
+void sound_graph_prime_functions(uint32_t levels)
+{
+    sound_lock();
+    for (unsigned i = 0; i < SOUND_FN_COUNT && i <= 28; ++i) { s_fn_state[i] = (levels & (UINT32_C(1) << i)) != 0; }
+    if (s_graph_runner) { s_graph_runner->fn_levels = levels & UINT32_C(0x1fffffff); s_graph_runner->fn_press = 0; s_graph_runner->fn_release = 0; }
+    sound_unlock();
+}
+void sound_legacy_commit(const sound_scheme_t *scheme, const char *name)
+{
+    if (!scheme || !name) { return; }
+    sound_lock(); runtime_reset_locked();
+    sg_graph_t *old = s_graph; sg_runner_t *runner = s_graph_runner;
+    s_graph = NULL; s_graph_runner = NULL; s_graph_fault = false; s_graph_id[0] = 0; s_graph_revision = 0;
+    s_scheme = *scheme; snprintf(s_active,sizeof(s_active),"%s",name);
+    s_control_armed = false; s_engine_key = false;
+    sound_unlock(); free(runner); free(old);
+}
+void sound_graph_deactivate(void)
+{
+    sound_lock(); runtime_reset_locked();
+    sg_graph_t *old = s_graph; sg_runner_t *runner = s_graph_runner;
+    s_graph = NULL; s_graph_runner = NULL; s_graph_fault = false; s_graph_id[0] = 0; s_graph_revision = 0;
+    (void)sound_store_default(&s_scheme); s_active[0] = 0;
+    sound_unlock(); free(runner); free(old);
+}
+void sound_graph_status_get(sound_graph_status_t *out)
+{
+    if (!out) { return; } memset(out,0,sizeof(*out)); memset(out->states,SG_NONE,sizeof(out->states));
+    sound_lock(); out->active = s_graph != NULL || s_graph_fault; out->fault = s_graph_fault;
+    out->speed = s_speed;
+    if (s_graph_runner) {
+        out->engine = s_graph_runner->engine_on; out->armed = s_graph_runner->armed;
+        snprintf(out->id,sizeof(out->id),"%s",s_graph_id); out->revision = s_graph_revision;
+        for (unsigned i = 0; i <= s_graph->effect_count; ++i) {
+            out->states[i] = s_graph_runner->channels[i].state;
+            if (s_graph_runner->channels[i].failed) { out->failed_channels |= UINT32_C(1) << i; }
+        }
+    }
+    sound_unlock();
+}
+bool sound_graph_file_used(const char *file)
+{
+    sound_lock(); bool used = sg_file_used(s_graph,file); sound_unlock(); return used;
 }
 
 esp_err_t sound_set_inhibited(bool inhibited)
@@ -1197,6 +1401,17 @@ static void brake_tick(void)
 static void sound_tick(void)
 {
     sound_lock();
+    if (atomic_exchange(&s_stop_requested,false)) { runtime_reset_locked(); sound_unlock(); return; }
+    if (s_graph_fault) { sound_unlock(); return; }
+    if (s_graph_runner) {
+        if (!s_inhibited && s_graph_runner->armed) {
+            int32_t delta = (int32_t)s_speed - s_prev_speed;
+            s_accel_q = (s_accel_q * 7 + delta * 1024 * 3) / 10;
+            s_accel = s_accel_q / 1024; s_prev_speed = s_speed;
+            sg_runner_tick(s_graph_runner,s_speed,s_accel);
+        }
+        sound_unlock(); return;
+    }
     if (s_inhibited || !s_control_armed || s_scheme.type == SOUND_SCHEME_NONE ||
         s_scheme.type == SOUND_SCHEME_LEGACY) {
         sound_unlock();
@@ -1241,13 +1456,14 @@ static void sound_task(void *arg)
          * sound transitions match the real motion. */
         uint8_t spd = 0;
         bool fwd = true;
+        unsigned epoch = atomic_load(&s_motion_epoch);
         (void)motor_get_applied_speed(&spd, &fwd);
         /* The motor reports the DCC 128-step scale (0..126); the engine works
          * on a normalized 0..255 scale. */
         if (spd > 126U) {
             spd = 126U;
         }
-        sound_set_speed((uint8_t)(((uint16_t)spd * 255U) / 126U), fwd);
+        sound_applied_speed((uint8_t)(((uint16_t)spd * 255U) / 126U), fwd,epoch);
         sound_tick();
         iters++;
         if (s_task_iter_cap != 0U && iters >= s_task_iter_cap) {

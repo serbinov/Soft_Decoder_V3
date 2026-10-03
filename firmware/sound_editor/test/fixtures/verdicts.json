@@ -1,0 +1,9 @@
+[
+  { "file": "valid-silent.json", "valid": true },
+  { "file": "valid-tick-cycle.json", "valid": true },
+  { "file": "valid-missing-asset-draft.json", "valid": true },
+  { "file": "invalid-priority.json", "valid": false },
+  { "file": "invalid-silent-cycle.json", "valid": false },
+  { "file": "invalid-path.json", "valid": false },
+  { "file": "invalid-version.json", "valid": false }
+]

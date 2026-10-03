@@ -32,7 +32,16 @@ static bool g_boot_mode, g_bound_worker;
 static int g_worker_delays;
 static jmp_buf g_worker_exit;
 static int g_lease_depth, g_lease_ends, g_motor_calls, g_notes, g_motion;
-static int g_functions, g_sound_stops, g_reload, g_deferred, g_flush, g_volume;
+static int g_functions, g_sound_stops, g_sound_requests, g_reload, g_deferred, g_flush, g_volume;
+static int g_graph_faults, g_graph_installs;
+static unsigned g_cal_watchdog_calls;
+static bool g_bound_safety;
+static unsigned g_safety_delays;
+static jmp_buf g_safety_exit;
+static bool g_graph_selected;
+static bool g_storage_mounted;
+static esp_err_t g_selection_err, g_graph_read_err, g_graph_parse_err, g_graph_assets_err;
+static esp_err_t g_sound_init_err;
 static int g_listener, g_confirm, g_hard_reset_calls;
 static uint32_t g_mask;
 static int64_t g_tick, g_packet;
@@ -49,9 +58,47 @@ esp_err_t motor_init(void) { return ESP_OK; }
 esp_err_t storage_init(void) { return ESP_OK; }
 esp_err_t storage_mount(void) { return ESP_OK; }
 storage_backend_t storage_get_backend(void) { return STORAGE_BACKEND_NONE; }
+bool storage_is_mounted(void) { return g_storage_mounted; }
+void motor_bemf_cal_watchdog(void) { ++g_cal_watchdog_calls; }
 esp_err_t settings_init(void) { return ESP_OK; }
 esp_err_t audio_init(void) { return ESP_OK; }
-esp_err_t sound_init(void) { return ESP_OK; }
+esp_err_t sound_init(void) { return g_sound_init_err; }
+esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision, bool *selected)
+{
+    snprintf(id, capacity, "%s", "saved_graph");
+    *revision = 2;
+    *selected = g_graph_selected;
+    return g_selection_err;
+}
+esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *length, uint32_t *actual)
+{
+    (void)id;
+    if (g_graph_read_err != ESP_OK) { return g_graph_read_err; }
+    *out = malloc(3);
+    memcpy(*out, "{}", 3);
+    *length = 2;
+    *actual = revision;
+    return ESP_OK;
+}
+esp_err_t sg_parse(const char *json, size_t length, sg_graph_t *out, sg_diagnostic_t *diag)
+{
+    (void)json; (void)length; (void)diag;
+    memset(out, 0, sizeof(*out));
+    return g_graph_parse_err;
+}
+esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag)
+{
+    (void)graph; (void)diag;
+    return g_graph_assets_err;
+}
+esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t revision)
+{
+    (void)graph; (void)id;
+    TEST_ASSERT_EQUAL(2, revision);
+    ++g_graph_installs;
+    return ESP_OK;
+}
+void sound_graph_fail_closed(void) { ++g_graph_faults; }
 esp_err_t dcc_init(void) { g_enabled = false; return ESP_OK; }
 bool provision_try(void) { return false; }
 void provision_listener_start(void) { ++g_listener; }
@@ -131,6 +178,7 @@ void web_apply_function(uint8_t fn, bool state)
     ++g_functions;
 }
 void sound_stop_all(void) { ++g_sound_stops; }
+void sound_request_stop(void) { ++g_sound_requests; }
 void web_log_event(const char *tag, const char *format, ...)
 {
     (void)tag;
@@ -182,11 +230,16 @@ void web_master_volume_changed(uint8_t volume) { g_volume = volume; }
 
 void vTaskDelay(TickType_t ticks)
 {
+    if (g_bound_safety) {
+        TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(10), ticks);
+        if (++g_safety_delays > 3U) { longjmp(g_safety_exit, 1); }
+    }
     if (g_bound_worker) {
         TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(100), ticks);
         if (++g_worker_delays > 1) { longjmp(g_worker_exit, 1); }
     }
     sdk_task_delay(ticks);
+    if (g_bound_safety) { g_tick = esp_timer_get_time(); }
 }
 
 static void startup_hook(void (*task)(void *), void *param)
@@ -210,6 +263,14 @@ void setUp(void)
     g_worker_delays = 0;
     g_lease_depth = g_lease_ends = g_motor_calls = g_notes = g_motion = 0;
     g_functions = g_sound_stops = g_reload = g_deferred = g_flush = 0;
+    g_sound_requests = g_graph_faults = g_graph_installs = 0;
+    g_cal_watchdog_calls = 0;
+    g_bound_safety = false;
+    g_safety_delays = 0;
+    g_graph_selected = false;
+    g_storage_mounted = true;
+    g_selection_err = g_graph_read_err = g_graph_parse_err = g_graph_assets_err = ESP_OK;
+    g_sound_init_err = ESP_OK;
     g_volume = g_listener = g_confirm = g_hard_reset_calls = 0;
     g_mask = MOTOR_INHIBIT_CONTROL;
     mock_timer_now_us = 1000000;
@@ -363,6 +424,42 @@ static void test_safety_step_stale_heartbeat_latches(void)
     TEST_ASSERT_TRUE(s_motor_stall_latched);
     TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
 }
+
+static void test_calibration_guard_runs_independently_of_motor_heartbeat(void)
+{
+    bool timeout = false;
+    for (unsigned i = 0; i < 100; ++i) {
+        mock_timer_now_us += 10000;
+        g_tick = mock_timer_now_us;
+        safety_step(&timeout);
+    }
+    TEST_ASSERT_EQUAL_UINT32(100, g_cal_watchdog_calls);
+    TEST_ASSERT_FALSE(s_motor_stall_latched);
+    TEST_ASSERT_FALSE(timeout);
+    TEST_ASSERT_EQUAL_INT(0, mock_nvs_set_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_nvs_commit_calls);
+    g_tick = 0;
+    safety_step(&timeout);
+    TEST_ASSERT_EQUAL_UINT32(101, g_cal_watchdog_calls);
+    TEST_ASSERT_TRUE(s_motor_stall_latched);
+}
+
+static void test_actual_safety_task_checks_calibration_every_ten_ms(void)
+{
+    s_safety_ready = xQueueCreate(1, sizeof(esp_err_t));
+    TEST_ASSERT_NOT_NULL(s_safety_ready);
+    g_bound_safety = true;
+    if (setjmp(g_safety_exit) == 0) {
+        safety_task(NULL);
+        TEST_FAIL_MESSAGE("Safety loop unexpectedly returned");
+    }
+    g_bound_safety = false;
+    TEST_ASSERT_EQUAL_UINT32(3, g_cal_watchdog_calls);
+    TEST_ASSERT_EQUAL_INT(3, mock_task_wdt_reset_calls);
+    TEST_ASSERT_EQUAL_INT64(1030000, esp_timer_get_time());
+    TEST_ASSERT_FALSE(s_motor_stall_latched);
+    TEST_ASSERT_EQUAL_INT(0, mock_nvs_set_calls);
+}
 static void test_cv11_dcc_timeout_recovery_preserves_other_owners(void)
 {
     bool timeout = false;
@@ -497,9 +594,63 @@ static void test_persistence_worker_skips_recovered_timeout_cleanup(void)
     TEST_ASSERT_FALSE(s_function_cleanup_requested);
 }
 
+static void test_selected_graph_restores_without_legacy_fallback(void)
+{
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL(0, g_graph_installs);
+    g_graph_selected = true;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL(1, g_graph_installs);
+    TEST_ASSERT_EQUAL(0, g_graph_faults);
+    g_graph_read_err = ESP_ERR_NOT_FOUND;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL(1, g_graph_installs);
+    TEST_ASSERT_EQUAL(1, g_graph_faults);
+    g_graph_read_err = ESP_OK;
+    g_graph_assets_err = ESP_FAIL;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL(2, g_graph_faults);
+}
+
+static void test_corrupt_selection_and_missing_storage_fail_safe(void)
+{
+    g_selection_err = ESP_FAIL;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL(1, g_graph_faults);
+    g_storage_mounted = false;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL(1, g_graph_faults);
+    TEST_ASSERT_EQUAL(0, g_graph_installs);
+}
+
+static void test_failed_sound_initialization_never_restores_legacy_audio(void)
+{
+    g_sound_init_err = ESP_FAIL;
+    g_graph_selected = true;
+    app_main();
+    TEST_ASSERT_EQUAL(1, g_graph_faults);
+    TEST_ASSERT_EQUAL(0, g_graph_installs);
+}
+
+static void test_emergency_stop_requests_audio_stop_immediately(void)
+{
+    on_dcc_emergency_stop();
+    TEST_ASSERT_EQUAL(1, g_sound_requests);
+    bool timed_out = false;
+    g_cv[11] = 1;
+    g_packet = mock_timer_now_us - 30000;
+    safety_step(&timed_out);
+    TEST_ASSERT_TRUE(timed_out);
+    TEST_ASSERT_TRUE(g_sound_requests >= 2);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_selected_graph_restores_without_legacy_fallback);
+    RUN_TEST(test_corrupt_selection_and_missing_storage_fail_safe);
+    RUN_TEST(test_failed_sound_initialization_never_restores_legacy_audio);
+    RUN_TEST(test_emergency_stop_requests_audio_stop_immediately);
     RUN_TEST(test_boot_required_consumers_fail_closed);
     RUN_TEST(test_boot_persistence_allocation_fails_closed);
     RUN_TEST(test_boot_safety_allocation_fails_closed);
@@ -512,6 +663,8 @@ int main(void)
     RUN_TEST(test_safety_start_zero_and_stale_heartbeat_rejected);
     RUN_TEST(test_safety_step_first_tick_latches_without_storage);
     RUN_TEST(test_safety_step_stale_heartbeat_latches);
+    RUN_TEST(test_calibration_guard_runs_independently_of_motor_heartbeat);
+    RUN_TEST(test_actual_safety_task_checks_calibration_every_ten_ms);
     RUN_TEST(test_cv11_dcc_timeout_recovery_preserves_other_owners);
     RUN_TEST(test_cv11_ignored_in_dc_and_web_modes);
     RUN_TEST(test_callbacks_source_leases_and_accepted_motion_only);

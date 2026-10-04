@@ -785,7 +785,7 @@ esp_err_t settings_func_bind_legacy_convert(const settings_func_map_t *map, size
         for (int s = 0; s < 2 && n < FUNC_BIND_MAX; ++s) {
             if (slots[s] != 0U) {
                 func_bind_fill(&out[n], (uint8_t)f, FUNC_TARGET_SLOT, slots[s], dir, state,
-                               SOUND_MODE_LATCHED);
+                               FUNC_MODE_LATCHED);
                 n++;
             }
         }

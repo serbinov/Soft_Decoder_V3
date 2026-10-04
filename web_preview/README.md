@@ -1,12 +1,19 @@
 # AURA-X web preview
 
-Local sandbox for developing the decoder web interface without a board.
+Local sandbox for the decoder web interface without a board.
 
-The server serves the **real** page `firmware/web_ui.html` (so the layout,
-themes and logic are exactly the device ones) and answers every `/api/*`
-request with in-memory mock data. Controls, settings, log, tracks and the
-sound scheme all behave like on the decoder; state resets when the server
-restarts.
+The server serves the **real** page `firmware/web_ui.html` and the built sound
+editor from `firmware/sound_editor/dist`:
+
+- <http://127.0.0.1:8080/> — main decoder UI
+- <http://127.0.0.1:8080/sound-editor/> — sound graph editor (effect library + patch panel)
+
+Every `/api/*` request is answered with in-memory mock data. The graph API
+(`/api/sound/graph/{capabilities,projects,project,state,asset,validate,save,apply}`)
+returns a v2 authoring project (effect tables + `sources`/`blocks`/`sinks`/`wires`
+plus the compiled `states`/`transitions`/`effects`), so the editor's library and
+patch panel are populated; Save/Apply and the live state poll work. Function
+bindings are served by `/api/func-map?view=bind`.
 
 ## Run
 
@@ -23,19 +30,14 @@ python web_preview\mock_server.py            # http://127.0.0.1:8080/
 python web_preview\mock_server.py 9000       # custom port
 ```
 
-Then open <http://127.0.0.1:8080/>. The page is served with `no-store`, so
-after editing `firmware/web_ui.html` just reload the browser.
-
-The sound graph editor is served from its built `sound_editor/dist` at
-<http://127.0.0.1:8080/sound-editor/>.
+Then open <http://127.0.0.1:8080/>.
 
 ## Notes
 
-- The source file `firmware/web_ui.html` is the single source of truth; the
-  preview never modifies it. `__VERSION__` is shown as `PREVIEW`.
-- Defaults are chosen to be interactive: control source is `web`, mode `dcc`,
-  20 tracks, a 20-table diesel scheme and calibration idle.
-- Mocked firmware contracts mirror `firmware/components/web/src/web.c`, so
-  field names and shapes match the device responses.
+- The source file `firmware/web_ui.html` is served with `no-store`, so editing it
+  and reloading the browser shows the change immediately. The sound editor is
+  static: after editing `firmware/sound_editor/src`, rebuild it with
+  `cd firmware/sound_editor && npm run build`.
+- `__VERSION__` is shown as `PREVIEW`; state resets when the server restarts.
 - Unknown `/api/*` paths return `{ "ok": false, "error": "..." }` instead of
   breaking the page.

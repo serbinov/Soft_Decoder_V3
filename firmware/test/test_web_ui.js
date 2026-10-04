@@ -159,28 +159,24 @@ test('Wi-Fi save preserves the password unless removal is explicit', t => {
   assert.match(context.wifiQuery(), /ap_password_clear=1/);
 });
 
-test('scheme deletion waits for confirmation and cancellation sends nothing', async t => {
-  const { context, element, requests } = fixture(t);
-  element('snd_proj').value = 'existing';
-  const deletion = context.deleteScheme();
+test('destructive action waits for confirmation and cancellation sends nothing', async t => {
+  const { context, requests } = fixture(t);
+  const reset = context.cvFactoryReset();
   await wait(0);
   assert.equal(requests.length, 0);
   context.dlgAnswer(false);
-  await deletion;
+  await reset;
   assert.equal(requests.length, 0);
 });
 
-test('scheme overwrite waits for confirmation', async t => {
-  const { context, element, requests, xhrs } = fixture(t);
-  element('snd_file').files = [{ name: 'existing.mds', size: 100 }];
-  context.sndProjects = [{ name: 'existing' }];
-  const upload = context.uploadScheme();
+test('accepting the confirmation performs the destructive action', async t => {
+  const { context, requests } = fixture(t);
+  const reset = context.cvFactoryReset();
   await wait(0);
   assert.equal(requests.length, 0);
-  assert.equal(xhrs.length, 0);
-  context.dlgAnswer(false);
-  await upload;
-  assert.equal(context.uploadBusy, false);
+  context.dlgAnswer(true);
+  await reset;
+  assert.match(requests[0].url, /cv\/write\?index=8&value=8/);
 });
 
 test('failed status poll exits without the old six-request timeout chain', async t => {

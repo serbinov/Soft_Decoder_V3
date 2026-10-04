@@ -1,5 +1,6 @@
 # Agent / tool artifacts
 .playwright-mcp/
+__pycache__/
 
 # Local backups and archives
 *.zip

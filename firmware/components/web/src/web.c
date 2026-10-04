@@ -33,7 +33,6 @@
 #include "audio.h"
 #include "auxio.h"
 #include "sound.h"
-#include "sound_store.h"
 #include "dcc.h"
 #include "motor.h"
 #include "pinmap.h"
@@ -598,7 +597,6 @@ static esp_err_t func_bind_migrate_from_map(void)
         }
         s_func_bind_count = n;
         err = settings_func_bind_save(s_func_bind, n);
-        if (err == ESP_OK) sound_reload_bindings();
     }
     return err;
 }
@@ -725,7 +723,7 @@ void web_apply_function(uint8_t fn, bool state)
 
     /* With an active sound scheme the engine owns the function-key routing and
      * the reserved engine voices, so the legacy slot mapping below is skipped. */
-    bool scheme_on = sound_scheme_enabled();
+    bool scheme_on = sound_enabled();
     if (changed && scheme_on) {
         sound_function(fn, state);
     }
@@ -853,7 +851,6 @@ bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
     s_func_bind_present = true;
     func_apply_output_locked(fn);
     xSemaphoreGive(s_func_mutex);
-    sound_reload_bindings();
     {
         char auxs[48];
         char slots[24];
@@ -1515,67 +1512,6 @@ static esp_err_t graph_apply_post(httpd_req_t *req)
     if (maintenance) web_maintenance_end();
     if (err != ESP_OK && diag.message[0] && err != ESP_ERR_NO_MEM && err != ESP_ERR_TIMEOUT) return graph_diagnostic_response(req, &diag, false);
     if (err != ESP_OK) return graph_result_error(req, err);
-    return send_json(req, "{\"ok\":true}");
-}
-
-static esp_err_t graph_legacy_post(httpd_req_t *req)
-{
-    char query[WEB_QUERY_MAX] = {0}, name[SOUND_FILE_MAX] = {0}, previous[SOUND_FILE_MAX], path[192];
-    if (req->content_len != 0U) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
-    if (!graph_query(req, query, sizeof(query))) return graph_result_error(req, ESP_ERR_INVALID_ARG);
-    bool disable = query_has_key(query, "none");
-    if (disable) {
-        char flag[4];
-        if (!graph_param(query, "none", flag, sizeof(flag)) || strcmp(flag, "1") != 0 || query_has_key(query, "id"))
-            return graph_result_error(req, ESP_ERR_INVALID_ARG);
-    } else if (!graph_param(query, "id", name, sizeof(name)) || !sound_store_name_ok(name)) {
-        return graph_result_error(req, ESP_ERR_INVALID_ARG);
-    }
-    if (!graph_motor_stopped()) return graph_error(req, "409 Conflict", "motor must be stopped");
-    sound_scheme_t *scheme = malloc(sizeof(*scheme));
-    if (scheme == NULL) return graph_result_error(req, ESP_ERR_NO_MEM);
-    esp_err_t err = storage_access_begin();
-    bool lease = err == ESP_OK, maintenance = false;
-    if (err == ESP_OK && !disable) err = sound_store_path(path, sizeof(path), name);
-    if (err == ESP_OK) err = disable ? sound_store_default(scheme) : sound_store_load(path, scheme);
-    if (err == ESP_OK) err = sound_store_validate(scheme);
-    if (lease) { storage_access_end(); lease = false; }
-    if (err != ESP_OK) {
-        free(scheme);
-        return graph_error(req, err == ESP_ERR_NOT_FOUND ? "404 Not Found" :
-            (err == ESP_ERR_INVALID_STATE || err == ESP_ERR_TIMEOUT) ? "503 Service Unavailable" : "400 Bad Request",
-            "legacy project unavailable or invalid; selection unchanged");
-    }
-    if (err == ESP_OK) { err = maintenance_reserve_checked(true); maintenance = err == ESP_OK; }
-    if (err == ESP_OK && !graph_motor_stopped()) err = ESP_ERR_INVALID_STATE;
-    if (err == ESP_OK) err = maintenance_quiesce(false);
-    if (err == ESP_OK) { err = storage_access_begin(); lease = err == ESP_OK; }
-    /* Reload after admission closes: an earlier MDS read is not a reservation. */
-    if (err == ESP_OK) err = disable ? sound_store_default(scheme) : sound_store_load(path, scheme);
-    if (err == ESP_OK) err = sound_store_validate(scheme);
-    if (err == ESP_OK) err = settings_active_scheme_get(previous, sizeof(previous));
-    bool name_attempted = false, restore_failed = false;
-    if (err == ESP_OK) {
-        name_attempted = true;
-        err = settings_active_scheme_set(name);
-    }
-    if (err == ESP_OK) err = sg_store_select_legacy();
-    if (err == ESP_OK) sound_legacy_commit(scheme, name);
-    else if (name_attempted) {
-        restore_failed = settings_active_scheme_set(previous) != ESP_OK;
-        if (restore_failed) {
-            portENTER_CRITICAL(&s_control_state_mux);
-            s_actuation_ready = false;
-            portEXIT_CRITICAL(&s_control_state_mux);
-        }
-    }
-    free(scheme);
-    if (lease) storage_access_end();
-    if (maintenance) web_maintenance_end();
-    if (restore_failed) return graph_error(req, "500 Internal Server Error", "legacy selection failed; previous name restoration failed; actuation disabled");
-    if (err != ESP_OK) return graph_error(req,
-        (err == ESP_ERR_NO_MEM || err == ESP_ERR_TIMEOUT) ? "503 Service Unavailable" : err == ESP_ERR_INVALID_STATE ? "409 Conflict" : "500 Internal Server Error",
-        "legacy switch failed; previous runtime and selector retained");
     return send_json(req, "{\"ok\":true}");
 }
 
@@ -2712,8 +2648,6 @@ static bool web_func_bind_commit(func_binding_t *tmp, size_t n)
     if (s_func_mutex != NULL) {
         xSemaphoreGive(s_func_mutex);
     }
-    /* Push the new list to the engine so it takes effect without a reboot. */
-    sound_reload_bindings();
     return true;
 }
 
@@ -2889,375 +2823,6 @@ static esp_err_t func_map_post(httpd_req_t *req)
     char json[64];
     snprintf(json, sizeof(json), "{\"ok\":true,\"fn\":%u}", (unsigned)fn);
     return send_json(req, json);
-}
-
-/* ---------- sound scheme REST (R5.1) ---------- */
-
-static esp_err_t sound_state_handler(httpd_req_t *req)
-{
-    sound_status_t st;
-    sound_status_get(&st);
-    char esc[SOUND_FILE_MAX * 2];
-    json_escape(st.name, esc, sizeof(esc));
-    char json[320];
-    snprintf(json, sizeof(json),
-             "{\"ok\":true,\"type\":%u,\"name\":\"%s\",\"enabled\":%s,\"engine\":%s,"
-             "\"table\":%u,\"phase\":%u,\"speed\":%u,\"forward\":%s}",
-             (unsigned)st.type, esc, st.enabled ? "true" : "false",
-             st.engine ? "true" : "false", (unsigned)st.table, (unsigned)st.phase,
-             (unsigned)st.speed, st.forward ? "true" : "false");
-    return send_json(req, json);
-}
-
-/* Full scheme view: 31 tables x (metadata + 3 file names) + arrays + extras. */
-#define WEB_SCHEME_JSON_MAX 16384
-
-static esp_err_t sound_scheme_handler(httpd_req_t *req)
-{
-    char *json = malloc(WEB_SCHEME_JSON_MAX);
-    if (json == NULL) {
-        return send_json(req, "{\"ok\":false,\"error\":\"oom\"}");
-    }
-    /* Serialize via the fine-grained accessors: copying the whole ~26 KB scheme
-     * per request would churn the internal heap for a read-only view. */
-    sound_engine_t eng;
-    (void)sound_engine_get(&eng);
-    uint8_t type = sound_type_get();
-    sound_status_t st;
-    sound_status_get(&st);
-    /* CV30 is the effective skip-flag source the engine reads, so report it. */
-    uint8_t flags = eng.flags;
-    (void)settings_cv_read(30, &flags);
-    sound_brake_t brake;
-    (void)sound_brake_get(&brake);
-    char esc[SOUND_FILE_MAX * 2];
-    json_escape(st.name, esc, sizeof(esc));
-    size_t used = 0;
-    buf_appendf(json, WEB_SCHEME_JSON_MAX, &used,
-                "{\"ok\":true,\"type\":%u,\"name\":\"%s\",\"start_fn\":%u,\"sync\":%u,"
-                "\"flags\":%u,\"start\":%u,\"stop\":%u,\"shutdown\":%u,\"cyl_min\":%u,"
-                "\"cyl_max\":%u,\"cyl_inc\":%u,"
-                "\"drive\":[%u,%u,%u,%u,%u],\"accel\":[%u,%u,%u,%u,%u],"
-                "\"coast\":[%u,%u,%u,%u,%u],\"brake\":{\"max\":%u,\"min\":%u},\"tables\":[",
-                (unsigned)type, esc, (unsigned)eng.engine_start_fn,
-                eng.sync_motion ? 1U : 0U, (unsigned)flags,
-                (unsigned)eng.start_table, (unsigned)eng.stop_table,
-                (unsigned)eng.shutdown_table, (unsigned)eng.cyl_shift_min,
-                (unsigned)eng.cyl_shift_max, (unsigned)eng.cyl_shift_inc,
-                (unsigned)eng.drive[0], (unsigned)eng.drive[1], (unsigned)eng.drive[2],
-                (unsigned)eng.drive[3], (unsigned)eng.drive[4],
-                (unsigned)eng.accel[0], (unsigned)eng.accel[1], (unsigned)eng.accel[2],
-                (unsigned)eng.accel[3], (unsigned)eng.accel[4],
-                (unsigned)eng.coast[0], (unsigned)eng.coast[1], (unsigned)eng.coast[2],
-                (unsigned)eng.coast[3], (unsigned)eng.coast[4],
-                (unsigned)brake.max_on_speed, (unsigned)brake.min_brake_speed);
-    for (uint8_t i = 1U; i < SOUND_MAX_TABLES; ++i) {
-        sound_table_t t;
-        (void)sound_table_get(i, &t);
-        json_escape(t.name, esc, sizeof(esc));
-        char e_init[SOUND_FILE_MAX * 2];
-        char e_loop[SOUND_FILE_MAX * 2];
-        char e_end[SOUND_FILE_MAX * 2];
-        json_escape(t.init[0].file, e_init, sizeof(e_init));
-        json_escape(t.loop[0].file, e_loop, sizeof(e_loop));
-        json_escape(t.end[0].file, e_end, sizeof(e_end));
-        buf_appendf(json, WEB_SCHEME_JSON_MAX, &used,
-                    "%s{\"i\":%u,\"used\":%u,\"name\":\"%s\",\"min\":%u,\"max\":%u,"
-                    "\"rate\":%u,\"min_plays\":%u,\"max_plays\":%u,\"end\":%u,"
-                    "\"nacc\":%u,\"ndec\":%u,\"init\":\"%s\",\"loop\":\"%s\",\"endf\":\"%s\"}",
-                    i == 1U ? "" : ",", (unsigned)i, t.used ? 1U : 0U, esc,
-                    (unsigned)t.min_speed, (unsigned)t.max_speed, (unsigned)t.rate_scale,
-                    (unsigned)t.min_plays, (unsigned)t.max_plays, (unsigned)t.end_table,
-                    (unsigned)t.next_accel, (unsigned)t.next_decel,
-                    e_init, e_loop, e_end);
-    }
-    buf_appendf(json, WEB_SCHEME_JSON_MAX, &used, "],\"extras\":[");
-    for (uint8_t j = 0; j < SOUND_MAX_EXTRAS; ++j) {
-        sound_extra_t e;
-        (void)sound_extra_get(j, &e);
-        buf_appendf(json, WEB_SCHEME_JSON_MAX, &used,
-                    "%s{\"i\":%u,\"table\":%u,\"fn\":%u,\"dir\":%u,\"state\":%u,\"mode\":%u,"
-                    "\"vol\":%u,\"rmin\":%u,\"rmax\":%u}",
-                    j == 0U ? "" : ",", (unsigned)j, (unsigned)e.table, (unsigned)e.fn,
-                    (unsigned)e.dir, (unsigned)e.state, (unsigned)e.mode,
-                    (unsigned)e.volume, (unsigned)e.random_min_ms, (unsigned)e.random_max_ms);
-    }
-    buf_appendf(json, WEB_SCHEME_JSON_MAX, &used, "]}");
-    esp_err_t err = send_json(req, json);
-    free(json);
-    return err;
-}
-
-static esp_err_t sound_scheme_post_handler(httpd_req_t *req)
-{
-    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
-    char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    sound_engine_t eng;
-    (void)sound_engine_get(&eng);
-    uint8_t type = sound_type_get();
-    uint8_t v = 0;
-    if (parse_u8(query, "type", &v)) {
-        if (v > SOUND_SCHEME_ELECTRIC) {
-            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad type");
-        }
-        type = v;
-    }
-    if (parse_u8(query, "start_fn", &v)) { eng.engine_start_fn = v; }
-    if (parse_u8(query, "sync", &v)) { eng.sync_motion = (v != 0U); }
-    if (parse_u8(query, "flags", &v)) {
-        eng.flags = v;
-        /* CV30 is what the engine actually reads: keep the two in sync. */
-        (void)settings_cv_write(30, v);
-        settings_cv_commit_deferred();
-    }
-    if (parse_u8(query, "start", &v)) { eng.start_table = v; }
-    if (parse_u8(query, "stop", &v)) { eng.stop_table = v; }
-    if (parse_u8(query, "shutdown", &v)) { eng.shutdown_table = v; }
-    if (parse_u8(query, "cyl_min", &v)) { eng.cyl_shift_min = v; }
-    if (parse_u8(query, "cyl_max", &v)) { eng.cyl_shift_max = v; }
-    if (parse_u8(query, "cyl_inc", &v)) { eng.cyl_shift_inc = v; }
-    for (uint8_t i = 0; i < SOUND_ENGINE_STEPS; ++i) {
-        char key[10];
-        snprintf(key, sizeof(key), "drive%u", (unsigned)i);
-        if (parse_u8(query, key, &v)) { eng.drive[i] = v; }
-        snprintf(key, sizeof(key), "accel%u", (unsigned)i);
-        if (parse_u8(query, key, &v)) { eng.accel[i] = v; }
-        snprintf(key, sizeof(key), "coast%u", (unsigned)i);
-        if (parse_u8(query, key, &v)) { eng.coast[i] = v; }
-    }
-    sound_brake_t brake;
-    (void)sound_brake_get(&brake);
-    bool brake_changed = false;
-    if (parse_u8(query, "brake_max", &v)) { brake.max_on_speed = v; brake_changed = true; }
-    if (parse_u8(query, "brake_min", &v)) { brake.min_brake_speed = v; brake_changed = true; }
-    if (brake_changed) {
-        (void)sound_brake_set(&brake);
-    }
-    (void)sound_type_set(type);
-    (void)sound_engine_set(&eng);
-    if (sound_scheme_save() != ESP_OK) {
-        return send_json(req, "{\"ok\":false,\"error\":\"save\"}");
-    }
-    return send_json(req, "{\"ok\":true}");
-}
-
-static esp_err_t sound_table_post(httpd_req_t *req)
-{
-    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
-    char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    uint8_t idx = 0;
-    if (!parse_u8(query, "i", &idx) || idx == SOUND_TABLE_NONE || idx >= SOUND_MAX_TABLES) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad i");
-    }
-    sound_table_t tbl;
-    (void)sound_table_get(idx, &tbl);
-    sound_table_t *t = &tbl;
-    uint8_t v = 0;
-    if (parse_u8(query, "used", &v)) { t->used = (v != 0U); }
-    if (parse_u8(query, "min", &v)) { t->min_speed = v; }
-    if (parse_u8(query, "max", &v)) { t->max_speed = v; }
-    if (parse_u8(query, "rate", &v)) { t->rate_scale = v; }
-    if (parse_u8(query, "min_plays", &v)) { t->min_plays = v; }
-    if (parse_u8(query, "max_plays", &v)) { t->max_plays = v; }
-    if (parse_u8(query, "end", &v)) { t->end_table = v; }
-    if (parse_u8(query, "nacc", &v)) { t->next_accel = v; }
-    if (parse_u8(query, "ndec", &v)) { t->next_decel = v; }
-    char s[SOUND_FILE_MAX] = { 0 };
-    if (parse_query(query, "name", s, sizeof(s))) {
-        snprintf(t->name, sizeof(t->name), "%.*s", (int)(sizeof(t->name) - 1U), s);
-    }
-    if (parse_query(query, "init", s, sizeof(s))) { snprintf(t->init[0].file, SOUND_FILE_MAX, "%s", s); }
-    if (parse_query(query, "loop", s, sizeof(s))) { snprintf(t->loop[0].file, SOUND_FILE_MAX, "%s", s); }
-    if (parse_query(query, "endf", s, sizeof(s))) { snprintf(t->end[0].file, SOUND_FILE_MAX, "%s", s); }
-    (void)sound_table_set(idx, &tbl);
-    if (sound_scheme_save() != ESP_OK) {
-        return send_json(req, "{\"ok\":false,\"error\":\"save\"}");
-    }
-    char json[48];
-    snprintf(json, sizeof(json), "{\"ok\":true,\"i\":%u}", (unsigned)idx);
-    return send_json(req, json);
-}
-
-static esp_err_t sound_extra_post(httpd_req_t *req)
-{
-    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
-    char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    uint8_t idx = 0;
-    if (!parse_u8(query, "i", &idx) || idx >= SOUND_MAX_EXTRAS) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad i");
-    }
-    sound_extra_t ex;
-    (void)sound_extra_get(idx, &ex);
-    sound_extra_t *e = &ex;
-    uint8_t v = 0;
-    uint16_t u = 0;
-    if (parse_u8(query, "table", &v)) { e->table = v; }
-    if (parse_u8(query, "fn", &v)) { e->fn = v; }
-    if (parse_u8(query, "dir", &v)) { e->dir = v; }
-    if (parse_u8(query, "state", &v)) { e->state = v; }
-    if (parse_u8(query, "mode", &v)) { e->mode = v; }
-    if (parse_u8(query, "vol", &v)) { e->volume = v; }
-    if (parse_u16(query, "rmin", &u)) { e->random_min_ms = u; }
-    if (parse_u16(query, "rmax", &u)) { e->random_max_ms = u; }
-    (void)sound_extra_set(idx, &ex);
-    if (sound_scheme_save() != ESP_OK) {
-        return send_json(req, "{\"ok\":false,\"error\":\"save\"}");
-    }
-    char json[48];
-    snprintf(json, sizeof(json), "{\"ok\":true,\"i\":%u}", (unsigned)idx);
-    return send_json(req, json);
-}
-
-static esp_err_t sound_lint_handler(httpd_req_t *req)
-{
-    char rep[160];
-    int n = sound_lint(rep, sizeof(rep));
-    char esc[320];
-    json_escape(rep, esc, sizeof(esc));
-    char json[400];
-    snprintf(json, sizeof(json), "{\"ok\":true,\"problems\":%d,\"report\":\"%s\"}", n, esc);
-    return send_json(req, json);
-}
-
-/* ---------- sound scheme project files (create/select/delete/export/import) */
-
-/* GET /api/sound/projects -> the stored .mds files and which one is active. */
-static esp_err_t sound_projects_get(httpd_req_t *req)
-{
-    char (*names)[SOUND_FILE_MAX] = malloc(sizeof(char[WEB_PROJECTS_MAX][SOUND_FILE_MAX]));
-    char *json = malloc(WEB_PROJECTS_JSON_MAX);
-    if (names == NULL || json == NULL) {
-        free(names);
-        free(json);
-        return send_json(req, "{\"ok\":false,\"error\":\"oom\"}");
-    }
-    size_t count = 0;
-    (void)sound_scheme_list(names, WEB_PROJECTS_MAX, &count);
-    char active[SOUND_FILE_MAX] = { 0 };
-    (void)sound_active_name_get(active, sizeof(active));
-    char esc[SOUND_FILE_MAX * 2];
-    json_escape(active, esc, sizeof(esc));
-    size_t used = 0;
-    buf_appendf(json, WEB_PROJECTS_JSON_MAX, &used,
-                "{\"ok\":true,\"active\":\"%s\",\"count\":%u,\"projects\":[",
-                esc, (unsigned)count);
-    for (size_t i = 0; i < count; ++i) {
-        json_escape(names[i], esc, sizeof(esc));
-        buf_appendf(json, WEB_PROJECTS_JSON_MAX, &used, "%s{\"name\":\"%s\",\"active\":%s}",
-                    i == 0U ? "" : ",", esc,
-                    strcmp(names[i], active) == 0 ? "true" : "false");
-    }
-    buf_appendf(json, WEB_PROJECTS_JSON_MAX, &used, "]}");
-    esp_err_t err = send_json(req, json);
-    free(names);
-    free(json);
-    return err;
-}
-
-/* POST /api/sound/project — create=<name>[&type=N] | activate=<name> | delete=<name> */
-static esp_err_t sound_project_post(httpd_req_t *req)
-{
-    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
-    char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    char name[SOUND_FILE_MAX] = { 0 };
-    esp_err_t err;
-    if (parse_query(query, "create", name, sizeof(name))) {
-        uint8_t type = SOUND_SCHEME_DIESEL;
-        (void)parse_u8(query, "type", &type);
-        err = sound_scheme_create(name, type);
-    } else if (parse_query(query, "activate", name, sizeof(name))) {
-        err = sound_load_scheme(name);
-    } else if (parse_query(query, "delete", name, sizeof(name))) {
-        err = sound_scheme_delete(name);
-    } else {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad action");
-    }
-    if (err != ESP_OK) {
-        char json[96];
-        snprintf(json, sizeof(json), "{\"ok\":false,\"error\":\"%s\"}", esp_err_to_name(err));
-        return send_json(req, json);
-    }
-    web_log_event("Звук", "схема %s", name);
-    return send_json(req, "{\"ok\":true}");
-}
-
-/* GET /api/sound/download?name=N — raw .mds file as an attachment. */
-static esp_err_t sound_download_get(httpd_req_t *req)
-{
-    char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    char name[SOUND_FILE_MAX] = { 0 };
-    if (!parse_query(query, "name", name, sizeof(name))) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad name");
-    }
-    uint8_t *buf = malloc(SOUND_STORE_MAX_BYTES);
-    if (buf == NULL) {
-        return send_json(req, "{\"ok\":false,\"error\":\"oom\"}");
-    }
-    size_t len = 0;
-    esp_err_t err = sound_scheme_export(name, buf, SOUND_STORE_MAX_BYTES, &len);
-    if (err != ESP_OK) {
-        free(buf);
-        char json[96];
-        snprintf(json, sizeof(json), "{\"ok\":false,\"error\":\"%s\"}", esp_err_to_name(err));
-        return send_json(req, json);
-    }
-    char disp[SOUND_FILE_MAX + 32];
-    snprintf(disp, sizeof(disp), "attachment; filename=\"%s.mds\"", name);
-    httpd_resp_set_type(req, "application/octet-stream");
-    httpd_resp_set_hdr(req, "Content-Disposition", disp);
-    esp_err_t rerr = httpd_resp_send(req, (const char *)buf, len);
-    free(buf);
-    return rerr;
-}
-
-/* POST /api/sound/upload?name=N[&activate=0] — import a raw .mds body. */
-static esp_err_t sound_upload_post(httpd_req_t *req)
-{
-    if (sound_graph_active()) return close_rejected_body(req, graph_error(req, "409 Conflict", "graph mode: use /sound-editor/"));
-    if (!storage_is_mounted()) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage unavailable");
-    }
-    if (req->content_len != (int)SOUND_STORE_MAX_BYTES) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid size");
-    }
-    char query[WEB_QUERY_MAX] = { 0 };
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    char name[SOUND_FILE_MAX] = { 0 };
-    if (!parse_query(query, "name", name, sizeof(name))) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad name");
-    }
-    uint8_t *buf = malloc(SOUND_STORE_MAX_BYTES);
-    if (buf == NULL) {
-        return send_json(req, "{\"ok\":false,\"error\":\"oom\"}");
-    }
-    int got = 0;
-    while ((size_t)got < req->content_len) {
-        if (transfer_expired()) break;
-        int r = httpd_req_recv(req, (char *)buf + got, req->content_len - got);
-        if (r <= 0) {
-            break;
-        }
-        got += r;
-        s_up_received = got;
-    }
-    esp_err_t err = ((size_t)got == req->content_len && !transfer_expired()) ? ESP_OK : ESP_FAIL;
-    if (err == ESP_OK) {
-        bool activate = parse_bool(query, "activate", true);
-        err = sound_scheme_import(name, buf, (size_t)got, activate);
-    }
-    free(buf);
-    if (err != ESP_OK) {
-        char json[96];
-        snprintf(json, sizeof(json), "{\"ok\":false,\"error\":\"%s\"}", esp_err_to_name(err));
-        return send_json(req, json);
-    }
-    web_log_event("Звук", "схема загружена %s", name);
-    return send_json(req, "{\"ok\":true}");
 }
 
 static esp_err_t cv_all_get(httpd_req_t *req)
@@ -4140,9 +3705,7 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
         (query_err != ESP_OK && query_err != ESP_ERR_NOT_FOUND) || !query_encoding_valid(query))
         return close_rejected_body(req, httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query"));
     esp_err_t (*handler)(httpd_req_t *) = *(esp_err_t (**)(httpd_req_t *))req->user_ctx;
-    if (handler == sound_upload_post && sound_graph_active())
-        return close_rejected_body(req, graph_error(req, "409 Conflict", "graph mode: use /sound-editor/"));
-    if (handler == audio_upload_post || handler == ota_update_post || handler == sound_upload_post)
+    if (handler == audio_upload_post || handler == ota_update_post)
         return transfer_start(req, handler);
     if (req->content_len != 0U && handler != graph_validate_post && handler != graph_save_post)
         return close_rejected_body(req, httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unexpected body"));
@@ -4236,7 +3799,6 @@ static esp_err_t start_http_server(void)
     register_route("/api/sound/graph/validate", HTTP_POST, graph_validate_post);
     register_route("/api/sound/graph/save", HTTP_POST, graph_save_post);
     register_route("/api/sound/graph/apply", HTTP_POST, graph_apply_post);
-    register_route("/api/sound/graph/legacy", HTTP_POST, graph_legacy_post);
     register_route("/api/control/source", HTTP_GET, control_source_get);
     register_route("/api/control/source", HTTP_POST, control_source_post);
     register_route("/api/mode", HTTP_GET, mode_get);
@@ -4262,16 +3824,6 @@ static esp_err_t start_http_server(void)
     register_route("/api/track/category", HTTP_POST, track_category_post);
     register_route("/api/func-map", HTTP_GET, func_map_get);
     register_route("/api/func-map", HTTP_POST, func_map_post);
-    register_route("/api/sound/state", HTTP_GET, sound_state_handler);
-    register_route("/api/sound/scheme", HTTP_GET, sound_scheme_handler);
-    register_route("/api/sound/scheme", HTTP_POST, sound_scheme_post_handler);
-    register_route("/api/sound/table", HTTP_POST, sound_table_post);
-    register_route("/api/sound/extra", HTTP_POST, sound_extra_post);
-    register_route("/api/sound/lint", HTTP_GET, sound_lint_handler);
-    register_route("/api/sound/projects", HTTP_GET, sound_projects_get);
-    register_route("/api/sound/project", HTTP_POST, sound_project_post);
-    register_route("/api/sound/download", HTTP_GET, sound_download_get);
-    register_route("/api/sound/upload", HTTP_POST, sound_upload_post);
     register_route("/api/aux/cfg", HTTP_GET, aux_cfg_get);
     register_route("/api/aux/cfg", HTTP_POST, aux_cfg_post);
     register_route("/api/cv/read", HTTP_GET, cv_read_get);
@@ -4321,9 +3873,6 @@ esp_err_t web_init(void)
     s_func_bind_count = 0;
     load_err = func_bind_load();
     if (load_err != ESP_OK) return load_err;
-    /* The engine may have loaded the (possibly empty) store before web_init
-     * migrated it; hand it the authoritative list. */
-    sound_reload_bindings();
 
     /* Bring up the AUX outputs before restoring the saved per-channel level/
      * effect: auxio_config() only programmes channels that auxio_init() has

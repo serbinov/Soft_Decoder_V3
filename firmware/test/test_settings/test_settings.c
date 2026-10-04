@@ -934,7 +934,7 @@ static void test_func_bind_roundtrip(void)
     b[0].fn = 2;
     b[0].target_type = FUNC_TARGET_SOUND;
     b[0].target_id = 3;
-    b[0].mode = SOUND_MODE_SHORT_LONG;
+    b[0].mode = FUNC_MODE_SHORT_LONG;
     b[0].flags = FUNC_FLAG_DUCK;
     b[0].short_table = 7;
     b[0].short_ms = 400;
@@ -947,7 +947,7 @@ static void test_func_bind_roundtrip(void)
     TEST_ASSERT_EQUAL_UINT8(2, back[0].fn);
     TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SOUND, back[0].target_type);
     TEST_ASSERT_EQUAL_UINT8(3, back[0].target_id);
-    TEST_ASSERT_EQUAL_UINT8(SOUND_MODE_SHORT_LONG, back[0].mode);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_MODE_SHORT_LONG, back[0].mode);
     TEST_ASSERT_EQUAL_UINT8(FUNC_FLAG_DUCK, back[0].flags);
     TEST_ASSERT_EQUAL_UINT16(400, back[0].short_ms);
 
@@ -1002,7 +1002,7 @@ static void test_func_bind_legacy_convert(void)
     TEST_ASSERT_EQUAL_UINT8(FUNC_STATE_STOPPED, out[1].state);
     TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SLOT, out[2].target_type);
     TEST_ASSERT_EQUAL_UINT8(1, out[2].target_id);
-    TEST_ASSERT_EQUAL_UINT8(SOUND_MODE_LATCHED, out[2].mode);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_MODE_LATCHED, out[2].mode);
     TEST_ASSERT_EQUAL_UINT8(2, out[3].target_id);
     TEST_ASSERT_EQUAL_UINT8(0, out[4].target_id); /* F2F forward */
     TEST_ASSERT_EQUAL_UINT8(FUNC_DIR_FWD, out[4].dir);

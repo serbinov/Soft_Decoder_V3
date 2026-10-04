@@ -6,7 +6,7 @@ Serves the real firmware page (firmware/web_ui.html) and answers every
 /api/* endpoint with in-memory mock data, so the interface can be developed
 and tested in a browser exactly like it renders on the decoder -- without a
 board. State is kept in process, so the controls, settings, log and sound
-scheme panels behave as on the device.
+graph editor project behave as on the device.
 
 Run:
     python mock_server.py            # http://127.0.0.1:8080/
@@ -32,11 +32,11 @@ FN_COUNT = 29
 TRACK_COUNT = 20
 AUX_NAMES = ["F0F", "F0R", "AUX1", "AUX2", "AUX3", "AUX4", "AUX5", "AUX6", "AUX7"]
 
-TTY_TABLES = [
-    "Старт", "Холостой", "Разгон", "Тяга 1", "Тяга 2", "Тяга 3", "Тяга 4",
-    "Тяга 5", "Тяга 6", "Тяга 7", "Тяга 8", "Выбег", "Тормоз", "Останов",
-    "Свисток", "Тифон", "Компрессор", "Вентилятор", "Сцепка", "Песок",
-]
+GRAPH_LIMITS = {
+    "states": 57, "soundStates": 31, "transitions": 128, "effects": 24,
+    "effectTables": 16, "blocks": 64, "sinks": 9, "assets": 31,
+    "jsonBytes": 131072,
+}
 TRACK_LABELS = [
     "Тепловоз", "Отправление", "Свисток", "Тифон", "Компрессор", "Вентилятор",
     "Сцепка", "Тормоз", "Гудок", "Стрелка", "Колёса", "Песок", "Генератор",
@@ -62,32 +62,106 @@ def _new_tracks():
     return tracks, cats
 
 
-def _new_scheme():
-    tables = []
-    for i in range(31):
-        used = 1 <= i <= len(TTY_TABLES)
-        name = TTY_TABLES[i - 1] if used else ""
-        tables.append({
-            "i": i, "used": 1 if used else 0, "name": name,
-            "min": (i - 1) * 6 if used else 0, "max": i * 6 if used else 0,
-            "rate": 8 if used else 0, "min_plays": 0 if used else 0,
-            "max_plays": 3 if used else 0, "end": 0, "nacc": 0, "ndec": 0,
-            "init": ("audio/t%02d_init.wav" % i) if used else "",
-            "loop": ("audio/t%02d_loop.wav" % i) if used else "",
-            "endf": "",
-        })
-    extras = [
-        {"i": 0, "table": 17, "fn": 3, "dir": 0, "state": 0, "mode": 0, "vol": 100, "rmin": 400, "rmax": 1200},
-        {"i": 1, "table": 15, "fn": 5, "dir": 0, "state": 0, "mode": 1, "vol": 80, "rmin": 300, "rmax": 900},
-        {"i": 2, "table": 16, "fn": 6, "dir": 0, "state": 0, "mode": 0, "vol": 60, "rmin": 800, "rmax": 1600},
-        {"i": 3, "table": 18, "fn": 0, "dir": 0, "state": 0, "mode": 0, "vol": 0, "rmin": 0, "rmax": 0},
+def _asset(name):
+    return {"file": name, "size": 44144, "crc32": "12345678",
+            "sampleRate": 22050, "channels": 1, "bits": 16, "durationMs": 1000}
+
+
+def _state(sid, name, filename, loop, volume=80):
+    return {"id": sid, "name": name, "file": filename, "loop": loop,
+            "volume": volume, "rate": 1000}
+
+
+def _edge(eid, source, target, priority, timing, condition):
+    return {"id": eid, "source": source, "target": target,
+            "priority": priority, "timing": timing, "condition": condition}
+
+
+def _new_graph():
+    """A v2 authoring project (effect-table library + patch-panel routing) with
+    a compiled v1 behaviour layer, mirroring what the sound editor saves."""
+    states = [
+        {"id": "off", "name": "Выкл / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
+        _state("engine_idle", "Холостой ход", "slot01.wav", True),
+        _state("engine_run", "Тяга", "slot03.wav", True),
+        _state("engine_stop", "Останов двигателя", "slot14.wav", False),
+        {"id": "horn_off", "name": "Гудок / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
+        _state("horn_start", "Атака гудка", "slot09.wav", False),
+        _state("horn_hold", "Удержание гудка", "slot09.wav", True),
+        _state("horn_end", "Отпускание гудка", "slot07.wav", False),
     ]
+    transitions = [
+        _edge("t1", "off", "engine_idle", 10, "immediate", {"type": "engine_on"}),
+        _edge("t2", "engine_idle", "engine_run", 1, "after_sample", {"type": "speed", "min": 1, "max": 255}),
+        _edge("t3", "engine_run", "engine_idle", 1, "after_sample", {"type": "speed", "min": 0, "max": 0}),
+        _edge("t4", "engine_idle", "engine_stop", 255, "immediate", {"type": "engine_off"}),
+        _edge("t5", "engine_run", "engine_stop", 255, "immediate", {"type": "engine_off"}),
+        _edge("t6", "engine_stop", "off", 10, "immediate", {"type": "sample_done"}),
+        _edge("t7", "horn_off", "horn_start", 10, "immediate", {"type": "fn_press", "fn": 2}),
+        _edge("t8", "horn_start", "horn_hold", 10, "immediate", {"type": "sample_done"}),
+        _edge("t9", "horn_start", "horn_end", 200, "immediate", {"type": "fn_off", "fn": 2}),
+        _edge("t10", "horn_hold", "horn_end", 10, "immediate", {"type": "fn_off", "fn": 2}),
+        _edge("t11", "horn_end", "horn_off", 10, "immediate", {"type": "sample_done"}),
+    ]
+    effect_tables = [
+        {"id": "horn", "name": "Гудок", "kind": "horn", "preset": "shortLong",
+         "init": "slot09.wav", "loop": "slot09.wav", "end": "slot07.wav", "short": "slot07.wav",
+         "shortMs": 400, "volume": 80, "rate": 1000, "behavior": "horn_off"},
+        {"id": "motor", "name": "Мотор", "kind": "motor", "preset": "loopHeld",
+         "init": "slot01.wav", "loop": "slot01.wav", "end": "slot14.wav", "short": "",
+         "shortMs": 400, "volume": 80, "rate": 1000, "behavior": ""},
+        {"id": "brake", "name": "Тормоза", "kind": "brake", "preset": "state",
+         "init": "", "loop": "", "end": "slot14.wav", "short": "",
+         "shortMs": 400, "volume": 70, "rate": 1000, "behavior": ""},
+        {"id": "bell", "name": "Звонок", "kind": "bell", "preset": "random",
+         "init": "slot09.wav", "loop": "", "end": "", "short": "",
+         "shortMs": 400, "volume": 60, "rate": 1000, "behavior": ""},
+        {"id": "coupler", "name": "Сцепка", "kind": "coupler", "preset": "oneShot",
+         "init": "slot07.wav", "loop": "", "end": "", "short": "",
+         "shortMs": 400, "volume": 75, "rate": 1000, "behavior": ""},
+    ]
+    sources = [
+        {"id": "src_engine", "role": "engine", "fn": 8, "label": "Двигатель"},
+        {"id": "src_horn", "role": "fn", "fn": 2, "label": "F2 Гудок"},
+        {"id": "src_f3", "role": "fn", "fn": 3, "label": "F3 Звонок"},
+    ]
+    blocks = [
+        {"id": "blk_motor", "kind": "sound", "table": "motor", "op": "and", "min": 0, "max": 0},
+        {"id": "blk_horn", "kind": "sound", "table": "horn", "op": "and", "min": 0, "max": 0},
+        {"id": "blk_bell", "kind": "sound", "table": "bell", "op": "and", "min": 0, "max": 0},
+    ]
+    sinks = [
+        {"id": "sink_head", "output": "F0F"},
+        {"id": "sink_aux3", "output": "AUX3"},
+    ]
+    wires = [
+        {"id": "w1", "from": "src_engine", "to": "blk_motor", "event": "fn_on", "dir": "any", "state": "any"},
+        {"id": "w2", "from": "src_horn", "to": "blk_horn", "event": "fn_press", "dir": "any", "state": "any"},
+        {"id": "w3", "from": "src_f3", "to": "blk_bell", "event": "fn_press", "dir": "any", "state": "any"},
+        {"id": "w4", "from": "blk_motor", "to": "sink_head", "event": "", "dir": "fwd", "state": "moving"},
+        {"id": "w5", "from": "blk_horn", "to": "sink_aux3", "event": "", "dir": "any", "state": "any"},
+    ]
+    files = set()
+    for st in states:
+        if st["file"]:
+            files.add(st["file"])
+    for tbl in effect_tables:
+        for role in ("init", "loop", "end", "short"):
+            if tbl[role]:
+                files.add(tbl[role])
+    positions = {}
+    for node in states + sources + blocks + sinks:
+        positions[node["id"]] = {"x": 200, "y": 80}
     return {
-        "type": 1, "name": "Тепловоз ТЭП70", "start_fn": 8, "sync": 1,
-        "flags": 0, "start": 1, "stop": 2, "shutdown": 14,
-        "cyl_min": 0, "cyl_max": 8, "cyl_inc": 1,
-        "drive": [3, 4, 5, 6, 7], "accel": [2, 3, 4, 5, 6],
-        "tables": tables, "extras": extras,
+        "format": "sound-graph", "schemaVersion": 2, "id": "preview",
+        "name": "Тепловоз ТЭП70 (превью)",
+        "engine": {"entry": "off", "fn": 8}, "hysteresis": 3,
+        "effectTables": effect_tables, "sources": sources, "blocks": blocks,
+        "sinks": sinks, "wires": wires,
+        "states": states, "transitions": transitions,
+        "effects": [{"id": "horn", "entry": "horn_off", "fn": 2}],
+        "assets": [_asset(name) for name in sorted(files)],
+        "editor": {"positions": positions, "viewport": {"x": 0, "y": 0, "zoom": 0.8}},
     }
 
 
@@ -113,8 +187,6 @@ def _new_state():
         "aux": [{"level": 100, "effect": 0} for _ in range(9)],
         "fmap": _new_fmap(),
         "binds": _new_binds(),
-        "scheme": _new_scheme(),
-        "projects": [{"name": "Тепловоз ТЭП70", "active": True}],
         "tracks": tracks,
         "cats": cats,
         "log": [],
@@ -160,6 +232,9 @@ def _new_binds():
 STATE = _new_state()
 STATE["cv"][0] = 3        # CV1 primary address
 STATE["cv"][28] = 2       # CV29 28/128 speed steps
+
+# The active sound graph editor project (v2 authoring) and its revision.
+GRAPH = {"project": _new_graph(), "revision": 4, "active": False, "fault": False}
 
 
 def add_log(tag, text):
@@ -264,26 +339,6 @@ def log_json(query):
     since = as_int(q1(query, "since", "0"), 0)
     entries = [e for e in STATE["log"] if e["s"] > since]
     return ok(entries=entries, seq=STATE["logseq"])
-
-
-def sound_state_json():
-    s = STATE["scheme"]
-    return ok(type=s["type"], name=s["name"], enabled=True, engine=False,
-              table=s["start"], phase=0, speed=0, forward=True)
-
-
-def sound_scheme_json():
-    return ok(**STATE["scheme"])
-
-
-def sound_projects_json():
-    projects = STATE["projects"]
-    active = ""
-    for p in projects:
-        if p["active"]:
-            active = p["name"]
-    return ok(active=active, count=len(projects),
-              projects=[dict(p) for p in projects])
 
 
 # --------------------------------------------------------------------------
@@ -518,76 +573,52 @@ def handle_api(method, path, query, body):
         return 200, ok(start=20, full=95,
                        points=[{"speed": i * 12, "frac": 20 + i * 7} for i in range(1, 11)])
 
-    if path == "/api/sound/state":
-        return 200, sound_state_json()
+    if path == "/api/sound/graph/capabilities":
+        return 200, ok(format="sound-graph", schemaVersion=1, limits=GRAPH_LIMITS)
 
-    if path == "/api/sound/scheme":
-        if method == "POST":
-            if q1(query, "type") is not None:
-                s["scheme"]["type"] = as_int(q1(query, "type"), s["scheme"]["type"])
-            if q1(query, "start_fn") is not None:
-                s["scheme"]["start_fn"] = as_int(q1(query, "start_fn"), s["scheme"]["start_fn"])
-            if q1(query, "sync") is not None:
-                s["scheme"]["sync"] = 1 if as_bool(q1(query, "sync"), False) else 0
-            add_log("Звук", "схема сохранена")
-            return 200, ok()
-        return 200, sound_scheme_json()
+    if path == "/api/sound/graph/projects":
+        p = GRAPH["project"]
+        return 200, ok(projects=[{"id": p["id"], "name": p["name"], "revision": GRAPH["revision"]}])
 
-    if path == "/api/sound/table":
-        i = as_int(q1(query, "i"), -1)
-        for t in s["scheme"]["tables"]:
-            if t["i"] == i:
-                if q1(query, "used") is not None:
-                    t["used"] = 1 if as_bool(q1(query, "used"), True) else 0
-                for key in ("name", "init", "loop", "endf"):
-                    if q1(query, key) is not None:
-                        t[key] = q1(query, key)
-                for key in ("min", "max", "rate", "min_plays", "max_plays"):
-                    if q1(query, key) is not None:
-                        t[key] = as_int(q1(query, key), t[key])
-        add_log("Звук", "таблица %d сохранена" % i)
-        return 200, ok(i=i)
+    if path == "/api/sound/graph/project":
+        return 200, ok(project=GRAPH["project"], revision=GRAPH["revision"])
 
-    if path == "/api/sound/extra":
-        i = as_int(q1(query, "i"), -1)
-        for e in s["scheme"]["extras"]:
-            if e["i"] == i and q1(query, "table") is not None:
-                e["table"] = as_int(q1(query, "table"), e["table"])
-        add_log("Звук", "доп. звук %d сохранён" % i)
-        return 200, ok(i=i)
+    if path == "/api/sound/graph/state":
+        m = s["motor"]
+        return 200, ok(active=GRAPH["active"], fault=GRAPH["fault"],
+                       id=GRAPH["project"]["id"], revision=GRAPH["revision"],
+                       engine=False, armed=True, states=[0],
+                       failedChannels=0, speed=m["speed"])
 
-    if path == "/api/sound/lint":
-        return 200, ok(problems=0, report="")
+    if path == "/api/sound/graph/asset":
+        return 200, ok(asset=_asset(q1(query, "file", "sample.wav")))
 
-    if path == "/api/sound/projects":
-        return 200, sound_projects_json()
+    if path == "/api/sound/graph/validate":
+        return 200, ok(valid=True, diagnostics=[])
 
-    if path == "/api/sound/project":
-        name = q1(query, "create") or q1(query, "activate") or q1(query, "delete")
-        if q1(query, "delete") is not None:
-            s["projects"] = [p for p in s["projects"] if p["name"] != q1(query, "delete")]
-            add_log("Звук", "схема удалена: %s" % q1(query, "delete"))
-        elif q1(query, "create") is not None:
-            s["projects"].append({"name": name, "active": False})
-            add_log("Звук", "схема создана: %s" % name)
-        elif q1(query, "activate") is not None:
-            for p in s["projects"]:
-                p["active"] = (p["name"] == name)
-            s["scheme"]["name"] = name
-            add_log("Звук", "активна: %s" % name)
+    if path == "/api/sound/graph/save":
+        try:
+            incoming = json.loads(body.decode("utf-8")) if body else {}
+        except (ValueError, UnicodeDecodeError):
+            return 200, {"ok": False, "error": "invalid json"}
+        if isinstance(incoming, dict):
+            # The editor sends the compiled schema-v1 payload; keep the v2
+            # authoring layer so preview load/save round-trips the library.
+            if not incoming.get("effectTables"):
+                for key in ("effectTables", "sources", "blocks", "sinks", "wires"):
+                    if key in GRAPH["project"]:
+                        incoming[key] = GRAPH["project"][key]
+            GRAPH["project"] = incoming
+        expected = as_int(q1(query, "expectedRevision"), 0)
+        GRAPH["revision"] = expected + 1 if expected else GRAPH["revision"] + 1
+        add_log("Граф", "сохранена версия %d" % GRAPH["revision"])
+        return 200, ok(revision=GRAPH["revision"])
+
+    if path == "/api/sound/graph/apply":
+        GRAPH["active"] = True
+        GRAPH["fault"] = False
+        add_log("Граф", "применён проект %s" % GRAPH["project"].get("id", ""))
         return 200, ok()
-
-    if path == "/api/sound/upload":
-        name = q1(query, "name", "Схема")
-        if not any(p["name"] == name for p in s["projects"]):
-            s["projects"].append({"name": name, "active": False})
-        add_log("Звук", "схема загружена %s" % name)
-        return 200, ok()
-
-    if path == "/api/sound/download":
-        name = q1(query, "name", "scheme")
-        data = ("MDS1 " + name).encode("utf-8")
-        return 200, data
 
     if path == "/api/ota/update":
         add_log("OTA", "прошивка записана, перезагрузка")

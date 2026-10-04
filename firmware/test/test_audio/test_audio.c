@@ -66,10 +66,7 @@ static esp_err_t audio_test_i2s_enable(i2s_chan_handle_t channel);
 #undef gpio_set_level
 #define TAG sound_test_tag
 #define s_inhibited sound_test_inhibited
-#define build_path sound_build_path
-#include "../../components/sound/src/sound_store.c"
 #include "../../components/sound/src/sound.c"
-#undef build_path
 #undef s_inhibited
 #undef TAG
 #undef static
@@ -312,14 +309,9 @@ void setUp(void)
     s_i2s_delete_calls = 0;
     s_i2s_disable_calls = 0;
     s_i2s_enable_err = ESP_OK;
-    memset(&s_scheme, 0, sizeof(s_scheme));
-    memset(s_fn_voice, AUDIO_VOICE_NONE, sizeof(s_fn_voice));
-    memset(s_extra_voice, AUDIO_VOICE_NONE, sizeof(s_extra_voice));
     s_lock = NULL;
     sound_test_inhibited = false;
     s_control_armed = true;
-    s_table = SOUND_TABLE_NONE;
-    s_phase = TB_STOP;
     mock_mutex_create_fail = 0;
     s_volume = 100;
     /* The anti-click envelope is exercised by dedicated tests; keep the
@@ -1210,12 +1202,6 @@ static void test_reserved_voices_survive_fx_saturation(void)
     audio_voice_handle_t overflow;
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, audio_voice_alloc_owned(&overflow));
     TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, overflow.voice);
-    s_scheme.type = SOUND_SCHEME_DIESEL;
-    s_scheme.tables[1].used = true;
-    snprintf(s_scheme.tables[1].loop[0].file, SOUND_FILE_MAX, "%s", TMP_MONO);
-    TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, fx_play_table(1, true, &s_fn_voice[1]));
-    TEST_ASSERT_FALSE(s_voice[18].req_stop);
-    TEST_ASSERT_FALSE(s_voice[19].req_stop);
     mixer_step();
     TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(engine));
     TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(secondary));
@@ -1276,36 +1262,6 @@ static void test_wav_malformed_corpus_common_parser(void)
         TEST_ASSERT_NULL(st.f);
         TEST_ASSERT_EQUAL(0, s_storage_leases);
     }
-}
-
-static void test_real_async_sound_sequencer(void)
-{
-    make_wav_const(s_path_mono, 22050, 600, 1000);
-    make_wav_const(s_path_stereo, 22050, 2000, 2000);
-    s_scheme.type = SOUND_SCHEME_DIESEL;
-    s_scheme.tables[1].used = true;
-    snprintf(s_scheme.tables[1].init[0].file, SOUND_FILE_MAX, "%s", TMP_MONO);
-    snprintf(s_scheme.tables[1].loop[0].file, SOUND_FILE_MAX, "%s", TMP_STEREO);
-    tb_start(1);
-    audio_voice_handle_t init = s_engine_handle;
-    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(init));
-    for (int i = 0; i < 10; ++i) { tb_advance(); }
-    TEST_ASSERT_EQUAL(TB_INIT, s_phase);
-    TEST_ASSERT_EQUAL(init.generation, s_engine_handle.generation);
-    mixer_step();
-    TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(init));
-    tb_advance();
-    TEST_ASSERT_EQUAL(TB_INIT, s_phase);
-    mixer_step();
-    mixer_step();
-    TEST_ASSERT_EQUAL(AUDIO_VOICE_FINISHED, audio_voice_get_state(init));
-    tb_advance();
-    TEST_ASSERT_EQUAL(TB_LOOP, s_phase);
-    TEST_ASSERT_EQUAL(AUDIO_VOICE_PENDING, audio_voice_get_state(s_engine_handle));
-    TEST_ASSERT_NOT_EQUAL(init.generation, s_engine_handle.generation);
-    sound_stop_all();
-    mixer_step();
-    TEST_ASSERT_TRUE(audio_is_quiescent());
 }
 
 static void test_generation_scoped_completion_and_rate(void)
@@ -1420,7 +1376,6 @@ int main(void)
     RUN_TEST(test_generation_wrap_skips_zero);
     RUN_TEST(test_resampler_accelerated_index_wrap);
     RUN_TEST(test_wav_malformed_corpus_common_parser);
-    RUN_TEST(test_real_async_sound_sequencer);
     RUN_TEST(test_generation_scoped_completion_and_rate);
     RUN_TEST(test_async_failure_is_not_successful_eof);
     RUN_TEST(test_reserved_generation_release_stops_only_current_owner);

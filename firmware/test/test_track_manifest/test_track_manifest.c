@@ -443,7 +443,7 @@ static void test_manifest_roundtrip_bindings(void)
     b[0].fn = 2;
     b[0].target_type = FUNC_TARGET_SOUND;
     b[0].target_id = 5;
-    b[0].mode = SOUND_MODE_SHORT_LONG;
+    b[0].mode = FUNC_MODE_SHORT_LONG;
     b[0].flags = FUNC_FLAG_DUCK;
     b[0].short_table = 7;
     b[0].short_ms = 400;
@@ -473,7 +473,7 @@ static void test_manifest_roundtrip_bindings(void)
     TEST_ASSERT_EQUAL_UINT8(2, back[0].fn);
     TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SOUND, back[0].target_type);
     TEST_ASSERT_EQUAL_UINT8(5, back[0].target_id);
-    TEST_ASSERT_EQUAL_UINT8(SOUND_MODE_SHORT_LONG, back[0].mode);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_MODE_SHORT_LONG, back[0].mode);
     TEST_ASSERT_EQUAL_UINT8(FUNC_FLAG_DUCK, back[0].flags);
     TEST_ASSERT_EQUAL_UINT8(7, back[0].short_table);
     TEST_ASSERT_EQUAL_UINT16(400, back[0].short_ms);

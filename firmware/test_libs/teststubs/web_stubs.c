@@ -992,7 +992,7 @@ esp_err_t settings_func_bind_legacy_convert(const settings_func_map_t *map, size
                 out[n].target_id = slots[s];
                 out[n].dir = dir;
                 out[n].state = state;
-                out[n].mode = SOUND_MODE_LATCHED;
+                out[n].mode = FUNC_MODE_LATCHED;
                 n++;
             }
         }
@@ -1066,106 +1066,7 @@ uint8_t mock_sound_last_fn = 0;
 bool mock_sound_last_state = false;
 int mock_sound_stop_all_calls = 0;
 
-sound_scheme_t mock_sound_scheme;
-int mock_sound_scheme_get_ret = 0;
-int mock_sound_scheme_set_calls = 0;
-int mock_sound_scheme_save_ret = 0;
-int mock_sound_scheme_save_calls = 0;
-int mock_sound_lint_ret = 0;
-sound_status_t mock_sound_status;
-
-esp_err_t sound_scheme_get(sound_scheme_t *out)
-{
-    if (out != NULL) {
-        *out = mock_sound_scheme;
-    }
-    return (esp_err_t)mock_sound_scheme_get_ret;
-}
-
-esp_err_t sound_scheme_set(const sound_scheme_t *in)
-{
-    mock_sound_scheme_set_calls++;
-    if (in != NULL) {
-        mock_sound_scheme = *in;
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_scheme_save(void)
-{
-    mock_sound_scheme_save_calls++;
-    return (esp_err_t)mock_sound_scheme_save_ret;
-}
-
-void sound_status_get(sound_status_t *out)
-{
-    if (out != NULL) {
-        *out = mock_sound_status;
-    }
-}
-
-int sound_lint(char *out, size_t cap)
-{
-    if (out != NULL && cap != 0U) {
-        out[0] = '\0';
-    }
-    return mock_sound_lint_ret;
-}
-
-uint8_t sound_type_get(void) { return mock_sound_scheme.type; }
-esp_err_t sound_type_set(uint8_t type) { mock_sound_scheme.type = type; return ESP_OK; }
-
-esp_err_t sound_engine_get(sound_engine_t *out)
-{
-    if (out != NULL) {
-        *out = mock_sound_scheme.engine;
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_engine_set(const sound_engine_t *in)
-{
-    if (in != NULL) {
-        mock_sound_scheme.engine = *in;
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_table_get(uint8_t idx, sound_table_t *out)
-{
-    if (out != NULL && idx < SOUND_MAX_TABLES) {
-        *out = mock_sound_scheme.tables[idx];
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_table_set(uint8_t idx, const sound_table_t *t)
-{
-    if (t != NULL && idx < SOUND_MAX_TABLES) {
-        mock_sound_scheme.tables[idx] = *t;
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_extra_get(uint8_t idx, sound_extra_t *out)
-{
-    if (out != NULL && idx < SOUND_MAX_EXTRAS) {
-        *out = mock_sound_scheme.extras[idx];
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_extra_set(uint8_t idx, const sound_extra_t *e)
-{
-    if (e != NULL && idx < SOUND_MAX_EXTRAS) {
-        mock_sound_scheme.extras[idx] = *e;
-    }
-    return ESP_OK;
-}
-
-bool sound_scheme_enabled(void) { return mock_sound_scheme_enabled != 0; }
-int mock_sound_reload_calls = 0;
-void sound_reload_bindings(void) { mock_sound_reload_calls++; }
+bool sound_enabled(void) { return mock_sound_scheme_enabled != 0; }
 void sound_function(uint8_t fn, bool state)
 {
     mock_sound_function_calls++;
@@ -1181,137 +1082,6 @@ esp_err_t sound_set_inhibited(bool inhibited)
     if (mock_sound_inhibit_ret != ESP_OK) { return mock_sound_inhibit_ret; }
     mock_sound_inhibited = inhibited;
     if (inhibited) { sound_stop_all(); }
-    return ESP_OK;
-}
-
-/* Scheme project files (create/select/delete/export/import/list). */
-int mock_sound_last_name_calls = 0;
-char mock_sound_last_name[64] = { 0 };
-int mock_sound_active_name_ret = 0;
-char mock_sound_active_name[64] = { 0 };
-int mock_sound_load_scheme_ret = 0;
-int mock_sound_load_scheme_calls = 0;
-
-esp_err_t sound_active_name_get(char *out, size_t cap)
-{
-    mock_sound_last_name_calls++;
-    if (out != NULL && cap > 0) {
-        snprintf(out, cap, "%s", mock_sound_active_name);
-    }
-    return (esp_err_t)mock_sound_active_name_ret;
-}
-
-esp_err_t sound_load_scheme(const char *name)
-{
-    mock_sound_load_scheme_calls++;
-    if (name != NULL) {
-        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
-    }
-    return (esp_err_t)mock_sound_load_scheme_ret;
-}
-
-int mock_sound_scheme_create_ret = 0;
-int mock_sound_scheme_create_calls = 0;
-uint8_t mock_sound_last_type = 0;
-
-esp_err_t sound_scheme_create(const char *name, uint8_t type)
-{
-    mock_sound_scheme_create_calls++;
-    if (name != NULL) {
-        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
-    }
-    mock_sound_last_type = type;
-    return (esp_err_t)mock_sound_scheme_create_ret;
-}
-
-int mock_sound_scheme_delete_ret = 0;
-int mock_sound_scheme_delete_calls = 0;
-
-esp_err_t sound_scheme_delete(const char *name)
-{
-    mock_sound_scheme_delete_calls++;
-    if (name != NULL) {
-        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
-    }
-    return (esp_err_t)mock_sound_scheme_delete_ret;
-}
-
-int mock_sound_scheme_export_ret = 0;
-int mock_sound_scheme_export_calls = 0;
-size_t mock_sound_export_len = 0;
-uint8_t mock_sound_export_byte = 0;
-
-esp_err_t sound_scheme_export(const char *name, uint8_t *buf, size_t cap, size_t *out_len)
-{
-    (void)name;
-    mock_sound_scheme_export_calls++;
-    if (mock_sound_scheme_export_ret != 0) {
-        return (esp_err_t)mock_sound_scheme_export_ret;
-    }
-    size_t n = mock_sound_export_len < cap ? mock_sound_export_len : cap;
-    if (buf != NULL) {
-        memset(buf, mock_sound_export_byte, n);
-    }
-    if (out_len != NULL) {
-        *out_len = n;
-    }
-    return ESP_OK;
-}
-
-int mock_sound_scheme_import_ret = 0;
-int mock_sound_scheme_import_calls = 0;
-size_t mock_sound_import_last_len = 0;
-bool mock_sound_import_last_activate = false;
-
-esp_err_t sound_scheme_import(const char *name, const uint8_t *buf, size_t len, bool activate)
-{
-    (void)buf;
-    mock_sound_scheme_import_calls++;
-    if (name != NULL) {
-        snprintf(mock_sound_last_name, sizeof(mock_sound_last_name), "%s", name);
-    }
-    mock_sound_import_last_len = len;
-    mock_sound_import_last_activate = activate;
-    return (esp_err_t)mock_sound_scheme_import_ret;
-}
-
-int mock_sound_scheme_list_ret = 0;
-int mock_sound_scheme_list_calls = 0;
-int mock_sound_scheme_list_count = 0;
-char mock_sound_scheme_list_names[8][SOUND_FILE_MAX];
-
-esp_err_t sound_scheme_list(char names[][SOUND_FILE_MAX], size_t max, size_t *count)
-{
-    mock_sound_scheme_list_calls++;
-    if (mock_sound_scheme_list_ret != 0) {
-        return (esp_err_t)mock_sound_scheme_list_ret;
-    }
-    size_t n = (size_t)mock_sound_scheme_list_count;
-    if (n > max) {
-        n = max;
-    }
-    for (size_t i = 0; i < n; ++i) {
-        snprintf(names[i], SOUND_FILE_MAX, "%s", mock_sound_scheme_list_names[i]);
-    }
-    if (count != NULL) {
-        *count = n;
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_brake_get(sound_brake_t *out)
-{
-    if (out != NULL) {
-        *out = mock_sound_scheme.brake;
-    }
-    return ESP_OK;
-}
-
-esp_err_t sound_brake_set(const sound_brake_t *in)
-{
-    if (in != NULL) {
-        mock_sound_scheme.brake = *in;
-    }
     return ESP_OK;
 }
 
@@ -1751,7 +1521,7 @@ uint32_t mock_graph_revision;
 esp_err_t mock_graph_save_err, mock_graph_read_err, mock_graph_select_err;
 esp_err_t mock_graph_assets_err, mock_graph_prepare_err, mock_graph_reference_err;
 bool mock_graph_referenced;
-unsigned mock_graph_save_calls, mock_graph_select_calls, mock_graph_commit_calls, mock_legacy_commit_calls;
+unsigned mock_graph_save_calls, mock_graph_select_calls, mock_graph_commit_calls;
 uint32_t mock_graph_primed;
 sound_graph_status_t mock_graph_status;
 struct sound_graph_prepared { char id[SG_ID_CAP]; uint32_t revision; };
@@ -1776,12 +1546,6 @@ void sound_graph_commit(sound_graph_prepared_t *prepared)
     mock_graph_status.revision = prepared->revision; free(prepared);
 }
 void sound_graph_prime_functions(uint32_t levels) { mock_graph_primed = levels; }
-void sound_legacy_commit(const sound_scheme_t *scheme, const char *name)
-{
-    ++mock_legacy_commit_calls; mock_graph_status.active = false;
-    mock_sound_scheme = *scheme;
-    snprintf(mock_sound_active_name, sizeof(mock_sound_active_name), "%s", name);
-}
 esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, size_t len, uint32_t *revision, sg_diagnostic_t *diag)
 {
     ++mock_graph_save_calls;
@@ -1836,44 +1600,6 @@ esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
     (void)file; *referenced = mock_graph_reference_err != ESP_OK || mock_graph_referenced;
     return mock_graph_reference_err;
 }
-esp_err_t mock_legacy_validate_err, mock_legacy_name_err;
-unsigned mock_legacy_name_calls, mock_legacy_name_fail_at;
-char mock_persisted_legacy[SOUND_FILE_MAX];
-bool sound_store_name_ok(const char *name)
-{
-    if (name == NULL || !name[0] || strlen(name) >= SOUND_FILE_MAX) return false;
-    for (const char *p = name; *p; ++p)
-        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return false;
-    return true;
-}
-esp_err_t sound_store_path(char *out, size_t cap, const char *name)
-{
-    snprintf(out, cap, "web_tmp/projects/%s.mds", name); return ESP_OK;
-}
-esp_err_t sound_store_load(const char *path, sound_scheme_t *out)
-{
-    (void)path; *out = mock_sound_scheme; return mock_legacy_validate_err;
-}
-esp_err_t sound_store_default(sound_scheme_t *out)
-{
-    if (out == NULL) return ESP_ERR_INVALID_ARG;
-    memset(out, 0, sizeof(*out));
-    out->type = SOUND_SCHEME_NONE;
-    out->engine.engine_start_fn = 1;
-    return ESP_OK;
-}
-esp_err_t sound_store_validate(const sound_scheme_t *scheme) { (void)scheme; return mock_legacy_validate_err; }
-esp_err_t settings_active_scheme_get(char *out, size_t cap)
-{
-    snprintf(out, cap, "%s", mock_persisted_legacy); return ESP_OK;
-}
-esp_err_t settings_active_scheme_set(const char *name)
-{
-    ++mock_legacy_name_calls;
-    if (mock_legacy_name_err != ESP_OK || mock_legacy_name_calls == mock_legacy_name_fail_at) return ESP_FAIL;
-    snprintf(mock_persisted_legacy, sizeof(mock_persisted_legacy), "%s", name); return ESP_OK;
-}
-
 /* Restore every mock flag/injector to its neutral default and clear the
  * web.c module state so each Unity test starts from a known baseline. */
 void mock_web_reset(void)
@@ -1882,12 +1608,9 @@ void mock_web_reset(void)
     mock_graph_save_err = mock_graph_read_err = mock_graph_select_err = ESP_OK;
     mock_graph_assets_err = mock_graph_prepare_err = mock_graph_reference_err = ESP_OK;
     mock_graph_referenced = false;
-    mock_graph_save_calls = mock_graph_select_calls = mock_graph_commit_calls = mock_legacy_commit_calls = 0;
+    mock_graph_save_calls = mock_graph_select_calls = mock_graph_commit_calls = 0;
     mock_graph_primed = 0; memset(&mock_graph_status, 0, sizeof(mock_graph_status));
     mock_motor_applied_speed = 0;
-    mock_legacy_validate_err = mock_legacy_name_err = ESP_OK;
-    mock_legacy_name_calls = mock_legacy_name_fail_at = 0;
-    mock_persisted_legacy[0] = '\0';
     mock_httpd_reset();
     mock_alloc_fail_at = -1;
     mock_alloc_calls = 0;
@@ -2047,37 +1770,6 @@ void mock_web_reset(void)
     mock_sound_last_fn = 0;
     mock_sound_last_state = false;
     mock_sound_stop_all_calls = 0;
-    memset(&mock_sound_scheme, 0, sizeof(mock_sound_scheme));
-    memset(&mock_sound_status, 0, sizeof(mock_sound_status));
-    mock_sound_scheme_get_ret = 0;
-    mock_sound_scheme_set_calls = 0;
-    mock_sound_scheme_save_ret = 0;
-    mock_sound_scheme_save_calls = 0;
-    mock_sound_lint_ret = 0;
-    mock_sound_reload_calls = 0;
-    mock_sound_last_name_calls = 0;
-    mock_sound_last_name[0] = '\0';
-    mock_sound_active_name_ret = 0;
-    mock_sound_active_name[0] = '\0';
-    mock_sound_load_scheme_ret = 0;
-    mock_sound_load_scheme_calls = 0;
-    mock_sound_scheme_create_ret = 0;
-    mock_sound_scheme_create_calls = 0;
-    mock_sound_last_type = 0;
-    mock_sound_scheme_delete_ret = 0;
-    mock_sound_scheme_delete_calls = 0;
-    mock_sound_scheme_export_ret = 0;
-    mock_sound_scheme_export_calls = 0;
-    mock_sound_export_len = 0;
-    mock_sound_export_byte = 0;
-    mock_sound_scheme_import_ret = 0;
-    mock_sound_scheme_import_calls = 0;
-    mock_sound_import_last_len = 0;
-    mock_sound_import_last_activate = false;
-    mock_sound_scheme_list_ret = 0;
-    mock_sound_scheme_list_calls = 0;
-    mock_sound_scheme_list_count = 0;
-    memset(mock_sound_scheme_list_names, 0, sizeof(mock_sound_scheme_list_names));
 
     mock_audio_is_playing = 0;
     mock_audio_validate_ret = 0;

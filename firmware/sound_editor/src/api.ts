@@ -1,8 +1,8 @@
 import type { Asset, Diagnostic, Limits, Project } from './model';
 
 export type Descriptor = { id: string; name: string; revision: number };
-export type LegacyDescriptor = { name: string; active: boolean };
 export type Track = { slot: number; file: string; label: string; enabled: boolean };
+export type Binding = { fn: number; type: number; id: number; dir?: number; state?: number };
 export type RuntimeStatus = { active: boolean; fault?: boolean; id: string; revision: number; engine: boolean; armed: boolean; states: number[]; failedChannels: number; speed?: number };
 export class ApiError extends Error {
   status: number;
@@ -38,8 +38,7 @@ export const api = {
   save: (project: Project, revision: number) => request<{ revision: number }>(`/api/sound/graph/save?${query({ id: project.id, expectedRevision: revision })}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(project) }),
   apply: (id: string, revision: number) => request(`/api/sound/graph/apply?${query({ id, revision })}`, { method: 'POST' }),
   upload: (file: File) => request<{ slot: number }>('/api/audio/upload?slot=0&enabled=1', { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'X-File-Name': encodeURIComponent(file.name) }, body: file }),
-  legacy: () => request<{ name?: string; type?: number; engine?: unknown; tables?: unknown[] }>('/api/sound/scheme'),
-  legacyProjects: () => request<{ active: string; count: number; projects: LegacyDescriptor[] }>('/api/sound/projects'),
-  activateLegacy: (id: string) => request(`/api/sound/graph/legacy?${query({ id })}`, { method: 'POST' }),
-  disableGraph: () => request('/api/sound/graph/legacy?none=1', { method: 'POST' }),
+  bindings: () => request<{ binds: Binding[] }>('/api/func-map?view=bind'),
+  bindAdd: (fn: number, type: number, id: number, dir: number, state: number) => request(`/api/func-map?${query({ bind: 1, fn, type, id, dir, state })}`, { method: 'POST' }),
+  bindRemove: (idx: number) => request(`/api/func-map?${query({ bind: 1, remove: 1, idx })}`, { method: 'POST' }),
 };

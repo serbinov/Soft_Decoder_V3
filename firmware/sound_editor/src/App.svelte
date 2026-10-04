@@ -2,8 +2,10 @@
   import { onMount, untrack } from 'svelte';
   import { Background, Controls, MarkerType, SvelteFlow, type Connection, type Edge, type Node } from '@xyflow/svelte';
   import SoundNode from './SoundNode.svelte';
-  import { CONDITIONS, DEFAULT_LIMITS, byteLength, clone, conditionLabel, conditionName, deleteState, dieselTemplate, emptyProject, nextId, parseProject, positionOf, setPosition, validFile, validateProject, type ConditionType, type Diagnostic, type Limits, type Project, type Viewport } from './model';
-  import { ApiError, api, type Descriptor, type LegacyDescriptor, type RuntimeStatus, type Track } from './api';
+  import EffectsPanel from './EffectsPanel.svelte';
+  import PatchPanel from './PatchPanel.svelte';
+  import { CONDITIONS, DEFAULT_LIMITS, byteLength, clone, compileWires, conditionLabel, conditionName, deleteState, devicePayload, dieselTemplate, emptyProject, migrateV1toV2, nextId, parseProject, positionOf, setPosition, validFile, validateProject, type ConditionType, type Diagnostic, type Limits, type Project, type Viewport } from './model';
+  import { ApiError, api, type Descriptor, type RuntimeStatus, type Track } from './api';
   import { readDraft, writeDraft, type Draft } from './draft';
 
   let graph = $state.raw<Project>(emptyProject());
@@ -34,9 +36,7 @@
   let drawer = $state<'palette' | 'inspector' | ''>('');
   let fullscreen = $state(false);
   let from = $state(''), to = $state('');
-  let legacy = $state('');
-  let legacyProjects = $state.raw<LegacyDescriptor[]>([]);
-  let legacyChoice = $state('');
+  let tab = $state<'patch' | 'effects' | 'graph'>('patch');
   let theme = $state<'dark' | 'light'>(currentTheme());
   let uploadInput: HTMLInputElement;
   let importInput: HTMLInputElement;
@@ -95,7 +95,7 @@
   });
 
   async function refresh() {
-    const results = await Promise.allSettled([api.capabilities(), api.projects(), api.tracks(), api.legacyProjects()]);
+    const results = await Promise.allSettled([api.capabilities(), api.projects(), api.tracks()]);
     if (results[0].status === 'fulfilled') {
       const capabilities = results[0].value;
       if (capabilities.format !== 'sound-graph' || capabilities.schemaVersion !== 1) { message = 'Формат графа устройства несовместим. Сохранение/применение отключены.'; compatible = false; return; }
@@ -105,8 +105,6 @@
     } else { compatible = false; message = 'API устройства недоступен. Локальное редактирование/экспорт доступны; записи никогда не повторяются автоматически.'; }
     if (results[1].status === 'fulfilled') projects = results[1].value.projects;
     if (results[2].status === 'fulfilled') tracks = results[2].value.tracks;
-    if (results[3].status === 'fulfilled') { legacyProjects = results[3].value.projects; if (!legacyProjects.some(project => project.name === legacyChoice)) legacyChoice = ''; }
-    else legacyProjects = [];
   }
 
   function change(edit: (project: Project) => void) {
@@ -122,7 +120,7 @@
   function toggleFullscreen() { drawer = ''; fullscreen = !fullscreen; }
   function replace(project: Project, rev = 0, persisted = false) { graph = clone(project); revision = rev; savedId = persisted ? project.id : ''; saved = persisted ? JSON.stringify(project) : ''; past = []; future = []; selected = ''; selectedKind = ''; serverErrors = []; conflict = false; uncertain = false; }
   function create(template = false) { if (!canReplace()) return; replace(template ? dieselTemplate(nextId('diesel', projects.map(project => project.id))) : emptyProject(nextId('graph', projects.map(project => project.id)))); message = template ? 'Имена WAV в шаблоне — заполнители. Выберите/проверьте настоящие WAV перед применением. Звуки и привязки не изменялись.' : 'Новый локальный граф. Добавьте состояния и типизированные переходы.'; }
-  function restore() { if (!recovery) return; try { const project = parseProject(JSON.stringify(recovery.project), limits); graph = project; saved = recovery.saved; revision = recovery.revision; savedId = project.id; uncertain = recovery.uncertain; conflict = false; recovery = undefined; message = 'Локальный черновик восстановлен. Переподключитесь и проверьте текущую версию сервера перед записью.'; } catch (error) { message = String(error); } }
+  function restore() { if (!recovery) return; try { const project = migrateV1toV2(parseProject(JSON.stringify(recovery.project), limits)); graph = project; saved = recovery.saved; revision = recovery.revision; savedId = project.id; uncertain = recovery.uncertain; conflict = false; recovery = undefined; message = 'Локальный черновик восстановлен. Переподключитесь и проверьте текущую версию сервера перед записью.'; } catch (error) { message = String(error); } }
   function select(id: string, kind: 'state' | 'edge') { selected = id; selectedKind = kind; drawer = 'inspector'; }
   function addState(silent: boolean) {
     const id = nextId('state', graph.states.map(state => state.id));
@@ -168,12 +166,12 @@
   async function persist() { await writeDraft({ project: clone(graph), revision: effectiveRevision, saved, time: Date.now(), uncertain: uncertain || conflict }); }
   async function load() {
     if (!projectChoice || !canReplace()) return;
-    await operation('Загрузка', async () => { const response = await api.project(projectChoice); const project = parseProject(JSON.stringify(response.project), limits); replace(project, response.revision, true); message = `Загружено «${project.name}», версия ${response.revision}. Активное воспроизведение не изменялось.`; });
+    await operation('Загрузка', async () => { const response = await api.project(projectChoice); const project = migrateV1toV2(parseProject(JSON.stringify(response.project), limits)); replace(project, response.revision, true); message = `Загружено «${project.name}», версия ${response.revision}. Активное воспроизведение не изменялось.`; });
   }
-  async function validate() { await operation('Проверка', async () => { const response = await api.validate(graph); serverErrors = response.diagnostics; message = response.valid ? 'Проверка устройства пройдена. Требуемые WAV всё ещё проверяются при применении.' : 'Устройство отклонило этот граф. Выберите диагностику, чтобы просмотреть поля.'; }); }
+  async function validate() { await operation('Проверка', async () => { const response = await api.validate(devicePayload(graph)); serverErrors = response.diagnostics; message = response.valid ? 'Проверка устройства пройдена. Требуемые WAV всё ещё проверяются при применении.' : 'Устройство отклонило этот граф. Выберите диагностику, чтобы просмотреть поля.'; }); }
   async function save() {
     if (!compatible || conflict || uncertain || validateProject(graph, limits).some(error => error.severity !== 'warning')) return;
-    await operation('Сохранение', async () => { const snapshot = clone(graph); const response = await api.save(snapshot, effectiveRevision); revision = response.revision; savedId = snapshot.id; saved = JSON.stringify(snapshot); message = `Сохранена версия ${revision}. Не применена; активный проект не изменён.`; void refresh(); }, true);
+    await operation('Сохранение', async () => { const snapshot = clone(graph); const response = await api.save(devicePayload(snapshot), effectiveRevision); revision = response.revision; savedId = snapshot.id; saved = JSON.stringify(snapshot); message = `Сохранена версия ${revision}. Не применена; активный проект не изменён.`; void refresh(); }, true);
   }
   async function apply() {
     if (!compatible || dirty || !effectiveRevision || applyErrors.length || conflict || uncertain) return;
@@ -194,22 +192,10 @@
   async function importJson(event: Event) {
     const file = (event.currentTarget as HTMLInputElement).files?.[0]; importInput.value = ''; if (!file || !canReplace()) return;
     if (file.size > limits.jsonBytes) { message = 'Импорт превышает лимит JSON устройства.'; return; }
-    try { const project = parseProject(await file.text(), limits); replace(project); message = 'JSON импортирован как несохранённый черновик. Данные WAV не включены; проверьте файлы на этом устройстве. Сохранение/применение никогда не выполняются автоматически.'; }
+    try { const project = migrateV1toV2(parseProject(await file.text(), limits)); replace(project); message = 'JSON импортирован как несохранённый черновик. Данные WAV не включены; проверьте файлы на этом устройстве. Сохранение/применение никогда не выполняются автоматически.'; }
     catch (error) { message = error instanceof Error ? error.message : String(error); }
   }
   function exportJson() { const blob = new Blob([JSON.stringify(graph, null, 2)], { type: 'application/json' }), url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${graph.id}.json`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); message = 'Экспортирован только JSON графа. Аудио WAV нужно передавать отдельно.'; }
-  async function viewLegacy() { await operation('Чтение совместимости', async () => { const response = await api.legacy(); legacy = JSON.stringify(response, null, 2); message = 'Схема совместимости доступна только для чтения. Копия-шаблон не является точной миграцией; исходный MDS остаётся без изменений.'; }); }
-  async function switchLegacy(none = false) {
-    if (switchBlocked || (!none && !legacyChoice)) return;
-    const target = none ? 'NONE (отключить граф)' : `MDS совместимости «${legacyChoice}»`;
-    if (!window.confirm(`Активировать ${target}? Двигатель должен быть остановлен. Черновик графа сохраняется локально; сохранённые схемы и ресурсы WAV сохраняются. Команды двигателя/AUX не отправляются.`)) return;
-    await operation(none ? 'Отключение графа' : 'Активация MDS', async () => {
-      if (none) await api.disableGraph(); else await api.activateLegacy(legacyChoice);
-      runtime = null;
-      message = `Активировано: ${target}. Черновик графа, сохранённые схемы и ресурсы WAV не изменены. Команды двигателя/AUX не отправлялись.`;
-      void refresh();
-    }, true);
-  }
   function key(event: KeyboardEvent) {
     if (event.target instanceof HTMLElement && (event.target.closest('input,select,textarea') || event.target.isContentEditable)) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
@@ -229,6 +215,9 @@
     <a class="button" href="/">Интерфейс декодера</a>
   </header>
   <nav class="toolbar" aria-label="Действия с проектом">
+    <button class:active={tab === 'patch'} onclick={() => tab = 'patch'}>Пульт</button>
+    <button class:active={tab === 'effects'} onclick={() => tab = 'effects'}>Эффекты</button>
+    <button class:active={tab === 'graph'} onclick={() => tab = 'graph'}>Граф (эксперт)</button>
     <button disabled={!!busy || !!recovery} onclick={() => create()}>Новая</button>
     <button disabled={!!busy || !!recovery} onclick={() => create(true)}>Шаблон «Тепловоз + F2»</button>
     <button disabled={!past.length || !!busy} onclick={undo}>Отменить</button><button disabled={!future.length || !!busy} onclick={redo}>Повторить</button>
@@ -245,6 +234,11 @@
   {#if recovery}<div class="banner warning" role="status">Доступен локальный черновик от {new Date(recovery.time).toLocaleString()}. Записи на устройство не выполнялись.<button onclick={restore}>Восстановить черновик</button><button onclick={() => { recovery = undefined; message = 'Восстановление отменено явно.'; }}>Отменить восстановление</button></div>{/if}
   {#if conflict || uncertain}<div class="banner danger" role="alert">{conflict ? 'Конфликт версий: другая вкладка/операция на устройстве изменила этот проект.' : 'Результат записи неизвестен после потери связи.'} Экспортируйте этот черновик, перезагрузите версию сервера или сохраните отдельную копию. Автоматическая перезапись отсутствует.<button disabled={!!busy} onclick={fork}>Сохранить как отдельную копию</button></div>{/if}
   <div class="notice" role="status">{busy ? `${busy}... ` : ''}{message}</div>
+  {#if tab === 'effects'}
+    <div class="workspace single"><EffectsPanel {graph} mutate={change} {tracks} /></div>
+  {:else if tab === 'patch'}
+    <div class="workspace single"><PatchPanel {graph} mutate={change} /></div>
+  {:else}
   <div class="workspace">
     <aside class="palette" class:open={drawer === 'palette'} aria-label="Проект и палитра">
       <div class="drawer-heading"><h2>Проект / палитра</h2><button onclick={() => drawer = ''}>Закрыть</button></div>
@@ -281,13 +275,6 @@
         <small>Рекомендуется PCM16 моно 22050 Гц. Только собственное/лицензированное аудио. Загрузка не начинает воспроизведение.</small>
         {#each graph.assets.filter(asset => !graph.states.some(state => state.file === asset.file)) as asset}<button onclick={() => change(project => project.assets = project.assets.filter(item => item.file !== asset.file))}>Удалить неиспользуемый манифест: {asset.file}</button>{/each}
         <small>Удаление метаданных неиспользуемого манифеста не удаляет WAV-файлы с устройства.</small>
-        <h2>Совместимость</h2><button onclick={viewLegacy}>Показать текущую схему</button>
-        <label>Проекты MDS<select aria-label="Проекты MDS" bind:value={legacyChoice} disabled={switchBlocked}><option value="">Выбрать сохранённый MDS</option>{#each legacyProjects as project}<option value={project.name}>{project.name}{project.active ? ' (активен)' : ''}</option>{/each}</select></label>
-        <button disabled={switchBlocked || !legacyChoice} onclick={() => switchLegacy()}>Активировать MDS</button>
-        <button disabled={switchBlocked} onclick={() => switchLegacy(true)}>Отключить граф / NONE</button>
-        <small>Двигатель должен быть остановлен. Эти явные переключения сохраняют черновик графа, сохранённые схемы и ресурсы WAV; команды двигателя/AUX не отправляются. NONE доступен даже без сохранённого MDS.</small>
-        <a href="/">Открыть редактор совместимости / проекты</a>
-        {#if legacy}<p class="warning-text">Только чтение. Копия-шаблон не является точной миграцией. Исходный MDS и звуковые привязки остаются без изменений.</p><pre class="legacy-view">{legacy}</pre><button onclick={() => create(true)}>Создать отдельную копию шаблона</button>{/if}
       </fieldset>
     </aside>
     <section class="canvas" aria-label="Холст звукового графа">
@@ -334,9 +321,10 @@
         {#each diagnostics as error}<button class:warning={error.severity === 'warning'} onclick={() => { if (graph.states.some(state => state.id === error.id)) select(error.id, 'state'); else if (graph.transitions.some(edge => edge.id === error.id)) select(error.id, 'edge'); }}><strong>{error.id || 'Проект'} {error.field}</strong><span>{error.message}</span></button>{/each}
       </div>
       {#if runtime?.failedChannels}<p class="warning-text">Маска сбоев аудио/каналов во время выполнения: {runtime.failedChannels}. Канал безопасно остановлен; проверьте WAV/диагностику устройства.</p>{/if}
-      {#if runtime?.fault}<p class="warning-text" role="alert">Выбранный граф устройства отсутствует/повреждён. Звук остаётся безопасно заблокированным. Явно примените допустимый сохранённый проект или переключитесь на сохранённый MDS/NONE при остановленном двигателе.</p><button onclick={() => drawer = 'palette'}>Открыть действия восстановления MDS/NONE</button>{/if}
+      {#if runtime?.fault}<p class="warning-text" role="alert">Выбранный граф устройства отсутствует/повреждён. Звук остаётся безопасно заблокированным. Примените допустимый сохранённый проект при остановленном двигателе.</p><button onclick={() => drawer = 'palette'}>Открыть действия восстановления</button>{/if}
       {#if runtime?.active && !activeHere}<small>Активный проект устройства: {runtime.id} r{runtime.revision}. Подсветка скрыта для другой/несохранённой версии.</small>{/if}
     </aside>
   </div>
+  {/if}
   <footer><span>{draftStatus} / JSON {byteLength(serialized)} / {limits.jsonBytes} байт</span><span>Экспорт JSON не включает WAV / <a href="./THIRD_PARTY_NOTICES.txt">Сторонние лицензии</a></span></footer>
 </main>

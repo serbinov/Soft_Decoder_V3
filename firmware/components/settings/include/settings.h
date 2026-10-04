@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "sound_types.h"
+#include "func_types.h"
 
 #define SETTINGS_CV_COUNT   512
 #define SETTINGS_SSID_MAX   33

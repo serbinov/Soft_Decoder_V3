@@ -86,6 +86,11 @@
   .ltable table{width:100%;border-collapse:collapse}
   .ltable th,.ltable td{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertical-align:top}
   .ltable th{color:var(--muted);font-weight:600}
+  .modal{position:fixed;inset:0;background:#0008;z-index:100;display:flex;align-items:center;justify-content:center}
+  .modal.hidden{display:none}
+  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(560px,92vw);max-height:88vh;overflow:auto;box-shadow:0 10px 40px #000a}
+  .modal-hd{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .modal-bd{padding:12px}
   .hint{font-size:11px;color:var(--muted);margin:6px 0}
   footer.foot{display:flex;gap:12px;align-items:center;padding:6px 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
   .diag{max-height:76px;overflow:auto;font-size:11px;width:100%}
@@ -118,6 +123,7 @@
   <button id="b_redo" title="Повторить (Ctrl+Y)">↷</button>
   <button id="b_dup" title="Дублировать (Ctrl+D)">Дубль</button>
   <div class="grow"></div>
+  <button id="b_scheme" title="Схема и таблица связей" aria-label="Схема и связи"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="7" height="6" rx="1"/><rect x="15" y="3" width="7" height="6" rx="1"/><rect x="8" y="15" width="8" height="6" rx="1"/><path d="M9 6h6M5 9v3h7v3M19 9v3h-7"/></svg></button>
   <button id="b_test">▶ Тест</button>
   <button id="b_validate">Проверить</button>
   <button class="primary" id="b_save" disabled>Сохранить</button>
@@ -159,14 +165,19 @@
     <div id="inspector"><p class="hint">Выберите блок на холсте или добавьте новый слева.</p></div>
     <h2>Проверка</h2>
     <div id="summary" class="hint"></div>
-    <h2>Схема связей</h2>
-    <div id="mini" class="mini"></div>
-    <button id="b_minipng" class="sm" style="width:100%;margin:6px 0">Скачать картинку</button>
-    <button id="b_minitxt" class="sm" style="width:100%;margin-bottom:6px">Скачать текст</button>
-    <h2>Таблица связей</h2>
-    <div id="linktable" class="ltable"></div>
   </aside>
 </main>
+
+<div id="schemeModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-hd"><b>Схема и таблица связей</b><button id="m_close" title="Закрыть">✕</button></div>
+    <div class="modal-bd">
+      <div id="mini" class="mini"></div>
+      <div class="row" style="margin:8px 0"><button id="b_minipng" class="sm">Скачать картинку</button><button id="b_minitxt" class="sm">Скачать текст</button></div>
+      <div id="linktable" class="ltable"></div>
+    </div>
+  </div>
+</div>
 
 <footer class="foot">
   <span id="status_txt">Готово</span>
@@ -984,6 +995,9 @@ $("b_insp").onclick=()=>document.body.classList.toggle("show-insp");
 $("b_align").onclick=autoLayout;
 $("b_minipng").onclick=exportMiniPng;
 $("b_minitxt").onclick=exportText;
+$("b_scheme").onclick=()=>{renderMini();renderLinkTable();$("schemeModal").classList.remove("hidden");};
+$("m_close").onclick=()=>$("schemeModal").classList.add("hidden");
+$("schemeModal").onclick=ev=>{if(ev.target===$("schemeModal"))$("schemeModal").classList.add("hidden");};
 $("b_undo").onclick=undo;$("b_redo").onclick=redo;$("b_dup").onclick=duplicateSelected;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))return;

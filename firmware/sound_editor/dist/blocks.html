@@ -53,19 +53,16 @@
   .node.logic{border-color:#a06fe0}
   .node .hd{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:9px 9px 0 0;background:var(--nodehd);cursor:grab}
   .node .hd b{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .node .hd .x{background:none;border:none;color:var(--muted);padding:0 2px}
+  .node .hd .x{background:none;border:none;color:var(--muted);padding:0 3px;cursor:pointer;display:flex;align-items:center}
+  .node .hd .x:hover{color:var(--err)}
   .node .bd{padding:6px 9px;font-size:12px;color:var(--muted);min-height:34px}
   .node .bd .k{color:var(--text)}
-  .node .badge{font-size:10px;padding:1px 5px;border-radius:8px;background:#0006}
-  .ports{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);padding:0 9px 6px}
-  .ports .lbl-in{color:#6fa8ff}
-  .ports .lbl-out{color:#6fcf8f}
   .port{position:absolute;top:28px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
   .port.in{left:-7px;background:#4a8fe0}
   .port.out{right:-7px;background:#4caf72}
-  .port .lbl{position:absolute;top:-15px;font-size:9px;color:var(--muted);white-space:nowrap;pointer-events:none}
-  .port.in .lbl{left:-4px}
-  .port.out .lbl{right:-4px}
+  .port .lbl{position:absolute;top:50%;transform:translateY(-50%);font-size:10px;white-space:nowrap;pointer-events:none}
+  .port.in .lbl{left:18px;color:#7fb3ff}
+  .port.out .lbl{right:18px;color:#7fd39f}
   aside.right label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
   aside.right input,aside.right select{width:100%;padding:5px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px}
   .row{display:flex;gap:8px}.row>*{flex:1}
@@ -175,6 +172,7 @@ const ROLE_NAMES={start:"Начало",loop:"Тело (цикл)",end:"Коне�
 const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе"};
 const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",headlight:"Фары",aux:"Выход",logic:"Логика"};
 const DIRS=[{v:"auto",n:"Авто (вперёд/назад)"},{v:"fwd",n:"Только вперёд"},{v:"rev",n:"Только назад"},{v:"any",n:"Без направления"}];
+const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 
 /* ---- state ----------------------------------------------------------- */
 let project=null;
@@ -417,11 +415,10 @@ function renderNodes(){
     const el=document.createElement("div");
     el.className="node"+(selected===b.id?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
     el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;
-    el.innerHTML='<div class="hd" data-drag="'+b.id+'"><span class="badge">'+esc(cat.name)+'</span><b>'+esc(b.name)+'</b><button class="x" data-del="'+b.id+'">✕</button></div>'+
+    el.innerHTML='<div class="hd" data-drag="'+b.id+'"><b>'+esc(b.name)+'</b><button class="x" data-del="'+b.id+'" title="Удалить блок" aria-label="Удалить блок">'+TRASH+'</button></div>'+
       '<div class="bd">'+nodeSummary(b)+"</div>"+
-      '<div class="ports"><span class="lbl-in">'+(hasIn?"◀ вход":"")+'</span><span class="lbl-out">'+(hasOut?"выход ▶":"")+'</span></div>'+
-      (hasIn?'<div class="port in" data-in="'+b.id+'"></div>':'')+
-      (hasOut?'<div class="port out" data-out="'+b.id+'"></div>':'');
+      (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">вход</span></div>':'')+
+      (hasOut?'<div class="port out" data-out="'+b.id+'"><span class="lbl">выход</span></div>':'');
     box.appendChild(el);
   }
   box.querySelectorAll("[data-drag]").forEach(h=>h.addEventListener("pointerdown",onNodeDown));
@@ -438,7 +435,7 @@ function renderLinks(){
   const byId={};project.blocks.forEach(b=>byId[b.id]=b);let html="";
   for(const l of project.links){const a=byId[l.from],c=byId[l.to];if(!a||!c||BY_TYPE[a.type].kind==="output")continue;
     const p1=portPos(l.from,"out"),p2=portPos(l.to,"in");
-    html+='<path class="link" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x,p2.y)+'"></path>';}
+    html+='<path class="link" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x-9,p2.y)+'"></path>';}
   $("linkLayer").innerHTML=html;
   $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=()=>{project.links=project.links.filter(l=>l.id!==p.getAttribute("data-link"));render();});
   renderTempLink();
@@ -511,7 +508,7 @@ function renderSnapBtn(){$("b_snap").textContent="Сетка: "+(project.editor.
 /* ---- interaction ----------------------------------------------------- */
 function worldPoint(ev){const r=$("stage").getBoundingClientRect(),v=project.editor.viewport;return {x:(ev.clientX-r.left-v.x)/v.zoom,y:(ev.clientY-r.top-v.y)/v.zoom};}
 function onNodeDown(ev){
-  if(ev.target.classList.contains("x"))return;
+  if(ev.target.closest&&ev.target.closest(".x"))return;
   const id=ev.currentTarget.getAttribute("data-drag"),b=project.blocks.find(x=>x.id===id);if(!b)return;
   if(selected!==id){selected=id;render();}
   const p=worldPoint(ev);dragging={id,dx:p.x-b.x,dy:p.y-b.y};

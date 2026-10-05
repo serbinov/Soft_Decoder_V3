@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-05 (v0.10) — style(sound): single block title, trash icon, inline port labels, arrow offset
 - 2026-10-05 (v0.10) — feat(sound): block editor wiring, output/light blocks, grid and auto-layout
 - 2026-10-05 (v0.10) — feat(sound): add ready-block constructor editor and settings entry
 - 2026-10-05 (v0.10) — build(sound-editor): track prebuilt bundle so a fresh clone serves /sound-editor/

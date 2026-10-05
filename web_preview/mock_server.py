@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.normpath(os.path.join(HERE, "..", "firmware"))
 UI_FILE = os.path.join(FW, "web_ui.html")
 EDITOR_DIR = os.path.join(FW, "sound_editor", "dist")
+SOUND_DIR = os.path.normpath(os.path.join(HERE, "..", "SOUND"))
 VERSION = "PREVIEW"
 CV_COUNT = 512
 FN_COUNT = 29
@@ -627,6 +628,14 @@ def handle_api(method, path, query, body):
     if path == "/api/log":
         return 200, log_json(query)
 
+    if path == "/api/sound-files":
+        try:
+            files = sorted(name for name in os.listdir(SOUND_DIR)
+                           if name.lower().endswith(".wav"))
+        except OSError:
+            files = []
+        return 200, ok(files=files)
+
     if path == "/api/clientlog":
         sys.stderr.write("[client] %s\n" % (q1(query, "m", "") or ""))
         return 200, ok()
@@ -650,6 +659,7 @@ CONTENT_TYPES = {
     ".gz": "application/gzip",
     ".svg": "image/svg+xml",
     ".png": "image/png",
+    ".wav": "audio/wav",
 }
 
 
@@ -716,6 +726,13 @@ class Handler(BaseHTTPRequestHandler):
             rel = unquote(path[len("/sound-editor/"):])
             safe = os.path.normpath(os.path.join(EDITOR_DIR, rel))
             if safe.startswith(EDITOR_DIR):
+                return self._serve_file(safe)
+            return self._json(404, {"ok": False, "error": "not found"})
+
+        if path.startswith("/sound-files/"):
+            rel = unquote(path[len("/sound-files/"):])
+            safe = os.path.normpath(os.path.join(SOUND_DIR, rel))
+            if safe.startswith(SOUND_DIR):
                 return self._serve_file(safe)
             return self._json(404, {"ok": False, "error": "not found"})
 

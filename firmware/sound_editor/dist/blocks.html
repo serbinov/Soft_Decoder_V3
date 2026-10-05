@@ -66,6 +66,10 @@
   aside.right label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
   aside.right input,aside.right select{width:100%;padding:5px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px}
   .row{display:flex;gap:8px}.row>*{flex:1}
+  .frow{display:flex;gap:6px;align-items:center}
+  .frow select{flex:1;min-width:0}
+  .frow .play{flex:0 0 auto;padding:5px 9px;font-size:12px}
+  .diag .ok{color:var(--ok)}
   .hint{font-size:11px;color:var(--muted);margin:6px 0}
   footer.foot{display:flex;gap:12px;align-items:center;padding:6px 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
   .diag{max-height:76px;overflow:auto;font-size:11px;width:100%}
@@ -85,6 +89,7 @@
   <button id="b_snap" class="on">Сетка: вкл</button>
   <button id="b_align">Выровнять</button>
   <div class="grow"></div>
+  <button id="b_test">▶ Тест</button>
   <button id="b_validate">Проверить</button>
   <button class="primary" id="b_save" disabled>Сохранить</button>
   <button id="b_outputs" disabled>Выходы</button>
@@ -103,11 +108,11 @@
     <div id="world">
       <svg id="links" width="6000" height="4000">
         <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="#6f8bb0"></path>
+          <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+            <path d="M3 2 L9 6 L3 10" fill="none" stroke="#7fa4cf" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
           </marker>
-          <marker id="arrowTemp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="#4a9eff"></path>
+          <marker id="arrowTemp" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+            <path d="M3 2 L9 6 L3 10" fill="none" stroke="#4a9eff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
           </marker>
         </defs>
         <g id="linkLayer"></g>
@@ -179,7 +184,7 @@ let project=null;
 let selected="";
 let dragging=null,panning=null,linking=null;
 let online=false,busy=false,revision=0,savedId="";
-let tracks=[],diagnostics=[],assets={};
+let tracks=[],soundFiles=[],diagnostics=[],assets={};
 
 const $=id=>document.getElementById(id);
 const clone=v=>JSON.parse(JSON.stringify(v));
@@ -338,6 +343,7 @@ async function refreshStatus(){
   try{const s=await req("/api/sound/graph/state");online=true;revision=Number(s.revision)||0;}catch(e){online=false;}
   $("on").classList.toggle("on",online);$("on_txt").textContent=online?"Подключено":"Нет связи";
   try{const t=await req("/api/audio/tracks");tracks=(t.tracks||[]).map(x=>String(x.file||"").replace(/^audio\//,"")).filter(f=>/^[A-Za-z0-9_-]+\.wav$/.test(f));}catch(e){tracks=[];}
+  try{const sf=await req("/api/sound-files");soundFiles=(sf.files||[]).filter(f=>/\.wav$/i.test(f));}catch(e){soundFiles=[];}
   refreshButtons();
 }
 async function fetchAssets(files){for(const f of files){if(assets[f])continue;try{const a=await req("/api/sound/graph/asset?file="+encodeURIComponent(f));assets[f]=a.asset;}catch(e){}}}
@@ -428,14 +434,17 @@ function renderNodes(){
 }
 function portPos(id,which){
   const b=project.blocks.find(x=>x.id===id);if(!b)return {x:0,y:0};
-  return which==="out"?{x:b.x+NODE_W,y:b.y+34}:{x:b.x,y:b.y+34};
+  const el=$("nodes").querySelector('[data-id="'+id+'"]');
+  const p=el&&el.querySelector(which==="out"?".port.out":".port.in");
+  if(el&&p)return {x:b.x+p.offsetLeft+p.offsetWidth/2,y:b.y+p.offsetTop+p.offsetHeight/2};
+  return which==="out"?{x:b.x+NODE_W,y:b.y+35}:{x:b.x,y:b.y+35};
 }
 function curve(x1,y1,x2,y2){const dx=Math.max(40,Math.abs(x2-x1)/2);return "M"+x1+" "+y1+" C"+(x1+dx)+" "+y1+" "+(x2-dx)+" "+y2+" "+x2+" "+y2;}
 function renderLinks(){
   const byId={};project.blocks.forEach(b=>byId[b.id]=b);let html="";
   for(const l of project.links){const a=byId[l.from],c=byId[l.to];if(!a||!c||BY_TYPE[a.type].kind==="output")continue;
     const p1=portPos(l.from,"out"),p2=portPos(l.to,"in");
-    html+='<path class="link" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x-9,p2.y)+'"></path>';}
+    html+='<path class="link" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x-10,p2.y)+'"></path>';}
   $("linkLayer").innerHTML=html;
   $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=()=>{project.links=project.links.filter(l=>l.id!==p.getAttribute("data-link"));render();});
   renderTempLink();
@@ -447,7 +456,56 @@ function renderTempLink(){
   tmp.classList.remove("hidden");
   tmp.setAttribute("d",curve(p1.x,p1.y,linking.x,linking.y));
 }
-function fileField(role,b){return '<input data-role="'+role+'" list="files" value="'+esc(b.files[role]||"")+'" placeholder="выберите или введите .wav">';}
+function soundOptions(sel){
+  const known=tracks.concat(soundFiles);let h='<option value="">— нет —</option>';
+  if(sel&&!known.includes(sel))h+='<option value="'+esc(sel)+'" selected>'+esc(sel)+"</option>";
+  if(tracks.length)h+='<optgroup label="На устройстве">'+tracks.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
+  if(soundFiles.length)h+='<optgroup label="Тест (SOUND)">'+soundFiles.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
+  return h;
+}
+function fileField(role,b){return '<div class="frow"><select data-role="'+role+'">'+soundOptions(b.files[role]||"")+'</select><button class="play" data-play="'+role+'" title="Прослушать">▶</button></div>';}
+async function playFile(name){
+  if(!name){setStatus("Звук не выбран");return;}
+  const m=/^slot0*(\d+)\.wav$/i.exec(name);
+  if(m){try{await req("/api/audio/play?slot="+Number(m[1]),{method:"POST"});setStatus("Играю "+name+" (устройство)");}catch(e){setStatus("Не играет: "+e.message);}return;}
+  try{const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;await a.play();setStatus("Играю "+name+" (тест)");}catch(e){setStatus("Прослушивание доступно в превью (SOUND)");}
+}
+function blockFiles(b){const roles=BY_TYPE[b.type].roles||[];return roles.map(r=>b.files[r]).filter(Boolean);}
+async function testBlock(b){
+  if(!b)return;const out=[];const kind=BY_TYPE[b.type].kind;
+  if(kind==="sound"){
+    const roles=BY_TYPE[b.type].roles||[],set=roles.filter(r=>b.files[r]);
+    if(!set.length)out.push({id:b.id,message:"Не задан ни один WAV-файл",severity:"error"});
+    else out.push({id:b.id,message:"Файлы: "+set.map(r=>ROLE_NAMES[r]).join(", "),severity:"ok"});
+  }else if(b.type==="engine"){
+    if(!b.files.idle)out.push({id:b.id,message:"Нет файла холостого хода",severity:"warning"});else out.push({id:b.id,message:"Холостой ход: "+b.files.idle,severity:"ok"});
+  }else{
+    const fn=sourceFnOf(b.id);if(fn==null&&!(b.fn>=0&&b.fn<=28))out.push({id:b.id,message:"Не задан источник (F-клавиша или связь)",severity:"error"});else out.push({id:b.id,message:"F-клавиша: F"+(fn!=null?fn:b.fn),severity:"ok"});
+  }
+  validate().diagnostics.filter(d=>d.id===b.id).forEach(d=>out.push(d));
+  diagnostics=out;renderDiag();
+  const playable=blockFiles(b)[0]||b.files.idle;if(playable)await playFile(playable);
+  const bad=out.filter(x=>x.severity==="error").length;
+  setStatus("Тест блока «"+b.name+"»: "+(bad?bad+" ошибок":"в порядке"));
+}
+async function testScheme(){
+  if(busy)return;busy=true;refreshButtons();setStatus("Тест схемы...");
+  try{
+    const v=validate();await fetchAssets(v.files);const v2=validate();diagnostics=[...v2.diagnostics];
+    const lines=[];let ok=0,err=0;
+    for(const b of project.blocks){
+      const kind=BY_TYPE[b.type].kind;let bad=false;
+      if(kind==="sound"){const roles=BY_TYPE[b.type].roles||[];bad=!roles.some(r=>b.files[r]);}
+      else if(b.type==="engine")bad=!b.files.idle;
+      else{const fn=sourceFnOf(b.id);bad=(fn==null&&!(b.fn>=0&&b.fn<=28));}
+      if(bad){err++;lines.push({id:b.id,message:"Блок «"+b.name+"» не готов",severity:"error"});}else ok++;
+    }
+    if(online){try{const r=await req("/api/sound/graph/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});(r.diagnostics||[]).forEach(d=>diagnostics.push(d));}catch(e){diagnostics.push({id:"",message:e.message,severity:"error"});}}
+    diagnostics=[...lines,...diagnostics];renderDiag();
+    const anyErr=diagnostics.some(d=>d.severity!=="warning");
+    setStatus("Тест схемы: "+ok+" блоков готово, "+err+" с ошибками"+(anyErr?", проверьте список":" — можно сохранять"));
+  }catch(e){setStatus("Ошибка теста: "+e.message);}finally{busy=false;refreshButtons();}
+}
 function renderInspector(){
   const b=project.blocks.find(x=>x.id===selected);const insp=$("inspector");
   if(!b){insp.innerHTML='<p class="hint">Выберите блок на холсте или добавьте новый слева.</p>';return;}
@@ -463,14 +521,14 @@ function renderInspector(){
   if(b.type==="engine"){
     h+='<label>Ступени скорости</label><input type="number" id="i_steps" min="1" max="10" value="'+(b.steps||1)+'">';
     h+='<label>Начало (запуск)</label>'+fileField("start",b)+'<label>Холостой ход (цикл)</label>'+fileField("idle",b);
-    const run=b.files.run||[];for(let i=1;i<=(b.steps||1);i++)h+='<label>Движение '+i+' (цикл)</label><input data-run="'+(i-1)+'" list="files" value="'+esc(run[i-1]||"")+'">';
+    const run=b.files.run||[];for(let i=1;i<=(b.steps||1);i++)h+='<label>Движение '+i+' (цикл)</label><div class="frow"><select data-run="'+(i-1)+'">'+soundOptions(run[i-1]||"")+'</select><button class="play" data-playrun="'+(i-1)+'" title="Прослушать">▶</button></div>';
     h+='<label>Останов</label>'+fileField("stop",b);
   }else if(kind==="sound"){
     (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileField(r,b);});
   }
   h+='<datalist id="files">'+tracks.map(f=>'<option value="'+esc(f)+'"></option>').join("")+"</datalist>";
   if(kind==="output"||kind==="logic")h+='<p class="hint">Вход блока можно соединить с другим блоком — тогда F-клавиша берётся от него.</p>';
-  h+='<div class="row" style="margin-top:10px"><button class="primary" id="i_close">Готово</button><button id="i_del">Удалить</button></div>';
+  h+='<div class="row" style="margin-top:10px"><button class="primary" id="i_test">▶ Тест блока</button><button id="i_close">Готово</button><button id="i_del">Удалить</button></div>';
   insp.innerHTML=h;
   const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
   on("i_name","change",e=>{b.name=e.target.value;render();});
@@ -484,6 +542,9 @@ function renderInspector(){
   on("i_steps","change",e=>{b.steps=Math.max(1,Math.min(10,Number(e.target.value)));const run=b.files.run||[],arr=[];for(let i=0;i<b.steps;i++)arr.push(run[i]||"");b.files.run=arr;render();});
   insp.querySelectorAll("[data-role]").forEach(el=>el.addEventListener("change",e=>{b.files[el.getAttribute("data-role")]=e.target.value;render();}));
   insp.querySelectorAll("[data-run]").forEach(el=>el.addEventListener("change",e=>{if(!b.files.run)b.files.run=[];b.files.run[Number(el.getAttribute("data-run"))]=e.target.value;render();}));
+  insp.querySelectorAll("[data-play]").forEach(btn=>btn.onclick=()=>playFile(b.files[btn.getAttribute("data-play")]));
+  insp.querySelectorAll("[data-playrun]").forEach(btn=>btn.onclick=()=>playFile((b.files.run||[])[Number(btn.getAttribute("data-playrun"))]));
+  on("i_test","click",()=>testBlock(b));
   on("i_close","click",()=>{selected="";render();});
   on("i_del","click",()=>removeBlock(b.id));
 }
@@ -499,7 +560,7 @@ function renderSummary(){
   const e=diagnostics.filter(d=>d.severity!=="warning").length,w=diagnostics.filter(d=>d.severity==="warning").length;
   $("summary").textContent=e+" ошибок / "+w+" предупреждений";
 }
-function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":"d")+'">'+esc(d.message)+"</div>").join("");}
+function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":d.severity==="ok"?"ok":"d")+'">'+esc(d.message)+"</div>").join("");}
 function render(){renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();saveDraft();}
 function setStatus(t){$("status_txt").textContent=t;}
 function refreshButtons(){$("b_save").disabled=!online||busy;$("b_outputs").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;$("b_validate").disabled=busy;}
@@ -556,6 +617,7 @@ $("b_import").onclick=()=>$("f_import").click();
 $("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=p;if(!project.editor)project.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
 $("b_align").onclick=autoLayout;
+$("b_test").onclick=testScheme;
 $("b_validate").onclick=doValidate;
 $("b_save").onclick=doSave;
 $("b_outputs").onclick=async()=>{if(busy)return;busy=true;refreshButtons();setStatus("Запись выходов...");try{await applyOutputs();setStatus("Выходы записаны");}catch(e){setStatus("Выходы не записаны: "+e.message);}finally{busy=false;refreshButtons();}};

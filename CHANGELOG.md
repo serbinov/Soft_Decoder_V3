@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-05 (v0.10) — feat(sound): detailed scheme PNG export and text logic export
 - 2026-10-05 (v0.10) — feat(sound): link-aware auto layout, connections diagram and links table
 - 2026-10-05 (v0.10) — style(sound): relabel block output options as Napryamuyu / Posle sobytiya
 - 2026-10-05 (v0.10) — feat(sound): full-canvas grid and per-block output event/delay settings

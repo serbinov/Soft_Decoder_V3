@@ -153,7 +153,7 @@
 
 const LIMITS={states:57,soundStates:31,transitions:128,effects:24,assets:31,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
-const GRID=20;const NODE_W=240;const NODE_H=120;
+const GRID=20;const NODE_W=240;const NODE_H=120;const SPEED_STEP=25;
 
 /* ---- catalogs -------------------------------------------------------- */
 const AUX_NAMES=["AUX1","AUX2","AUX3","AUX4","AUX5","AUX6","AUX7"];
@@ -165,11 +165,12 @@ const CATALOG=[
   {type:"whistle",name:"Тифон",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"bell",name:"Звонок",group:"Сигналы",kind:"sound",mode:"latched",roles:["sound"]},
   {type:"compressor",name:"Компрессор",group:"Механика",kind:"sound",mode:"loopHeld",roles:["sound"]},
-  {type:"brake",name:"Тормоз",group:"Механика",kind:"sound",mode:"latched",roles:["sound"]},
+  {type:"brake",name:"Тормоз",group:"Механика",kind:"sound",mode:"decel",roles:["sound"]},
   {type:"coupler",name:"Сцепка",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"sander",name:"Песочница",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"pantograph",name:"Токоприёмник",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"doors",name:"Двери",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"speed",name:"Скоростной звук",group:"Механика",kind:"sound",mode:"speed"},
   {type:"custom",name:"Свой сценарий",group:"Дополнительно",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
   {type:"headlight",name:"Фары",group:"Свет и выходы",kind:"output",mode:"headlight"},
   {type:"aux",name:"AUX-выход",group:"Свет и выходы",kind:"output",mode:"aux",fx:true},
@@ -192,13 +193,14 @@ function normalizeProject(p){
       if(b.level===undefined)b.level=100;
     }
     if(b.trigger===undefined)b.trigger="auto";
+    if(b.type==="speed"){if(!Array.isArray(b.bands))b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_STEP;}
   }
   if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
   return p;
 }
 const ROLE_NAMES={start:"Начало",loop:"Тело (цикл)",end:"Конец",short:"Короткий",sound:"Звук"};
-const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе"};
-const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",headlight:"Фары",aux:"Выход",logic:"Логика"};
+const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе",speed:"По скорости"};
+const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",decel:"По замедлению",speed:"По скорости",headlight:"Фары",aux:"Выход",logic:"Логика"};
 const DIRS=[{v:"auto",n:"Авто (вперёд/назад)"},{v:"fwd",n:"Только вперёд"},{v:"rev",n:"Только назад"},{v:"any",n:"Без направления"}];
 const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 
@@ -214,6 +216,7 @@ const clone=v=>JSON.parse(JSON.stringify(v));
 const nid=(p,ids)=>{let i=1;while(ids.includes(p+i))i++;return p+i;};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const hexA=(hex,a)=>{const h=hex.replace("#","");const n=parseInt(h.length===3?h.split("").map(x=>x+x).join(""):h,16);return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";};
+const pctSpeed=p=>Math.max(0,Math.min(255,Math.round((Number(p)||0)*255/100)));
 const snap=v=>project.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
 
 function newProject(){
@@ -232,6 +235,7 @@ function addBlockTo(p,type){
   if(cat.kind==="logic")b.logic=1;
   (cat.roles||[]).forEach(r=>b.files[r]="");
   if(type==="engine"){b.steps=3;b.files={start:"",idle:"",stop:"",run:["","",""]};}
+  if(type==="speed"){b.hyst=SPEED_STEP;b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));}
   const n=p.blocks.length;
   b.x=snapTo(p,40+(n%3)*260);b.y=snapTo(p,40+Math.floor(n/3)*140);
   p.blocks.push(b);return b;
@@ -240,7 +244,7 @@ function snapTo(p,v){return p.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
 
 /* ---- compile sound blocks -> device sound-graph (schema v1) ---------- */
 function compile(){
-  const states=[],transitions=[],effects=[];const files=new Set();let tid=0;
+  const states=[],transitions=[],effects=[];const files=new Set();const speedHysts=[];let tid=0;
   const addState=(id,name,file,loop,volume=80,rate=1000)=>{if(states.some(s=>s.id===id))return;states.push({id,name,file:file||"",loop:!!loop,volume,rate});if(file)files.add(file);};
   const silent=(id,name)=>addState(id,name,"",false,100,1000);
   const addEdge=(source,target,condition,priority=10,timing="immediate")=>{transitions.push({id:"t"+(++tid),source,target,priority,timing,condition});};
@@ -281,9 +285,26 @@ function compile(){
     }
     const entry=b.id+"_off";silent(entry,b.name+" / тихий вход");
     effects.push({id:b.id,entry,fn});
-    const trig=triggerOf(b),startCond=trig==="engine"?{type:"engine_on"}:{type:"fn_press",fn};
-    const stopCond=trig==="engine"?{type:"engine_off"}:{type:"fn_release",fn};
-    const mode=BY_TYPE[b.type].mode;
+    const mode0=BY_TYPE[b.type].mode;
+    if(mode0==="speed"){
+      speedHysts.push(b.hyst==null?SPEED_STEP:b.hyst);
+      const bands=(Array.isArray(b.bands)?b.bands:[]).filter(x=>x&&x.file),items=[];
+      bands.forEach(x=>{const s=b.id+"_sp"+items.length;addState(s,b.name+" "+Math.round(x.from||0)+"-"+Math.round(x.to==null?100:x.to)+"%",x.file,true,vol,rate);items.push({state:s,lo:pctSpeed(x.from),hi:pctSpeed(x.to==null?100:x.to)});});
+      items.forEach((it,i)=>addEdge(entry,it.state,{type:"speed",min:it.lo,max:it.hi},i+1,"after_sample"));
+      items.forEach((it,i)=>items.forEach((jt,j)=>{if(i!==j)addEdge(it.state,jt.state,{type:"speed",min:jt.lo,max:jt.hi},j+1,"after_sample");}));
+      items.forEach(it=>addEdge(it.state,entry,{type:"engine_off"},255));
+      continue;
+    }
+    if(mode0==="decel"){
+      if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",{type:"decel",min:1,max:255},10,"after_sample");addEdge(b.id+"_play",entry,{type:"sample_done"},10);}
+      continue;
+    }
+    const trig=triggerOf(b);
+    let startCond,stopCond=null,speedRange=null;
+    if(trig==="engine"){startCond={type:"engine_on"};stopCond={type:"engine_off"};}
+    else if(trig==="speed"){speedRange={min:pctSpeed(b.speedMin==null?0:b.speedMin),max:pctSpeed(b.speedMax==null?100:b.speedMax)};startCond={type:"speed",min:speedRange.min,max:speedRange.max};speedHysts.push(b.hyst==null?SPEED_STEP:b.hyst);}
+    else{startCond={type:"fn_press",fn};stopCond={type:"fn_release",fn};}
+    const mode=(trig==="speed")?"loopHeld":mode0;
     if(mode==="oneshot"){
       if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",startCond,10);addEdge(b.id+"_play",entry,{type:"sample_done"},10);}
     }else if(mode==="shortLong"){
@@ -298,14 +319,22 @@ function compile(){
       else if(b.files.loop)addEdge(b.id+"_loop",entry,stopCond,5);
       else if(b.files.start)addEdge(b.id+"_start",entry,{type:"sample_done"},10);
     }else if(mode==="loopHeld"){
-      if(b.files.sound){addState(b.id+"_loop",b.name,b.files.sound,true,vol,rate);addEdge(entry,b.id+"_loop",startCond,10);addEdge(b.id+"_loop",entry,stopCond,10);}
+      if(b.files.sound){addState(b.id+"_loop",b.name,b.files.sound,true,vol,rate);
+        addEdge(entry,b.id+"_loop",startCond,10,trig==="speed"?"after_sample":"immediate");
+        if(trig==="speed"){
+          if(speedRange.min>0)addEdge(b.id+"_loop",entry,{type:"speed",min:0,max:speedRange.min-1},5,"after_sample");
+          if(speedRange.max<255)addEdge(b.id+"_loop",entry,{type:"speed",min:speedRange.max+1,max:255},6,"after_sample");
+          addEdge(b.id+"_loop",entry,{type:"engine_off"},255);
+        }else addEdge(b.id+"_loop",entry,stopCond,10);
+      }
     }else if(mode==="latched"){
       if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);}
     }
   }
   const positions={};project.blocks.forEach(b=>positions[b.id]={x:b.x,y:b.y});
+  const hystUnits=speedHysts.length?Math.max.apply(null,speedHysts.map(p=>pctSpeed(p))):(engine?3:0);
   const payload={format:"sound-graph",schemaVersion:1,id:project.id,name:project.name,
-    engine:{entry:engineEntry,fn:engine?engine.fn:8},hysteresis:engine?3:0,
+    engine:{entry:engineEntry,fn:engine?engine.fn:8},hysteresis:hystUnits,
     effectTables:[],sources:[],blocks:[],sinks:[],wires:[],
     states,transitions,effects,assets:Object.keys(assets).map(f=>assets[f]),
     editor:{positions,viewport:project.editor.viewport}};
@@ -437,7 +466,10 @@ function nodeSummary(b){
     return "F"+(src!=null?src:b.fn)+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+((LIGHT_FX.find(f=>f.v===b.effect)||{}).n||"")+" · "+b.level+"%";
   }
   if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n||"");}
-  const cat=BY_TYPE[b.type],parts=[];(cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
+  const cat=BY_TYPE[b.type],parts=[];
+  if(cat.mode==="speed")return "Скорость % · диапазонов "+((b.bands||[]).filter(x=>x.file).length)+" · защита "+(b.hyst==null?SPEED_STEP:b.hyst)+"%";
+  if(cat.mode==="decel")return "F"+b.fn+" · по замедлению"+(b.files.sound?" · "+esc(b.files.sound):" · файл не задан");
+  (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
   return "F"+b.fn+" · "+(parts.length?parts.join("<br>"):"файлы не заданы");
 }
 function renderNodes(){
@@ -503,9 +535,15 @@ function blockFiles(b){const roles=BY_TYPE[b.type].roles||[];return roles.map(r=
 async function testBlock(b){
   if(!b)return;const out=[];const kind=BY_TYPE[b.type].kind;
   if(kind==="sound"){
-    const roles=BY_TYPE[b.type].roles||[],set=roles.filter(r=>b.files[r]);
-    if(!set.length)out.push({id:b.id,message:"Не задан ни один WAV-файл",severity:"error"});
-    else out.push({id:b.id,message:"Файлы: "+set.map(r=>ROLE_NAMES[r]).join(", "),severity:"ok"});
+    if(BY_TYPE[b.type].mode==="speed"){
+      const set=(b.bands||[]).filter(x=>x.file);
+      if(!set.length)out.push({id:b.id,message:"Не задан ни один диапазон скорости",severity:"error"});
+      else out.push({id:b.id,message:"Диапазонов: "+set.length+", защита "+(b.hyst==null?SPEED_STEP:b.hyst)+" %",severity:"ok"});
+    }else{
+      const roles=BY_TYPE[b.type].roles||[],set=roles.filter(r=>b.files[r]);
+      if(!set.length)out.push({id:b.id,message:"Не задан ни один WAV-файл",severity:"error"});
+      else out.push({id:b.id,message:"Файлы: "+set.map(r=>ROLE_NAMES[r]).join(", "),severity:"ok"});
+    }
   }else if(b.type==="engine"){
     if(!b.files.idle)out.push({id:b.id,message:"Нет файла холостого хода",severity:"warning"});else out.push({id:b.id,message:"Холостой ход: "+b.files.idle,severity:"ok"});
   }else{
@@ -524,7 +562,7 @@ async function testScheme(){
     const lines=[];let ok=0,err=0;
     for(const b of project.blocks){
       const kind=BY_TYPE[b.type].kind;let bad=false;
-      if(kind==="sound"){const roles=BY_TYPE[b.type].roles||[];bad=!roles.some(r=>b.files[r]);}
+      if(kind==="sound"){bad=(BY_TYPE[b.type].mode==="speed")?!(b.bands||[]).some(x=>x.file):!((BY_TYPE[b.type].roles||[]).some(r=>b.files[r]));}
       else if(b.type==="engine")bad=!b.files.idle;
       else{const fn=sourceFnOf(b.id);bad=(fn==null&&!(b.fn>=0&&b.fn<=28));}
       if(bad){err++;lines.push({id:b.id,message:"Блок «"+b.name+"» не готов",severity:"error"});}else ok++;
@@ -538,25 +576,44 @@ async function testScheme(){
 function renderInspector(){
   const b=project.blocks.find(x=>x.id===selected);const insp=$("inspector");
   if(!b){insp.innerHTML='<p class="hint">Выберите блок на холсте или добавьте новый слева.</p>';return;}
-  const cat=BY_TYPE[b.type],kind=cat.kind;let h='<label>Название</label><input id="i_name" value="'+esc(b.name)+'">';
-  h+='<div class="row"><label>F-клавиша</label><label>'+(kind==="output"?"Яркость %":"Громкость")+'</label></div><div class="row">'+
-     '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
-     '<input type="number" id="i_vol" min="0" max="100" value="'+(kind==="output"?b.level:b.volume)+'"></div>';
-  if(kind==="sound")h+='<label>Запуск</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+TRIGGER_NAMES[k]+"</option>").join("")+"</select>";
-  if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";
-  if(kind==="output"&&b.type!=="headlight")h+='<label>Канал</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
-  if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>Эффект</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+f.n+"</option>").join("")+"</select>";
-  if(kind==="logic")h+='<label>Операция</label><select id="i_logic">'+LOGIC_OPS.map(o=>'<option value="'+o.v+'"'+((b.logic|0)===o.v?" selected":"")+">"+o.n+"</option>").join("")+"</select>";
-  if(b.type==="engine"){
-    h+='<label>Ступени скорости</label><input type="number" id="i_steps" min="1" max="10" value="'+(b.steps||1)+'">';
-    h+='<label>Начало (запуск)</label>'+fileField("start",b)+'<label>Холостой ход (цикл)</label>'+fileField("idle",b);
-    const run=b.files.run||[];for(let i=1;i<=(b.steps||1);i++)h+='<label>Движение '+i+' (цикл)</label><div class="frow"><select data-run="'+(i-1)+'">'+soundOptions(run[i-1]||"")+'</select><button class="play" data-playrun="'+(i-1)+'" title="Прослушать">▶</button></div>';
-    h+='<label>Останов</label>'+fileField("stop",b);
-  }else if(kind==="sound"){
-    (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileField(r,b);});
+  const cat=BY_TYPE[b.type],kind=cat.kind,mode0=cat.mode;let h='<label>Название</label><input id="i_name" value="'+esc(b.name)+'">';
+  if(mode0==="speed"){
+    h+='<div class="row"><label>Защитный интервал, %</label><label>Громкость</label></div><div class="row">'+
+       '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_STEP:b.hyst)+'">'+
+       '<input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'"></div>';
+    h+='<div class="hint">Диапазоны скорости в процентах; шаг по умолчанию 25 %.</div>';
+    (b.bands||[]).forEach((bd,i)=>{
+      h+='<div class="row" style="margin-top:6px"><label>От %</label><label>До %</label><span style="flex:0 0 34px"></span></div>'+
+         '<div class="row"><input data-bfrom="'+i+'" type="number" min="0" max="100" value="'+Math.round(bd.from||0)+'">'+
+         '<input data-bto="'+i+'" type="number" min="0" max="100" value="'+Math.round(bd.to==null?100:bd.to)+'">'+
+         '<button class="play" data-bplay="'+i+'" title="Прослушать">▶</button></div>'+
+         '<div class="frow"><select data-bfile="'+i+'">'+soundOptions(bd.file||"")+'</select></div>';
+    });
+    h+='<div class="row" style="margin-top:6px"><button id="i_addband">+ Диапазон</button></div>';
+  }else{
+    h+='<div class="row"><label>F-клавиша</label><label>'+(kind==="output"?"Яркость %":"Громкость")+'</label></div><div class="row">'+
+       '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
+       '<input type="number" id="i_vol" min="0" max="100" value="'+(kind==="output"?b.level:b.volume)+'"></div>';
+    if(kind==="sound")h+='<label>Запуск</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+TRIGGER_NAMES[k]+"</option>").join("")+"</select>";
+    if(kind==="sound"&&b.trigger==="speed")h+='<div class="row"><label>От %</label><label>До %</label><label>Защита %</label></div><div class="row">'+
+       '<input type="number" id="i_smin" min="0" max="100" value="'+(b.speedMin==null?0:b.speedMin)+'">'+
+       '<input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'">'+
+       '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_STEP:b.hyst)+'"></div>';
+    if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";
+    if(kind==="output"&&b.type!=="headlight")h+='<label>Канал</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
+    if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>Эффект</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+f.n+"</option>").join("")+"</select>";
+    if(kind==="logic")h+='<label>Операция</label><select id="i_logic">'+LOGIC_OPS.map(o=>'<option value="'+o.v+'"'+((b.logic|0)===o.v?" selected":"")+">"+o.n+"</option>").join("")+"</select>";
+    if(b.type==="engine"){
+      h+='<label>Ступени скорости</label><input type="number" id="i_steps" min="1" max="10" value="'+(b.steps||1)+'">';
+      h+='<label>Начало (запуск)</label>'+fileField("start",b)+'<label>Холостой ход (цикл)</label>'+fileField("idle",b);
+      const run=b.files.run||[];for(let i=1;i<=(b.steps||1);i++)h+='<label>Движение '+i+' (цикл)</label><div class="frow"><select data-run="'+(i-1)+'">'+soundOptions(run[i-1]||"")+'</select><button class="play" data-playrun="'+(i-1)+'" title="Прослушать">▶</button></div>';
+      h+='<label>Останов</label>'+fileField("stop",b);
+    }else if(kind==="sound"){
+      (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileField(r,b);});
+    }
   }
-  h+='<datalist id="files">'+tracks.map(f=>'<option value="'+esc(f)+'"></option>').join("")+"</datalist>";
   if(kind==="output"||kind==="logic")h+='<p class="hint">Вход блока можно соединить с другим блоком — тогда F-клавиша берётся от него.</p>';
+  if(mode0==="speed")h+='<p class="hint">Звук меняется по скорости поезда; защитный интервал не даёт дребезжать на границах.</p>';
   h+='<div class="row" style="margin-top:10px"><button class="primary" id="i_test">▶ Тест блока</button><button id="i_close">Готово</button><button id="i_del">Удалить</button></div>';
   insp.innerHTML=h;
   const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
@@ -564,6 +621,9 @@ function renderInspector(){
   on("i_fn","change",e=>{b.fn=Number(e.target.value);render();});
   on("i_vol","change",e=>{const v=Math.max(0,Math.min(100,Number(e.target.value)));if(kind==="output")b.level=v;else b.volume=v;render();});
   on("i_trig","change",e=>{b.trigger=e.target.value;render();});
+  on("i_hyst","change",e=>{b.hyst=Math.max(0,Math.min(100,Number(e.target.value)));render();});
+  on("i_smin","change",e=>{b.speedMin=Math.max(0,Math.min(100,Number(e.target.value)));render();});
+  on("i_smax","change",e=>{b.speedMax=Math.max(0,Math.min(100,Number(e.target.value)));render();});
   on("i_dir","change",e=>{b.dir=e.target.value;render();});
   on("i_ch","change",e=>{b.channel=Number(e.target.value);render();});
   on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
@@ -573,6 +633,11 @@ function renderInspector(){
   insp.querySelectorAll("[data-run]").forEach(el=>el.addEventListener("change",e=>{if(!b.files.run)b.files.run=[];b.files.run[Number(el.getAttribute("data-run"))]=e.target.value;render();}));
   insp.querySelectorAll("[data-play]").forEach(btn=>btn.onclick=()=>playFile(b.files[btn.getAttribute("data-play")]));
   insp.querySelectorAll("[data-playrun]").forEach(btn=>btn.onclick=()=>playFile((b.files.run||[])[Number(btn.getAttribute("data-playrun"))]));
+  on("i_addband","click",()=>{if(!b.bands)b.bands=[];b.bands.push({from:0,to:100,file:""});render();});
+  insp.querySelectorAll("[data-bfrom]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bfrom"))].from=Math.max(0,Math.min(100,Number(e.target.value)));render();}));
+  insp.querySelectorAll("[data-bto]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bto"))].to=Math.max(0,Math.min(100,Number(e.target.value)));render();}));
+  insp.querySelectorAll("[data-bfile]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bfile"))].file=e.target.value;render();}));
+  insp.querySelectorAll("[data-bplay]").forEach(btn=>btn.onclick=()=>playFile((b.bands[Number(btn.getAttribute("data-bplay"))]||{}).file));
   on("i_test","click",()=>testBlock(b));
   on("i_close","click",()=>{selected="";render();});
   on("i_del","click",()=>removeBlock(b.id));

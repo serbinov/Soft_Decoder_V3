@@ -5,20 +5,52 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ADDITIPUS AURA-X · v__VERSION__</title>
 <style>
-:root{--bg:#0f1420;--panel:#131a2b;--panel2:#0f1830;--text:#ffffff;--muted:#ffffff;--good:#3ecf8e;--warn:#ffd479;--bad:#ff6b6b;--line:#202a45;--accent:#4da3ff;--accent2:#4da3ff;--input:#0a0e18;--on-accent:#04101f;--on-good:#04101f;--btn-bg:#1c2740;--btn2-bg:#131a2b;--hd-bg:#131a2b;--log-bg:#0a0e18}
-html[data-theme=light]{--bg:#eef1f7;--panel:#ffffff;--panel2:#f4f6fb;--text:#000000;--muted:#000000;--good:#1f9d63;--warn:#b8791a;--bad:#d64545;--line:#d3dae8;--accent:#2f6fd0;--accent2:#2f6fd0;--input:#ffffff;--on-accent:#ffffff;--on-good:#ffffff;--btn-bg:#e8edf6;--btn2-bg:#f1f4fa;--hd-bg:#ffffff;--log-bg:#f7f9fd}
+:root{--bg:#0f1420;--panel:#131a2b;--panel2:#0f1830;--text:#ffffff;--muted:#93a1bd;--good:#3ecf8e;--warn:#ffd479;--bad:#ff6b6b;--line:#222d49;--accent:#4da3ff;--accent2:#4da3ff;--input:#0a0e18;--on-accent:#04101f;--on-good:#04101f;--btn-bg:#1c2740;--btn2-bg:#131a2b;--hd-bg:#131a2b;--log-bg:#0a0e18;--app-w:700px;--radius:10px;--radius-sm:8px;--shadow:0 6px 20px rgba(0,0,0,.35)}
+html[data-theme=light]{--bg:#eef1f7;--panel:#ffffff;--panel2:#f4f6fb;--text:#0b1220;--muted:#5b6579;--good:#1f9d63;--warn:#b8791a;--bad:#d64545;--line:#d3dae8;--accent:#2f6fd0;--accent2:#2f6fd0;--input:#ffffff;--on-accent:#ffffff;--on-good:#ffffff;--btn-bg:#e8edf6;--btn2-bg:#f1f4fa;--hd-bg:#ffffff;--log-bg:#f7f9fd;--shadow:0 6px 20px rgba(20,30,60,.12)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;background:var(--bg);color:var(--text)}
 button,input,select{font:inherit}
 button{cursor:pointer}
 input[type=range]{width:100%;accent-color:var(--accent)}
-.shell{width:100%;max-width:100%;margin:0;padding:10px 12px 92px}
+.shell{width:100%;max-width:none;margin:0;padding:10px 14px 92px}
+/* Each page is its own responsive area. On a phone everything is a single
+   column; on a wide screen the settings become a two-pane view: a section list
+   on the left and the selected section on the right. */
+.page{display:grid;gap:10px;align-items:start;grid-template-columns:1fr}
+.page>.panel{margin-bottom:0}
+.span-all,.page>.uptime-line{grid-column:1/-1}
+@media(min-width:760px){
+  .page[data-page=control]{grid-template-columns:minmax(230px,320px) minmax(0,1fr)}
+}
+/* settings: section list (wide screens only) + content column */
+.set-nav{display:none}
+.set-body{display:grid;gap:10px;min-width:0}
+.set-body>.panel{margin-bottom:0;min-width:0}
+.set-item{display:block;width:100%;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px}
+.set-item:hover{background:var(--btn2-bg)}
+.set-item.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.set-group{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 10px 4px}
+.info-panel{border-left:3px solid var(--accent);box-shadow:var(--shadow)}
+.info-device{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.info-device .info-key{flex:0 0 auto}
+.info-device input{flex:1 1 200px;max-width:460px;min-width:0}
+@media(min-width:900px){
+  .page[data-page=settings].md-on{grid-template-columns:250px minmax(0,1fr);align-items:start}
+  .page[data-page=settings].md-on .set-nav{display:block;grid-column:1;position:sticky;top:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px}
+  .page[data-page=settings].md-on .set-body{grid-column:2}
+  .page[data-page=settings].md-on .info-panel,
+  .page[data-page=settings].md-on .uptime-line{grid-column:1/-1}
+  .page[data-page=settings].md-on .set-body>.panel{display:none}
+  .page[data-page=settings].md-on .set-body>.panel.active{display:block}
+  .page[data-page=settings].md-on .set-body .panel-hd{cursor:default}
+  .page[data-page=settings].md-on .set-body .panel-hd .chev{display:none}
+}
 
 .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--hd-bg);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
 .brand{font-size:16px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
-.brand small{font-size:10px;color:var(--text);font-weight:600;margin-left:6px}
-.conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);white-space:nowrap;font-weight:600}
+.brand small{font-size:10px;color:var(--muted);font-weight:600;margin-left:6px}
+.conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);white-space:nowrap;font-weight:600}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex-shrink:0}
 .dot.ok{background:var(--good)}
 
@@ -27,7 +59,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .panel .bd{padding:10px 12px}
 .panel-hd{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
 .panel-hd h2{border-bottom:0;flex:1}
-.panel-hd .chev{color:var(--text);font-size:11px;padding-right:12px;transition:transform .15s}
+.panel-hd .chev{color:var(--muted);font-size:11px;padding-right:12px;transition:transform .15s}
 .panel-hd.open .chev{transform:rotate(90deg)}
 
 .btn{border:1px solid var(--line);background:var(--btn-bg);color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;min-height:42px;touch-action:manipulation;user-select:none;white-space:nowrap}
@@ -35,7 +67,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent);font-weight:700}
 .btn.bad,.btn.danger{border-color:#7b3030;color:var(--bad)}
-.btn:disabled{opacity:.65;cursor:default}
+.btn:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.25)}
 .btn.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:700}
 .btn.sm{min-height:36px;padding:6px 10px;font-size:12px}
 .btn.ghost{background:var(--btn2-bg)}
@@ -47,10 +79,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 input[type=number],input[type=text],input[type=password],select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--text);width:100%;outline:none}
 input:focus,select:focus{border-color:var(--accent)}
 select{cursor:pointer}
-.muted{color:var(--text)}
+.muted{color:var(--muted)}
 label{color:var(--text);font-weight:600}
-.hint{font-size:12px;color:var(--text);font-weight:600}
-::placeholder{color:var(--text);opacity:1}
+.hint{font-size:12px;color:var(--muted);font-weight:600}
+::placeholder{color:var(--muted);opacity:1}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.offline-banner{display:none;align-items:center;gap:8px;padding:9px 12px;margin-bottom:10px;border:1px solid var(--bad);border-radius:var(--radius);background:var(--panel);color:var(--bad);font-size:13px;font-weight:600}
+.offline-banner.show{display:flex}
 
 .seg{display:flex;gap:6px;margin-bottom:8px}
 .seg .btn{flex:1}
@@ -66,7 +101,7 @@ label{color:var(--text);font-weight:600}
 .fn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:7px}
 .fn-grid .btn{min-height:44px;font-size:12px;font-weight:700}
 
-.locked{opacity:.9}
+.locked{opacity:1}
 
 .vol{display:grid;grid-template-columns:70px 1fr 2.5em;gap:8px;align-items:center;margin-bottom:8px}
 .vol label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
@@ -76,16 +111,16 @@ label{color:var(--text);font-weight:600}
 .slot{border:1px solid var(--line);border-radius:8px;background:var(--panel2);padding:8px;display:grid;gap:6px;min-width:0}
 .slot.playing{border-color:var(--good);box-shadow:0 0 0 1px rgba(62,207,142,.15) inset}
 .slot .head{display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0}
-.slot .idx{font-size:11px;color:var(--text);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.slot .idx{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
 .slot .name{display:block;font-size:13px;font-weight:700;flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .slot .name .ni{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-.slot .file{font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .file{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .slot .acts{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
 .slot input[type=file]{display:none}
 .slot input[type=text]{flex:1;min-width:0;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--input);color:var(--text);font-size:12px}
 .up-bar{height:8px;border-radius:4px;background:var(--input);border:1px solid var(--line);overflow:hidden;display:none}
 .up-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
-.up-meta{font-size:11px;color:var(--text);font-family:ui-monospace,Consolas,monospace;display:none}
+.up-meta{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;display:none}
 
 .cv-quick{display:grid;grid-template-columns:130px 130px auto auto auto auto;gap:8px;align-items:end;margin-bottom:10px}
 .cv-list{display:grid;gap:6px}
@@ -94,8 +129,8 @@ label{color:var(--text);font-weight:600}
 .cv-card .head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .cv-card .name{font-size:13px;font-weight:700}
 .cv-card .vendor{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle}
-.cv-card .idx{font-size:12px;color:var(--text);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
-.cv-card .desc{font-size:11px;color:var(--text)}
+.cv-card .idx{font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.cv-card .desc{font-size:11px;color:var(--muted)}
 .cv-card .ctrl{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:end}
 .mini{display:flex;gap:6px;flex-wrap:wrap}
 
@@ -125,7 +160,7 @@ label{color:var(--text);font-weight:600}
 }
 .fnmap-row{display:grid;grid-template-columns:14px 1fr 1fr 62px 58px;gap:5px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .fnmap-col{display:flex;flex-direction:column;gap:2px;min-width:0}
-.fnmap-lbl{font-size:11px;color:var(--text);font-weight:600}
+.fnmap-lbl{font-size:11px;color:var(--muted);font-weight:600}
 .fnmap-cbs{display:grid;gap:1px 6px;min-width:0}
 .fnmap-cbs.slots,.fnmap-cbs.outs{grid-template-columns:repeat(2,minmax(0,1fr))}
 .fnmap-cbs.one{grid-template-columns:1fr}
@@ -134,7 +169,7 @@ label{color:var(--text);font-weight:600}
 .fnmap-fn{font-weight:600;font-size:12px;padding-top:12px}
 .fnmap-sec{margin-bottom:16px}
 .fnmap-cap{font-size:12px;font-weight:800;margin:0 0 6px 0;letter-spacing:.02em}
-.fnmap-leg{font-size:11px;color:var(--text);margin:4px 0 0 0}
+.fnmap-leg{font-size:11px;color:var(--muted);margin:4px 0 0 0}
 .fnmap-tbl{border-collapse:collapse;font-size:11px}
 .fnmap-tbl th,.fnmap-tbl td{border:1px solid var(--line);padding:1px 3px;text-align:center;white-space:nowrap;background:var(--panel);color:var(--text)}
 .fnmap-tbl thead th{background:var(--panel2);font-weight:700}
@@ -151,7 +186,7 @@ label{color:var(--text);font-weight:600}
 .auxpwm-row{display:grid;grid-template-columns:36px 70px 1fr;gap:6px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .auxpwm-row .num{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px;font-size:12px;text-align:center}
 .auxpwm-row .num:disabled{background:var(--panel2);color:var(--text);opacity:.8}
-.uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--text);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
+.uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
 .uptime-line #uptime{color:var(--text);font-weight:700}
 /* top nav + theme switch */
 .hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -161,16 +196,18 @@ label{color:var(--text);font-weight:600}
 .nav-tab.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 /* info grid */
 .info-grid{display:grid;gap:2px}
+@media(min-width:760px){.info-grid{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px}}
+@media(min-width:1400px){.info-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .info-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
 .info-grid .info-row:last-child{border-bottom:0}
-.info-key{color:var(--text);white-space:nowrap;font-weight:600}
+.info-key{color:var(--muted);white-space:nowrap;font-weight:600}
 .info-val{color:var(--text);text-align:right;min-width:0;overflow-wrap:anywhere}
 /* wide settings grids scroll instead of squashing on phones */
 #fnmap_rows,#snd_matrix{overflow-x:auto}
-/* On computers and laptops render the whole page 50% larger for readability.
-   zoom (not font-size) is used because the layout uses px sizes; it scales
-   text and controls together and the page reflows without horizontal scroll. */
-@media(min-width:1024px){body{zoom:1.5}}
+/* On computers the layout stays a comfortable centered column instead of
+   scaling the whole page: the app is used from a phone, so the desktop view
+   keeps the same single-column structure with slightly larger base text. */
+@media(min-width:1024px){body{font-size:15px}}
 @media(max-width:760px){
   .fn-grid{grid-template-columns:repeat(auto-fill,minmax(50px,1fr))}
   .nav-tab{padding:9px 8px}
@@ -186,19 +223,61 @@ label{color:var(--text);font-weight:600}
 <body>
 <div class="shell">
 
+  <div class="offline-banner" id="offline_banner">⚠ Нет связи с устройством. Проверьте подключение к точке доступа.</div>
+
   <div class="hd">
     <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
     <div class="hd-right">
       <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
-      <button class="btn sm ghost theme-btn" id="theme_btn" onclick="toggleTheme()" title="Светлая / тёмная тема">☀</button>
+      <button class="btn sm ghost theme-btn" id="theme_btn" onclick="toggleTheme()" title="Светлая / тёмная тема" aria-label="Переключить тему">☀</button>
     </div>
   </div>
 
-  <div class="panel" data-page="settings" style="display:none">
+  <div class="page" data-page="control">
+    <div class="panel">
+      <h2>Управление через</h2>
+      <div class="bd">
+        <div class="seg">
+          <button class="btn" id="src_rails" onclick="setControlSource('rails')">Рельсы</button>
+          <button class="btn" id="src_web" onclick="setControlSource('web')">Веб</button>
+        </div>
+        <div class="row" style="margin-top:2px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <input type="checkbox" id="mode_dc" style="width:auto" onchange="toggleMode()">DC — аналоговое управление
+          </label>
+        </div>
+        <div class="hint" id="src_hint">Управление скоростью и функциями — с выбранного источника.</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Управление</h2>
+      <div class="bd" id="control_body">
+        <div class="speed-row">
+          <label>Скорость</label>
+          <input type="range" id="speed" min="0" max="126" value="0" oninput="onSpeedInput()">
+          <span class="val" id="speed_v">0</span>
+        </div>
+        <div class="dir-row">
+          <button class="btn" id="btn_rev" onclick="setDir(false)">◀ Назад</button>
+          <button class="btn danger" id="btn_stop" onclick="setStop()">■ Стоп</button>
+          <button class="btn emergency" id="btn_emergency" onclick="emergencyStop()">⛔ Экстренный Стоп</button>
+          <button class="btn" id="btn_fwd" onclick="setDir(true)">▶ Вперёд</button>
+        </div>
+        <div class="fn-grid" id="fn_grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" data-page="settings" style="display:none">
+  <div class="panel info-panel span-all" data-page="settings" style="display:none">
     <h2>Информация</h2>
     <div class="bd">
+      <div class="info-device">
+        <span class="info-key">Устройство</span>
+        <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ">
+        <button class="btn primary sm" id="device_save" onclick="saveDeviceName()" style="display:none">Сохранить</button>
+      </div>
       <div class="info-grid">
-        <div class="info-row"><span class="info-key">Устройство</span><span class="info-val" id="info_name">—</span></div>
         <div class="info-row"><span class="info-key">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
         <div class="info-row"><span class="info-key">Адрес</span><span class="info-val" id="info_addr">—</span></div>
         <div class="info-row"><span class="info-key">Состояние</span><span class="info-val" id="info_conn">—</span></div>
@@ -207,52 +286,25 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
-  <div class="panel" data-page="settings" style="display:none">
-    <h2>Имя устройства</h2>
-    <div class="bd">
-      <div class="row">
-        <div class="field grow">
-          <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ">
-        </div>
-        <button class="btn primary" id="device_save" onclick="saveDeviceName()" style="display:none">Сохранить</button>
-      </div>
-    </div>
-  </div>
+  <nav class="set-nav" data-page="settings" style="display:none" aria-label="Разделы настроек">
+    <div class="set-group">Движение</div>
+    <button class="set-item" data-target="panel_bemf" onclick="showSetting('panel_bemf')">Калибровка BEMF</button>
+    <div class="set-group">Звук</div>
+    <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')">Загрузка звуков</button>
+    <button class="set-item" data-target="panel_fnmap" onclick="showSetting('panel_fnmap')">Настройка функции F</button>
+    <button class="set-item" data-target="panel_auxpwm" onclick="showSetting('panel_auxpwm')">PWM и эффекты AUX</button>
+    <button class="set-item" data-target="panel_graph" onclick="showSetting('panel_graph')">Звуковой граф</button>
+    <button class="set-item" data-target="panel_blocks" onclick="showSetting('panel_blocks')">Конструктор блоков</button>
+    <div class="set-group">Настройки</div>
+    <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')">CV</button>
+    <button class="set-item" data-target="panel_wifi" onclick="showSetting('panel_wifi')">Wi-Fi</button>
+    <button class="set-item" data-target="panel_ota" onclick="showSetting('panel_ota')">Обновление</button>
+    <button class="set-item" data-target="panel_bemf_base" onclick="showSetting('panel_bemf_base')">Базовые настройки</button>
+    <div class="set-group">Сервис</div>
+    <button class="set-item" data-target="panel_log" onclick="showSetting('panel_log')">Журнал</button>
+  </nav>
 
-  <div class="panel" data-page="control">
-    <h2>Управление через</h2>
-    <div class="bd">
-      <div class="seg">
-        <button class="btn" id="src_rails" onclick="setControlSource('rails')">Рельсы</button>
-        <button class="btn" id="src_web" onclick="setControlSource('web')">Веб</button>
-      </div>
-      <div class="row" style="margin-top:2px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-          <input type="checkbox" id="mode_dc" style="width:auto" onchange="toggleMode()">DC — аналоговое управление
-        </label>
-      </div>
-      <div class="hint" id="src_hint">Управление скоростью и функциями — с выбранного источника.</div>
-    </div>
-  </div>
-
-  <div class="panel" data-page="control">
-    <h2>Управление</h2>
-    <div class="bd" id="control_body">
-      <div class="speed-row">
-        <label>Скорость</label>
-        <input type="range" id="speed" min="0" max="126" value="0" oninput="onSpeedInput()">
-        <span class="val" id="speed_v">0</span>
-      </div>
-      <div class="dir-row">
-        <button class="btn" id="btn_rev" onclick="setDir(false)">◀ Назад</button>
-        <button class="btn danger" id="btn_stop" onclick="setStop()">■ Стоп</button>
-        <button class="btn emergency" id="btn_emergency" onclick="emergencyStop()">⛔ Экстренный Стоп</button>
-        <button class="btn" id="btn_fwd" onclick="setDir(true)">▶ Вперёд</button>
-      </div>
-      <div class="fn-grid" id="fn_grid"></div>
-      <button class="btn primary nav-settings-btn" id="nav_settings" onclick="showPage('settings')">⚙ Настройки</button>
-    </div>
-  </div>
+  <div class="set-body">
 
   <div class="panel" data-page="settings" style="display:none" id="panel_bemf">
     <div class="panel-hd" id="hd_bemf" onclick="togglePanel('bemf')">
@@ -296,6 +348,26 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
+  <div class="panel" data-page="settings" style="display:none" id="panel_fnmap">
+    <div class="panel-hd" id="hd_fnmap" onclick="togglePanel('fnmap')">
+      <h2>Настройка функции F</h2>
+      <span class="chev" id="chev_fnmap">▸</span>
+    </div>
+    <div class="bd" id="bd_fnmap" style="display:none">
+      <div id="fnmap_rows"></div>
+    </div>
+  </div>
+
+  <div class="panel" data-page="settings" style="display:none" id="panel_auxpwm">
+    <div class="panel-hd" id="hd_auxpwm" onclick="togglePanel('auxpwm')">
+      <h2>PWM и эффекты AUX</h2>
+      <span class="chev" id="chev_auxpwm">▸</span>
+    </div>
+    <div class="bd" id="bd_auxpwm" style="display:none">
+      <div id="auxpwm_rows"></div>
+    </div>
+  </div>
+
   <div class="panel" data-page="settings" style="display:none" id="panel_graph">
     <div class="panel-hd" id="hd_graph" onclick="togglePanel('graph')">
       <h2>Звуковой граф</h2>
@@ -315,26 +387,6 @@ label{color:var(--text);font-weight:600}
     <div class="bd" id="bd_blocks" style="display:none">
       <div class="hint" style="margin-bottom:10px">Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.</div>
       <button class="btn sm" onclick="window.open('/sound-editor/blocks.html','_blank')">Открыть конструктор блоков</button>
-    </div>
-  </div>
-
-  <div class="panel" data-page="settings" style="display:none" id="panel_fnmap">
-    <div class="panel-hd" id="hd_fnmap" onclick="togglePanel('fnmap')">
-      <h2>Настройка функции F</h2>
-      <span class="chev" id="chev_fnmap">▸</span>
-    </div>
-    <div class="bd" id="bd_fnmap" style="display:none">
-      <div id="fnmap_rows"></div>
-    </div>
-  </div>
-
-  <div class="panel" data-page="settings" style="display:none" id="panel_auxpwm">
-    <div class="panel-hd" id="hd_auxpwm" onclick="togglePanel('auxpwm')">
-      <h2>PWM и эффекты AUX</h2>
-      <span class="chev" id="chev_auxpwm">▸</span>
-    </div>
-    <div class="bd" id="bd_auxpwm" style="display:none">
-      <div id="auxpwm_rows"></div>
     </div>
   </div>
 
@@ -406,7 +458,7 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
-  <div class="panel" data-page="settings" style="display:none">
+  <div class="panel" data-page="settings" style="display:none" id="panel_log">
     <h2>Журнал</h2>
     <div class="bd">
       <div class="row" style="justify-content:flex-end;margin-bottom:6px">
@@ -415,11 +467,14 @@ label{color:var(--text);font-weight:600}
       <div class="log" id="app_log"></div>
     </div>
   </div>
+  </div>
 
   <div class="uptime-line" data-page="settings" style="display:none"><span>Устройство работает:</span> <span id="uptime">—</span></div>
+  </div>
 
-  <nav class="nav" data-page="settings" style="display:none">
-    <button class="nav-tab" id="nav_control" onclick="showPage('control')">◀ Управление</button>
+  <nav class="nav">
+    <button class="nav-tab active" id="nav_control" onclick="showPage('control')">Управление</button>
+    <button class="nav-tab" id="nav_settings" onclick="showPage('settings')">Настройки</button>
   </nav>
 
   <div class="modal" id="modal">
@@ -502,6 +557,8 @@ function setConnected(ok){
     if(dot)dot.classList.toggle('ok',ok);
     setText('connection',ok?'Онлайн':'Офлайн');
     setText('info_conn',ok?'Онлайн':'Офлайн');
+    var banner=byId('offline_banner');
+    if(banner)banner.classList.toggle('show',!ok);
     /* The bottom uptime clock is only meaningful while the board answers: keep
        it running while online and stop the timer when the device is gone. */
     if(ok)startUptime();else stopUptime();
@@ -1726,24 +1783,83 @@ function showPage(name){
   var els=[];
   if(document.querySelectorAll)els=document.querySelectorAll('[data-page]');
   for(var i=0;i<els.length;i++){els[i].style.display=(els[i].getAttribute('data-page')===name)?'':'none';}
+  var nc=byId('nav_control'),ns=byId('nav_settings');
+  if(nc)nc.classList.toggle('active',name==='control');
+  if(ns)ns.classList.toggle('active',name==='settings');
   try{if(typeof history!=='undefined'&&history.replaceState)history.replaceState(null,'',name==='settings'?'#settings':'#control');}catch(e){}
+  if(typeof applySettingsMode==='function')applySettingsMode();
 }
 function pageFromHash(){return (location.hash||'').replace('#','')==='settings'?'settings':'control';}
 
-/* collapsible panels */
+/* settings: on wide screens a section list switches the content pane */
+var currentSetting='panel_bemf',settingsWide=false;
+function isWide(){return (typeof window!=='undefined')&&Number(window.innerWidth)>=900;}
+function loadSettingData(name){
+  if(name==='snd'){loadTracks();refreshStatus();loadFreeSpace();}
+  if(name==='wifi'&&!wifiLoaded){loadWifi();}
+  if(name==='bemf'){loadBemfCal();}
+  if(name==='cv'){loadCvValues();}
+  if(name==='fnmap'){loadFuncMap();}
+  if(name==='auxpwm'){loadAuxPwm();}
+}
+function showSetting(id){
+  currentSetting=id||currentSetting||'panel_bemf';
+  applySettingVisibility();
+  loadSettingData(currentSetting.replace(/^panel_/,''));
+}
+function applySettingVisibility(){
+  if(!document.querySelectorAll)return;
+  var panels=document.querySelectorAll('.set-body>.panel');
+  var target=null;
+  for(var i=0;i<panels.length;i++){
+    var on=panels[i].id===currentSetting;
+    panels[i].classList.toggle('active',on);
+    if(on)target=panels[i];
+  }
+  if(!target&&panels.length){target=panels[0];currentSetting=panels[0].id;target.classList.add('active');}
+  if(target){
+    var bd=target.querySelector('.bd');if(bd)bd.style.display='block';
+    var hd=target.querySelector('.panel-hd');if(hd)hd.classList.add('open');
+  }
+  var items=document.querySelectorAll('.set-nav .set-item');
+  for(var j=0;j<items.length;j++){items[j].classList.toggle('active',items[j].getAttribute('data-target')===currentSetting);}
+}
+function applySettingsMode(){
+  if(!document.querySelector)return;
+  var page=document.querySelector('.page[data-page=settings]');
+  if(!page)return;
+  var wide=isWide()&&pageFromHash()==='settings';
+  if(wide===settingsWide&&page.classList.contains('md-on')===wide)return;
+  settingsWide=wide;
+  if(wide){
+    page.classList.add('md-on');
+    if(!currentSetting)currentSetting='panel_bemf';
+    applySettingVisibility();
+    loadSettingData(currentSetting.replace(/^panel_/,''));
+  }else{
+    page.classList.remove('md-on');
+    /* returning to the stacked accordion: collapse everything again */
+    if(document.querySelectorAll){
+      var bodies=document.querySelectorAll('.set-body>.panel .bd');
+      for(var b=0;b<bodies.length;b++)bodies[b].style.display='none';
+      var heads=document.querySelectorAll('.set-body>.panel .panel-hd');
+      for(var h=0;h<heads.length;h++)heads[h].classList.remove('open');
+      var cards=document.querySelectorAll('.set-body>.panel');
+      for(var c=0;c<cards.length;c++)cards[c].classList.remove('active');
+    }
+  }
+}
+
+/* collapsible panels (stacked accordion on phones) */
 function togglePanel(name){
   var bd=byId('bd_'+name);
   var hd=byId('hd_'+name);
   if(!bd)return;
+  if(document.querySelector){var pg=document.querySelector('.page[data-page=settings]');if(pg&&pg.classList.contains('md-on'))return;}
   var show=bd.style.display==='none';
   bd.style.display=show?'block':'none';
   if(hd)hd.classList.toggle('open',show);
-  if(show&&name==='snd'){loadTracks();refreshStatus();loadFreeSpace();}
-  if(show&&name==='wifi'&&!wifiLoaded){loadWifi();}
-  if(show&&name==='bemf'){loadBemfCal();}
-  if(show&&name==='cv'){loadCvValues();}
-  if(show&&name==='fnmap'){loadFuncMap();}
-  if(show&&name==='auxpwm'){loadAuxPwm();}
+  if(show)loadSettingData(name);
 }
 
 /* init */
@@ -1751,6 +1867,7 @@ function init(){
   initTheme();
   showPage(pageFromHash());
   if(typeof addEventListener!=='undefined')addEventListener('hashchange',function(){showPage(pageFromHash());});
+  if(typeof addEventListener!=='undefined')addEventListener('resize',function(){applySettingsMode();});
   byId('device_name').addEventListener('input',onDeviceNameInput);
   renderCvList();
   setActiveCv(1);

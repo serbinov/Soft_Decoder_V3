@@ -46,23 +46,23 @@
   #links path.link{stroke:#6f8bb0;stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
   #links path.link:hover{stroke:var(--err)}
   #links path.temp{stroke:var(--accent);stroke-width:2.5;fill:none;stroke-dasharray:6 5;pointer-events:none}
-  .node{position:absolute;width:240px;height:120px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
+  .node{position:absolute;width:240px;height:80px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
   .node.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(74,158,255,.35)}
   .node.engine{border-color:#e0a24a}
   .node.output{border-color:#5fbf7a}
   .node.logic{border-color:#a06fe0}
-  .node .hd{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:9px 9px 0 0;background:var(--nodehd);cursor:grab}
+  .node .hd{display:flex;align-items:center;gap:6px;padding:4px 9px;border-radius:9px 9px 0 0;background:var(--nodehd);cursor:grab}
   .node .hd b{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .node .hd .x{background:none;border:none;color:var(--muted);padding:0 3px;cursor:pointer;display:flex;align-items:center}
   .node .hd .x:hover{color:var(--err)}
-  .node .bd{padding:6px 9px;font-size:12px;color:var(--muted);min-height:34px;max-height:58px;overflow:hidden}
+  .node .bd{padding:4px 44px;font-size:11px;line-height:1.35;color:var(--muted);min-height:30px;max-height:46px;overflow:hidden}
   .node .bd .k{color:var(--text)}
-  .port{position:absolute;top:92px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
+  .port{position:absolute;top:32px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
   .port.in{left:-8px;background:#4a8fe0}
   .port.out{right:-8px;background:#4caf72}
-  .port .lbl{position:absolute;top:50%;transform:translateY(-50%);font-size:10px;white-space:nowrap;pointer-events:none}
-  .port.in .lbl{left:18px;color:#7fb3ff}
-  .port.out .lbl{right:18px;color:#7fd39f}
+  .port .lbl{position:absolute;top:50%;transform:translateY(-50%);font-size:9px;white-space:nowrap;pointer-events:none}
+  .port.in .lbl{left:12px;color:#7fb3ff}
+  .port.out .lbl{right:12px;color:#7fd39f}
   aside.right label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
   aside.right input,aside.right select{width:100%;padding:5px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px}
   .row{display:flex;gap:8px}.row>*{flex:1}
@@ -164,15 +164,21 @@ const CATALOG=[
   {type:"custom",name:"Свой сценарий",group:"Дополнительно",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
   {type:"headlight",name:"Фары",group:"Свет и выходы",kind:"output",mode:"headlight"},
   {type:"aux",name:"AUX-выход",group:"Свет и выходы",kind:"output",mode:"aux"},
-  {type:"logic",name:"Логика",group:"Свет и выходы",kind:"logic",mode:"logic"},
-  {type:"fx_incandescent",name:"Лампа накаливания",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:1},
-  {type:"fx_mars",name:"Марс / прожектор",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:2},
-  {type:"fx_ditch",name:"Ходовые огни",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:3},
-  {type:"fx_beacon",name:"Маяк",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:4},
-  {type:"fx_strobe",name:"Строб",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:5},
-  {type:"fx_firebox",name:"Топка",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:6}
+  {type:"lightfx",name:"Световой эффект",group:"Освещение (AUX)",kind:"output",mode:"aux",fx:true},
+  {type:"logic",name:"Логика",group:"Свет и выходы",kind:"logic",mode:"logic"}
 ];
 const BY_TYPE={};CATALOG.forEach(c=>BY_TYPE[c.type]=c);
+const GROUP_COLORS={"Основные":"#e0a24a","Сигналы":"#4a9eff","Механика":"#5fbf7a","Свет и выходы":"#e0d24a","Освещение (AUX)":"#e08a4a","Дополнительно":"#a06fe0"};
+const LEGACY_FX={fx_incandescent:1,fx_mars:2,fx_ditch:3,fx_beacon:4,fx_strobe:5,fx_firebox:6};
+function normalizeProject(p){
+  if(!p||!Array.isArray(p.blocks))return p;
+  for(const b of p.blocks){
+    if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="lightfx";b.name=b.name||"Световой эффект";}
+    if(b.type==="lightfx"&&b.effect===undefined)b.effect=0;
+  }
+  if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
+  return p;
+}
 const ROLE_NAMES={start:"Начало",loop:"Тело (цикл)",end:"Конец",short:"Короткий",sound:"Звук"};
 const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе"};
 const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",headlight:"Фары",aux:"Выход",logic:"Логика"};
@@ -190,6 +196,7 @@ const $=id=>document.getElementById(id);
 const clone=v=>JSON.parse(JSON.stringify(v));
 const nid=(p,ids)=>{let i=1;while(ids.includes(p+i))i++;return p+i;};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const hexA=(hex,a)=>{const h=hex.replace("#","");const n=parseInt(h.length===3?h.split("").map(x=>x+x).join(""):h,16);return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";};
 const snap=v=>project.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
 
 function newProject(){
@@ -388,15 +395,15 @@ async function applyOutputs(){
 
 /* ---- persistence ----------------------------------------------------- */
 function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId}));}catch(e){}}
-function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=d.project;revision=d.revision||0;savedId=d.savedId||"";if(!project.editor)project.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
+function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
 
 /* ---- rendering ------------------------------------------------------- */
 function renderPalette(){
   const groups={};CATALOG.forEach(c=>{(groups[c.group]=groups[c.group]||[]).push(c);});
   const hasEngine=project.blocks.some(b=>b.type==="engine");let html="";
   for(const g in groups){html+='<div class="pal-group"><header>'+esc(g)+"</header>";groups[g].forEach(c=>{
-    const dis=c.type==="engine"&&hasEngine;
-    html+='<button data-add="'+c.type+'"'+(dis?" disabled":"")+'><b>'+esc(c.name)+"</b><small>"+esc(MODE_NAMES[c.mode]||"")+(c.effect?" · "+esc((LIGHT_FX.find(f=>f.v===c.effect)||{}).n||""):"")+"</small></button>";
+    const dis=c.type==="engine"&&hasEngine,col=GROUP_COLORS[c.group]||"#2b3547";
+    html+='<button data-add="'+c.type+'" style="border-left:3px solid '+col+'"'+(dis?" disabled":"")+'><b>'+esc(c.name)+"</b><small>"+esc(MODE_NAMES[c.mode]||"")+(c.fx?" · выбор эффекта":"")+"</small></button>";
   });html+="</div>";}
   $("palette").innerHTML=html;
   $("palette").querySelectorAll("[data-add]").forEach(btn=>btn.onclick=()=>{const b=addBlockTo(project,btn.getAttribute("data-add"));if(b){selected=b.id;render();}});
@@ -419,9 +426,10 @@ function renderNodes(){
     const cat=BY_TYPE[b.type],kind=cat.kind;
     const hasIn=b.type!=="engine",hasOut=kind!=="output";
     const el=document.createElement("div");
+    const color=GROUP_COLORS[cat.group]||"#2b3547";
     el.className="node"+(selected===b.id?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
-    el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;
-    el.innerHTML='<div class="hd" data-drag="'+b.id+'"><b>'+esc(b.name)+'</b><button class="x" data-del="'+b.id+'" title="Удалить блок" aria-label="Удалить блок">'+TRASH+'</button></div>'+
+    el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;el.style.borderColor=color;
+    el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.20)+'"><b>'+esc(b.name)+'</b><button class="x" data-del="'+b.id+'" title="Удалить блок" aria-label="Удалить блок">'+TRASH+'</button></div>'+
       '<div class="bd">'+nodeSummary(b)+"</div>"+
       (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">вход</span></div>':'')+
       (hasOut?'<div class="port out" data-out="'+b.id+'"><span class="lbl">выход</span></div>':'');
@@ -438,7 +446,7 @@ function portPos(id,which){
   if(p){const r=p.getBoundingClientRect(),s=$("stage").getBoundingClientRect(),v=project.editor.viewport;
     return {x:(r.left+r.width/2-s.left-v.x)/v.zoom,y:(r.top+r.height/2-s.top-v.y)/v.zoom};}
   const b=project.blocks.find(x=>x.id===id)||{x:0,y:0};
-  return which==="out"?{x:b.x+NODE_W,y:b.y+100}:{x:b.x,y:b.y+100};
+  return which==="out"?{x:b.x+NODE_W,y:b.y+40}:{x:b.x,y:b.y+40};
 }
 function curve(x1,y1,x2,y2){const dx=Math.max(40,Math.abs(x2-x1)/2);return "M"+x1+" "+y1+" C"+(x1+dx)+" "+y1+" "+(x2-dx)+" "+y2+" "+x2+" "+y2;}
 function renderLinks(){
@@ -615,7 +623,7 @@ function autoLayout(){
 $("b_new").onclick=()=>{if(!confirm("Создать новую схему? Несохранённые правки будут потеряны."))return;project=newProject();selected="";revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Новая схема");};
 $("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+".blocks.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $("b_import").onclick=()=>$("f_import").click();
-$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=p;if(!project.editor)project.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
+$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
 $("b_align").onclick=autoLayout;
 $("b_test").onclick=testScheme;

@@ -14,7 +14,7 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
   body{display:flex;flex-direction:column;overflow:hidden}
-  header.top{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header.top{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
   .brand{font-weight:600}
   .brand span{color:var(--accent);font-weight:400}
   .grow{flex:1}
@@ -25,11 +25,13 @@
   button:hover{border-color:var(--accent)}
   button.primary{background:var(--accent);border-color:var(--accent);color:#04101f;font-weight:600}
   button.apply{background:var(--ok);border-color:var(--ok);color:#04170c;font-weight:600}
+  button.on{background:var(--accent);border-color:var(--accent);color:#04101f}
   button:disabled{opacity:.45;cursor:not-allowed}
   button.sm{padding:3px 7px;font-size:12px}
+  .sep{width:1px;height:22px;background:var(--line);margin:0 2px}
   main{flex:1;display:flex;min-height:0}
-  aside{background:var(--panel);border-right:1px solid var(--line);width:220px;overflow:auto;padding:10px}
-  aside.right{border-right:none;border-left:1px solid var(--line);width:280px}
+  aside{background:var(--panel);border-right:1px solid var(--line);width:230px;overflow:auto;padding:10px}
+  aside.right{border-right:none;border-left:1px solid var(--line);width:290px}
   aside h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:12px 0 6px}
   aside h2:first-child{margin-top:0}
   .pal-group{margin-bottom:10px}
@@ -37,31 +39,40 @@
   .pal button{display:block;width:100%;text-align:left;margin-bottom:5px}
   .pal button b{display:block;font-weight:600}
   .pal button small{color:var(--muted)}
-  #stage{position:relative;flex:1;overflow:hidden;background:
-    radial-gradient(circle at 1px 1px, #263042 1px, transparent 0) 0 0/22px 22px}
+  #stage{position:relative;flex:1;overflow:hidden;background:#0c1119}
+  #stage.grid-bg{background-image:linear-gradient(#1a2230 1px,transparent 1px),linear-gradient(90deg,#1a2230 1px,transparent 1px);background-size:20px 20px}
   #world{position:absolute;left:0;top:0;transform-origin:0 0}
   #links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
-  #links path{stroke:#5b708f;stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
-  #links path:hover{stroke:var(--err)}
-  .node{position:absolute;width:210px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
+  #links path.link{stroke:#6f8bb0;stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
+  #links path.link:hover{stroke:var(--err)}
+  #links path.temp{stroke:var(--accent);stroke-width:2.5;fill:none;stroke-dasharray:6 5;pointer-events:none}
+  .node{position:absolute;width:216px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
   .node.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(74,158,255,.35)}
-  .node .hd{display:flex;align-items:center;gap:6px;padding:7px 9px;border-radius:9px 9px 0 0;background:var(--nodehd);cursor:grab}
+  .node.engine{border-color:#e0a24a}
+  .node.output{border-color:#5fbf7a}
+  .node.logic{border-color:#a06fe0}
+  .node .hd{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:9px 9px 0 0;background:var(--nodehd);cursor:grab}
   .node .hd b{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .node .hd .x{background:none;border:none;color:var(--muted);padding:0 2px}
-  .node .bd{padding:7px 9px;font-size:12px;color:var(--muted)}
+  .node .bd{padding:6px 9px;font-size:12px;color:var(--muted);min-height:34px}
   .node .bd .k{color:var(--text)}
   .node .badge{font-size:10px;padding:1px 5px;border-radius:8px;background:#0006}
-  .port{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--accent);top:26px;border:2px solid var(--node)}
-  .port.in{left:-6px}.port.out{right:-6px;background:var(--ok)}
-  .port{cursor:crosshair}
+  .ports{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);padding:0 9px 6px}
+  .ports .lbl-in{color:#6fa8ff}
+  .ports .lbl-out{color:#6fcf8f}
+  .port{position:absolute;top:28px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
+  .port.in{left:-7px;background:#4a8fe0}
+  .port.out{right:-7px;background:#4caf72}
+  .port .lbl{position:absolute;top:-15px;font-size:9px;color:var(--muted);white-space:nowrap;pointer-events:none}
+  .port.in .lbl{left:-4px}
+  .port.out .lbl{right:-4px}
   aside.right label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
   aside.right input,aside.right select{width:100%;padding:5px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px}
   .row{display:flex;gap:8px}.row>*{flex:1}
   .hint{font-size:11px;color:var(--muted);margin:6px 0}
   footer.foot{display:flex;gap:12px;align-items:center;padding:6px 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
-  .diag{max-height:80px;overflow:auto;font-size:11px;width:100%}
+  .diag{max-height:76px;overflow:auto;font-size:11px;width:100%}
   .diag .d{color:var(--err)}.diag .w{color:var(--warn)}
-  .banner{padding:6px 12px;font-size:12px;background:#332a12;color:var(--warn);border-bottom:1px solid var(--line)}
   .hidden{display:none}
 </style>
 </head>
@@ -69,14 +80,19 @@
 <header class="top">
   <div class="brand">AURA-X <span>КОНСТРУКТОР БЛОКОВ</span></div>
   <div class="status"><i class="dot" id="on"></i><span id="on_txt">Нет связи</span></div>
-  <div class="grow"></div>
+  <div class="sep"></div>
   <button id="b_new">Новая</button>
   <button id="b_import">Импорт</button>
   <button id="b_export">Экспорт</button>
+  <div class="sep"></div>
+  <button id="b_snap" class="on">Сетка: вкл</button>
+  <button id="b_align">Выровнять</button>
+  <div class="grow"></div>
   <button id="b_validate">Проверить</button>
   <button class="primary" id="b_save" disabled>Сохранить</button>
+  <button id="b_outputs" disabled>Выходы</button>
   <button class="apply" id="b_apply" disabled>Применить</button>
-  <a class="btn" href="/" style="text-decoration:none"><button>Интерфейс декодера</button></a>
+  <button onclick="window.location.href='/'">Интерфейс декодера</button>
   <input type="file" id="f_import" accept=".json,application/json" class="hidden" />
 </header>
 
@@ -86,9 +102,20 @@
     <div class="pal" id="palette"></div>
   </aside>
 
-  <section id="stage">
+  <section id="stage" class="grid-bg">
     <div id="world">
-      <svg id="links" width="6000" height="4000"></svg>
+      <svg id="links" width="6000" height="4000">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#6f8bb0"></path>
+          </marker>
+          <marker id="arrowTemp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#4a9eff"></path>
+          </marker>
+        </defs>
+        <g id="linkLayer"></g>
+        <path id="tempLink" class="temp hidden" marker-end="url(#arrowTemp)"></path>
+      </svg>
       <div id="nodes"></div>
     </div>
   </section>
@@ -114,87 +141,95 @@
 
 const LIMITS={states:57,soundStates:31,transitions:128,effects:24,assets:31,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
+const GRID=20;const NODE_W=216;const NODE_H=104;
 
-/* ---- ready block catalog -------------------------------------------- */
+/* ---- catalogs -------------------------------------------------------- */
+const AUX_NAMES=["AUX1","AUX2","AUX3","AUX4","AUX5","AUX6","AUX7"];
+const LIGHT_FX=[{v:0,n:"Постоянный"},{v:1,n:"Лампа накаливания"},{v:2,n:"Марс"},{v:3,n:"Ходовые"},{v:4,n:"Маяк"},{v:5,n:"Строб"},{v:6,n:"Топка"}];
+const LOGIC_OPS=[{v:1,n:"Mute стоп"},{v:2,n:"Mute ход"},{v:3,n:"Mute свет"},{v:4,n:"Удержание хода"},{v:5,n:"Выбег"},{v:6,n:"Дин. тормоз"},{v:7,n:"Набор позиции"},{v:8,n:"Сброс позиции"}];
 const CATALOG=[
-  {type:"engine",name:"Двигатель",group:"Основные",mode:"engine",roles:[]},
-  {type:"horn",name:"Гудок",group:"Сигналы",mode:"shortLong",roles:["start","loop","end","short"]},
-  {type:"whistle",name:"Тифон",group:"Сигналы",mode:"oneshot",roles:["sound"]},
-  {type:"signal",name:"Короткий сигнал",group:"Сигналы",mode:"oneshot",roles:["sound"]},
-  {type:"bell",name:"Звонок",group:"Сигналы",mode:"latched",roles:["sound"]},
-  {type:"compressor",name:"Компрессор",group:"Механика",mode:"loopHeld",roles:["sound"]},
-  {type:"brake",name:"Тормоз",group:"Механика",mode:"latched",roles:["sound"]},
-  {type:"coupler",name:"Сцепка",group:"Механика",mode:"oneshot",roles:["sound"]},
-  {type:"sander",name:"Песочница",group:"Механика",mode:"oneshot",roles:["sound"]},
-  {type:"pantograph",name:"Токоприёмник",group:"Механика",mode:"oneshot",roles:["sound"]},
-  {type:"doors",name:"Двери",group:"Механика",mode:"oneshot",roles:["sound"]},
-  {type:"custom",name:"Свой сценарий",group:"Дополнительно",mode:"shortLong",roles:["start","loop","end","short"]}
+  {type:"engine",name:"Двигатель",group:"Основные",kind:"engine",mode:"engine"},
+  {type:"horn",name:"Гудок",group:"Сигналы",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
+  {type:"whistle",name:"Тифон",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"signal",name:"Короткий сигнал",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"bell",name:"Звонок",group:"Сигналы",kind:"sound",mode:"latched",roles:["sound"]},
+  {type:"compressor",name:"Компрессор",group:"Механика",kind:"sound",mode:"loopHeld",roles:["sound"]},
+  {type:"brake",name:"Тормоз",group:"Механика",kind:"sound",mode:"latched",roles:["sound"]},
+  {type:"coupler",name:"Сцепка",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"sander",name:"Песочница",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"pantograph",name:"Токоприёмник",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"doors",name:"Двери",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"custom",name:"Свой сценарий",group:"Дополнительно",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
+  {type:"headlight",name:"Фары",group:"Свет и выходы",kind:"output",mode:"headlight"},
+  {type:"aux",name:"AUX-выход",group:"Свет и выходы",kind:"output",mode:"aux"},
+  {type:"logic",name:"Логика",group:"Свет и выходы",kind:"logic",mode:"logic"},
+  {type:"fx_incandescent",name:"Лампа накаливания",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:1},
+  {type:"fx_mars",name:"Марс / прожектор",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:2},
+  {type:"fx_ditch",name:"Ходовые огни",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:3},
+  {type:"fx_beacon",name:"Маяк",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:4},
+  {type:"fx_strobe",name:"Строб",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:5},
+  {type:"fx_firebox",name:"Топка",group:"Освещение (AUX)",kind:"output",mode:"aux",effect:6}
 ];
 const BY_TYPE={};CATALOG.forEach(c=>BY_TYPE[c.type]=c);
 const ROLE_NAMES={start:"Начало",loop:"Тело (цикл)",end:"Конец",short:"Короткий",sound:"Звук"};
 const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе"};
-const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно"};
+const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",headlight:"Фары",aux:"Выход",logic:"Логика"};
+const DIRS=[{v:"auto",n:"Авто (вперёд/назад)"},{v:"fwd",n:"Только вперёд"},{v:"rev",n:"Только назад"},{v:"any",n:"Без направления"}];
 
 /* ---- state ----------------------------------------------------------- */
 let project=null;
 let selected="";
-let dragging=null;             // {id,dx,dy}
-let panning=null;              // {x,y,px,py}
-let linking=null;              // {from,x,y}
+let dragging=null,panning=null,linking=null;
 let online=false,busy=false,revision=0,savedId="";
-let tracks=[];
-let diagnostics=[];
-let assets={};
+let tracks=[],diagnostics=[],assets={};
 
 const $=id=>document.getElementById(id);
 const clone=v=>JSON.parse(JSON.stringify(v));
 const nid=(p,ids)=>{let i=1;while(ids.includes(p+i))i++;return p+i;};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const snap=v=>project.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
 
 function newProject(){
   const p={format:"sound-blocks",schemaVersion:1,id:"blocks_graph",name:"Новая схема тепловоза",
-    blocks:[],links:[],editor:{viewport:{x:40,y:40,zoom:1}}};
+    blocks:[],links:[],editor:{viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]}};
   addBlockTo(p,"engine");
   return p;
 }
+function nextFn(p){const used=new Set(p.blocks.map(b=>b.fn));let f=0;while(used.has(f)&&f<28)f++;return f;}
 function addBlockTo(p,type){
   const cat=BY_TYPE[type];if(!cat)return null;
   if(type==="engine"&&p.blocks.some(b=>b.type==="engine"))return null;
   const id=nid(type==="engine"?"engine_":"b",p.blocks.map(b=>b.id));
-  const b={id,type,name:cat.name,fn:type==="engine"?8:nextFn(p),trigger:"auto",volume:80,rate:1000,files:{}};
+  const b={id,type,name:cat.name,fn:type==="engine"?8:nextFn(p),trigger:"auto",volume:80,rate:1000,level:80,files:{}};
+  if(cat.kind==="output"){b.channel=0;b.effect=cat.effect||0;b.dir=type==="headlight"?"auto":"any";}
+  if(cat.kind==="logic")b.logic=1;
   (cat.roles||[]).forEach(r=>b.files[r]="");
   if(type==="engine"){b.steps=3;b.files={start:"",idle:"",stop:"",run:["","",""]};}
   const n=p.blocks.length;
-  b.x=60+(n%3)*240;b.y=60+Math.floor(n/3)*140;
+  b.x=snapTo(p,40+(n%3)*250);b.y=snapTo(p,40+Math.floor(n/3)*140);
   p.blocks.push(b);return b;
 }
-function nextFn(p){const used=new Set(p.blocks.filter(b=>b.type!=="engine").map(b=>b.fn));let f=0;while(used.has(f)&&f<28)f++;return f;}
+function snapTo(p,v){return p.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);}
 
-/* ---- compile blocks -> device sound-graph (schema v1) ---------------- */
+/* ---- compile sound blocks -> device sound-graph (schema v1) ---------- */
 function compile(){
-  const states=[],transitions=[],effects=[];
-  const files=new Set();let tid=0;
-  const addState=(id,name,file,loop,volume=80,rate=1000)=>{
-    if(states.some(s=>s.id===id))return;
-    states.push({id,name,file:file||"",loop:!!loop,volume,rate});if(file)files.add(file);
-  };
+  const states=[],transitions=[],effects=[];const files=new Set();let tid=0;
+  const addState=(id,name,file,loop,volume=80,rate=1000)=>{if(states.some(s=>s.id===id))return;states.push({id,name,file:file||"",loop:!!loop,volume,rate});if(file)files.add(file);};
   const silent=(id,name)=>addState(id,name,"",false,100,1000);
-  const addEdge=(source,target,condition,priority=10,timing="immediate")=>{
-    transitions.push({id:"t"+(++tid),source,target,priority,timing,condition});
-  };
+  const addEdge=(source,target,condition,priority=10,timing="immediate")=>{transitions.push({id:"t"+(++tid),source,target,priority,timing,condition});};
   const engine=project.blocks.find(b=>b.type==="engine");
   const engineEntry=engine?engine.id+"_off":"engine_off";
   silent(engineEntry,"Выкл / тихий вход");
-
   const linkedFromEngine=id=>project.links.some(l=>l.to===id&&(project.blocks.find(b=>b.id===l.from)||{}).type==="engine");
   const triggerOf=b=>b.trigger==="auto"?(linkedFromEngine(b.id)?"engine":"fn"):b.trigger;
 
   for(const b of project.blocks){
+    const kind=BY_TYPE[b.type].kind;
+    if(kind==="output"||kind==="logic")continue;
     const fn=b.fn,vol=b.volume,rate=b.rate||1000;
     if(b.type==="engine"){
       const has=f=>!!f;
-      const start=b.files.start,idle=b.files.idle,stop=b.files.stop||"";
-      const run=Array.isArray(b.files.run)?b.files.run:[];
+      const start=b.files.start,idle=b.files.idle,stop=b.files.stop||"",run=Array.isArray(b.files.run)?b.files.run:[];
       const steps=Math.max(1,Math.min(10,b.steps||1));
       if(has(start))addState(b.id+"_start","Запуск двигателя",start,false,vol,rate);
       addState(b.id+"_idle","Холостой ход",idle,true,vol,rate);
@@ -241,7 +276,7 @@ function compile(){
       if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);}
     }
   }
-  const positions={};project.blocks.forEach(b=>{positions[b.id]={x:b.x,y:b.y};});
+  const positions={};project.blocks.forEach(b=>positions[b.id]={x:b.x,y:b.y});
   const payload={format:"sound-graph",schemaVersion:1,id:project.id,name:project.name,
     engine:{entry:engineEntry,fn:engine?engine.fn:8},hysteresis:engine?3:0,
     effectTables:[],sources:[],blocks:[],sinks:[],wires:[],
@@ -250,23 +285,46 @@ function compile(){
   return {payload,files:[...files]};
 }
 
+/* ---- compile outputs/logic -> func_binding_t ------------------------- */
+function outputBlocks(){return project.blocks.filter(b=>BY_TYPE[b.type].kind==="output"||BY_TYPE[b.type].kind==="logic");}
+function sourceFnOf(id){for(const l of project.links){if(l.to===id){const s=project.blocks.find(b=>b.id===l.from);if(s)return s.fn;}}return null;}
+function desiredBindings(){
+  const out=[];const mk=(fn,type,id,dir,state)=>({fn,type,id,dir:dir|0,state:state|0});
+  for(const b of outputBlocks()){
+    const kind=BY_TYPE[b.type].kind,fn=sourceFnOf(b.id)!=null?sourceFnOf(b.id):b.fn;
+    if(kind==="logic"){out.push(mk(fn,4,b.logic,0,0));continue;}
+    if(b.type==="headlight"){
+      if(b.dir==="auto"){out.push(mk(fn,1,0,1,0));out.push(mk(fn,1,1,2,0));}
+      else if(b.dir==="rev")out.push(mk(fn,1,1,2,0));
+      else if(b.dir==="fwd")out.push(mk(fn,1,0,1,0));
+      else out.push(mk(fn,1,0,0,0));
+    }else out.push(mk(fn,1,2+(b.channel|0),b.dir==="rev"?2:0,0));
+  }
+  return out;
+}
+function auxConfigs(){return outputBlocks().filter(b=>BY_TYPE[b.type].kind==="output"&&b.type!=="headlight").map(b=>({ch:b.channel|0,level:b.level|0,effect:b.effect|0}));}
+const bindKey=b=>b.fn+":"+b.type+":"+b.id+":"+(b.dir|0)+":"+(b.state|0);
+
 /* ---- client validation ---------------------------------------------- */
 function validate(){
-  const {payload,files}=compile();
-  const out=[];
-  const err=(code,id,message)=>out.push({code,id,message,severity:"error"});
-  const warn=(code,id,message)=>out.push({code,id,message,severity:"warning"});
-  if(payload.states.length>LIMITS.states)err("cap","","Состояний "+payload.states.length+" > "+LIMITS.states+". Упростите схему.");
-  if(payload.states.filter(s=>s.file).length>LIMITS.soundStates)err("cap","","Звуковых состояний > "+LIMITS.soundStates+".");
-  if(payload.transitions.length>LIMITS.transitions)err("cap","","Переходов "+payload.transitions.length+" > "+LIMITS.transitions+".");
-  if(payload.effects.length>LIMITS.effects)err("cap","","Эффектов > "+LIMITS.effects+".");
+  const {payload,files}=compile();const out=[];
+  const err=(id,message)=>out.push({id,message,severity:"error"});
+  const warn=(id,message)=>out.push({id,message,severity:"warning"});
+  if(payload.states.length>LIMITS.states)err("","Состояний "+payload.states.length+" > "+LIMITS.states+". Упростите схему.");
+  if(payload.states.filter(s=>s.file).length>LIMITS.soundStates)err("","Звуковых состояний > "+LIMITS.soundStates+".");
+  if(payload.transitions.length>LIMITS.transitions)err("","Переходов "+payload.transitions.length+" > "+LIMITS.transitions+".");
+  if(payload.effects.length>LIMITS.effects)err("","Эффектов > "+LIMITS.effects+".");
   const silent=new Set(payload.states.filter(s=>!s.file).map(s=>s.id));
-  if(!silent.has(payload.engine.entry))err("entry","","Вход двигателя должен быть тихим.");
-  payload.effects.forEach(e=>{if(!silent.has(e.entry))err("entry",e.id,"Вход эффекта должен быть тихим.");});
-  const used={};payload.transitions.forEach(e=>{const k=e.source+":"+e.priority;if(used[k])err("priority",e.id,"Дублирующийся приоритет у источника "+e.source+".");used[k]=1;});
+  if(!silent.has(payload.engine.entry))err("","Вход двигателя должен быть тихим.");
+  payload.effects.forEach(e=>{if(!silent.has(e.entry))err(e.id,"Вход эффекта должен быть тихим.");});
+  const used={};payload.transitions.forEach(e=>{const k=e.source+":"+e.priority;if(used[k])err(e.id,"Дублирующийся приоритет у источника "+e.source+".");used[k]=1;});
   const ids=new Set(payload.states.map(s=>s.id));
-  payload.transitions.forEach(e=>{if(!ids.has(e.source))err("ref",e.id,"Нет состояния "+e.source);if(!ids.has(e.target))err("ref",e.id,"Нет состояния "+e.target);});
-  files.forEach(f=>{if(!assets[f])warn("asset","","Нет WAV на устройстве: "+f+" (проверьте перед применением).");});
+  payload.transitions.forEach(e=>{if(!ids.has(e.source))err(e.id,"Нет состояния "+e.source);if(!ids.has(e.target))err(e.id,"Нет состояния "+e.target);});
+  files.forEach(f=>{if(!assets[f])warn("","Нет WAV на устройстве: "+f+" (проверьте перед применением).");});
+  for(const b of outputBlocks()){
+    if(BY_TYPE[b.type].kind==="output"&&b.type!=="headlight"&&(b.channel|0)>6)err(b.id,"Недопустимый AUX-канал.");
+    if(sourceFnOf(b.id)==null&&!(b.fn>=0&&b.fn<=28))err(b.id,"Задайте F-клавишу или связь с блоком.");
+  }
   return {payload,files,diagnostics:out};
 }
 
@@ -277,70 +335,93 @@ async function req(path,init){
   if(!r.ok||data.ok!==true)throw new Error(data.error||("Ошибка "+r.status));
   return data;
 }
+const qs=o=>Object.keys(o).map(k=>encodeURIComponent(k)+"="+encodeURIComponent(o[k])).join("&");
 async function refreshStatus(){
-  try{const s=await req("/api/sound/graph/state");online=true;revision=Number(s.revision)||0;}
-  catch(e){online=false;}
+  try{const s=await req("/api/sound/graph/state");online=true;revision=Number(s.revision)||0;}catch(e){online=false;}
   $("on").classList.toggle("on",online);$("on_txt").textContent=online?"Подключено":"Нет связи";
   try{const t=await req("/api/audio/tracks");tracks=(t.tracks||[]).map(x=>String(x.file||"").replace(/^audio\//,"")).filter(f=>/^[A-Za-z0-9_-]+\.wav$/.test(f));}catch(e){tracks=[];}
-  $("b_save").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;
+  refreshButtons();
 }
-async function fetchAssets(files){
-  for(const f of files){if(assets[f])continue;try{const a=await req("/api/sound/graph/asset?file="+encodeURIComponent(f));assets[f]=a.asset;}catch(e){}}
-}
-
+async function fetchAssets(files){for(const f of files){if(assets[f])continue;try{const a=await req("/api/sound/graph/asset?file="+encodeURIComponent(f));assets[f]=a.asset;}catch(e){}}}
 async function doValidate(){
   if(busy)return;busy=true;refreshButtons();setStatus("Проверка...");
   try{const v=validate();await fetchAssets(v.files);const v2=validate();diagnostics=v2.diagnostics;
-    if(online){try{const r=await req("/api/sound/graph/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});if(r.diagnostics)r.diagnostics.forEach(d=>diagnostics.push(d));}catch(e){diagnostics.push({code:"device",id:"",message:e.message,severity:"error"});}}
-    renderSummary(v2);renderDiag();setStatus(diagnostics.some(d=>d.severity!=="warning")?"Есть ошибки":"Проверка пройдена");
+    if(online){try{const r=await req("/api/sound/graph/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});if(r.diagnostics)r.diagnostics.forEach(d=>diagnostics.push(d));}catch(e){diagnostics.push({id:"",message:e.message,severity:"error"});}}
+    renderSummary();renderDiag();setStatus(diagnostics.some(d=>d.severity!=="warning")?"Есть ошибки":"Проверка пройдена");
   }catch(e){setStatus("Ошибка: "+e.message);}finally{busy=false;refreshButtons();}
 }
 async function doSave(){
   if(busy)return;busy=true;refreshButtons();setStatus("Сохранение...");
   try{const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error("Исправьте ошибки перед сохранением");}
     await fetchAssets(v.files);v.payload.assets=Object.keys(assets).map(f=>assets[f]);
-    const q="?id="+encodeURIComponent(project.id)+"&expectedRevision="+(project.id===savedId?revision:0);
-    const r=await req("/api/sound/graph/save"+q,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});
+    const r=await req("/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0}),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});
     revision=Number(r.revision)||revision;savedId=project.id;setStatus("Сохранена версия "+revision);await refreshStatus();
   }catch(e){setStatus("Не сохранено: "+e.message);}finally{busy=false;refreshButtons();}
 }
 async function doApply(){
   if(busy||!revision)return;busy=true;refreshButtons();setStatus("Применение...");
-  try{await req("/api/sound/graph/apply?id="+encodeURIComponent(project.id)+"&revision="+revision,{method:"POST"});setStatus("Применена версия "+revision);}
-  catch(e){setStatus("Не применено: "+e.message);}finally{busy=false;refreshButtons();}
+  try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});
+    await applyOutputs();setStatus("Применена версия "+revision+", выходы записаны");
+  }catch(e){setStatus("Не применено: "+e.message);}finally{busy=false;refreshButtons();}
+}
+async function applyOutputs(){
+  const desired=desiredBindings();
+  const list=async()=>(await req("/api/func-map?view=bind")).binds||[];
+  const existing=await list();
+  const have=new Set(existing.map(x=>bindKey({fn:x.fn,type:x.type,id:x.id,dir:x.dir||0,state:x.state||0})));
+  const desiredKeys=new Set(desired.map(bindKey));
+  for(const b of desired){if(!have.has(bindKey(b)))await req("/api/func-map?bind=1&"+qs(b),{method:"POST"});}
+  const tracked=project.editor.bindTuples||[];
+  for(const k of tracked){
+    if(desiredKeys.has(k))continue;
+    const now=await list();
+    const idx=now.findIndex(x=>bindKey({fn:x.fn,type:x.type,id:x.id,dir:x.dir||0,state:x.state||0})===k);
+    if(idx>=0)await req("/api/func-map?bind=1&remove=1&idx="+idx,{method:"POST"});
+  }
+  for(const c of auxConfigs()){try{await req("/api/aux/cfg?"+qs({ch:c.ch,level:c.level,effect:c.effect}),{method:"POST"});}catch(e){}}
+  project.editor.bindTuples=desired.map(bindKey);saveDraft();
 }
 
 /* ---- persistence ----------------------------------------------------- */
 function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId}));}catch(e){}}
-function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=d.project;revision=d.revision||0;savedId=d.savedId||"";}}catch(e){}}
+function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=d.project;revision=d.revision||0;savedId=d.savedId||"";if(!project.editor)project.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
 
 /* ---- rendering ------------------------------------------------------- */
 function renderPalette(){
   const groups={};CATALOG.forEach(c=>{(groups[c.group]=groups[c.group]||[]).push(c);});
-  const hasEngine=project.blocks.some(b=>b.type==="engine");
-  let html="";
+  const hasEngine=project.blocks.some(b=>b.type==="engine");let html="";
   for(const g in groups){html+='<div class="pal-group"><header>'+esc(g)+"</header>";groups[g].forEach(c=>{
     const dis=c.type==="engine"&&hasEngine;
-    html+='<button data-add="'+c.type+'"'+(dis?" disabled":"")+'><b>'+esc(c.name)+"</b><small>"+esc(MODE_NAMES[c.mode])+"</small></button>";
+    html+='<button data-add="'+c.type+'"'+(dis?" disabled":"")+'><b>'+esc(c.name)+"</b><small>"+esc(MODE_NAMES[c.mode]||"")+(c.effect?" · "+esc((LIGHT_FX.find(f=>f.v===c.effect)||{}).n||""):"")+"</small></button>";
   });html+="</div>";}
   $("palette").innerHTML=html;
   $("palette").querySelectorAll("[data-add]").forEach(btn=>btn.onclick=()=>{const b=addBlockTo(project,btn.getAttribute("data-add"));if(b){selected=b.id;render();}});
 }
 function nodeSummary(b){
+  const kind=BY_TYPE[b.type].kind;
   if(b.type==="engine")return "Ступени: <span class='k'>"+((b.files.run||[]).filter(Boolean).length||0)+"</span> · F"+b.fn;
-  const cat=BY_TYPE[b.type],parts=[];
-  (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
+  if(kind==="output"){
+    const src=sourceFnOf(b.id);
+    if(b.type==="headlight")return "F"+(src!=null?src:b.fn)+" · "+(DIRS.find(d=>d.v===b.dir)||{}).n+" · "+b.level+"%";
+    return "F"+(src!=null?src:b.fn)+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+((LIGHT_FX.find(f=>f.v===b.effect)||{}).n||"")+" · "+b.level+"%";
+  }
+  if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n||"");}
+  const cat=BY_TYPE[b.type],parts=[];(cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
   return "F"+b.fn+" · "+(parts.length?parts.join("<br>"):"файлы не заданы");
 }
 function renderNodes(){
   const box=$("nodes");box.innerHTML="";
   for(const b of project.blocks){
+    const cat=BY_TYPE[b.type],kind=cat.kind;
+    const hasIn=b.type!=="engine",hasOut=kind!=="output";
     const el=document.createElement("div");
-    el.className="node"+(selected===b.id?" sel":"");el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;
-    el.innerHTML='<div class="hd" data-drag="'+b.id+'"><span class="badge">'+(b.type==="engine"?"двигатель":esc(BY_TYPE[b.type].name))+'</span><b>'+esc(b.name)+'</b><button class="x" data-del="'+b.id+'">✕</button></div>'+
+    el.className="node"+(selected===b.id?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
+    el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;
+    el.innerHTML='<div class="hd" data-drag="'+b.id+'"><span class="badge">'+esc(cat.name)+'</span><b>'+esc(b.name)+'</b><button class="x" data-del="'+b.id+'">✕</button></div>'+
       '<div class="bd">'+nodeSummary(b)+"</div>"+
-      (b.type!=="engine"?'<div class="port in" data-in="'+b.id+'"></div>':'')+
-      '<div class="port out" data-out="'+b.id+'"></div>';
+      '<div class="ports"><span class="lbl-in">'+(hasIn?"◀ вход":"")+'</span><span class="lbl-out">'+(hasOut?"выход ▶":"")+'</span></div>'+
+      (hasIn?'<div class="port in" data-in="'+b.id+'"></div>':'')+
+      (hasOut?'<div class="port out" data-out="'+b.id+'"></div>':'');
     box.appendChild(el);
   }
   box.querySelectorAll("[data-drag]").forEach(h=>h.addEventListener("pointerdown",onNodeDown));
@@ -348,69 +429,84 @@ function renderNodes(){
   box.querySelectorAll("[data-out]").forEach(p=>p.addEventListener("pointerdown",onPortDown));
   box.querySelectorAll(".node .bd").forEach(bd=>bd.addEventListener("pointerdown",()=>{const id=bd.closest(".node").dataset.id;if(selected!==id){selected=id;render();}}));
 }
-const NODE_W=210,NODE_H=96;
-function renderLinks(){
-  const byId={};project.blocks.forEach(b=>byId[b.id]=b);
-  let html="";
-  for(const l of project.links){const a=byId[l.from],b=byId[l.to];if(!a||!b)continue;
-    const x1=a.x+NODE_W,y1=a.y+32,x2=b.x,y2=b.y+32,dx=Math.max(40,Math.abs(x2-x1)/2);
-    html+='<path data-link="'+l.id+'" d="M'+x1+' '+y1+' C'+(x1+dx)+' '+y1+' '+(x2-dx)+' '+y2+' '+x2+' '+y2+'"></path>';}
-  $("links").innerHTML=html;
-  $("links").querySelectorAll("[data-link]").forEach(p=>p.onclick=()=>{project.links=project.links.filter(l=>l.id!==p.getAttribute("data-link"));render();});
+function portPos(id,which){
+  const b=project.blocks.find(x=>x.id===id);if(!b)return {x:0,y:0};
+  return which==="out"?{x:b.x+NODE_W,y:b.y+34}:{x:b.x,y:b.y+34};
 }
+function curve(x1,y1,x2,y2){const dx=Math.max(40,Math.abs(x2-x1)/2);return "M"+x1+" "+y1+" C"+(x1+dx)+" "+y1+" "+(x2-dx)+" "+y2+" "+x2+" "+y2;}
+function renderLinks(){
+  const byId={};project.blocks.forEach(b=>byId[b.id]=b);let html="";
+  for(const l of project.links){const a=byId[l.from],c=byId[l.to];if(!a||!c||BY_TYPE[a.type].kind==="output")continue;
+    const p1=portPos(l.from,"out"),p2=portPos(l.to,"in");
+    html+='<path class="link" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x,p2.y)+'"></path>';}
+  $("linkLayer").innerHTML=html;
+  $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=()=>{project.links=project.links.filter(l=>l.id!==p.getAttribute("data-link"));render();});
+  renderTempLink();
+}
+function renderTempLink(){
+  const tmp=$("tempLink");
+  if(!linking){tmp.classList.add("hidden");return;}
+  const p1=portPos(linking.from,"out");
+  tmp.classList.remove("hidden");
+  tmp.setAttribute("d",curve(p1.x,p1.y,linking.x,linking.y));
+}
+function fileField(role,b){return '<input data-role="'+role+'" list="files" value="'+esc(b.files[role]||"")+'" placeholder="выберите или введите .wav">';}
 function renderInspector(){
-  const b=project.blocks.find(x=>x.id===selected);
-  const insp=$("inspector");
+  const b=project.blocks.find(x=>x.id===selected);const insp=$("inspector");
   if(!b){insp.innerHTML='<p class="hint">Выберите блок на холсте или добавьте новый слева.</p>';return;}
-  const cat=BY_TYPE[b.type];
-  let h='<label>Название</label><input id="i_name" value="'+esc(b.name)+'">';
-  h+='<div class="row"><label>F-клавиша</label><label>Громкость</label></div><div class="row">'+
+  const cat=BY_TYPE[b.type],kind=cat.kind;let h='<label>Название</label><input id="i_name" value="'+esc(b.name)+'">';
+  h+='<div class="row"><label>F-клавиша</label><label>'+(kind==="output"?"Яркость %":"Громкость")+'</label></div><div class="row">'+
      '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
-     '<input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'"></div>';
-  if(b.type!=="engine")h+='<label>Запуск</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+TRIGGER_NAMES[k]+"</option>").join("")+"</select>";
+     '<input type="number" id="i_vol" min="0" max="100" value="'+(kind==="output"?b.level:b.volume)+'"></div>';
+  if(kind==="sound")h+='<label>Запуск</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+TRIGGER_NAMES[k]+"</option>").join("")+"</select>";
+  if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";
+  if(kind==="output"&&b.type!=="headlight")h+='<label>Канал</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
+  if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>Эффект</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+f.n+"</option>").join("")+"</select>";
+  if(kind==="logic")h+='<label>Операция</label><select id="i_logic">'+LOGIC_OPS.map(o=>'<option value="'+o.v+'"'+((b.logic|0)===o.v?" selected":"")+">"+o.n+"</option>").join("")+"</select>";
   if(b.type==="engine"){
     h+='<label>Ступени скорости</label><input type="number" id="i_steps" min="1" max="10" value="'+(b.steps||1)+'">';
-    h+='<label>Начало (запуск)</label>'+fileSelect("start",b);h+='<label>Холостой ход (цикл)</label>'+fileSelect("idle",b);
-    const run=b.files.run||[];for(let i=1;i<=(b.steps||1);i++){h+='<label>Движение '+i+' (цикл)</label><input id="i_run'+i+'" data-run="'+(i-1)+'" list="files" value="'+esc(run[i-1]||"")+'">';}
-    h+='<label>Останов</label>'+fileSelect("stop",b);
-  }else{
-    (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileSelect(r,b);});
+    h+='<label>Начало (запуск)</label>'+fileField("start",b)+'<label>Холостой ход (цикл)</label>'+fileField("idle",b);
+    const run=b.files.run||[];for(let i=1;i<=(b.steps||1);i++)h+='<label>Движение '+i+' (цикл)</label><input data-run="'+(i-1)+'" list="files" value="'+esc(run[i-1]||"")+'">';
+    h+='<label>Останов</label>'+fileField("stop",b);
+  }else if(kind==="sound"){
+    (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileField(r,b);});
   }
   h+='<datalist id="files">'+tracks.map(f=>'<option value="'+esc(f)+'"></option>').join("")+"</datalist>";
+  if(kind==="output"||kind==="logic")h+='<p class="hint">Вход блока можно соединить с другим блоком — тогда F-клавиша берётся от него.</p>';
   h+='<div class="row" style="margin-top:10px"><button class="primary" id="i_close">Готово</button><button id="i_del">Удалить</button></div>';
   insp.innerHTML=h;
   const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
   on("i_name","change",e=>{b.name=e.target.value;render();});
   on("i_fn","change",e=>{b.fn=Number(e.target.value);render();});
-  on("i_vol","change",e=>{b.volume=Math.max(0,Math.min(100,Number(e.target.value)));render();});
+  on("i_vol","change",e=>{const v=Math.max(0,Math.min(100,Number(e.target.value)));if(kind==="output")b.level=v;else b.volume=v;render();});
   on("i_trig","change",e=>{b.trigger=e.target.value;render();});
-  on("i_steps","change",e=>{b.steps=Math.max(1,Math.min(10,Number(e.target.value)));const run=b.files.run||[];const arr=[];for(let i=0;i<b.steps;i++)arr.push(run[i]||"");b.files.run=arr;render();});
+  on("i_dir","change",e=>{b.dir=e.target.value;render();});
+  on("i_ch","change",e=>{b.channel=Number(e.target.value);render();});
+  on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
+  on("i_logic","change",e=>{b.logic=Number(e.target.value);render();});
+  on("i_steps","change",e=>{b.steps=Math.max(1,Math.min(10,Number(e.target.value)));const run=b.files.run||[],arr=[];for(let i=0;i<b.steps;i++)arr.push(run[i]||"");b.files.run=arr;render();});
   insp.querySelectorAll("[data-role]").forEach(el=>el.addEventListener("change",e=>{b.files[el.getAttribute("data-role")]=e.target.value;render();}));
   insp.querySelectorAll("[data-run]").forEach(el=>el.addEventListener("change",e=>{if(!b.files.run)b.files.run=[];b.files.run[Number(el.getAttribute("data-run"))]=e.target.value;render();}));
   on("i_close","click",()=>{selected="";render();});
   on("i_del","click",()=>removeBlock(b.id));
 }
-function fileSelect(role,b){
-  return '<input data-role="'+role+'" list="files" value="'+esc(b.files[role]||"")+'" placeholder="выберите или введите .wav">';
-}
 function removeBlock(id){
-  if(project.blocks.find(b=>b.id===id&&b.type==="engine")&&project.blocks.filter(b=>b.type==="engine").length<=1)return;
+  if(project.blocks.find(b=>b.id===id&&b.type==="engine"))return;
   project.blocks=project.blocks.filter(b=>b.id!==id);
   project.links=project.links.filter(l=>l.from!==id&&l.to!==id);
   if(selected===id)selected="";render();
 }
-function renderSummary(v){
-  const p=(v&&v.payload)||compile().payload;
-  $("counts").textContent="Состояний "+p.states.length+"/"+LIMITS.states+" · переходов "+p.transitions.length+"/"+LIMITS.transitions+" · эффектов "+p.effects.length+"/"+LIMITS.effects+" · блоков "+project.blocks.length;
+function renderSummary(){
+  const p=compile().payload;const dyn=(p.effects.length||0);
+  $("counts").textContent="Состояний "+p.states.length+"/"+LIMITS.states+" · переходов "+p.transitions.length+"/"+LIMITS.transitions+" · эффектов "+dyn+"/"+LIMITS.effects+" · блоков "+project.blocks.length;
   const e=diagnostics.filter(d=>d.severity!=="warning").length,w=diagnostics.filter(d=>d.severity==="warning").length;
   $("summary").textContent=e+" ошибок / "+w+" предупреждений";
 }
-function renderDiag(){
-  $("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":"d")+'">'+esc(d.message)+"</div>").join("");
-}
+function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":"d")+'">'+esc(d.message)+"</div>").join("");}
 function render(){renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();saveDraft();}
 function setStatus(t){$("status_txt").textContent=t;}
-function refreshButtons(){$("b_save").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;$("b_validate").disabled=busy;}
+function refreshButtons(){$("b_save").disabled=!online||busy;$("b_outputs").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;$("b_validate").disabled=busy;}
+function renderSnapBtn(){$("b_snap").textContent="Сетка: "+(project.editor.snap?"вкл":"выкл");$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
 function worldPoint(ev){const r=$("stage").getBoundingClientRect(),v=project.editor.viewport;return {x:(ev.clientX-r.left-v.x)/v.zoom,y:(ev.clientY-r.top-v.y)/v.zoom};}
@@ -421,36 +517,55 @@ function onNodeDown(ev){
   const p=worldPoint(ev);dragging={id,dx:p.x-b.x,dy:p.y-b.y};
   try{if(ev.currentTarget.setPointerCapture)ev.currentTarget.setPointerCapture(ev.pointerId);}catch(e){}
 }
-function onPortDown(ev){ev.stopPropagation();const id=ev.currentTarget.getAttribute("data-out"),p=worldPoint(ev);linking={from:id,x:p.x,y:p.y};}
-function endLink(ev){
+function onPortDown(ev){ev.stopPropagation();const id=ev.currentTarget.getAttribute("data-out");const p=worldPoint(ev);linking={from:id,x:p.x,y:p.y};renderTempLink();}
+function finishLink(ev){
   if(!linking)return;
-  const el=document.elementFromPoint(ev.clientX,ev.clientY);
-  const target=el&&(el.getAttribute&&(el.getAttribute("data-in")||(el.closest&&el.closest("[data-in]")&&el.closest("[data-in]").getAttribute("data-in"))));
-  if(target&&target!==linking.from&&!project.links.some(l=>l.from===linking.from&&l.to===target)){
-    project.links.push({id:"l"+Date.now().toString(36),from:linking.from,to:target});
-  }
-  linking=null;render();
+  const prev=linking;linking=null;renderTempLink();
+  let el=document.elementFromPoint(ev.clientX,ev.clientY);
+  const inEl=el&&el.closest?el.closest("[data-in]"):null;
+  const target=inEl&&inEl.getAttribute("data-in");
+  if(target&&target!==prev.from&&!project.links.some(l=>l.from===prev.from&&l.to===target))project.links.push({id:"l"+Date.now().toString(36),from:prev.from,to:target});
+  render();
 }
-$("stage").addEventListener("pointerdown",ev=>{if(ev.target===$("stage")||ev.target.id==="world"||ev.target.id==="links"){const v=project.editor.viewport;panning={px:ev.clientX,py:ev.clientY,x:v.x,y:v.y};}});
+$("stage").addEventListener("pointerdown",ev=>{if(ev.target===$("stage")||ev.target.id==="world"||ev.target.id==="links"||ev.target.id==="linkLayer"){const v=project.editor.viewport;panning={px:ev.clientX,py:ev.clientY,x:v.x,y:v.y};}});
 window.addEventListener("pointermove",ev=>{
-  if(dragging){const b=project.blocks.find(x=>x.id===dragging.id);if(b){const p=worldPoint(ev);b.x=Math.round(p.x-dragging.dx);b.y=Math.round(p.y-dragging.dy);const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el){el.style.left=b.x+"px";el.style.top=b.y+"px";}renderLinks();}}
+  if(linking){const p=worldPoint(ev);linking.x=p.x;linking.y=p.y;renderTempLink();return;}
+  if(dragging){const b=project.blocks.find(x=>x.id===dragging.id);if(b){const p=worldPoint(ev);b.x=snap(p.x-dragging.dx);b.y=snap(p.y-dragging.dy);const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el){el.style.left=b.x+"px";el.style.top=b.y+"px";}renderLinks();}}
   else if(panning){const v=project.editor.viewport;v.x=panning.x+(ev.clientX-panning.px);v.y=panning.y+(ev.clientY-panning.py);applyViewport();}
 });
-window.addEventListener("pointerup",ev=>{if(dragging){dragging=null;saveDraft();}panning=null;endLink(ev);});
+window.addEventListener("pointerup",ev=>{if(dragging){dragging=null;saveDraft();}if(panning)panning=null;finishLink(ev);});
 $("stage").addEventListener("wheel",ev=>{ev.preventDefault();const v=project.editor.viewport,r=$("stage").getBoundingClientRect();const mx=ev.clientX-r.left,my=ev.clientY-r.top;const f=ev.deltaY<0?1.1:0.9;const nz=Math.max(.3,Math.min(2.5,v.zoom*f));v.x=mx-(mx-v.x)*(nz/v.zoom);v.y=my-(my-v.y)*(nz/v.zoom);v.zoom=nz;applyViewport();saveDraft();},{passive:false});
 function applyViewport(){const v=project.editor.viewport;$("world").style.transform="translate("+v.x+"px,"+v.y+"px) scale("+v.zoom+")";}
 
+/* ---- auto layout ----------------------------------------------------- */
+function autoLayout(){
+  const nodes=project.blocks,indeg={},adj={};
+  nodes.forEach(n=>{indeg[n.id]=0;adj[n.id]=[];});
+  project.links.forEach(l=>{if(adj[l.from]&&indeg[l.to]!==undefined&&BY_TYPE[(nodes.find(n=>n.id===l.from)||{}).type||"x"]&&BY_TYPE[(nodes.find(n=>n.id===l.from)||{}).type].kind!=="output"){adj[l.from].push(l.to);indeg[l.to]++;}});
+  const layer={},q=[];
+  nodes.forEach(n=>{if(indeg[n.id]===0){layer[n.id]=0;q.push(n.id);}});
+  if(!q.length)nodes.forEach((n,i)=>layer[n.id]=i);
+  while(q.length){const u=q.shift();(adj[u]||[]).forEach(v=>{layer[v]=Math.max(layer[v]==null?0:layer[v],layer[u]+1);indeg[v]--;if(indeg[v]===0)q.push(v);});}
+  nodes.forEach(n=>{if(layer[n.id]==null)layer[n.id]=0;});
+  const cols={};nodes.forEach(n=>{(cols[layer[n.id]]=cols[layer[n.id]]||[]).push(n);});
+  Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(L=>{cols[L].sort((a,b)=>a.y-b.y);cols[L].forEach((n,i)=>{n.x=snapTo(project,40+L*260);n.y=snapTo(project,40+i*140);});});
+  render();setStatus("Блоки выровнены");
+}
+
 /* ---- toolbar --------------------------------------------------------- */
-$("b_new").onclick=()=>{if(!confirm("Создать новую схему? Несохранённые правки будут потеряны."))return;project=newProject();selected="";revision=0;savedId="";assets={};diagnostics=[];applyViewport();render();setStatus("Новая схема");};
+$("b_new").onclick=()=>{if(!confirm("Создать новую схему? Несохранённые правки будут потеряны."))return;project=newProject();selected="";revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Новая схема");};
 $("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+".blocks.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $("b_import").onclick=()=>$("f_import").click();
-$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=p;selected="";assets={};diagnostics=[];applyViewport();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
+$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=p;if(!project.editor)project.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
+$("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
+$("b_align").onclick=autoLayout;
 $("b_validate").onclick=doValidate;
 $("b_save").onclick=doSave;
+$("b_outputs").onclick=async()=>{if(busy)return;busy=true;refreshButtons();setStatus("Запись выходов...");try{await applyOutputs();setStatus("Выходы записаны");}catch(e){setStatus("Выходы не записаны: "+e.message);}finally{busy=false;refreshButtons();}};
 $("b_apply").onclick=doApply;
 
 /* ---- boot ------------------------------------------------------------ */
-loadDraft();if(!project)project=newProject();applyViewport();render();refreshStatus();setInterval(refreshStatus,3000);
+loadDraft();if(!project)project=newProject();applyViewport();renderSnapBtn();render();refreshStatus();setInterval(refreshStatus,3000);
 })();
 </script>
 </body>

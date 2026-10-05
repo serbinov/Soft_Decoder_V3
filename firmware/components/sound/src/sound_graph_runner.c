@@ -11,7 +11,7 @@ static void sgr_release(sg_runner_t *r, sg_channel_t *c)
 static void sgr_enter(sg_runner_t *r, unsigned channel, uint8_t state)
 {
     sg_channel_t *c = &r->channels[channel]; sgr_release(r,c);
-    c->state = state; c->pending = SG_NONE; c->done = false;
+    c->state = state; c->pending = SG_NONE; c->done = false; c->elapsed_ms = 0;
     memset(c->speed_match,0,sizeof(c->speed_match));
     const sg_state_t *s = &r->graph->states[state];
     if (!s->file[0]) { return; }
@@ -68,6 +68,7 @@ static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_
         case SG_DIR_REV: return !r->forward;
         case SG_SAMPLE_DONE: return ch->done;
         case SG_RANDOM: return (sgr_rand(r) % 100u) < (c->has_min ? c->min : 100u);
+        case SG_TIMEOUT: return c->has_min && ch->elapsed_ms >= (uint32_t)c->min * 50u;
         default: break;
     }
     int64_t value = c->type == SG_SPEED ? speed : c->type == SG_ACCEL ? accel : -(int64_t)accel;
@@ -96,12 +97,13 @@ static int sgr_best(sg_runner_t *r, const uint8_t *cand, int n)
     if (!rnd || g <= 1) { return group[0]; }
     return group[sgr_rand(r) % (unsigned)g];
 }
-void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward)
+void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, uint32_t dt_ms)
 {
     if (!r || !r->graph || !r->armed) { return; }
     r->forward = forward;
     for (unsigned i = 0; i <= r->graph->effect_count; ++i) {
         sg_channel_t *ch = &r->channels[i]; if (ch->failed) { continue; }
+        ch->elapsed_ms += dt_ms;
         if (!r->graph->states[ch->state].file[0]) { ch->done = true; }
         if (ch->playing && r->io.poll) {
             sg_audio_state_t audio = r->io.poll(r->io.ctx,ch->handle);

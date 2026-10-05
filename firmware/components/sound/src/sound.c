@@ -341,7 +341,7 @@ static void sound_tick(void)
             int32_t delta = (int32_t)s_speed - s_prev_speed;
             s_accel_q = (s_accel_q * 7 + delta * 1024 * 3) / 10;
             s_accel = s_accel_q / 1024; s_prev_speed = s_speed;
-            sg_runner_tick(s_graph_runner,s_speed,s_accel,s_forward);
+            sg_runner_tick(s_graph_runner,s_speed,s_accel,s_forward,SOUND_TICK_MS);
             sound_apply_duck_locked();
         }
     }

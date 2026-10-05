@@ -19,7 +19,7 @@
 typedef enum {
     SG_FN_PRESS, SG_FN_RELEASE, SG_FN_ON, SG_FN_OFF, SG_ENGINE_ON,
     SG_ENGINE_OFF, SG_SPEED, SG_ACCEL, SG_DECEL, SG_SAMPLE_DONE,
-    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM
+    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM, SG_TIMEOUT
 } sg_condition_type_t;
 typedef enum { SG_IMMEDIATE, SG_AFTER_SAMPLE } sg_timing_t;
 typedef struct {
@@ -82,6 +82,7 @@ typedef struct {
     uint8_t state, pending;
     bool playing, done, failed;
     sg_handle_t handle;
+    uint32_t elapsed_ms;   /* time in the current state, for SG_TIMEOUT */
     bool speed_match[SG_MAX_TRANSITIONS];
 } sg_channel_t;
 typedef struct {
@@ -97,6 +98,6 @@ void sg_runner_init(sg_runner_t *runner, const sg_graph_t *graph, const sg_io_t 
 void sg_runner_reset(sg_runner_t *runner);
 void sg_runner_function(sg_runner_t *runner, uint8_t fn, bool on);
 void sg_runner_power(sg_runner_t *runner, bool on);
-void sg_runner_tick(sg_runner_t *runner, uint8_t speed, int32_t accel, bool forward);
+void sg_runner_tick(sg_runner_t *runner, uint8_t speed, int32_t accel, bool forward, uint32_t dt_ms);
 
 #endif

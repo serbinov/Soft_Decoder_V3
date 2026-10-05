@@ -221,8 +221,8 @@ esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_
         SG_STR(obj,"id",e->id); SG_STR(obj,"source",e->source); SG_STR(obj,"target",e->target); SG_NUM(obj,"priority",e->priority,255);
         SG_STR(obj,"timing",text); const char *const timing[] = {"immediate","after_sample"}; int v = sg_enum(text,timing,2); if (v < 0) { goto fail; } e->timing = (sg_timing_t)v;
         int cond = sg_get(&p,obj,"condition"); if (!sg_keys(&p,cond,"|type||fn||min||max|")) { goto fail; }
-        SG_STR(cond,"type",text); const char *const types[] = {"fn_press","fn_release","fn_on","fn_off","engine_on","engine_off","speed","accel","decel","sample_done","dir_fwd","dir_rev","random"};
-        v = sg_enum(text,types,13); if (v < 0) { goto fail; } e->condition.type = (sg_condition_type_t)v;
+        SG_STR(cond,"type",text); const char *const types[] = {"fn_press","fn_release","fn_on","fn_off","engine_on","engine_off","speed","accel","decel","sample_done","dir_fwd","dir_rev","random","timeout"};
+        v = sg_enum(text,types,14); if (v < 0) { goto fail; } e->condition.type = (sg_condition_type_t)v;
         int f = sg_get(&p,cond,"fn"), lo = sg_get(&p,cond,"min"), hi = sg_get(&p,cond,"max");
         e->condition.has_fn = f >= 0; e->condition.has_min = lo >= 0; e->condition.has_max = hi >= 0;
         if (f >= 0) { SG_NUM(cond,"fn",e->condition.fn,28); }
@@ -310,12 +310,14 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
         sg_transition_t *e = &g->transitions[i]; sg_condition_t *c = &e->condition;
         SG_CHECK(sg_id_valid(e->id) && (e->timing == SG_IMMEDIATE || e->timing == SG_AFTER_SAMPLE),"invalid transition");
         int src = sg_state_index(g,e->source), dst = sg_state_index(g,e->target); SG_CHECK(src >= 0 && dst >= 0,"dangling transition"); e->source_index = (uint8_t)src; e->target_index = (uint8_t)dst;
-        SG_CHECK(c->type >= SG_FN_PRESS && c->type <= SG_RANDOM,"unknown condition");
+        SG_CHECK(c->type >= SG_FN_PRESS && c->type <= SG_TIMEOUT,"unknown condition");
         bool fn = c->type <= SG_FN_OFF, range = c->type >= SG_SPEED && c->type <= SG_DECEL, rnd = c->type == SG_RANDOM;
+        bool tmo = c->type == SG_TIMEOUT;
         SG_CHECK(c->has_fn == fn && (!fn || c->fn <= 28),"condition fn mismatch");
-        SG_CHECK(range || rnd || (!c->has_min && !c->has_max),"unexpected condition range");
+        SG_CHECK(range || rnd || tmo || (!c->has_min && !c->has_max),"unexpected condition range");
         SG_CHECK(!range || (c->has_min || c->has_max),"missing condition range");
         SG_CHECK(!rnd || (c->has_min && !c->has_max && c->min <= 100),"invalid random chance");
+        SG_CHECK(!tmo || (c->has_min && !c->has_max),"invalid timeout");
         SG_CHECK(!c->has_min || !c->has_max || c->min <= c->max,"inverted condition range");
         for (unsigned j = 0; j < i; ++j) {
             SG_CHECK(strcmp(e->id,g->transitions[j].id),"duplicate transition ID");
@@ -331,6 +333,7 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
         const sg_transition_t *e = &g->transitions[i];
         if (e->timing == SG_IMMEDIATE && e->condition.type >= SG_FN_ON &&
             e->condition.type != SG_SAMPLE_DONE && e->condition.type != SG_RANDOM &&
+            e->condition.type != SG_TIMEOUT &&
             !g->states[e->source_index].file[0] && !g->states[e->target_index].file[0]) {
             immediate[e->source_index] |= UINT64_C(1) << e->target_index;
         }

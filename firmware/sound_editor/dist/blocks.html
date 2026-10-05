@@ -40,13 +40,13 @@
   .pal button b{display:block;font-weight:600}
   .pal button small{color:var(--muted)}
   #stage{position:relative;flex:1;overflow:hidden;background:#0c1119}
-  #stage.grid-bg{background-image:linear-gradient(#1a2230 1px,transparent 1px),linear-gradient(90deg,#1a2230 1px,transparent 1px);background-size:20px 20px}
-  #world{position:absolute;left:0;top:0;transform-origin:0 0}
+  #world{position:absolute;left:0;top:0;transform-origin:0 0;width:6000px;height:4000px}
+  #world.grid-bg{background-image:linear-gradient(#1a2230 1px,transparent 1px),linear-gradient(90deg,#1a2230 1px,transparent 1px);background-size:20px 20px}
   #links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
   #links path.link{stroke:#6f8bb0;stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
   #links path.link:hover{stroke:var(--err)}
   #links path.temp{stroke:var(--accent);stroke-width:2.5;fill:none;stroke-dasharray:6 5;pointer-events:none}
-  .node{position:absolute;width:216px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
+  .node{position:absolute;width:240px;height:120px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
   .node.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(74,158,255,.35)}
   .node.engine{border-color:#e0a24a}
   .node.output{border-color:#5fbf7a}
@@ -55,11 +55,11 @@
   .node .hd b{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .node .hd .x{background:none;border:none;color:var(--muted);padding:0 3px;cursor:pointer;display:flex;align-items:center}
   .node .hd .x:hover{color:var(--err)}
-  .node .bd{padding:6px 9px;font-size:12px;color:var(--muted);min-height:34px}
+  .node .bd{padding:6px 9px;font-size:12px;color:var(--muted);min-height:34px;max-height:58px;overflow:hidden}
   .node .bd .k{color:var(--text)}
-  .port{position:absolute;top:28px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
-  .port.in{left:-7px;background:#4a8fe0}
-  .port.out{right:-7px;background:#4caf72}
+  .port{position:absolute;top:92px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
+  .port.in{left:-8px;background:#4a8fe0}
+  .port.out{right:-8px;background:#4caf72}
   .port .lbl{position:absolute;top:50%;transform:translateY(-50%);font-size:10px;white-space:nowrap;pointer-events:none}
   .port.in .lbl{left:18px;color:#7fb3ff}
   .port.out .lbl{right:18px;color:#7fd39f}
@@ -104,8 +104,8 @@
     <div class="pal" id="palette"></div>
   </aside>
 
-  <section id="stage" class="grid-bg">
-    <div id="world">
+  <section id="stage">
+    <div id="world" class="grid-bg">
       <svg id="links" width="6000" height="4000">
         <defs>
           <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
@@ -143,7 +143,7 @@
 
 const LIMITS={states:57,soundStates:31,transitions:128,effects:24,assets:31,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
-const GRID=20;const NODE_W=216;const NODE_H=104;
+const GRID=20;const NODE_W=240;const NODE_H=120;
 
 /* ---- catalogs -------------------------------------------------------- */
 const AUX_NAMES=["AUX1","AUX2","AUX3","AUX4","AUX5","AUX6","AUX7"];
@@ -209,7 +209,7 @@ function addBlockTo(p,type){
   (cat.roles||[]).forEach(r=>b.files[r]="");
   if(type==="engine"){b.steps=3;b.files={start:"",idle:"",stop:"",run:["","",""]};}
   const n=p.blocks.length;
-  b.x=snapTo(p,40+(n%3)*250);b.y=snapTo(p,40+Math.floor(n/3)*140);
+  b.x=snapTo(p,40+(n%3)*260);b.y=snapTo(p,40+Math.floor(n/3)*140);
   p.blocks.push(b);return b;
 }
 function snapTo(p,v){return p.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);}
@@ -433,11 +433,12 @@ function renderNodes(){
   box.querySelectorAll(".node .bd").forEach(bd=>bd.addEventListener("pointerdown",()=>{const id=bd.closest(".node").dataset.id;if(selected!==id){selected=id;render();}}));
 }
 function portPos(id,which){
-  const b=project.blocks.find(x=>x.id===id);if(!b)return {x:0,y:0};
   const el=$("nodes").querySelector('[data-id="'+id+'"]');
   const p=el&&el.querySelector(which==="out"?".port.out":".port.in");
-  if(el&&p)return {x:b.x+p.offsetLeft+p.offsetWidth/2,y:b.y+p.offsetTop+p.offsetHeight/2};
-  return which==="out"?{x:b.x+NODE_W,y:b.y+35}:{x:b.x,y:b.y+35};
+  if(p){const r=p.getBoundingClientRect(),s=$("stage").getBoundingClientRect(),v=project.editor.viewport;
+    return {x:(r.left+r.width/2-s.left-v.x)/v.zoom,y:(r.top+r.height/2-s.top-v.y)/v.zoom};}
+  const b=project.blocks.find(x=>x.id===id)||{x:0,y:0};
+  return which==="out"?{x:b.x+NODE_W,y:b.y+100}:{x:b.x,y:b.y+100};
 }
 function curve(x1,y1,x2,y2){const dx=Math.max(40,Math.abs(x2-x1)/2);return "M"+x1+" "+y1+" C"+(x1+dx)+" "+y1+" "+(x2-dx)+" "+y2+" "+x2+" "+y2;}
 function renderLinks(){
@@ -564,7 +565,7 @@ function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.s
 function render(){renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();saveDraft();}
 function setStatus(t){$("status_txt").textContent=t;}
 function refreshButtons(){$("b_save").disabled=!online||busy;$("b_outputs").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;$("b_validate").disabled=busy;}
-function renderSnapBtn(){$("b_snap").textContent="Сетка: "+(project.editor.snap?"вкл":"выкл");$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
+function renderSnapBtn(){$("b_snap").textContent="Сетка: "+(project.editor.snap?"вкл":"выкл");$("b_snap").classList.toggle("on",!!project.editor.snap);$("world").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
 function worldPoint(ev){const r=$("stage").getBoundingClientRect(),v=project.editor.viewport;return {x:(ev.clientX-r.left-v.x)/v.zoom,y:(ev.clientY-r.top-v.y)/v.zoom};}

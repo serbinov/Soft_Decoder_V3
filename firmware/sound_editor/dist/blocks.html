@@ -659,7 +659,7 @@ function renderInspector(){
     const a=project.blocks.find(x=>x.id===lk.from),c=project.blocks.find(x=>x.id===lk.to);
     const kindName={gate:"При двигателе",bind:"Выход от F-клавиши",after:"Цепочка звуков"}[lk.kind]||"Связь";
     let h='<div class="hint">Связь: «'+esc(a?a.name:"?")+'» → «'+esc(c?c.name:"?")+'»</div><label>Тип</label><div class="hint">'+esc(kindName)+'</div>';
-    if(lk.kind==="after")h+='<div class="hint">Событие и задержку задаёт блок-источник «'+esc(a?a.name:"?")+'» (выход: '+(a&&a.outEvent==="start"?"после запуска":"после завершения")+', задержка '+(a?(a.outDelay|0):0)+' мс).</div>';
+    if(lk.kind==="after")h+='<div class="hint">Событие и задержку задаёт блок-источник «'+esc(a?a.name:"?")+'» (выход: '+(a&&a.outEvent==="start"?"напрямую":"после события")+', задержка '+(a?(a.outDelay|0):0)+' мс).</div>';
     h+='<div class="row" style="margin-top:10px"><button class="primary" id="l_close">Готово</button><button id="l_del">Удалить связь</button></div>';
     insp.innerHTML=h;
     const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
@@ -701,7 +701,7 @@ function renderInspector(){
        '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'"></div>';
     if(kind==="sound"&&b.trigger==="dir")h+='<label>Направление</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>Вперёд</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>Назад</option></select>';
     if((kind==="sound"&&["oneshot","shortLong","decel","loopHeld"].indexOf(mode0)>=0)||b.type==="engine"){
-      h+='<label>Выход: событие</label><select id="i_outev"><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>После завершения</option><option value="start"'+(b.outEvent==="start"?" selected":"")+'>После запуска</option></select>';
+      h+='<label>Выход</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>Напрямую</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>После события</option></select>';
       h+='<label>Выход: задержка, мс</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">0 — сразу; применяется к связям «к другому блоку».</div>';
     }
     if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";

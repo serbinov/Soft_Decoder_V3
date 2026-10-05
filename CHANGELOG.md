@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-05 (v0.10) — feat(sound): speed steps recalc on add, default protective interval 5%, drop tone field
 - 2026-10-05 (v0.10) — feat(sound): chain links with delay, ready checkmark, engine speed %, output import, mobile layout
 - 2026-10-05 (v0.10) — feat(sound): block editor undo/redo, duplicate/copy/paste and F-key conflict warnings
 - 2026-10-05 (v0.10) — feat(sound): engine direction/random conditions and effect ducking; editor dir/random blocks

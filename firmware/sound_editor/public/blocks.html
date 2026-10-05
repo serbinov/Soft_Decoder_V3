@@ -170,7 +170,7 @@
 
 const LIMITS={states:57,soundStates:31,transitions:128,effects:24,assets:31,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
-const GRID=20;const NODE_W=240;const NODE_H=120;const SPEED_STEP=25;
+const GRID=20;const NODE_W=240;const NODE_H=120;const SPEED_STEP=25;const SPEED_HYST=5;
 
 /* ---- catalogs -------------------------------------------------------- */
 const AUX_NAMES=["AUX1","AUX2","AUX3","AUX4","AUX5","AUX6","AUX7"];
@@ -211,9 +211,9 @@ function normalizeProject(p){
       if(b.level===undefined)b.level=100;
     }
     if(b.trigger===undefined)b.trigger="auto";
-    if(b.type==="speed"){if(!Array.isArray(b.bands))b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_STEP;}
+    if(b.type==="speed"){if(!Array.isArray(b.bands))b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
     if(b.type==="random"&&!Array.isArray(b.files.random))b.files.random=["","","",""];
-    if(b.type==="engine"){if(b.files&&Array.isArray(b.files.run)){b.run=b.files.run.map((f,i)=>({from:i*SPEED_STEP,to:(i+1)*SPEED_STEP,file:f||""}));delete b.files.run;}if(!Array.isArray(b.run))b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_STEP;}
+    if(b.type==="engine"){if(b.files&&Array.isArray(b.files.run)){b.run=b.files.run.map((f,i)=>({from:i*SPEED_STEP,to:(i+1)*SPEED_STEP,file:f||""}));delete b.files.run;}if(!Array.isArray(b.run))b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
   }
   if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
   return p;
@@ -256,8 +256,8 @@ function addBlockTo(p,type){
   if(cat.kind==="output"){b.channel=0;b.effect=cat.effect||0;b.dir=type==="headlight"?"auto":"any";}
   if(cat.kind==="logic")b.logic=1;
   (cat.roles||[]).forEach(r=>b.files[r]="");
-  if(type==="engine"){b.files={start:"",idle:"",stop:""};b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));b.hyst=SPEED_STEP;}
-  if(type==="speed"){b.hyst=SPEED_STEP;b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));}
+  if(type==="engine"){b.files={start:"",idle:"",stop:""};b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));b.hyst=SPEED_HYST;}
+  if(type==="speed"){b.hyst=SPEED_HYST;b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));}
   if(type==="random")b.files.random=["","","",""];
   const n=p.blocks.length;
   b.x=snapTo(p,40+(n%3)*260);b.y=snapTo(p,40+Math.floor(n/3)*140);
@@ -286,7 +286,7 @@ function compile(){
       const has=f=>!!f;
       const start=b.files.start,idle=b.files.idle,stop=b.files.stop||"";
       const runs=(Array.isArray(b.run)?b.run:[]).filter(x=>x&&x.file);
-      speedHysts.push(b.hyst==null?SPEED_STEP:b.hyst);
+      speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
       if(has(start))addState(b.id+"_start","Запуск двигателя",start,false,vol,rate);
       addState(b.id+"_idle","Холостой ход",idle,true,vol,rate);
       runs.forEach((x,i)=>addState(b.id+"_run"+i,"Движение "+(i+1),x.file,true,vol,rate));
@@ -313,7 +313,7 @@ function compile(){
     effects.push({id:b.id,entry,fn});
     const mode0=BY_TYPE[b.type].mode;
     if(mode0==="speed"){
-      speedHysts.push(b.hyst==null?SPEED_STEP:b.hyst);
+      speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
       const bands=(Array.isArray(b.bands)?b.bands:[]).filter(x=>x&&x.file),items=[];
       bands.forEach(x=>{const s=b.id+"_sp"+items.length;addState(s,b.name+" "+Math.round(x.from||0)+"-"+Math.round(x.to==null?100:x.to)+"%",x.file,true,vol,rate);items.push({state:s,lo:pctSpeed(x.from),hi:pctSpeed(x.to==null?100:x.to)});});
       items.forEach((it,i)=>addEdge(entry,it.state,{type:"speed",min:it.lo,max:it.hi},i+1,"after_sample"));
@@ -337,7 +337,7 @@ function compile(){
     const trig=triggerOf(b);
     let startCond,stopCond=null,speedRange=null;
     if(trig==="engine"){startCond={type:"engine_on"};stopCond={type:"engine_off"};}
-    else if(trig==="speed"){speedRange={min:pctSpeed(b.speedMin==null?0:b.speedMin),max:pctSpeed(b.speedMax==null?100:b.speedMax)};startCond={type:"speed",min:speedRange.min,max:speedRange.max};speedHysts.push(b.hyst==null?SPEED_STEP:b.hyst);}
+    else if(trig==="speed"){speedRange={min:pctSpeed(b.speedMin==null?0:b.speedMin),max:pctSpeed(b.speedMax==null?100:b.speedMax)};startCond={type:"speed",min:speedRange.min,max:speedRange.max};speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);}
     else if(trig==="dir"){const fwd=b.dirTrigger!=="rev";startCond={type:fwd?"dir_fwd":"dir_rev"};stopCond={type:fwd?"dir_rev":"dir_fwd"};}
     else{startCond={type:"fn_press",fn};stopCond={type:"fn_release",fn};}
     const mode=(trig==="speed"||trig==="dir")?"loopHeld":mode0;
@@ -523,7 +523,7 @@ function renderPalette(){
 }
 function nodeSummary(b){
   const kind=BY_TYPE[b.type].kind;
-  if(b.type==="engine")return "Ступени: <span class='k'>"+((b.run||[]).filter(x=>x.file).length)+"</span> · защита "+(b.hyst==null?SPEED_STEP:b.hyst)+"% · F"+b.fn;
+  if(b.type==="engine")return "Ступени: <span class='k'>"+((b.run||[]).filter(x=>x.file).length)+"</span> · защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"% · F"+b.fn;
   if(kind==="output"){
     const src=sourceFnOf(b.id);
     if(b.type==="headlight")return "F"+(src!=null?src:b.fn)+" · "+(DIRS.find(d=>d.v===b.dir)||{}).n+" · "+b.level+"%";
@@ -531,7 +531,7 @@ function nodeSummary(b){
   }
   if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n||"");}
   const cat=BY_TYPE[b.type],parts=[];
-  if(cat.mode==="speed")return "Скорость % · диапазонов "+((b.bands||[]).filter(x=>x.file).length)+" · защита "+(b.hyst==null?SPEED_STEP:b.hyst)+"%";
+  if(cat.mode==="speed")return "Скорость % · диапазонов "+((b.bands||[]).filter(x=>x.file).length)+" · защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"%";
   if(cat.mode==="decel")return "F"+b.fn+" · по замедлению"+(b.files.sound?" · "+esc(b.files.sound):" · файл не задан");
   if(cat.mode==="random")return "F"+b.fn+" · случайно из "+((b.files.random||[]).filter(Boolean).length)+" звуков";
   (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
@@ -603,7 +603,7 @@ async function testBlock(b){
     if(BY_TYPE[b.type].mode==="speed"){
       const set=(b.bands||[]).filter(x=>x.file);
       if(!set.length)out.push({id:b.id,message:"Не задан ни один диапазон скорости",severity:"error"});
-      else out.push({id:b.id,message:"Диапазонов: "+set.length+", защита "+(b.hyst==null?SPEED_STEP:b.hyst)+" %",severity:"ok"});
+      else out.push({id:b.id,message:"Диапазонов: "+set.length+", защита "+(b.hyst==null?SPEED_HYST:b.hyst)+" %",severity:"ok"});
     }else if(BY_TYPE[b.type].mode==="random"){
       const set=(b.files.random||[]).filter(Boolean);
       if(!set.length)out.push({id:b.id,message:"Не задан ни один звук",severity:"error"});
@@ -663,7 +663,7 @@ function renderInspector(){
   const cat=BY_TYPE[b.type],kind=cat.kind,mode0=cat.mode;let h='<label>Название</label><input id="i_name" value="'+esc(b.name)+'">';
   if(mode0==="speed"){
     h+='<div class="row"><label>Защитный интервал, %</label><label>Громкость</label></div><div class="row">'+
-       '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_STEP:b.hyst)+'">'+
+       '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">'+
        '<input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'"></div>';
     h+='<div class="hint">Диапазоны скорости в процентах; шаг по умолчанию 25 %.</div>';
     (b.bands||[]).forEach((bd,i)=>{
@@ -685,12 +685,11 @@ function renderInspector(){
     h+='<div class="row"><label>F-клавиша</label><label>'+(kind==="output"?"Яркость %":"Громкость")+'</label></div><div class="row">'+
        '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
        '<input type="number" id="i_vol" min="0" max="100" value="'+(kind==="output"?b.level:b.volume)+'"></div>';
-    if(kind==="sound"||b.type==="engine")h+='<label>Тон (скорость воспроизведения, ‰)</label><input type="number" id="i_rate" min="500" max="3000" step="50" value="'+(b.rate||1000)+'">';
     if(kind==="sound")h+='<label>Запуск</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+TRIGGER_NAMES[k]+"</option>").join("")+"</select>";
     if(kind==="sound"&&b.trigger==="speed")h+='<div class="row"><label>От %</label><label>До %</label><label>Защита %</label></div><div class="row">'+
        '<input type="number" id="i_smin" min="0" max="100" value="'+(b.speedMin==null?0:b.speedMin)+'">'+
        '<input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'">'+
-       '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_STEP:b.hyst)+'"></div>';
+       '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'"></div>';
     if(kind==="sound"&&b.trigger==="dir")h+='<label>Направление</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>Вперёд</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>Назад</option></select>';
     if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";
     if(kind==="output"&&b.type!=="headlight")h+='<label>Канал</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
@@ -703,7 +702,7 @@ function renderInspector(){
         '<div class="frow"><select data-rfile="'+i+'">'+soundOptions(x.file||"")+'</select><button class="play" data-rplay="'+i+'" title="Прослушать">▶</button><button class="sm" data-rdel="'+i+'" title="Удалить ступень">✕</button></div>';});
       h+='<div class="row" style="margin-top:6px"><button id="i_addrrun">+ Ступень</button></div>';
       h+='<label>Останов</label>'+fileField("stop",b);
-      h+='<label>Защитный интервал, %</label><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_STEP:b.hyst)+'">';
+      h+='<label>Защитный интервал, %</label><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">';
     }else if(kind==="sound"){
       (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileField(r,b);});
     }
@@ -726,18 +725,17 @@ function renderInspector(){
   on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
   on("i_logic","change",e=>{b.logic=Number(e.target.value);render();});
   on("i_steps","change",e=>{b.steps=Math.max(1,Math.min(10,Number(e.target.value)));const run=b.files.run||[],arr=[];for(let i=0;i<b.steps;i++)arr.push(run[i]||"");b.files.run=arr;render();});
-  on("i_rate","change",e=>{b.rate=Math.max(500,Math.min(3000,Number(e.target.value)||1000));render();});
-  on("i_addrrun","click",()=>{if(!b.run)b.run=[];const last=b.run[b.run.length-1];const from=last?(last.to==null?100:last.to):0;b.run.push({from:from,to:Math.min(100,from+SPEED_STEP),file:""});render();});
+  on("i_addrrun","click",()=>{if(!b.run)b.run=[];b.run.push({from:0,to:0,file:""});recalcRun(b);render();});
   insp.querySelectorAll("[data-rfrom]").forEach(el=>el.addEventListener("change",e=>{b.run[Number(el.getAttribute("data-rfrom"))].from=Math.max(0,Math.min(100,Number(e.target.value)||0));render();}));
   insp.querySelectorAll("[data-rto]").forEach(el=>el.addEventListener("change",e=>{b.run[Number(el.getAttribute("data-rto"))].to=Math.max(0,Math.min(100,Number(e.target.value)||0));render();}));
   insp.querySelectorAll("[data-rfile]").forEach(el=>el.addEventListener("change",e=>{b.run[Number(el.getAttribute("data-rfile"))].file=e.target.value;render();}));
   insp.querySelectorAll("[data-rplay]").forEach(btn=>btn.onclick=()=>playFile((b.run[Number(btn.getAttribute("data-rplay"))]||{}).file));
-  insp.querySelectorAll("[data-rdel]").forEach(btn=>btn.onclick=()=>{b.run.splice(Number(btn.getAttribute("data-rdel")),1);render();});
+  insp.querySelectorAll("[data-rdel]").forEach(btn=>btn.onclick=()=>{b.run.splice(Number(btn.getAttribute("data-rdel")),1);recalcRun(b);render();});
   insp.querySelectorAll("[data-role]").forEach(el=>el.addEventListener("change",e=>{b.files[el.getAttribute("data-role")]=e.target.value;render();}));
   insp.querySelectorAll("[data-run]").forEach(el=>el.addEventListener("change",e=>{if(!b.files.run)b.files.run=[];b.files.run[Number(el.getAttribute("data-run"))]=e.target.value;render();}));
   insp.querySelectorAll("[data-play]").forEach(btn=>btn.onclick=()=>playFile(b.files[btn.getAttribute("data-play")]));
   insp.querySelectorAll("[data-playrun]").forEach(btn=>btn.onclick=()=>playFile((b.files.run||[])[Number(btn.getAttribute("data-playrun"))]));
-  on("i_addband","click",()=>{if(!b.bands)b.bands=[];b.bands.push({from:0,to:100,file:""});render();});
+  on("i_addband","click",()=>{if(!b.bands)b.bands=[];b.bands.push({from:0,to:100,file:""});recalcBands(b);render();});
   insp.querySelectorAll("[data-bfrom]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bfrom"))].from=Math.max(0,Math.min(100,Number(e.target.value)));render();}));
   insp.querySelectorAll("[data-bto]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bto"))].to=Math.max(0,Math.min(100,Number(e.target.value)));render();}));
   insp.querySelectorAll("[data-bfile]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bfile"))].file=e.target.value;render();}));
@@ -756,6 +754,8 @@ function removeBlock(id){
   if(selected===id)selected="";render();
 }
 let clip=null;
+function recalcBands(b){const n=(b.bands||[]).length;if(!n)return;b.bands.forEach((x,i)=>{x.from=Math.round(i*100/n);x.to=Math.round((i+1)*100/n);});}
+function recalcRun(b){const n=(b.run||[]).length;if(!n)return;b.run.forEach((x,i)=>{x.from=Math.round(i*100/n);x.to=Math.round((i+1)*100/n);});}
 function cloneBlock(src,dx,dy){
   const b=JSON.parse(JSON.stringify(src));
   b.id=nid(b.type==="engine"?"engine_":"b",project.blocks.map(x=>x.id));

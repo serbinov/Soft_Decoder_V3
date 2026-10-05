@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-05 (v0.10) — build(release): publish v0.10 firmware with sound block editor and engine updates
 - 2026-10-05 (v0.10) — chore: track SOUND test samples and document block editor preview
 - 2026-10-05 (v0.10) — feat(sound): move connections scheme/table into toolbar modal, remove from inspector
 - 2026-10-05 (v0.10) — feat(sound): detailed scheme PNG export and text logic export

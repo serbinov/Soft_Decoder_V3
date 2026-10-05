@@ -73,6 +73,11 @@ void audio_stop_all(void);
  * Applied live to a playing voice; 1000 keeps the original pitch. */
 esp_err_t audio_voice_set_rate(uint8_t voice, uint16_t permille);
 
+/* Live per-voice volume override (0..100) applied to an already-playing voice.
+ * Cleared on the next play request, so it never leaks into a new playback.
+ * Used by the sound engine to duck the engine voice under effects. */
+esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume);
+
 /* Voice state queries, safe to call from any task. */
 bool audio_voice_is_active(uint8_t voice);
 uint32_t audio_voice_position(uint8_t voice); /* output samples produced */

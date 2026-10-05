@@ -23,6 +23,7 @@ static void sgr_enter(sg_runner_t *r, unsigned channel, uint8_t state)
 void sg_runner_init(sg_runner_t *r, const sg_graph_t *g, const sg_io_t *io)
 {
     memset(r,0,sizeof(*r)); r->graph = g; if (io) { r->io = *io; }
+    r->forward = true; r->rng = 0x2545F491u;
     sg_runner_reset(r);
 }
 void sg_runner_reset(sg_runner_t *r)
@@ -51,6 +52,7 @@ void sg_runner_power(sg_runner_t *r, bool on)
 {
     r->engine_on = on; r->armed = true;
 }
+static uint32_t sgr_rand(sg_runner_t *r){ r->rng = r->rng * 1664525u + 1013904223u; return r->rng; }
 static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_t speed, int32_t accel)
 {
     const sg_condition_t *c = &r->graph->transitions[idx].condition;
@@ -62,7 +64,10 @@ static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_
         case SG_FN_OFF: return (r->fn_levels & bit) == 0;
         case SG_ENGINE_ON: return r->engine_on;
         case SG_ENGINE_OFF: return !r->engine_on;
+        case SG_DIR_FWD: return r->forward;
+        case SG_DIR_REV: return !r->forward;
         case SG_SAMPLE_DONE: return ch->done;
+        case SG_RANDOM: return (sgr_rand(r) % 100u) < (c->has_min ? c->min : 100u);
         default: break;
     }
     int64_t value = c->type == SG_SPEED ? speed : c->type == SG_ACCEL ? accel : -(int64_t)accel;
@@ -78,9 +83,23 @@ static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_
     if (c->type == SG_SPEED) { ch->speed_match[idx] = match; }
     return match;
 }
-void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel)
+static int sgr_best(sg_runner_t *r, const uint8_t *cand, int n)
+{
+    if (n <= 0) { return -1; }
+    uint8_t maxp = 0;
+    for (int i = 0; i < n; ++i) { uint8_t p = r->graph->transitions[cand[i]].priority; if (p > maxp) { maxp = p; } }
+    uint8_t group[SG_MAX_TRANSITIONS]; int g = 0; bool rnd = false;
+    for (int i = 0; i < n; ++i) {
+        const sg_transition_t *e = &r->graph->transitions[cand[i]];
+        if (e->priority == maxp) { group[g++] = cand[i]; if (e->condition.type == SG_RANDOM) { rnd = true; } }
+    }
+    if (!rnd || g <= 1) { return group[0]; }
+    return group[sgr_rand(r) % (unsigned)g];
+}
+void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward)
 {
     if (!r || !r->graph || !r->armed) { return; }
+    r->forward = forward;
     for (unsigned i = 0; i <= r->graph->effect_count; ++i) {
         sg_channel_t *ch = &r->channels[i]; if (ch->failed) { continue; }
         if (!r->graph->states[ch->state].file[0]) { ch->done = true; }
@@ -89,16 +108,15 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel)
             if (audio == SG_AUDIO_FAILED) { sgr_release(r,ch); ch->failed = true; ch->pending = SG_NONE; continue; }
             if (audio == SG_AUDIO_DONE) { sgr_release(r,ch); ch->done = true; }
         }
-        int best = -1; ch->pending = SG_NONE;
+        uint8_t imm[SG_MAX_TRANSITIONS], pend[SG_MAX_TRANSITIONS]; int ni = 0, np = 0;
         for (unsigned j = 0; j < r->graph->transition_count; ++j) {
             const sg_transition_t *e = &r->graph->transitions[j];
             if (e->source_index != ch->state || !sgr_condition(r,ch,j,speed,accel)) { continue; }
-            if (e->timing == SG_AFTER_SAMPLE && ch->playing) {
-                if (ch->pending == SG_NONE || e->priority > r->graph->transitions[ch->pending].priority) { ch->pending = (uint8_t)j; }
-                continue;
-            }
-            if (best < 0 || e->priority > r->graph->transitions[best].priority) { best = (int)j; }
+            if (e->timing == SG_AFTER_SAMPLE && ch->playing) { pend[np++] = (uint8_t)j; }
+            else { imm[ni++] = (uint8_t)j; }
         }
+        int best = sgr_best(r,imm,ni), pb = sgr_best(r,pend,np);
+        ch->pending = pb < 0 ? SG_NONE : (uint8_t)pb;
         if (best >= 0) {
             const sg_transition_t *e = &r->graph->transitions[best];
             sgr_enter(r,i,e->target_index); continue;

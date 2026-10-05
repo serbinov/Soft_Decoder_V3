@@ -121,53 +121,53 @@ static void test_validator_references_ranges_priorities(void)
 static void test_runner_no_autostart_and_toggle_edges(void)
 {
     state("run","run.wav",true); edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
-    init_runner(); sg_runner_tick(r,100,0); TEST_ASSERT_EQUAL(0,plays);
+    init_runner(); sg_runner_tick(r,100,0,true); TEST_ASSERT_EQUAL(0,plays);
     sg_runner_function(r,1,true); sg_runner_function(r,1,true); TEST_ASSERT_TRUE(r->engine_on);
-    sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
-    sg_runner_reset(r); sg_runner_function(r,1,true); sg_runner_tick(r,0,0);
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    sg_runner_reset(r); sg_runner_function(r,1,true); sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_FALSE(r->armed);
-    sg_runner_function(r,1,false); sg_runner_function(r,1,true); sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL(2,plays);
+    sg_runner_function(r,1,false); sg_runner_function(r,1,true); sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(2,plays);
 }
 static void test_short_edges_priority_and_one_transition(void)
 {
     state("low","low.wav",false); state("high","high.wav",false); state("next","next.wav",false);
     edge("off","low",1,SG_FN_PRESS,2,SG_IMMEDIATE); edge("off","high",9,SG_FN_PRESS,2,SG_IMMEDIATE);
     edge("high","next",1,SG_FN_OFF,2,SG_IMMEDIATE);
-    init_runner(); sg_runner_function(r,2,true); sg_runner_function(r,2,false); sg_runner_tick(r,0,0);
+    init_runner(); sg_runner_function(r,2,true); sg_runner_function(r,2,false); sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL_UINT8(2,r->channels[0].state); TEST_ASSERT_EQUAL(1,plays);
-    sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL_UINT8(3,r->channels[0].state); TEST_ASSERT_EQUAL(2,plays);
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL_UINT8(3,r->channels[0].state); TEST_ASSERT_EQUAL(2,plays);
 }
 static void test_pending_boundary_rechecks_condition_and_loop_replays(void)
 {
     state("run","run.wav",true); state("end","end.wav",false);
     edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE); edge("run","end",1,SG_FN_ON,2,SG_AFTER_SAMPLE);
-    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL(1,plays);
-    sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_FALSE(r->channels[0].done);
-    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL(2,plays);
-    sg_runner_function(r,2,true); sg_runner_tick(r,0,0);
+    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(1,plays);
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_FALSE(r->channels[0].done);
+    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(2,plays);
+    sg_runner_function(r,2,true); sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL(2,plays); TEST_ASSERT_NOT_EQUAL(SG_NONE,r->channels[0].pending);
-    sg_runner_function(r,2,false); audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0);
+    sg_runner_function(r,2,false); audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL(3,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
-    sg_runner_function(r,2,true); audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0);
+    sg_runner_function(r,2,true); audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL(4,plays); TEST_ASSERT_EQUAL_UINT8(2,r->channels[0].state);
 }
 static void test_sample_done_silent_next_tick_and_audible_once(void)
 {
     state("run","run.wav",false); edge("off","run",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE);
     edge("run","off",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE); init_runner();
-    r->armed = true; sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
-    sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
-    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL_UINT8(0,r->channels[0].state);
+    r->armed = true; sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL_UINT8(0,r->channels[0].state);
     TEST_ASSERT_EQUAL(1,plays);
 }
 static void test_async_and_admission_failure_stop_channel(void)
 {
     state("run","run.wav",true); edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
-    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0);
-    audio_state[18] = SG_AUDIO_FAILED; sg_runner_tick(r,0,0);
+    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0,true);
+    audio_state[18] = SG_AUDIO_FAILED; sg_runner_tick(r,0,0,true);
     TEST_ASSERT_TRUE(r->channels[0].failed); TEST_ASSERT_FALSE(r->channels[0].playing);
-    sg_runner_tick(r,0,0); TEST_ASSERT_EQUAL(1,plays);
-    sg_runner_reset(r); fail_play = true; sg_runner_power(r,true); sg_runner_tick(r,0,0);
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(1,plays);
+    sg_runner_reset(r); fail_play = true; sg_runner_power(r,true); sg_runner_tick(r,0,0,true);
     TEST_ASSERT_TRUE(r->channels[0].failed); TEST_ASSERT_EQUAL(1,plays);
 }
 static void test_effect_channels_do_not_interrupt_engine(void)
@@ -175,7 +175,7 @@ static void test_effect_channels_do_not_interrupt_engine(void)
     state("run","run.wav",true); state("fxoff","",false); state("horn","horn.wav",false);
     edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE); edge("fxoff","horn",1,SG_FN_PRESS,2,SG_IMMEDIATE);
     g->effect_count = 1; snprintf(g->effects[0].id,SG_ID_CAP,"horn_channel"); snprintf(g->effects[0].entry,SG_ID_CAP,"fxoff"); g->effects[0].fn = 2;
-    init_runner(); sg_runner_function(r,1,true); sg_runner_function(r,2,true); sg_runner_tick(r,0,0);
+    init_runner(); sg_runner_function(r,1,true); sg_runner_function(r,2,true); sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL(2,plays); TEST_ASSERT_EQUAL_UINT8(18,r->channels[0].handle.voice);
     TEST_ASSERT_TRUE(r->channels[1].handle.voice < 18); TEST_ASSERT_EQUAL(0,releases);
     sg_runner_reset(r); TEST_ASSERT_EQUAL(2,releases);
@@ -184,8 +184,8 @@ static void test_filtered_accel_and_decel_ranges(void)
 {
     state("run","run.wav",false); unsigned e = edge("off","run",1,SG_DECEL,0,SG_IMMEDIATE);
     g->transitions[e].condition.has_min = true; g->transitions[e].condition.min = 3;
-    init_runner(); r->armed = true; sg_runner_tick(r,0,-2); TEST_ASSERT_EQUAL(0,plays);
-    sg_runner_tick(r,0,-3); TEST_ASSERT_EQUAL(1,plays);
+    init_runner(); r->armed = true; sg_runner_tick(r,0,-2,true); TEST_ASSERT_EQUAL(0,plays);
+    sg_runner_tick(r,0,-3,true); TEST_ASSERT_EQUAL(1,plays);
 }
 static void test_silent_cycles_and_temporal_events(void)
 {
@@ -203,11 +203,11 @@ static void test_speed_hysteresis_rejects_threshold_jitter(void)
     g->transitions[up].condition.has_min = true; g->transitions[up].condition.min = 100;
     g->transitions[down].condition.has_max = true; g->transitions[down].condition.max = 100;
     init_runner(); r->armed = true;
-    sg_runner_tick(r,101,0); TEST_ASSERT_EQUAL(0,plays);
-    sg_runner_tick(r,102,0); TEST_ASSERT_EQUAL(1,plays);
-    sg_runner_tick(r,100,0); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
-    sg_runner_tick(r,99,0); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
-    sg_runner_tick(r,98,0); TEST_ASSERT_EQUAL_UINT8(0,r->channels[0].state);
+    sg_runner_tick(r,101,0,true); TEST_ASSERT_EQUAL(0,plays);
+    sg_runner_tick(r,102,0,true); TEST_ASSERT_EQUAL(1,plays);
+    sg_runner_tick(r,100,0,true); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    sg_runner_tick(r,99,0,true); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    sg_runner_tick(r,98,0,true); TEST_ASSERT_EQUAL_UINT8(0,r->channels[0].state);
 }
 static void test_state_and_asset_capacity(void)
 {
@@ -228,11 +228,11 @@ static void test_pending_cannot_mask_current_immediate_and_event_is_not_latched(
     edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
     edge("run","end",20,SG_FN_PRESS,2,SG_AFTER_SAMPLE);
     edge("run","off",1,SG_ENGINE_OFF,0,SG_IMMEDIATE);
-    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0);
-    sg_runner_function(r,2,true); sg_runner_tick(r,0,0); TEST_ASSERT_NOT_EQUAL(SG_NONE,r->channels[0].pending);
-    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0);
+    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0,true);
+    sg_runner_function(r,2,true); sg_runner_tick(r,0,0,true); TEST_ASSERT_NOT_EQUAL(SG_NONE,r->channels[0].pending);
+    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state); TEST_ASSERT_EQUAL(2,plays);
-    sg_runner_function(r,2,false); sg_runner_function(r,2,true); sg_runner_power(r,false); sg_runner_tick(r,0,0);
+    sg_runner_function(r,2,false); sg_runner_function(r,2,true); sg_runner_power(r,false); sg_runner_tick(r,0,0,true);
     TEST_ASSERT_EQUAL_UINT8(0,r->channels[0].state); TEST_ASSERT_EQUAL(2,plays);
 }
 static void test_reachability_union_and_shared_states(void)
@@ -242,6 +242,67 @@ static void test_reachability_union_and_shared_states(void)
     g->effect_count = 1; snprintf(g->effects[0].id,SG_ID_CAP,"effect"); snprintf(g->effects[0].entry,SG_ID_CAP,"orphan");
     g->effects[0].fn = 2; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
     edge("off","orphan",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE); TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+}
+static void test_direction_condition(void)
+{
+    state("run","run.wav",true); unsigned e = edge("off","run",1,SG_DIR_FWD,0,SG_IMMEDIATE);
+    init_runner(); r->armed = true;
+    sg_runner_tick(r,0,0,false); TEST_ASSERT_EQUAL(0,plays);
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(1,plays);
+    sg_runner_reset(r); g->transitions[e].condition.type = SG_DIR_REV; r->armed = true;
+    sg_runner_tick(r,0,0,true); TEST_ASSERT_EQUAL(1,plays);
+    sg_runner_tick(r,0,0,false); TEST_ASSERT_EQUAL(2,plays);
+}
+static void test_random_selects_among_equal_priority_options(void)
+{
+    state("r1","r1.wav",false); state("r2","r2.wav",false); state("ready","",false);
+    edge("off","ready",1,SG_FN_PRESS,2,SG_IMMEDIATE);
+    unsigned a = edge("ready","r1",5,SG_RANDOM,0,SG_IMMEDIATE);
+    unsigned b = edge("ready","r2",5,SG_RANDOM,0,SG_IMMEDIATE);
+    g->transitions[a].condition.has_min = true; g->transitions[a].condition.min = 100;
+    g->transitions[b].condition.has_min = true; g->transitions[b].condition.min = 100;
+    edge("r1","off",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE);
+    edge("r2","off",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE);
+    init_runner();
+    unsigned c1 = 0, c2 = 0;
+    for (unsigned t = 0; t < 200; ++t) {
+        sg_runner_reset(r);
+        sg_runner_function(r,2,false); sg_runner_function(r,2,true);
+        sg_runner_tick(r,0,0,true); sg_runner_tick(r,0,0,true);
+        if (r->channels[0].state == 1U) { ++c1; } else if (r->channels[0].state == 2U) { ++c2; }
+    }
+    TEST_ASSERT_TRUE(c1 > 0 && c2 > 0);
+}
+static void test_random_requires_min_only(void)
+{
+    state("r","r.wav",false); unsigned e = edge("off","r",1,SG_RANDOM,0,SG_IMMEDIATE);
+    g->transitions[e].condition.has_max = true; g->transitions[e].condition.max = 50;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->transitions[e].condition.has_max = false; g->transitions[e].condition.has_min = true;
+    g->transitions[e].condition.min = 101; TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->transitions[e].condition.min = 50; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+}
+static void test_parse_direction_and_random_json(void)
+{
+    const char *json =
+      "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"t\",\"name\":\"T\","
+      "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":2,"
+      "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+      "{\"id\":\"rev\",\"name\":\"Rev\",\"file\":\"r.wav\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+      "{\"id\":\"ready\",\"name\":\"Ready\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+      "{\"id\":\"b1\",\"name\":\"B1\",\"file\":\"b.wav\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+      "{\"id\":\"b2\",\"name\":\"B2\",\"file\":\"c.wav\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+      "\"transitions\":["
+      "{\"id\":\"e1\",\"source\":\"off\",\"target\":\"rev\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"dir_rev\"}},"
+      "{\"id\":\"e2\",\"source\":\"rev\",\"target\":\"ready\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"fn_press\",\"fn\":2}},"
+      "{\"id\":\"e3\",\"source\":\"ready\",\"target\":\"b1\",\"priority\":5,\"timing\":\"immediate\",\"condition\":{\"type\":\"random\",\"min\":100}},"
+      "{\"id\":\"e4\",\"source\":\"ready\",\"target\":\"b2\",\"priority\":5,\"timing\":\"immediate\",\"condition\":{\"type\":\"random\",\"min\":100}},"
+      "{\"id\":\"e5\",\"source\":\"b1\",\"target\":\"off\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"sample_done\"}},"
+      "{\"id\":\"e6\",\"source\":\"b2\",\"target\":\"off\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"sample_done\"}}],"
+      "\"effects\":[],\"assets\":[],\"editor\":{\"positions\":{},\"viewport\":{\"x\":0,\"zoom\":1}}}";
+    TEST_ASSERT_EQUAL(ESP_OK,sg_parse(json,strlen(json),g,&diagnostic));
+    TEST_ASSERT_EQUAL_UINT8(SG_DIR_REV,g->transitions[0].condition.type);
+    TEST_ASSERT_EQUAL_UINT8(SG_RANDOM,g->transitions[2].condition.type);
 }
 static char *read_fixture(const char *file, size_t *length)
 {
@@ -286,5 +347,7 @@ int main(void)
     RUN_TEST(test_filtered_accel_and_decel_ranges); RUN_TEST(test_silent_cycles_and_temporal_events);
     RUN_TEST(test_speed_hysteresis_rejects_threshold_jitter); RUN_TEST(test_state_and_asset_capacity);
     RUN_TEST(test_pending_cannot_mask_current_immediate_and_event_is_not_latched);
-    RUN_TEST(test_reachability_union_and_shared_states); RUN_TEST(test_shared_frontend_fixture_verdicts); return UNITY_END();
+    RUN_TEST(test_reachability_union_and_shared_states); RUN_TEST(test_shared_frontend_fixture_verdicts);
+    RUN_TEST(test_direction_condition); RUN_TEST(test_random_selects_among_equal_priority_options);
+    RUN_TEST(test_random_requires_min_only); RUN_TEST(test_parse_direction_and_random_json); return UNITY_END();
 }

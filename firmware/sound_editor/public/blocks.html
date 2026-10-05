@@ -164,6 +164,7 @@ const CATALOG=[
   {type:"horn",name:"Гудок",group:"Сигналы",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
   {type:"whistle",name:"Тифон",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"bell",name:"Звонок",group:"Сигналы",kind:"sound",mode:"latched",roles:["sound"]},
+  {type:"random",name:"Случайный звук",group:"Сигналы",kind:"sound",mode:"random"},
   {type:"compressor",name:"Компрессор",group:"Механика",kind:"sound",mode:"loopHeld",roles:["sound"]},
   {type:"brake",name:"Тормоз",group:"Механика",kind:"sound",mode:"decel",roles:["sound"]},
   {type:"coupler",name:"Сцепка",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
@@ -194,13 +195,14 @@ function normalizeProject(p){
     }
     if(b.trigger===undefined)b.trigger="auto";
     if(b.type==="speed"){if(!Array.isArray(b.bands))b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_STEP;}
+    if(b.type==="random"&&!Array.isArray(b.files.random))b.files.random=["","","",""];
   }
   if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
   return p;
 }
 const ROLE_NAMES={start:"Начало",loop:"Тело (цикл)",end:"Конец",short:"Короткий",sound:"Звук"};
-const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе",speed:"По скорости"};
-const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",decel:"По замедлению",speed:"По скорости",headlight:"Фары",aux:"Выход",logic:"Логика"};
+const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе",speed:"По скорости",dir:"По направлению"};
+const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",decel:"По замедлению",speed:"По скорости",random:"Случайный выбор",headlight:"Фары",aux:"Выход",logic:"Логика"};
 const DIRS=[{v:"auto",n:"Авто (вперёд/назад)"},{v:"fwd",n:"Только вперёд"},{v:"rev",n:"Только назад"},{v:"any",n:"Без направления"}];
 const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 
@@ -236,6 +238,7 @@ function addBlockTo(p,type){
   (cat.roles||[]).forEach(r=>b.files[r]="");
   if(type==="engine"){b.steps=3;b.files={start:"",idle:"",stop:"",run:["","",""]};}
   if(type==="speed"){b.hyst=SPEED_STEP;b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));}
+  if(type==="random")b.files.random=["","","",""];
   const n=p.blocks.length;
   b.x=snapTo(p,40+(n%3)*260);b.y=snapTo(p,40+Math.floor(n/3)*140);
   p.blocks.push(b);return b;
@@ -299,12 +302,22 @@ function compile(){
       if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",{type:"decel",min:1,max:255},10,"after_sample");addEdge(b.id+"_play",entry,{type:"sample_done"},10);}
       continue;
     }
+    if(mode0==="random"){
+      const files=(Array.isArray(b.files.random)?b.files.random:[]).filter(Boolean);
+      if(files.length){
+        const ready=b.id+"_ready";addState(ready,b.name+" / выбор","",false,100,1000);
+        addEdge(entry,ready,{type:"fn_press",fn},10);
+        files.forEach((f,i)=>{const s=b.id+"_r"+i;addState(s,b.name+" "+(i+1),f,false,vol,rate);addEdge(ready,s,{type:"random",min:100},10);addEdge(s,entry,{type:"sample_done"},10);});
+      }
+      continue;
+    }
     const trig=triggerOf(b);
     let startCond,stopCond=null,speedRange=null;
     if(trig==="engine"){startCond={type:"engine_on"};stopCond={type:"engine_off"};}
     else if(trig==="speed"){speedRange={min:pctSpeed(b.speedMin==null?0:b.speedMin),max:pctSpeed(b.speedMax==null?100:b.speedMax)};startCond={type:"speed",min:speedRange.min,max:speedRange.max};speedHysts.push(b.hyst==null?SPEED_STEP:b.hyst);}
+    else if(trig==="dir"){const fwd=b.dirTrigger!=="rev";startCond={type:fwd?"dir_fwd":"dir_rev"};stopCond={type:fwd?"dir_rev":"dir_fwd"};}
     else{startCond={type:"fn_press",fn};stopCond={type:"fn_release",fn};}
-    const mode=(trig==="speed")?"loopHeld":mode0;
+    const mode=(trig==="speed"||trig==="dir")?"loopHeld":mode0;
     if(mode==="oneshot"){
       if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",startCond,10);addEdge(b.id+"_play",entry,{type:"sample_done"},10);}
     }else if(mode==="shortLong"){
@@ -373,7 +386,9 @@ function validate(){
   const silent=new Set(payload.states.filter(s=>!s.file).map(s=>s.id));
   if(!silent.has(payload.engine.entry))err("","Вход двигателя должен быть тихим.");
   payload.effects.forEach(e=>{if(!silent.has(e.entry))err(e.id,"Вход эффекта должен быть тихим.");});
-  const used={};payload.transitions.forEach(e=>{const k=e.source+":"+e.priority;if(used[k])err(e.id,"Дублирующийся приоритет у источника "+e.source+".");used[k]=1;});
+  const used={};payload.transitions.forEach(e=>{const k=e.source+":"+e.priority;
+    if(used[k]){if(!(e.condition&&e.condition.type==="random"&&used[k].condition&&used[k].condition.type==="random"))err(e.id,"Дублирующийся приоритет у источника "+e.source+".");}
+    else used[k]=e;});
   const ids=new Set(payload.states.map(s=>s.id));
   payload.transitions.forEach(e=>{if(!ids.has(e.source))err(e.id,"Нет состояния "+e.source);if(!ids.has(e.target))err(e.id,"Нет состояния "+e.target);});
   files.forEach(f=>{if(!assets[f])warn("","Нет WAV на устройстве: "+f+" (проверьте перед применением).");});
@@ -469,6 +484,7 @@ function nodeSummary(b){
   const cat=BY_TYPE[b.type],parts=[];
   if(cat.mode==="speed")return "Скорость % · диапазонов "+((b.bands||[]).filter(x=>x.file).length)+" · защита "+(b.hyst==null?SPEED_STEP:b.hyst)+"%";
   if(cat.mode==="decel")return "F"+b.fn+" · по замедлению"+(b.files.sound?" · "+esc(b.files.sound):" · файл не задан");
+  if(cat.mode==="random")return "F"+b.fn+" · случайно из "+((b.files.random||[]).filter(Boolean).length)+" звуков";
   (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
   return "F"+b.fn+" · "+(parts.length?parts.join("<br>"):"файлы не заданы");
 }
@@ -539,6 +555,10 @@ async function testBlock(b){
       const set=(b.bands||[]).filter(x=>x.file);
       if(!set.length)out.push({id:b.id,message:"Не задан ни один диапазон скорости",severity:"error"});
       else out.push({id:b.id,message:"Диапазонов: "+set.length+", защита "+(b.hyst==null?SPEED_STEP:b.hyst)+" %",severity:"ok"});
+    }else if(BY_TYPE[b.type].mode==="random"){
+      const set=(b.files.random||[]).filter(Boolean);
+      if(!set.length)out.push({id:b.id,message:"Не задан ни один звук",severity:"error"});
+      else out.push({id:b.id,message:"Случайно из "+set.length+" звуков",severity:"ok"});
     }else{
       const roles=BY_TYPE[b.type].roles||[],set=roles.filter(r=>b.files[r]);
       if(!set.length)out.push({id:b.id,message:"Не задан ни один WAV-файл",severity:"error"});
@@ -551,7 +571,7 @@ async function testBlock(b){
   }
   validate().diagnostics.filter(d=>d.id===b.id).forEach(d=>out.push(d));
   diagnostics=out;renderDiag();
-  const playable=blockFiles(b)[0]||b.files.idle;if(playable)await playFile(playable);
+  const playable=blockFiles(b)[0]||b.files.idle||(b.files.random||[]).filter(Boolean)[0]||((b.bands||[]).find(x=>x.file)||{}).file;if(playable)await playFile(playable);
   const bad=out.filter(x=>x.severity==="error").length;
   setStatus("Тест блока «"+b.name+"»: "+(bad?bad+" ошибок":"в порядке"));
 }
@@ -562,7 +582,7 @@ async function testScheme(){
     const lines=[];let ok=0,err=0;
     for(const b of project.blocks){
       const kind=BY_TYPE[b.type].kind;let bad=false;
-      if(kind==="sound"){bad=(BY_TYPE[b.type].mode==="speed")?!(b.bands||[]).some(x=>x.file):!((BY_TYPE[b.type].roles||[]).some(r=>b.files[r]));}
+      if(kind==="sound"){bad=(BY_TYPE[b.type].mode==="speed")?!(b.bands||[]).some(x=>x.file):(BY_TYPE[b.type].mode==="random")?!(b.files.random||[]).some(Boolean):!((BY_TYPE[b.type].roles||[]).some(r=>b.files[r]));}
       else if(b.type==="engine")bad=!b.files.idle;
       else{const fn=sourceFnOf(b.id);bad=(fn==null&&!(b.fn>=0&&b.fn<=28));}
       if(bad){err++;lines.push({id:b.id,message:"Блок «"+b.name+"» не готов",severity:"error"});}else ok++;
@@ -590,6 +610,13 @@ function renderInspector(){
          '<div class="frow"><select data-bfile="'+i+'">'+soundOptions(bd.file||"")+'</select></div>';
     });
     h+='<div class="row" style="margin-top:6px"><button id="i_addband">+ Диапазон</button></div>';
+  }else if(mode0==="random"){
+    h+='<div class="row"><label>F-клавиша</label><label>Громкость</label></div><div class="row">'+
+       '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
+       '<input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'"></div>';
+    h+='<div class="hint">При нажатии F проигрывается один случайный звук из списка.</div>';
+    (b.files.random||[]).forEach((f,i)=>{h+='<div class="frow" style="margin-top:6px"><select data-rand="'+i+'">'+soundOptions(f||"")+'</select><button class="play" data-randplay="'+i+'" title="Прослушать">▶</button></div>';});
+    h+='<div class="row" style="margin-top:6px"><button id="i_addrand">+ Звук</button></div>';
   }else{
     h+='<div class="row"><label>F-клавиша</label><label>'+(kind==="output"?"Яркость %":"Громкость")+'</label></div><div class="row">'+
        '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
@@ -599,6 +626,7 @@ function renderInspector(){
        '<input type="number" id="i_smin" min="0" max="100" value="'+(b.speedMin==null?0:b.speedMin)+'">'+
        '<input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'">'+
        '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_STEP:b.hyst)+'"></div>';
+    if(kind==="sound"&&b.trigger==="dir")h+='<label>Направление</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>Вперёд</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>Назад</option></select>';
     if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";
     if(kind==="output"&&b.type!=="headlight")h+='<label>Канал</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
     if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>Эффект</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+f.n+"</option>").join("")+"</select>";
@@ -625,6 +653,7 @@ function renderInspector(){
   on("i_smin","change",e=>{b.speedMin=Math.max(0,Math.min(100,Number(e.target.value)));render();});
   on("i_smax","change",e=>{b.speedMax=Math.max(0,Math.min(100,Number(e.target.value)));render();});
   on("i_dir","change",e=>{b.dir=e.target.value;render();});
+  on("i_dirtrig","change",e=>{b.dirTrigger=e.target.value;render();});
   on("i_ch","change",e=>{b.channel=Number(e.target.value);render();});
   on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
   on("i_logic","change",e=>{b.logic=Number(e.target.value);render();});
@@ -638,6 +667,9 @@ function renderInspector(){
   insp.querySelectorAll("[data-bto]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bto"))].to=Math.max(0,Math.min(100,Number(e.target.value)));render();}));
   insp.querySelectorAll("[data-bfile]").forEach(el=>el.addEventListener("change",e=>{b.bands[Number(el.getAttribute("data-bfile"))].file=e.target.value;render();}));
   insp.querySelectorAll("[data-bplay]").forEach(btn=>btn.onclick=()=>playFile((b.bands[Number(btn.getAttribute("data-bplay"))]||{}).file));
+  on("i_addrand","click",()=>{if(!b.files.random)b.files.random=[];b.files.random.push("");render();});
+  insp.querySelectorAll("[data-rand]").forEach(el=>el.addEventListener("change",e=>{b.files.random[Number(el.getAttribute("data-rand"))]=e.target.value;render();}));
+  insp.querySelectorAll("[data-randplay]").forEach(btn=>btn.onclick=()=>playFile((b.files.random||[])[Number(btn.getAttribute("data-randplay"))]));
   on("i_test","click",()=>testBlock(b));
   on("i_close","click",()=>{selected="";render();});
   on("i_del","click",()=>removeBlock(b.id));

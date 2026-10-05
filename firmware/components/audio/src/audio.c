@@ -79,6 +79,8 @@ typedef struct {
     bool req_stop;
     bool req_loop;
     uint8_t req_volume;
+    bool req_volume_live_set; /* live volume override for an active voice */
+    uint8_t req_volume_live;
     uint16_t req_rate; /* per-voice playback rate, 1000 = nominal */
     char req_path[AUDIO_PATH_MAX];
     uint32_t generation;
@@ -472,6 +474,7 @@ static void mixer_task(void *arg)
             voice_t *vo = &s_voice[v];
             bool play = false, stop = false, loop = false, start_failed = false;
             uint8_t volume = 100;
+            bool vol_live = false; uint8_t vol_live_val = 100;
             uint16_t rate = 1000;
             char path[AUDIO_PATH_MAX];
             if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
@@ -482,6 +485,7 @@ static void mixer_task(void *arg)
             loop = vo->req_loop;
             volume = vo->req_volume;
             rate = rate_clamp(vo->req_rate);
+            vol_live = vo->req_volume_live_set; vol_live_val = vo->req_volume_live; vo->req_volume_live_set = false;
             memcpy(path, vo->req_path, sizeof(path));
             path[sizeof(path) - 1] = '\0';
             vo->req_play = false;
@@ -503,6 +507,7 @@ static void mixer_task(void *arg)
                 start_failed = voice_start(&vo->st, path, loop, volume) != ESP_OK;
             } else if (vo->st.active) {
                 vo->st.rate_permille = rate; /* live rate updates */
+                if (vol_live) { vo->st.volume = vol_live_val > 100U ? 100U : vol_live_val; }
             }
             if (vo->st.active) { (void)voice_fill(&vo->st, mix, MIX_BLOCK); }
             if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
@@ -549,6 +554,7 @@ static esp_err_t queue_play(uint8_t voice, const char *path, bool loop, uint8_t 
     memcpy(vo->req_path, path, strlen(path) + 1);
     vo->req_loop = loop;
     vo->req_volume = volume > 100U ? 100U : volume;
+    vo->req_volume_live_set = false;
     vo->req_play = true;
     vo->req_stop = false;
     s_busy[voice] = true;
@@ -616,6 +622,23 @@ esp_err_t audio_voice_set_rate(uint8_t voice, uint16_t permille)
         xSemaphoreTake(s_req_mutex, portMAX_DELAY);
     }
     vo->req_rate = rate_clamp(permille);
+    if (s_req_mutex != NULL) {
+        xSemaphoreGive(s_req_mutex);
+    }
+    return ESP_OK;
+}
+
+esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume)
+{
+    if (voice >= AUDIO_MAX_VOICES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    voice_t *vo = &s_voice[voice];
+    if (s_req_mutex != NULL) {
+        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
+    }
+    vo->req_volume_live = volume > 100U ? 100U : volume;
+    vo->req_volume_live_set = true;
     if (s_req_mutex != NULL) {
         xSemaphoreGive(s_req_mutex);
     }

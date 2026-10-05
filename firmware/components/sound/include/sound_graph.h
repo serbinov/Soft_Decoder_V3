@@ -18,7 +18,8 @@
 
 typedef enum {
     SG_FN_PRESS, SG_FN_RELEASE, SG_FN_ON, SG_FN_OFF, SG_ENGINE_ON,
-    SG_ENGINE_OFF, SG_SPEED, SG_ACCEL, SG_DECEL, SG_SAMPLE_DONE
+    SG_ENGINE_OFF, SG_SPEED, SG_ACCEL, SG_DECEL, SG_SAMPLE_DONE,
+    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM
 } sg_condition_type_t;
 typedef enum { SG_IMMEDIATE, SG_AFTER_SAMPLE } sg_timing_t;
 typedef struct {
@@ -89,11 +90,13 @@ typedef struct {
     sg_channel_t channels[SG_MAX_EFFECTS + 1];
     uint32_t fn_levels, fn_press, fn_release;
     bool engine_on, armed;
+    bool forward;   /* travel direction, from the motor/DCC input */
+    uint32_t rng;   /* LCG state for SG_RANDOM conditions */
 } sg_runner_t;
 void sg_runner_init(sg_runner_t *runner, const sg_graph_t *graph, const sg_io_t *io);
 void sg_runner_reset(sg_runner_t *runner);
 void sg_runner_function(sg_runner_t *runner, uint8_t fn, bool on);
 void sg_runner_power(sg_runner_t *runner, bool on);
-void sg_runner_tick(sg_runner_t *runner, uint8_t speed, int32_t accel);
+void sg_runner_tick(sg_runner_t *runner, uint8_t speed, int32_t accel, bool forward);
 
 #endif

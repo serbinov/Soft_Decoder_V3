@@ -60,6 +60,13 @@ On save/apply the editor sends the schema-v1 device payload
 routing compiles to `func_binding_t` for outputs/logic. v1 graphs load and are
 migrated to the v2 authoring layer (`migrateV1toV2`).
 
+The engine condition set is `fn_press/release/on/off`, `engine_on/off`, `speed`,
+`accel`/`decel` and `sample_done`, plus `dir_fwd`/`dir_rev` (travel direction,
+passed into `sg_runner_tick`) and `random` (chance in `min`; equal-priority
+`random` transitions from one state form a random group picked uniformly). While
+any effect voice is audible the engine voice is ducked to `SOUND_DUCK_PCT` (40 %)
+through `audio_voice_set_volume_live` and restored when effects end.
+
 A second, simpler authoring path is the **block constructor**
 (`/sound-editor/blocks.html`, see `docs/sound_blocks_editor.md`): the user places
 ready-made locomotive blocks (engine, horn, whistle, bell, compressor, coupler,

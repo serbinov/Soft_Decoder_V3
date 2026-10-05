@@ -27,6 +27,8 @@ static const char *TAG = "sound";
 #define SOUND_VOICE_ENGINE     18
 #define SOUND_FN_COUNT         29
 #define SOUND_PATH_MAX         192
+/* Engine gain while any effect voice is audible (ducking), percent. */
+#define SOUND_DUCK_PCT         40
 
 static SemaphoreHandle_t s_lock;
 
@@ -309,6 +311,22 @@ esp_err_t sound_set_inhibited(bool inhibited)
     return ESP_OK;
 }
 
+/* Duck the engine voice while any effect channel is audible. Called with the
+ * sound lock held, right after the runner tick. */
+static void sound_apply_duck_locked(void)
+{
+    if (!s_graph_runner || !s_graph) { return; }
+    bool duck = false;
+    for (unsigned i = 1; i <= s_graph->effect_count; ++i) {
+        const sg_channel_t *c = &s_graph_runner->channels[i];
+        if (c->playing && s_graph->states[c->state].file[0]) { duck = true; break; }
+    }
+    const sg_channel_t *eng = &s_graph_runner->channels[0];
+    uint8_t base = s_graph->states[eng->state].file[0] ? s_graph->states[eng->state].volume : 100U;
+    uint8_t vol = duck ? (uint8_t)((uint16_t)base * SOUND_DUCK_PCT / 100U) : base;
+    (void)audio_voice_set_volume_live(SOUND_VOICE_ENGINE, vol);
+}
+
 /* ------------------------------------------------------------------ */
 /* tick                                                               */
 /* ------------------------------------------------------------------ */
@@ -323,7 +341,8 @@ static void sound_tick(void)
             int32_t delta = (int32_t)s_speed - s_prev_speed;
             s_accel_q = (s_accel_q * 7 + delta * 1024 * 3) / 10;
             s_accel = s_accel_q / 1024; s_prev_speed = s_speed;
-            sg_runner_tick(s_graph_runner,s_speed,s_accel);
+            sg_runner_tick(s_graph_runner,s_speed,s_accel,s_forward);
+            sound_apply_duck_locked();
         }
     }
     sound_unlock();

@@ -8,6 +8,7 @@ playwright-report/
 # after editing src/ and commit the updated bundle.
 dist/*
 !dist/index.html
+!dist/blocks.html
 !dist/build-inputs.json
 !dist/THIRD_PARTY_NOTICES.txt
 !dist/assets/

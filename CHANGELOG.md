@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-05 (v0.10) — feat(sound): add ready-block constructor editor and settings entry
 - 2026-10-05 (v0.10) — build(sound-editor): track prebuilt bundle so a fresh clone serves /sound-editor/
 - 2026-10-04 (v0.10) — refactor(sound): split sound editor into effect/patch panels and remove legacy sound store
 - 2026-10-03 (v0.10) — feat(sound): offline sound graph engine and redesigned decoder UI

@@ -57,6 +57,7 @@ async function hashInputs(directory) {
 }
 await hashInputs('src');
 await hashInputs('scripts');
+await hashInputs('public');
 for (const path of ['index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts']) files[path] = createHash('sha256').update(await readFile(join(root, path))).digest('hex');
 await writeFile(join(dist, 'build-inputs.json'), `${JSON.stringify({ files }, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));

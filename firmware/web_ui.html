@@ -307,6 +307,17 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
+  <div class="panel" data-page="settings" style="display:none" id="panel_blocks">
+    <div class="panel-hd" id="hd_blocks" onclick="togglePanel('blocks')">
+      <h2>Конструктор блоков (простой)</h2>
+      <span class="chev" id="chev_blocks">▸</span>
+    </div>
+    <div class="bd" id="bd_blocks" style="display:none">
+      <div class="hint" style="margin-bottom:10px">Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.</div>
+      <button class="btn sm" onclick="window.open('/sound-editor/blocks.html','_blank')">Открыть конструктор блоков</button>
+    </div>
+  </div>
+
   <div class="panel" data-page="settings" style="display:none" id="panel_fnmap">
     <div class="panel-hd" id="hd_fnmap" onclick="togglePanel('fnmap')">
       <h2>Настройка функции F</h2>

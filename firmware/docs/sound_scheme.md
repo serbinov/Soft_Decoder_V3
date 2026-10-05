@@ -60,6 +60,13 @@ On save/apply the editor sends the schema-v1 device payload
 routing compiles to `func_binding_t` for outputs/logic. v1 graphs load and are
 migrated to the v2 authoring layer (`migrateV1toV2`).
 
+A second, simpler authoring path is the **block constructor**
+(`/sound-editor/blocks.html`, see `docs/sound_blocks_editor.md`): the user places
+ready-made locomotive blocks (engine, horn, whistle, bell, compressor, coupler,
+…) and the page compiles them to the same schema-v1 payload. It is vanilla JS,
+has no Svelte dependency, and is reachable from the device UI under
+Настройки → «Конструктор блоков (простой)».
+
 ## 4. REST
 
 | Route | Method | Purpose |

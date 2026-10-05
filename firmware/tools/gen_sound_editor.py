@@ -22,7 +22,7 @@ def verify_sources(dist, source):
     recorded = json.loads(stamp.read_text(encoding="utf-8"))
     paths = [source / name for name in ("index.html", "package.json", "package-lock.json",
                                        "tsconfig.json", "vite.config.ts")]
-    for directory in ("src", "scripts"):
+    for directory in ("src", "scripts", "public"):
         paths.extend(path for path in (source / directory).rglob("*") if path.is_file())
     expected = {path.relative_to(source).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in paths}

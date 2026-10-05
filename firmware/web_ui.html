@@ -13,17 +13,19 @@ body{margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helve
 button,input,select{font:inherit}
 button{cursor:pointer}
 input[type=range]{width:100%;accent-color:var(--accent)}
-.shell{width:100%;max-width:none;margin:0;padding:10px 14px 92px}
+.shell{width:100%;max-width:none;margin:0;padding:10px 14px}
 /* Each page is its own responsive area. On a phone everything is a single
    column; on a wide screen the settings become a two-pane view: a section list
    on the left and the selected section on the right. */
 .page{display:grid;gap:10px;align-items:start;grid-template-columns:1fr}
 .page>.panel{margin-bottom:0}
-.span-all,.page>.uptime-line{grid-column:1/-1}
+.span-all{grid-column:1/-1}
+.uptime-line{grid-column:1/-1;order:99}
 @media(min-width:760px){
   .page[data-page=control]{grid-template-columns:minmax(230px,320px) minmax(0,1fr)}
 }
 /* settings: section list (wide screens only) + content column */
+.set-side{display:contents}
 .set-nav{display:none}
 .set-body{display:grid;gap:10px;min-width:0}
 .set-body>.panel{margin-bottom:0;min-width:0}
@@ -37,10 +39,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .info-device input{flex:1 1 200px;max-width:460px;min-width:0}
 @media(min-width:900px){
   .page[data-page=settings].md-on{grid-template-columns:250px minmax(0,1fr);align-items:start}
-  .page[data-page=settings].md-on .set-nav{display:block;grid-column:1;position:sticky;top:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px}
+  .page[data-page=settings].md-on .set-side{display:flex;flex-direction:column;gap:6px;grid-column:1;position:sticky;top:10px}
+  .page[data-page=settings].md-on .set-nav{display:block;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px}
   .page[data-page=settings].md-on .set-body{grid-column:2}
-  .page[data-page=settings].md-on .info-panel,
-  .page[data-page=settings].md-on .uptime-line{grid-column:1/-1}
+  .page[data-page=settings].md-on .info-panel{grid-column:1/-1}
+  .page[data-page=settings].md-on .uptime-line{margin:0;justify-content:flex-start}
   .page[data-page=settings].md-on .set-body>.panel{display:none}
   .page[data-page=settings].md-on .set-body>.panel.active{display:block}
   .page[data-page=settings].md-on .set-body .panel-hd{cursor:default}
@@ -95,7 +98,7 @@ label{color:var(--text);font-weight:600}
 .speed-row .val{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;color:var(--text);text-align:right}
 .dir-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
 .dir-row .btn{white-space:normal;line-height:1.1;padding:8px 4px;font-size:12px;min-height:48px}
-.nav-settings-btn{width:100%;margin-top:12px}
+.nav-settings-btn{display:none}
 .btn.emergency{background:var(--bad);border-color:var(--bad);color:#ffffff;font-weight:700}
 .btn.emergency:hover{border-color:#ffffff}
 .fn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:7px}
@@ -132,7 +135,6 @@ label{color:var(--text);font-weight:600}
 .cv-card .idx{font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
 .cv-card .desc{font-size:11px;color:var(--muted)}
 .cv-card .ctrl{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:end}
-.mini{display:flex;gap:6px;flex-wrap:wrap}
 
 .log{display:grid;gap:5px;margin-top:8px;max-height:200px;overflow-y:auto}
 .log-row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--log-bg);font-size:11px}
@@ -144,10 +146,6 @@ label{color:var(--text);font-weight:600}
 .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .modal .msg{font-size:14px;margin-bottom:14px;white-space:pre-line}
 .modal .acts{display:flex;gap:8px;justify-content:flex-end}
-.binds{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
-.binds th,.binds td{border:1px solid var(--line);padding:4px;text-align:center}
-.binds td.cell{cursor:pointer}
-.binds td.cell.on{background:var(--good);color:var(--on-good)}
 
 @media(max-width:760px){
   .shell{padding:0 12px 10px}
@@ -158,41 +156,14 @@ label{color:var(--text);font-weight:600}
 @media(max-width:600px){
   .brand small{display:block;margin-left:0}
 }
-.fnmap-row{display:grid;grid-template-columns:14px 1fr 1fr 62px 58px;gap:5px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
-.fnmap-col{display:flex;flex-direction:column;gap:2px;min-width:0}
-.fnmap-lbl{font-size:11px;color:var(--muted);font-weight:600}
-.fnmap-cbs{display:grid;gap:1px 6px;min-width:0}
-.fnmap-cbs.slots,.fnmap-cbs.outs{grid-template-columns:repeat(2,minmax(0,1fr))}
-.fnmap-cbs.one{grid-template-columns:1fr}
-.cb{display:flex;align-items:center;gap:3px;font-size:11px;white-space:nowrap;min-width:0;overflow:hidden}
-.cb input{margin:0;width:12px;height:12px;flex:0 0 auto}
-.fnmap-fn{font-weight:600;font-size:12px;padding-top:12px}
-.fnmap-sec{margin-bottom:16px}
-.fnmap-cap{font-size:12px;font-weight:800;margin:0 0 6px 0;letter-spacing:.02em}
-.fnmap-leg{font-size:11px;color:var(--muted);margin:4px 0 0 0}
-.fnmap-tbl{border-collapse:collapse;font-size:11px}
-.fnmap-tbl th,.fnmap-tbl td{border:1px solid var(--line);padding:1px 3px;text-align:center;white-space:nowrap;background:var(--panel);color:var(--text)}
-.fnmap-tbl thead th{background:var(--panel2);font-weight:700}
-.fnmap-tbl th.lbl,.fnmap-tbl td.lbl{position:sticky;left:0;z-index:2;background:var(--panel);text-align:left;font-weight:600;min-width:92px}
-.fnmap-tbl thead th.lbl{z-index:3;background:var(--panel2)}
-.fnmap-tbl input.cbx{width:14px;height:14px;margin:0;vertical-align:middle;accent-color:var(--accent)}
-.fnmap-tbl.outmap{min-width:1180px}
-.fnmap-tbl.slottbl{min-width:620px}
-.fnmap-tbl.spdtbl{min-width:170px}
-.fnmap-scroll{overflow-x:auto;overflow-y:hidden;width:100%;padding-bottom:8px;scrollbar-width:thin;scrollbar-color:var(--accent) var(--panel2)}
-.fnmap-scroll::-webkit-scrollbar{height:14px}
-.fnmap-scroll::-webkit-scrollbar-track{background:var(--panel2);border-radius:7px}
-.fnmap-scroll::-webkit-scrollbar-thumb{background:var(--accent);border-radius:7px;border:3px solid var(--panel2)}
-.auxpwm-row{display:grid;grid-template-columns:36px 70px 1fr;gap:6px;align-items:start;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
-.auxpwm-row .num{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px;font-size:12px;text-align:center}
-.auxpwm-row .num:disabled{background:var(--panel2);color:var(--text);opacity:.8}
 .uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
 .uptime-line #uptime{color:var(--text);font-weight:700}
-/* top nav + theme switch */
+/* top nav (page tabs) + theme switch */
 .hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .theme-btn{min-width:46px;font-size:15px;line-height:1}
-.nav{position:fixed;left:0;right:0;bottom:12px;margin-left:auto;margin-right:auto;z-index:60;display:flex;gap:6px;width:calc(100% - 24px);max-width:460px;padding:6px;background:var(--bg);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.nav-tab{flex:1;border:1px solid var(--line);background:var(--btn2-bg);color:var(--text);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;min-height:44px;cursor:pointer;touch-action:manipulation}
+.page-tabs{display:flex;gap:6px}
+.page-tabs .nav-tab{flex:0 0 auto;min-height:38px;padding:8px 14px}
+.nav-tab{border:1px solid var(--line);background:var(--btn2-bg);color:var(--text);border-radius:10px;padding:8px 14px;font-size:13px;font-weight:700;min-height:38px;cursor:pointer;touch-action:manipulation}
 .nav-tab.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 /* info grid */
 .info-grid{display:grid;gap:2px}
@@ -202,8 +173,6 @@ label{color:var(--text);font-weight:600}
 .info-grid .info-row:last-child{border-bottom:0}
 .info-key{color:var(--muted);white-space:nowrap;font-weight:600}
 .info-val{color:var(--text);text-align:right;min-width:0;overflow-wrap:anywhere}
-/* wide settings grids scroll instead of squashing on phones */
-#fnmap_rows,#snd_matrix{overflow-x:auto}
 /* On computers the layout stays a comfortable centered column instead of
    scaling the whole page: the app is used from a phone, so the desktop view
    keeps the same single-column structure with slightly larger base text. */
@@ -215,6 +184,9 @@ label{color:var(--text);font-weight:600}
 @media(max-width:600px){
   .brand{font-size:14px}
   .info-row{font-size:12px}
+  .page-tabs .nav-tab{padding:7px 10px;font-size:12px}
+  .theme-btn{min-width:40px}
+  .conn{font-size:11px;gap:5px}
   .fn-grid{grid-template-columns:repeat(auto-fill,minmax(44px,1fr))}
   .fn-grid .btn{min-height:40px;padding:8px 4px}
 }
@@ -228,6 +200,10 @@ label{color:var(--text);font-weight:600}
   <div class="hd">
     <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
     <div class="hd-right">
+      <div class="page-tabs">
+        <button class="nav-tab active" id="nav_control" onclick="showPage('control')">Управление</button>
+        <button class="nav-tab" id="nav_settings" onclick="showPage('settings')">Настройки</button>
+      </div>
       <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
       <button class="btn sm ghost theme-btn" id="theme_btn" onclick="toggleTheme()" title="Светлая / тёмная тема" aria-label="Переключить тему">☀</button>
     </div>
@@ -281,19 +257,16 @@ label{color:var(--text);font-weight:600}
         <div class="info-row"><span class="info-key">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
         <div class="info-row"><span class="info-key">Адрес</span><span class="info-val" id="info_addr">—</span></div>
         <div class="info-row"><span class="info-key">Состояние</span><span class="info-val" id="info_conn">—</span></div>
-        <div class="info-row"><span class="info-key">Время работы</span><span class="info-val" id="info_uptime">—</span></div>
       </div>
     </div>
   </div>
 
+  <div class="set-side">
   <nav class="set-nav" data-page="settings" style="display:none" aria-label="Разделы настроек">
     <div class="set-group">Движение</div>
     <button class="set-item" data-target="panel_bemf" onclick="showSetting('panel_bemf')">Калибровка BEMF</button>
     <div class="set-group">Звук</div>
     <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')">Загрузка звуков</button>
-    <button class="set-item" data-target="panel_fnmap" onclick="showSetting('panel_fnmap')">Настройка функции F</button>
-    <button class="set-item" data-target="panel_auxpwm" onclick="showSetting('panel_auxpwm')">PWM и эффекты AUX</button>
-    <button class="set-item" data-target="panel_graph" onclick="showSetting('panel_graph')">Звуковой граф</button>
     <button class="set-item" data-target="panel_blocks" onclick="showSetting('panel_blocks')">Конструктор блоков</button>
     <div class="set-group">Настройки</div>
     <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')">CV</button>
@@ -303,6 +276,9 @@ label{color:var(--text);font-weight:600}
     <div class="set-group">Сервис</div>
     <button class="set-item" data-target="panel_log" onclick="showSetting('panel_log')">Журнал</button>
   </nav>
+
+  <div class="uptime-line" data-page="settings" style="display:none"><span>Устройство работает:</span> <span id="uptime">—</span></div>
+  </div>
 
   <div class="set-body">
 
@@ -345,37 +321,6 @@ label{color:var(--text);font-weight:600}
       <div class="vol"><label>Двигатель</label><input type="range" min="0" max="100" value="20" id="vol_engine" oninput="onVolInput('engine')"><span class="val" id="vol_engine_v">20</span></div>
       <div class="vol"><label>Эффекты</label><input type="range" min="0" max="100" value="20" id="vol_effects" oninput="onVolInput('effects')"><span class="val" id="vol_effects_v">20</span></div>
       <div class="s-grid" id="sound_grid" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div class="panel" data-page="settings" style="display:none" id="panel_fnmap">
-    <div class="panel-hd" id="hd_fnmap" onclick="togglePanel('fnmap')">
-      <h2>Настройка функции F</h2>
-      <span class="chev" id="chev_fnmap">▸</span>
-    </div>
-    <div class="bd" id="bd_fnmap" style="display:none">
-      <div id="fnmap_rows"></div>
-    </div>
-  </div>
-
-  <div class="panel" data-page="settings" style="display:none" id="panel_auxpwm">
-    <div class="panel-hd" id="hd_auxpwm" onclick="togglePanel('auxpwm')">
-      <h2>PWM и эффекты AUX</h2>
-      <span class="chev" id="chev_auxpwm">▸</span>
-    </div>
-    <div class="bd" id="bd_auxpwm" style="display:none">
-      <div id="auxpwm_rows"></div>
-    </div>
-  </div>
-
-  <div class="panel" data-page="settings" style="display:none" id="panel_graph">
-    <div class="panel-hd" id="hd_graph" onclick="togglePanel('graph')">
-      <h2>Звуковой граф</h2>
-      <span class="chev" id="chev_graph">▸</span>
-    </div>
-    <div class="bd" id="bd_graph" style="display:none">
-      <div class="hint" style="margin-bottom:10px">Эффекты и маршрутизация F-клавиш редактируются в графовом редакторе на отдельной странице. Настройка функции F ниже — упрощённая привязка без графа.</div>
-      <button class="btn sm" onclick="window.open('/sound-editor/','_blank')">Открыть редактор звукового графа</button>
     </div>
   </div>
 
@@ -468,14 +413,7 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
   </div>
-
-  <div class="uptime-line" data-page="settings" style="display:none"><span>Устройство работает:</span> <span id="uptime">—</span></div>
   </div>
-
-  <nav class="nav">
-    <button class="nav-tab active" id="nav_control" onclick="showPage('control')">Управление</button>
-    <button class="nav-tab" id="nav_settings" onclick="showPage('settings')">Настройки</button>
-  </nav>
 
   <div class="modal" id="modal">
     <div class="box">
@@ -938,7 +876,7 @@ function emergencyStop(){
   }).catch(function(e){log('Стоп','экстренный: '+e.message);});
 }
 
-/* functions — buttons come from the F map (no hard-coded bindings) */
+/* functions — F0..F28 on/off buttons */
 function renderFunctions(){
   var host=byId('fn_grid');if(!host)return;
   var html=[];
@@ -1310,248 +1248,6 @@ async function cvFactoryReset(){
   }catch(e){log('CV','сброс к заводским: '+e.message);}
 }
 
-/* F function mapping: canonical bindings (?view=bind) rendered as three tables */
-var FN_MAX=28;
-var OUT_LABELS=['Свет вперёд','Свет назад','AUX1','AUX2','AUX3','AUX4','AUX5','AUX6','AUX7'];
-var bindCache=[];
-var fnSpeed={};
-var bindQueue=Promise.resolve();
-function fnspeedGet(fn){var v=fnSpeed[fn];return (v===1||v===2)?v:0;}
-function deriveFnSpeed(){
-  for(var f=0;f<=FN_MAX;f++){
-    var mv=false,st=false,has=false;
-    for(var i=0;i<bindCache.length;i++){
-      var b=bindCache[i];
-      if(b.fn===f&&(b.type===1||b.type===3)){
-        has=true;
-        if(b.state===1)mv=true;else if(b.state===2)st=true;
-      }
-    }
-    if(mv&&!st)fnSpeed[f]=1;else if(st&&!mv)fnSpeed[f]=2;else if(has)fnSpeed[f]=0;
-  }
-}
-function outCellOn(fn,bit,dir){
-  for(var i=0;i<bindCache.length;i++){
-    var b=bindCache[i];
-    if(b.type===1&&b.fn===fn&&b.id===bit&&(b.dir===dir||b.dir===0))return true;
-  }
-  return false;
-}
-function slotCellOn(fn,slot){
-  for(var i=0;i<bindCache.length;i++){
-    var b=bindCache[i];
-    if(b.type===3&&b.fn===fn&&b.id===slot)return true;
-  }
-  return false;
-}
-function speedDisplay(fn){
-  var mv=false,st=false,has=false;
-  for(var i=0;i<bindCache.length;i++){
-    var b=bindCache[i];
-    if(b.fn===fn&&(b.type===1||b.type===3)){
-      has=true;
-      if(b.state===1)mv=true;else if(b.state===2)st=true;
-    }
-  }
-  if(mv&&!st)return 1;
-  if(st&&!mv)return 2;
-  if(!has)return fnspeedGet(fn);
-  return 0;
-}
-function bindAdd(fn,type,id,dir,state,mode){
-  var q='/api/func-map?bind=1&fn='+fn+'&type='+type+'&id='+id+'&dir='+dir+'&state='+state+'&mode='+(mode||0);
-  return api(q,{method:'POST'}).then(function(d){if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');return d;});
-}
-function bindRemove(idx){
-  return api('/api/func-map?bind=1&remove=1&idx='+idx,{method:'POST'}).then(function(d){if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');return d;});
-}
-/* Serialize binding mutations and reload the store after each completed one,
-   because a removal shifts the indices that later operations rely on. */
-function bindMutate(task){
-  bindQueue=bindQueue.catch(function(){}).then(task).catch(function(e){log('Функции',e&&e.message?e.message:'ошибка');}).then(function(){return loadFuncMap();});
-  return bindQueue;
-}
-function outMapToggle(fn,bit,dir,cb){
-  var on=!!cb.checked,opp=(dir===1)?2:1;
-  bindMutate(function(){
-    var exact=[],anyIdx=-1,anyState=0,oppIdx=-1;
-    for(var i=0;i<bindCache.length;i++){
-      var b=bindCache[i];
-      if(b.type===1&&b.fn===fn&&b.id===bit){
-        if(b.dir===0){anyIdx=i;anyState=b.state;}
-        else if(b.dir===dir)exact.push(i);
-        else if(b.dir===opp)oppIdx=i;
-      }
-    }
-    if(on){
-      if(exact.length>0||anyIdx>=0)return;
-      return bindAdd(fn,1,bit,dir,fnspeedGet(fn),0);
-    }
-    if(exact.length>0){
-      exact.sort(function(a,b){return b-a;});
-      var chain=Promise.resolve();
-      exact.forEach(function(idx){chain=chain.then(function(){return bindRemove(idx);});});
-      return chain;
-    }
-    if(anyIdx>=0){
-      return bindRemove(anyIdx).then(function(){
-        if(oppIdx<0)return bindAdd(fn,1,bit,opp,anyState,0);
-      });
-    }
-  });
-}
-function slotMapToggle(fn,slot,cb){
-  var on=!!cb.checked;
-  bindMutate(function(){
-    var idx=-1,checked=[];
-    for(var i=0;i<bindCache.length;i++){
-      var b=bindCache[i];
-      if(b.type===3&&b.fn===fn){checked.push(i);if(b.id===slot)idx=i;}
-    }
-    if(!on){if(idx>=0)return bindRemove(idx);return;}
-    if(idx>=0)return;
-    if(checked.length>=2){
-      var oldest=checked[0];
-      return bindRemove(oldest).then(function(){return bindAdd(fn,3,slot,0,fnspeedGet(fn),0);});
-    }
-    return bindAdd(fn,3,slot,0,fnspeedGet(fn),0);
-  });
-}
-function speedMapToggle(fn,col){
-  var next=(speedDisplay(fn)===col)?0:col;
-  fnSpeed[fn]=next;
-  bindMutate(function(){
-    var list=[];
-    for(var i=0;i<bindCache.length;i++){
-      var b=bindCache[i];
-      if(b.fn===fn&&(b.type===1||b.type===3))list.push({i:i,type:b.type,id:b.id,dir:b.dir,mode:b.mode||0});
-    }
-    if(list.length===0)return;
-    var chain=Promise.resolve();
-    list.forEach(function(x){chain=chain.then(function(){return bindAdd(fn,x.type,x.id,x.dir,next,x.mode);});});
-    list.slice().sort(function(a,b){return b.i-a.i;}).forEach(function(x){chain=chain.then(function(){return bindRemove(x.i);});});
-    return chain;
-  });
-}
-function renderOutMap(){
-  var h=['<table class="fnmap-tbl outmap"><thead><tr><th class="lbl" rowspan="2">Кнопка</th>'];
-  for(var f=0;f<=FN_MAX;f++)h.push('<th colspan="2">F'+f+'</th>');
-  h.push('</tr><tr>');
-  for(var f2=0;f2<=FN_MAX;f2++)h.push('<th>В</th><th>Н</th>');
-  h.push('</tr></thead><tbody>');
-  for(var bit=0;bit<9;bit++){
-    h.push('<tr><th class="lbl">'+esc(OUT_LABELS[bit])+'</th>');
-    for(var f3=0;f3<=FN_MAX;f3++){
-      h.push('<td><input class="cbx" type="checkbox"'+(outCellOn(f3,bit,1)?' checked':'')+' onclick="outMapToggle('+f3+','+bit+',1,this)"></td>');
-      h.push('<td><input class="cbx" type="checkbox"'+(outCellOn(f3,bit,2)?' checked':'')+' onclick="outMapToggle('+f3+','+bit+',2,this)"></td>');
-    }
-    h.push('</tr>');
-  }
-  h.push('</tbody></table>');
-  return h.join('');
-}
-function renderSlotTable(){
-  var h=['<table class="fnmap-tbl slottbl"><thead><tr><th class="lbl">Кнопка</th>'];
-  for(var s=1;s<=SOUND_SLOTS;s++)h.push('<th>'+s+'</th>');
-  h.push('</tr></thead><tbody>');
-  for(var f=0;f<=FN_MAX;f++){
-    h.push('<tr><th class="lbl">F'+f+'</th>');
-    for(var s2=1;s2<=SOUND_SLOTS;s2++)h.push('<td><input class="cbx" type="checkbox"'+(slotCellOn(f,s2)?' checked':'')+' onclick="slotMapToggle('+f+','+s2+',this)"></td>');
-    h.push('</tr>');
-  }
-  h.push('</tbody></table>');
-  return h.join('');
-}
-function renderSpeedTable(){
-  var h=['<table class="fnmap-tbl spdtbl"><thead><tr><th class="lbl">Кнопка</th><th>Движ.</th><th>Стоп</th></tr></thead><tbody>'];
-  for(var f=0;f<=FN_MAX;f++){
-    var st=speedDisplay(f);
-    h.push('<tr><th class="lbl">F'+f+'</th>');
-    h.push('<td><input class="cbx" type="checkbox"'+(st===1?' checked':'')+' onclick="speedMapToggle('+f+',1,this)"></td>');
-    h.push('<td><input class="cbx" type="checkbox"'+(st===2?' checked':'')+' onclick="speedMapToggle('+f+',2,this)"></td>');
-    h.push('</tr>');
-  }
-  h.push('</tbody></table>');
-  return h.join('');
-}
-function renderBindTables(){
-  var host=byId('fnmap_rows');if(!host)return;
-  host.innerHTML='<div class="fnmap-sec"><div class="fnmap-cap">Карта выходов</div><div class="fnmap-scroll">'+renderOutMap()+'</div>'
-    +'<div class="fnmap-leg">В — направление движения вперёд</div><div class="fnmap-leg">Н — направление движения назад</div></div>'
-    +'<div class="fnmap-sec"><div class="fnmap-cap">Звуковые слоты</div><div class="fnmap-leg">Не более двух слотов на функцию; выбор третьего заменяет самый ранний.</div><div class="fnmap-scroll">'+renderSlotTable()+'</div></div>'
-    +'<div class="fnmap-sec"><div class="fnmap-cap">Условие скорости</div><div class="fnmap-leg">Движ. — только в движении, Стоп — только при остановке, пусто — в любом состоянии.</div><div class="fnmap-scroll">'+renderSpeedTable()+'</div></div>';
-}
-async function loadFuncMap(){
-  try{
-    var d=await api('/api/func-map?view=bind');
-    if(!d||!d.ok||!d.binds)throw new Error('не удалось');
-    bindCache=d.binds;
-    deriveFnSpeed();
-    renderBindTables();
-    renderFunctions();
-  }catch(e){log('Функции','настройка: '+e.message);}
-}
-
-/* AUX PWM / light effects */
-var auxCfg=[];
-var auxOutNames=['F0F','F0R','1','2','3','4','5','6','7'];
-var auxFxOpts=[{v:1,t:'Лампа'},{v:2,t:'Mars'},{v:3,t:'Ditch'},{v:4,t:'Маяк'},{v:5,t:'Строб'},{v:6,t:'Топка'}];
-function auxFxChecks(ch,eff){
-  var h='';
-  for(var i=0;i<auxFxOpts.length;i++){
-    var on=(eff===auxFxOpts[i].v)?' checked':'';
-    h+='<label class="cb"><input type="checkbox" data-fx="'+auxFxOpts[i].v+'"'+on+' onclick="auxFxToggle('+ch+',this)">'+esc(auxFxOpts[i].t)+'</label>';
-  }
-  return h;
-}
-function renderAuxPwm(){
-  var host=byId('auxpwm_rows');if(!host)return;
-  var rows=[];
-  for(var c=0;c<9;c++){
-    var m=auxCfg[c]||{level:100,effect:0};
-    rows.push('<div class="auxpwm-row"><div class="fnmap-fn">'+esc(auxOutNames[c])+'</div>'
-      +'<div class="fnmap-col"><span class="fnmap-lbl">% ШИМ</span><input class="num" type="number" min="0" max="100" value="'+m.level+'"'+(m.effect?' disabled':'')+' onchange="saveAuxPwm('+c+')"></div>'
-      +'<div class="fnmap-col"><span class="fnmap-lbl">Эффект</span><div class="fnmap-cbs outs">'+auxFxChecks(c,m.effect)+'</div></div>'
-      +'</div>');
-  }
-  host.innerHTML=rows.join('');
-}
-function auxFxToggle(ch,cb){
-  var host=byId('auxpwm_rows');if(!host)return;
-  var row=host.children[ch];if(!row)return;
-  var b=row.querySelectorAll('input[type=checkbox][data-fx]');
-  for(var i=0;i<b.length;i++){if(b[i]!==cb)b[i].checked=false;}
-  var fx=0;
-  for(var i=0;i<b.length;i++){if(b[i].checked){fx=Number(b[i].getAttribute('data-fx'));break;}}
-  var num=row.querySelector('input.num');
-  if(num)num.disabled=(fx!==0);
-  saveAuxPwm(ch);
-}
-async function loadAuxPwm(){
-  try{
-    var d=await api('/api/aux/cfg');
-    if(!d||!d.ok||!d.aux)throw new Error('не удалось');
-    auxCfg=d.aux;
-    renderAuxPwm();
-  }catch(e){log('AUX','PWM: '+e.message);}
-}
-async function saveAuxPwm(ch){
-  var host=byId('auxpwm_rows');if(!host)return;
-  var row=host.children[ch];if(!row)return;
-  var num=row.querySelector('input.num');
-  var level=num?clamp(Number(num.value)||0,0,100):0;
-  var fx=0;
-  var b=row.querySelectorAll('input[type=checkbox][data-fx]');
-  for(var i=0;i<b.length;i++){if(b[i].checked){fx=Number(b[i].getAttribute('data-fx'));break;}}
-  try{
-    var d=await api('/api/aux/cfg?ch='+ch+'&level='+level+'&effect='+fx,{method:'POST'});
-    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'не удалось');
-    auxCfg[ch]={level:level,effect:fx};
-    if(num)num.value=level;
-    log('AUX',auxOutNames[ch]+': '+level+'%, эффект '+(fx?fx:'нет'));
-  }catch(e){log('AUX',auxOutNames[ch]+': '+e.message);}
-}
-
 /* wifi settings */
 var wifiLoaded=false;
 async function loadWifi(){
@@ -1607,13 +1303,12 @@ function fmtUptime(s){
   s=Math.max(0,Math.floor(s));
   var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60),x=s%60;
   function p(n){return (n<10?'0':'')+n;}
-  return (d>0?d+' д ':'')+p(h)+':'+p(m)+':'+p(x);
+  return (d>0?d+' д ':'')+p(h)+' '+p(m)+' '+p(x);
 }
 function renderUptime(){
   var el=byId('uptime');
   var txt=uptimeAtMs?fmtUptime(uptimeBaseSec+(Date.now()-uptimeAtMs)/1000):'—';
   if(el)el.textContent=txt;
-  setText('info_uptime',txt);
 }
 
 /* Online heartbeat: test every 5 s that the device is reachable. A good answer
@@ -1799,8 +1494,6 @@ function loadSettingData(name){
   if(name==='wifi'&&!wifiLoaded){loadWifi();}
   if(name==='bemf'){loadBemfCal();}
   if(name==='cv'){loadCvValues();}
-  if(name==='fnmap'){loadFuncMap();}
-  if(name==='auxpwm'){loadAuxPwm();}
 }
 function showSetting(id){
   currentSetting=id||currentSetting||'panel_bemf';
@@ -1873,7 +1566,6 @@ function init(){
   setActiveCv(1);
   loadCvValues();
   renderMotor();
-  loadFuncMap();
   renderMode();
   loadDevice();
   loadWifi();

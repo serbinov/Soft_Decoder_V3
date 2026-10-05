@@ -7,6 +7,11 @@ editor from `firmware/sound_editor/dist`:
 
 - <http://127.0.0.1:8080/> — main decoder UI
 - <http://127.0.0.1:8080/sound-editor/> — sound graph editor (effect library + patch panel)
+- <http://127.0.0.1:8080/sound-editor/blocks.html> — block constructor (simple locomotive blocks)
+
+The block constructor lists test sounds from the committed `SOUND/` folder via
+`/api/sound-files` and plays them from `/sound-files/<name>` for preview
+auditioning.
 
 Every `/api/*` request is answered with in-memory mock data. The graph API
 (`/api/sound/graph/{capabilities,projects,project,state,asset,validate,save,apply}`)

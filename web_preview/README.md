@@ -35,9 +35,13 @@ Then open <http://127.0.0.1:8080/>.
 ## Notes
 
 - The source file `firmware/web_ui.html` is served with `no-store`, so editing it
-  and reloading the browser shows the change immediately. The sound editor is
-  static: after editing `firmware/sound_editor/src`, rebuild it with
-  `cd firmware/sound_editor && npm run build`.
+  and reloading the browser shows the change immediately.
+- The built sound editor (`firmware/sound_editor/dist`) is committed, so a fresh
+  `git clone` serves `/sound-editor/` without running npm. After editing
+  `firmware/sound_editor/src` you must rebuild it with
+  `cd firmware/sound_editor && npm run build` and commit the updated bundle —
+  otherwise the device build rejects the stale assets (`build-inputs.json`
+  freshness check).
 - `__VERSION__` is shown as `PREVIEW`; state resets when the server restarts.
 - Unknown `/api/*` paths return `{ "ok": false, "error": "..." }` instead of
   breaking the page.

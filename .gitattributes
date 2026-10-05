@@ -1,2 +1,6 @@
 # Git hooks are shell scripts: they must keep LF line endings on all platforms.
 .githooks/* text eol=lf
+
+# The prebuilt sound editor bundle is committed byte-for-byte as produced by the
+# build, so it must not undergo end-of-line conversion on checkout.
+firmware/sound_editor/dist/** -text

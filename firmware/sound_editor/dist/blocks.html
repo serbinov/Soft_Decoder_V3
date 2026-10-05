@@ -10,6 +10,13 @@
     --bg:#0f1420; --panel:#161b26; --panel2:#1e2533; --line:#2b3547;
     --text:#e7ecf5; --muted:#93a0b5; --accent:#4a9eff; --ok:#4caf72;
     --warn:#e0a24a; --err:#e05a5a; --node:#1b2230; --nodehd:#242f42;
+    --stage:#0c1119; --grid:#1a2230; --link:#6f8bb0;
+  }
+  html[data-theme=light]{
+    --bg:#eef1f7; --panel:#ffffff; --panel2:#f4f6fb; --line:#d3dae8;
+    --text:#0b0f16; --muted:#5a6678; --accent:#2f6fd0; --ok:#1f9d63;
+    --warn:#b8791a; --err:#d64545; --node:#ffffff; --nodehd:#eef2f9;
+    --stage:#f7f9fd; --grid:#dde3ee; --link:#8a99b5;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
@@ -39,13 +46,15 @@
   .pal button{display:block;width:100%;text-align:left;margin-bottom:5px}
   .pal button b{display:block;font-weight:600}
   .pal button small{color:var(--muted)}
-  #stage{position:relative;flex:1;overflow:hidden;background:#0c1119}
+  #stage{position:relative;flex:1;overflow:hidden;background:var(--stage)}
   #world{position:absolute;left:0;top:0;transform-origin:0 0;width:6000px;height:4000px}
-  #world.grid-bg{background-image:linear-gradient(#1a2230 1px,transparent 1px),linear-gradient(90deg,#1a2230 1px,transparent 1px);background-size:20px 20px}
+  #world.grid-bg{background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:20px 20px}
   #links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
-  #links path.link{stroke:#6f8bb0;stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
+  #links path.link{stroke:var(--link);stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
   #links path.link:hover{stroke:var(--err)}
   #links path.temp{stroke:var(--accent);stroke-width:2.5;fill:none;stroke-dasharray:6 5;pointer-events:none}
+  #arrow path{stroke:var(--link)}
+  #arrowTemp path{stroke:var(--accent)}
   .node{position:absolute;width:240px;height:80px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
   .node.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(74,158,255,.35)}
   .node.engine{border-color:#e0a24a}
@@ -95,6 +104,7 @@
   <button id="b_outputs" disabled>Выходы</button>
   <button class="apply" id="b_apply" disabled>Применить</button>
   <button onclick="window.location.href='/'">Интерфейс декодера</button>
+  <button id="b_theme" title="Светлая / тёмная тема">☀</button>
   <input type="file" id="f_import" accept=".json,application/json" class="hidden" />
 </header>
 
@@ -153,7 +163,6 @@ const CATALOG=[
   {type:"engine",name:"Двигатель",group:"Основные",kind:"engine",mode:"engine"},
   {type:"horn",name:"Гудок",group:"Сигналы",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
   {type:"whistle",name:"Тифон",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"signal",name:"Короткий сигнал",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"bell",name:"Звонок",group:"Сигналы",kind:"sound",mode:"latched",roles:["sound"]},
   {type:"compressor",name:"Компрессор",group:"Механика",kind:"sound",mode:"loopHeld",roles:["sound"]},
   {type:"brake",name:"Тормоз",group:"Механика",kind:"sound",mode:"latched",roles:["sound"]},
@@ -163,8 +172,7 @@ const CATALOG=[
   {type:"doors",name:"Двери",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"custom",name:"Свой сценарий",group:"Дополнительно",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
   {type:"headlight",name:"Фары",group:"Свет и выходы",kind:"output",mode:"headlight"},
-  {type:"aux",name:"AUX-выход",group:"Свет и выходы",kind:"output",mode:"aux"},
-  {type:"lightfx",name:"Световой эффект",group:"Освещение (AUX)",kind:"output",mode:"aux",fx:true},
+  {type:"aux",name:"AUX-выход",group:"Свет и выходы",kind:"output",mode:"aux",fx:true},
   {type:"logic",name:"Логика",group:"Свет и выходы",kind:"logic",mode:"logic"}
 ];
 const BY_TYPE={};CATALOG.forEach(c=>BY_TYPE[c.type]=c);
@@ -173,8 +181,17 @@ const LEGACY_FX={fx_incandescent:1,fx_mars:2,fx_ditch:3,fx_beacon:4,fx_strobe:5,
 function normalizeProject(p){
   if(!p||!Array.isArray(p.blocks))return p;
   for(const b of p.blocks){
-    if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="lightfx";b.name=b.name||"Световой эффект";}
-    if(b.type==="lightfx"&&b.effect===undefined)b.effect=0;
+    if(b.type==="signal"){b.type="whistle";b.name=b.name||"Тифон";}
+    else if(b.type==="lightfx"){b.type="aux";b.name="AUX-выход";}
+    else if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="aux";b.name="AUX-выход";}
+    if(!BY_TYPE[b.type]){b.type="aux";b.name=b.name||"AUX-выход";}
+    const cat=BY_TYPE[b.type];
+    if(cat&&cat.kind==="output"){
+      if(b.type!=="headlight"&&b.channel===undefined)b.channel=0;
+      if(b.effect===undefined)b.effect=0;
+      if(b.level===undefined)b.level=100;
+    }
+    if(b.trigger===undefined)b.trigger="auto";
   }
   if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
   return p;
@@ -210,7 +227,7 @@ function addBlockTo(p,type){
   const cat=BY_TYPE[type];if(!cat)return null;
   if(type==="engine"&&p.blocks.some(b=>b.type==="engine"))return null;
   const id=nid(type==="engine"?"engine_":"b",p.blocks.map(b=>b.id));
-  const b={id,type,name:cat.name,fn:type==="engine"?8:nextFn(p),trigger:"auto",volume:80,rate:1000,level:80,files:{}};
+  const b={id,type,name:cat.name,fn:type==="engine"?8:nextFn(p),trigger:"auto",volume:80,rate:1000,level:100,files:{}};
   if(cat.kind==="output"){b.channel=0;b.effect=cat.effect||0;b.dir=type==="headlight"?"auto":"any";}
   if(cat.kind==="logic")b.logic=1;
   (cat.roles||[]).forEach(r=>b.files[r]="");
@@ -396,6 +413,9 @@ async function applyOutputs(){
 /* ---- persistence ----------------------------------------------------- */
 function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId}));}catch(e){}}
 function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
+const THEME_KEY="aura_theme";
+function applyTheme(t){if(t!=="light")t="dark";document.documentElement.setAttribute("data-theme",t);const b=$("b_theme");if(b)b.textContent=t==="light"?"☾":"☀";try{localStorage.setItem(THEME_KEY,t);}catch(e){}}
+function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-theme")==="light"?"dark":"light");}
 
 /* ---- rendering ------------------------------------------------------- */
 function renderPalette(){
@@ -625,6 +645,7 @@ $("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],
 $("b_import").onclick=()=>$("f_import").click();
 $("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
+$("b_theme").onclick=toggleTheme;
 $("b_align").onclick=autoLayout;
 $("b_test").onclick=testScheme;
 $("b_validate").onclick=doValidate;
@@ -633,7 +654,7 @@ $("b_outputs").onclick=async()=>{if(busy)return;busy=true;refreshButtons();setSt
 $("b_apply").onclick=doApply;
 
 /* ---- boot ------------------------------------------------------------ */
-loadDraft();if(!project)project=newProject();applyViewport();renderSnapBtn();render();refreshStatus();setInterval(refreshStatus,3000);
+loadDraft();if(!project)project=newProject();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();render();refreshStatus();setInterval(refreshStatus,3000);
 })();
 </script>
 </body>

@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-05 (v0.10) — feat(sound): block editor undo/redo, duplicate/copy/paste and F-key conflict warnings
 - 2026-10-05 (v0.10) — feat(sound): engine direction/random conditions and effect ducking; editor dir/random blocks
 - 2026-10-05 (v0.10) — feat(sound): speed/state triggers, speed bands with protective interval, decel brake
 - 2026-10-05 (v0.10) — feat(sound): shared light/dark theme, AUX/headlight defaults 100%, remove duplicate blocks

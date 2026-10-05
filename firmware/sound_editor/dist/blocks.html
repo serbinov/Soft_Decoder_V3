@@ -81,6 +81,11 @@
   .frow select{flex:1;min-width:0}
   .frow .play{flex:0 0 auto;padding:5px 9px;font-size:12px}
   .diag .ok{color:var(--ok)}
+  .mini svg{width:100%;height:auto;display:block;background:var(--panel2);border:1px solid var(--line);border-radius:6px}
+  .ltable{font-size:11px}
+  .ltable table{width:100%;border-collapse:collapse}
+  .ltable th,.ltable td{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertical-align:top}
+  .ltable th{color:var(--muted);font-weight:600}
   .hint{font-size:11px;color:var(--muted);margin:6px 0}
   footer.foot{display:flex;gap:12px;align-items:center;padding:6px 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
   .diag{max-height:76px;overflow:auto;font-size:11px;width:100%}
@@ -154,6 +159,11 @@
     <div id="inspector"><p class="hint">Выберите блок на холсте или добавьте новый слева.</p></div>
     <h2>Проверка</h2>
     <div id="summary" class="hint"></div>
+    <h2>Схема связей</h2>
+    <div id="mini" class="mini"></div>
+    <button id="b_minipng" class="sm" style="width:100%;margin:6px 0">Скачать картинку</button>
+    <h2>Таблица связей</h2>
+    <div id="linktable" class="ltable"></div>
   </aside>
 </main>
 
@@ -788,7 +798,7 @@ function renderSummary(){
   $("summary").textContent=e+" ошибок / "+w+" предупреждений";
 }
 function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":d.severity==="ok"?"ok":"d")+'">'+esc(d.message)+"</div>").join("");}
-function render(){computeReady();renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();saveDraft();}
+function render(){computeReady();renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();renderMini();renderLinkTable();saveDraft();}
 function isReady(b){
   const cat=BY_TYPE[b.type];if(!cat)return false;
   if(cat.kind==="engine")return !!b.files.idle;
@@ -840,18 +850,69 @@ $("stage").addEventListener("wheel",ev=>{ev.preventDefault();const v=project.edi
 function applyViewport(){const v=project.editor.viewport;$("world").style.transform="translate("+v.x+"px,"+v.y+"px) scale("+v.zoom+")";const st=$("stage");st.style.setProperty("--gstep",(GRID*v.zoom)+"px");st.style.setProperty("--gx",v.x+"px");st.style.setProperty("--gy",v.y+"px");}
 
 /* ---- auto layout ----------------------------------------------------- */
-function autoLayout(){
-  const nodes=project.blocks,indeg={},adj={};
-  nodes.forEach(n=>{indeg[n.id]=0;adj[n.id]=[];});
-  project.links.forEach(l=>{if(adj[l.from]&&indeg[l.to]!==undefined&&BY_TYPE[(nodes.find(n=>n.id===l.from)||{}).type||"x"]&&BY_TYPE[(nodes.find(n=>n.id===l.from)||{}).type].kind!=="output"){adj[l.from].push(l.to);indeg[l.to]++;}});
+function graphLayers(){
+  const nodes=project.blocks,adj={},pred={},indeg={};
+  const kindOf=id=>{const b=nodes.find(n=>n.id===id);return b?BY_TYPE[b.type].kind:"";};
+  nodes.forEach(n=>{adj[n.id]=[];pred[n.id]=[];indeg[n.id]=0;});
+  project.links.forEach(l=>{if(l.from===l.to)return;if(adj[l.from]===undefined||indeg[l.to]===undefined)return;if(kindOf(l.from)==="output")return;adj[l.from].push(l.to);pred[l.to].push(l.from);indeg[l.to]++;});
   const layer={},q=[];
   nodes.forEach(n=>{if(indeg[n.id]===0){layer[n.id]=0;q.push(n.id);}});
   if(!q.length)nodes.forEach((n,i)=>layer[n.id]=i);
-  while(q.length){const u=q.shift();(adj[u]||[]).forEach(v=>{layer[v]=Math.max(layer[v]==null?0:layer[v],layer[u]+1);indeg[v]--;if(indeg[v]===0)q.push(v);});}
+  while(q.length){const u=q.shift();adj[u].forEach(v=>{layer[v]=Math.max(layer[v]==null?0:layer[v],layer[u]+1);if(--indeg[v]===0)q.push(v);});}
   nodes.forEach(n=>{if(layer[n.id]==null)layer[n.id]=0;});
   const cols={};nodes.forEach(n=>{(cols[layer[n.id]]=cols[layer[n.id]]||[]).push(n);});
-  Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(L=>{cols[L].sort((a,b)=>a.y-b.y);cols[L].forEach((n,i)=>{n.x=snapTo(project,40+L*260);n.y=snapTo(project,40+i*140);});});
-  render();setStatus("Блоки выровнены");
+  const order={};Object.keys(cols).forEach(L=>cols[L].forEach((n,i)=>order[n.id]=i));
+  for(let pass=0;pass<3;pass++){
+    Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(L=>{
+      cols[L].forEach(n=>{const ps=pred[n.id].filter(p=>order[p]!=null);n._b=ps.length?ps.reduce((s,p)=>s+order[p],0)/ps.length:(order[n.id]||0);});
+      cols[L].sort((a,b)=>a._b-b._b);cols[L].forEach((n,i)=>order[n.id]=i);
+    });
+  }
+  return {cols,layer};
+}
+function autoLayout(){
+  const {cols}=graphLayers();const COL_W=300,ROW_H=140;
+  Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(L=>{cols[L].forEach((n,i)=>{n.x=snapTo(project,40+L*COL_W);n.y=snapTo(project,40+i*ROW_H);});});
+  render();setStatus("Блоки выровнены по связям");
+}
+function linkCondText(l){
+  const a=project.blocks.find(x=>x.id===l.from);
+  if(l.kind==="gate")return "при двигателе";
+  if(l.kind==="bind")return "F-клавиша источника";
+  if(l.kind==="after"){const ev=(a&&a.outEvent==="start")?"напрямую":"после события";const d=(a&&a.outDelay)?(", задержка "+a.outDelay+" мс"):"";return ev+d;}
+  return "связь";
+}
+function renderMini(){
+  const box=$("mini");const {cols}=graphLayers();
+  const layers=Object.keys(cols).map(Number).sort((a,b)=>a-b);
+  if(!layers.length||!project.blocks.length){box.innerHTML='<div class="hint">Нет блоков.</div>';return;}
+  const maxRows=Math.max.apply(null,layers.map(L=>cols[L].length));
+  const W=280,rowH=22,padX=6,padY=8,nodeW=46,nodeH=16;
+  const colX=L=>layers.length>1?padX+(W-2*padX-nodeW)*layers.indexOf(L)/(layers.length-1):padX;
+  const H=padY*2+(maxRows-1)*rowH+nodeH;
+  const pos={};layers.forEach(L=>cols[L].forEach((n,i)=>{pos[n.id]={x:colX(L),y:padY+i*rowH};}));
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg"><defs><marker id="marm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10" fill="none" stroke="#8aa2c0" stroke-width="1.6"/></marker></defs>';
+  project.links.forEach(l=>{const a=pos[l.from],b=pos[l.to];if(!a||!b)return;
+    svg+='<line x1="'+(a.x+nodeW)+'" y1="'+(a.y+nodeH/2)+'" x2="'+b.x+'" y2="'+(b.y+nodeH/2)+'" stroke="#8aa2c0" stroke-width="1" marker-end="url(#marm)"/>';});
+  layers.forEach(L=>cols[L].forEach(n=>{const p=pos[n.id];const c=GROUP_COLORS[(BY_TYPE[n.type]||{}).group]||"#888";
+    svg+='<rect x="'+p.x+'" y="'+p.y+'" width="'+nodeW+'" height="'+nodeH+'" rx="3" fill="'+hexA(c,0.35)+'" stroke="'+c+'"/>';}));
+  svg+='</svg>';box.innerHTML=svg;
+}
+function renderLinkTable(){
+  const box=$("linktable");
+  if(!project.links.length){box.innerHTML='<div class="hint">Связей нет.</div>';return;}
+  const rows=project.links.map(l=>{const a=project.blocks.find(x=>x.id===l.from),c=project.blocks.find(x=>x.id===l.to);
+    return '<tr><td>'+esc(a?a.name:"?")+'</td><td>→</td><td>'+esc(c?c.name:"?")+'</td><td>'+esc(linkCondText(l))+'</td></tr>';}).join("");
+  box.innerHTML='<table><thead><tr><th>Источник</th><th></th><th>Цель</th><th>Условие</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function exportMiniPng(){
+  const svg=$("mini").querySelector("svg");if(!svg){setStatus("Нет схемы для экспорта");return;}
+  const vb=svg.viewBox.baseVal;const s=new XMLSerializer().serializeToString(svg);const img=new Image();
+  img.onload=()=>{const cv=document.createElement("canvas");cv.width=vb.width*3;cv.height=vb.height*3;const ctx=cv.getContext("2d");
+    ctx.fillStyle=getComputedStyle(document.body).backgroundColor||"#0f1420";ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(img,0,0,cv.width,cv.height);
+    const a=document.createElement("a");a.href=cv.toDataURL("image/png");a.download=project.id+"-links.png";a.click();setStatus("Картинка сохранена");};
+  img.onerror=()=>setStatus("Не удалось сформировать картинку");
+  img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(s);
 }
 
 /* ---- toolbar --------------------------------------------------------- */
@@ -864,6 +925,7 @@ $("b_theme").onclick=toggleTheme;
 $("b_pal").onclick=()=>document.body.classList.toggle("show-pal");
 $("b_insp").onclick=()=>document.body.classList.toggle("show-insp");
 $("b_align").onclick=autoLayout;
+$("b_minipng").onclick=exportMiniPng;
 $("b_undo").onclick=undo;$("b_redo").onclick=redo;$("b_dup").onclick=duplicateSelected;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))return;

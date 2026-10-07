@@ -4,3 +4,16 @@
 # The prebuilt sound editor bundle is committed byte-for-byte as produced by the
 # build, so it must not undergo end-of-line conversion on checkout.
 firmware/sound_editor/dist/** -text
+
+# The sound editor sources are hashed by tools/gen_sound_editor.py and compared
+# against dist/build-inputs.json, so they must check out with LF on every
+# platform. Otherwise core.autocrlf rewrites them to CRLF on Windows and the
+# firmware build rejects the bundle as "source changed after build".
+firmware/sound_editor/index.html text eol=lf
+firmware/sound_editor/package.json text eol=lf
+firmware/sound_editor/package-lock.json text eol=lf
+firmware/sound_editor/tsconfig.json text eol=lf
+firmware/sound_editor/vite.config.ts text eol=lf
+firmware/sound_editor/src/** text eol=lf
+firmware/sound_editor/scripts/** text eol=lf
+firmware/sound_editor/public/** text eol=lf

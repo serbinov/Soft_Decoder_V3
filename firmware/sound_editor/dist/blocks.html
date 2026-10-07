@@ -109,36 +109,37 @@
 </head>
 <body>
 <header class="top">
-  <button id="b_pal" class="mob" title="Палитра">☰</button>
-  <div class="brand">AURA-X <span>КОНСТРУКТОР БЛОКОВ</span></div>
-  <div class="status"><i class="dot" id="on"></i><span id="on_txt">Нет связи</span></div>
+  <button id="b_pal" class="mob" title="Палитра" data-i18n-title="palette">☰</button>
+  <div class="brand">AURA-X <span data-i18n="brand_sub">КОНСТРУКТОР БЛОКОВ</span></div>
+  <div class="status"><i class="dot" id="on"></i><span id="on_txt" data-i18n="offline">Нет связи</span></div>
   <div class="sep"></div>
-  <button id="b_new">Новая</button>
-  <button id="b_import">Импорт</button>
-  <button id="b_export">Экспорт</button>
+  <button id="b_new" data-i18n="new">Новая</button>
+  <button id="b_import" data-i18n="import">Импорт</button>
+  <button id="b_export" data-i18n="export">Экспорт</button>
   <div class="sep"></div>
   <button id="b_snap" class="on">Сетка: вкл</button>
-  <button id="b_align">Выровнять</button>
-  <button id="b_undo" title="Отменить (Ctrl+Z)">↶</button>
-  <button id="b_redo" title="Повторить (Ctrl+Y)">↷</button>
-  <button id="b_dup" title="Дублировать (Ctrl+D)">Дубль</button>
+  <button id="b_align" data-i18n="align">Выровнять</button>
+  <button id="b_undo" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip">↶</button>
+  <button id="b_redo" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip">↷</button>
+  <button id="b_dup" title="Дублировать (Ctrl+D)" data-i18n-title="dup_tip" data-i18n="dup">Дубль</button>
   <div class="grow"></div>
-  <button id="b_scheme" title="Схема и таблица связей" aria-label="Схема и связи"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="7" height="6" rx="1"/><rect x="15" y="3" width="7" height="6" rx="1"/><rect x="8" y="15" width="8" height="6" rx="1"/><path d="M9 6h6M5 9v3h7v3M19 9v3h-7"/></svg></button>
-  <button id="b_test">▶ Тест</button>
-  <button id="b_validate">Проверить</button>
-  <button class="primary" id="b_save" disabled>Сохранить</button>
-  <button id="b_outputs" disabled>Выходы</button>
-  <button id="b_impout" disabled title="Загрузить привязки с устройства">Импорт выходов</button>
-  <button class="apply" id="b_apply" disabled>Применить</button>
-  <button onclick="window.location.href='/'">Интерфейс декодера</button>
-  <button id="b_theme" title="Светлая / тёмная тема">☀</button>
-  <button id="b_insp" class="mob" title="Настройки">⚙</button>
+  <button id="b_scheme" title="Схема и таблица связей" aria-label="Схема и связи" data-i18n-title="scheme_tip" data-i18n-aria="scheme_aria"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="7" height="6" rx="1"/><rect x="15" y="3" width="7" height="6" rx="1"/><rect x="8" y="15" width="8" height="6" rx="1"/><path d="M9 6h6M5 9v3h7v3M19 9v3h-7"/></svg></button>
+  <button id="b_test" data-i18n="test">▶ Тест</button>
+  <button id="b_validate" data-i18n="validate">Проверить</button>
+  <button class="primary" id="b_save" disabled data-i18n="save">Сохранить</button>
+  <button id="b_outputs" disabled data-i18n="outputs">Выходы</button>
+  <button id="b_impout" disabled title="Загрузить привязки с устройства" data-i18n-title="impout_tip" data-i18n="impout">Импорт выходов</button>
+  <button class="apply" id="b_apply" disabled data-i18n="apply">Применить</button>
+  <button onclick="window.location.href='/'"><span data-i18n="to_decoder">Интерфейс декодера</span></button>
+  <button id="b_theme" title="Светлая / тёмная тема" data-i18n-title="theme_tip">☀</button>
+  <button id="b_lang" title="Switch to English" data-i18n-title="lang_tip">RU</button>
+  <button id="b_insp" class="mob" title="Настройки" data-i18n-title="insp_tip">⚙</button>
   <input type="file" id="f_import" accept=".json,application/json" class="hidden" />
 </header>
 
 <main>
   <aside class="left">
-    <h2>Готовые блоки</h2>
+    <h2 data-i18n="ready_blocks">Готовые блоки</h2>
     <div class="pal" id="palette"></div>
   </aside>
 
@@ -161,26 +162,26 @@
   </section>
 
   <aside class="right">
-    <h2>Настройка блока</h2>
-    <div id="inspector"><p class="hint">Выберите блок на холсте или добавьте новый слева.</p></div>
-    <h2>Проверка</h2>
+    <h2 data-i18n="block_setup">Настройка блока</h2>
+    <div id="inspector"><p class="hint" data-i18n="select_hint">Выберите блок на холсте или добавьте новый слева.</p></div>
+    <h2 data-i18n="check">Проверка</h2>
     <div id="summary" class="hint"></div>
   </aside>
 </main>
 
 <div id="schemeModal" class="modal hidden">
   <div class="modal-box">
-    <div class="modal-hd"><b>Схема и таблица связей</b><button id="m_close" title="Закрыть">✕</button></div>
+    <div class="modal-hd"><b data-i18n="scheme_title">Схема и таблица связей</b><button id="m_close" title="Закрыть" data-i18n-title="close_tip">✕</button></div>
     <div class="modal-bd">
       <div id="mini" class="mini"></div>
-      <div class="row" style="margin:8px 0"><button id="b_minipng" class="sm">Скачать картинку</button><button id="b_minitxt" class="sm">Скачать текст</button></div>
+      <div class="row" style="margin:8px 0"><button id="b_minipng" class="sm" data-i18n="download_png">Скачать картинку</button><button id="b_minitxt" class="sm" data-i18n="download_txt">Скачать текст</button></div>
       <div id="linktable" class="ltable"></div>
     </div>
   </div>
 </div>
 
 <footer class="foot">
-  <span id="status_txt">Готово</span>
+  <span id="status_txt" data-i18n="ready">Готово</span>
   <span class="grow"></span>
   <span id="counts"></span>
   <div class="diag" id="diag"></div>
@@ -190,42 +191,156 @@
 (function(){
 "use strict";
 
+/* ---- i18n (Russian / English), chosen by ?lang= or the site preference --- */
+const I18N={
+ru:{
+doc_title:"Конструктор звуковых блоков",brand_sub:"КОНСТРУКТОР БЛОКОВ",palette:"Палитра",
+connected:"Подключено",offline:"Нет связи",
+new:"Новая",import:"Импорт",export:"Экспорт",align:"Выровнять",dup:"Дубль",
+snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",
+undo_tip:"Отменить (Ctrl+Z)",redo_tip:"Повторить (Ctrl+Y)",dup_tip:"Дублировать (Ctrl+D)",
+scheme_tip:"Схема и таблица связей",scheme_aria:"Схема и связи",
+test:"▶ Тест",validate:"Проверить",save:"Сохранить",outputs:"Выходы",
+impout_tip:"Загрузить привязки с устройства",impout:"Импорт выходов",apply:"Применить",
+to_decoder:"Интерфейс декодера",theme_tip:"Светлая / тёмная тема",insp_tip:"Настройки",lang_tip:"Switch to English",
+ready_blocks:"Готовые блоки",block_setup:"Настройка блока",check:"Проверка",
+select_hint:"Выберите блок на холсте или добавьте новый слева.",
+scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Скачать картинку",download_txt:"Скачать текст",ready:"Готово",
+st_checking:"Проверка...",st_has_errors:"Есть ошибки",st_check_ok:"Проверка пройдена",st_error_prefix:"Ошибка: ",
+st_saving:"Сохранение...",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранена версия ",st_not_saved:"Не сохранено: ",
+st_applying:"Применение...",st_applied_prefix:"Применена версия ",st_applied_suffix:", выходы записаны",st_not_applied:"Не применено: ",
+err_not_json:"Устройство вернуло не-JSON (",err_http:"Ошибка ",
+pal_fx:" · выбор эффекта",ns_steps:"Ступени: ",ns_prot:" · защита ",ns_speed:"Скорость % · диапазонов ",ns_decel:" · по замедлению",ns_file_none:" · файл не задан",
+ns_random_a:" · случайно из ",ns_random_b:" звуков",ns_files_none:"файлы не заданы",tip_configured:"Блок настроен",tip_del_block:"Удалить блок",port_in:"вход",port_out:"выход",
+opt_none:"— нет —",opt_on_device:"На устройстве",opt_test:"Тест (SOUND)",tip_play:"Прослушать",
+st_sound_none:"Звук не выбран",st_playing_dev_a:"Играю ",st_playing_dev_b:" (устройство)",st_not_playing:"Не играет: ",st_playing_test_b:" (тест)",st_preview_only:"Прослушивание доступно в превью (SOUND)",
+tb_no_band:"Не задан ни один диапазон скорости",tb_bands_a:"Диапазонов: ",tb_prot:", защита ",tb_no_sound:"Не задан ни один звук",tb_random_a:"Случайно из ",tb_random_b:" звуков",
+tb_no_wav:"Не задан ни один WAV-файл",tb_files:"Файлы: ",tb_no_idle:"Нет файла холостого хода",tb_idle:"Холостой ход: ",tb_no_source:"Не задан источник (F-клавиша или связь)",tb_fn:"F-клавиша: F",
+tb_result_a:"Тест блока «",tb_result_b:"»: ",tb_errors:" ошибок",tb_ok:"в порядке",
+st_testing:"Тест схемы...",ts_not_ready_a:"Блок «",ts_not_ready_b:"» не готов",ts_result_a:"Тест схемы: ",ts_result_ok_a:" блоков готово, ",ts_result_err_b:" с ошибками",ts_check_list:", проверьте список",ts_can_save:" — можно сохранять",st_test_error:"Ошибка теста: ",
+link_kind_gate:"При двигателе",link_kind_bind:"Выход от F-клавиши",link_kind_after:"Цепочка звуков",link_kind:"Связь",
+li_link_a:"Связь: «",li_link_b:"» → «",li_link_c:"»",li_type:"Тип",
+li_after_a:"Событие и задержку задаёт блок-источник «",li_after_b:"» (выход: ",li_direct:"напрямую",li_after_event:"после события",li_delay_mid:", задержка ",li_delay_end:" мс).",
+done:"Готово",li_del:"Удалить связь",
+f_name:"Название",f_hyst:"Защитный интервал, %",f_volume:"Громкость",f_bands_hint:"Диапазоны скорости в процентах; шаг по умолчанию 25 %.",f_from:"От %",f_to:"До %",f_add_band:"+ Диапазон",
+f_fn:"F-клавиша",f_random_hint:"При нажатии F проигрывается один случайный звук из списка.",f_add_sound:"+ Звук",f_brightness:"Яркость %",f_trigger:"Запуск",f_prot:"Защита %",f_direction:"Направление",
+dir_fwd:"Вперёд",dir_rev:"Назад",f_out:"Выход",out_direct:"Напрямую",out_after:"После события",f_out_delay:"Выход: задержка, мс",f_out_delay_hint:"0 — сразу; применяется к связям «к другому блоку».",
+f_channel:"Канал",vol_master:"Общая",vol_engine:"Двигатель",vol_effects:"Эффекты",f_levels_hint:"Уровни громкости хранятся в схеме и записываются на устройство кнопкой «Применить».",st_cant_dup:"Этот блок нельзя дублировать",f_effect:"Эффект",f_logic:"Операция",f_engine_start:"Начало (запуск)",f_engine_idle:"Холостой ход (цикл)",f_steps:"Ступени движения, % скорости",f_del_step:"Удалить ступень",f_add_step:"+ Ступень",f_stop:"Останов",
+f_input_hint:"Вход блока можно соединить с другим блоком — тогда F-клавиша берётся от него.",f_speed_hint:"Звук меняется по скорости поезда; защитный интервал не даёт дребезжать на границах.",f_test:"▶ Тест блока",f_delete:"Удалить",
+st_cant_dup_engine:"Двигатель нельзя дублировать",st_duplicated:"Блок продублирован",st_nothing_copy:"Нет блока для копирования",st_copied:"Блок скопирован",st_clip_empty:"Буфер пуст",st_pasted:"Блок вставлен",
+sum_states:"Состояний ",sum_transitions:" · переходов ",sum_effects:" · эффектов ",sum_blocks:" · блоков ",sum_errors_mid:" ошибок / ",sum_warnings:" предупреждений",
+st_aligned:"Блоки выровнены по связям",st_undone:"Отменено",st_redone:"Повторено",
+lc_gate:"при двигателе",lc_bind:"F-клавиша источника",lc_direct:"напрямую",lc_after_event:"после события",lc_delay_a:", задержка ",lc_delay_b:" мс",lc_link:"связь",
+mini_none:"Нет блоков.",lt_none:"Связей нет.",lt_source:"Источник",lt_target:"Цель",lt_condition:"Условие",
+bd_run:" · запуск: ",bd_idle:" · холостой: ",bd_stop:" · стоп: ",bd_step_a:"ступень ",bd_prot_a:"защита ",bd_out_mid:" · выход: ",bd_delay_a:", задержка ",bd_delay_b:" мс",bd_random:" · случайно из:",bd_trigger:"запуск: ",tr_auto:"авто",bd_speed_a:"скорость ",bd_speed_b:"% · защита ",bd_dir:"направление: ",bd_dir_fwd:"вперёд",bd_dir_rev:"назад",bd_out_a:"выход: ",
+bt_scheme:"Схема: ",bt_counts_a:"Блоков: ",bt_counts_b:", связей: ",bt_blocks:"== Блоки ==",bt_links:"== Связи ==",
+st_no_scheme:"Нет схемы",st_png_saved:"Картинка сохранена",st_png_fail:"Не удалось сформировать картинку",st_txt_saved:"Описание сохранено",
+confirm_new:"Создать новую схему? Несохранённые правки будут потеряны.",st_new_scheme:"Новая схема",err_not_blocks_file:"Это не файл блоков",err_import:"Импорт не удался: ",st_imported:"Импортирована схема",
+st_writing_outputs:"Запись выходов...",st_outputs_written:"Выходы записаны",st_outputs_not_written:"Выходы не записаны: ",st_impout_a:"Импортировано выходов: ",st_impout_none:"Новых выходов нет",
+new_scheme_name:"Новая схема тепловоза",
+s_engine_off:"Выкл / тихий вход",s_engine_start:"Запуск двигателя",s_engine_idle:"Холостой ход",s_engine_run:"Движение ",s_engine_stop:"Останов двигателя",s_silent_in:" / тихий вход",s_choose:" / выбор",s_short:" (короткий)",s_begin:" начало",s_cycle:" цикл",s_finish:" конец",s_delay:" / задержка",
+v_states_a:"Состояний ",v_states_b:" > ",v_states_c:". Упростите схему.",v_sound_states_a:"Звуковых состояний > ",v_transitions_a:"Переходов ",v_transitions_b:" > ",v_effects_a:"Эффектов > ",
+v_engine_entry:"Вход двигателя должен быть тихим.",v_effect_entry:"Вход эффекта должен быть тихим.",v_dup_prio_a:"Дублирующийся приоритет у источника ",v_no_state_a:"Нет состояния ",v_no_wav_a:"Нет WAV на устройстве: ",v_no_wav_b:" (проверьте перед применением).",
+v_bad_aux:"Недопустимый AUX-канал.",v_need_fn:"Задайте F-клавишу или связь с блоком.",v_engine_word:"Двигатель",v_name_l:"«",v_name_r:"»",v_multiple_a:" используется несколькими блоками: "
+},
+en:{
+doc_title:"Sound block builder",brand_sub:"BLOCK BUILDER",palette:"Palette",
+connected:"Connected",offline:"No connection",
+new:"New",import:"Import",export:"Export",align:"Align",dup:"Duplicate",
+snap_a:"Grid: ",snap_on:"on",snap_off:"off",
+undo_tip:"Undo (Ctrl+Z)",redo_tip:"Redo (Ctrl+Y)",dup_tip:"Duplicate (Ctrl+D)",
+scheme_tip:"Diagram and link table",scheme_aria:"Diagram and links",
+test:"▶ Test",validate:"Validate",save:"Save",outputs:"Outputs",
+impout_tip:"Load bindings from the device",impout:"Import outputs",apply:"Apply",
+to_decoder:"Decoder interface",theme_tip:"Light / dark theme",insp_tip:"Settings",lang_tip:"Переключить на русский",
+ready_blocks:"Ready blocks",block_setup:"Block settings",check:"Validation",
+select_hint:"Select a block on the canvas or add a new one on the left.",
+scheme_title:"Diagram and link table",close_tip:"Close",download_png:"Download image",download_txt:"Download text",ready:"Ready",
+st_checking:"Validating...",st_has_errors:"There are errors",st_check_ok:"Validation passed",st_error_prefix:"Error: ",
+st_saving:"Saving...",err_fix_before_save:"Fix the errors before saving",st_saved_version:"Saved version ",st_not_saved:"Not saved: ",
+st_applying:"Applying...",st_applied_prefix:"Applied version ",st_applied_suffix:", outputs written",st_not_applied:"Not applied: ",
+err_not_json:"Device returned non-JSON (",err_http:"Error ",
+pal_fx:" · choose effect",ns_steps:"Steps: ",ns_prot:" · margin ",ns_speed:"Speed % · bands ",ns_decel:" · deceleration-based",ns_file_none:" · no file set",
+ns_random_a:" · randomly from ",ns_random_b:" sounds",ns_files_none:"no files set",tip_configured:"Block configured",tip_del_block:"Delete block",port_in:"in",port_out:"out",
+opt_none:"— none —",opt_on_device:"On device",opt_test:"Test (SOUND)",tip_play:"Preview",
+st_sound_none:"No sound selected",st_playing_dev_a:"Playing ",st_playing_dev_b:" (device)",st_not_playing:"Not playing: ",st_playing_test_b:" (test)",st_preview_only:"Preview is available in the demo (SOUND)",
+tb_no_band:"No speed band is set",tb_bands_a:"Bands: ",tb_prot:", margin ",tb_no_sound:"No sound is set",tb_random_a:"Randomly from ",tb_random_b:" sounds",
+tb_no_wav:"No WAV file is set",tb_files:"Files: ",tb_no_idle:"No idle file",tb_idle:"Idle: ",tb_no_source:"No source set (F-key or link)",tb_fn:"F-key: F",
+tb_result_a:"Block test \"",tb_result_b:"\": ",tb_errors:" errors",tb_ok:"OK",
+st_testing:"Testing scheme...",ts_not_ready_a:"Block \"",ts_not_ready_b:"\" is not ready",ts_result_a:"Scheme test: ",ts_result_ok_a:" blocks ready, ",ts_result_err_b:" with errors",ts_check_list:", check the list",ts_can_save:" — you can save",st_test_error:"Test error: ",
+link_kind_gate:"When engine runs",link_kind_bind:"Output from F-key",link_kind_after:"Sound chain",link_kind:"Link",
+li_link_a:"Link: \"",li_link_b:"\" → \"",li_link_c:"\"",li_type:"Type",
+li_after_a:"The event and delay are set by the source block \"",li_after_b:"\" (output: ",li_direct:"direct",li_after_event:"after event",li_delay_mid:", delay ",li_delay_end:" ms).",
+done:"Done",li_del:"Delete link",
+f_name:"Name",f_hyst:"Margin, %",f_volume:"Volume",f_bands_hint:"Speed bands in percent; the default step is 25%.",f_from:"From %",f_to:"To %",f_add_band:"+ Band",
+f_fn:"F-key",f_random_hint:"Pressing F plays one random sound from the list.",f_add_sound:"+ Sound",f_brightness:"Brightness %",f_trigger:"Trigger",f_prot:"Margin %",f_direction:"Direction",
+dir_fwd:"Forward",dir_rev:"Reverse",f_out:"Output",out_direct:"Direct",out_after:"After event",f_out_delay:"Output: delay, ms",f_out_delay_hint:"0 — immediately; applies to links \"to another block\".",
+f_channel:"Channel",vol_master:"Master",vol_engine:"Engine",vol_effects:"Effects",f_levels_hint:"Volume levels are stored in the scheme and written to the device with the Apply button.",st_cant_dup:"This block cannot be duplicated",f_effect:"Effect",f_logic:"Operation",f_engine_start:"Start (engine start)",f_engine_idle:"Idle (loop)",f_steps:"Motion steps, % speed",f_del_step:"Delete step",f_add_step:"+ Step",f_stop:"Stop",
+f_input_hint:"The block input can be linked to another block — then the F-key is taken from it.",f_speed_hint:"The sound changes with train speed; the margin prevents flicker at the boundaries.",f_test:"▶ Test block",f_delete:"Delete",
+st_cant_dup_engine:"The engine cannot be duplicated",st_duplicated:"Block duplicated",st_nothing_copy:"No block to copy",st_copied:"Block copied",st_clip_empty:"Clipboard is empty",st_pasted:"Block pasted",
+sum_states:"States ",sum_transitions:" · transitions ",sum_effects:" · effects ",sum_blocks:" · blocks ",sum_errors_mid:" errors / ",sum_warnings:" warnings",
+st_aligned:"Blocks aligned by links",st_undone:"Undone",st_redone:"Redone",
+lc_gate:"when engine runs",lc_bind:"source F-key",lc_direct:"direct",lc_after_event:"after event",lc_delay_a:", delay ",lc_delay_b:" ms",lc_link:"link",
+mini_none:"No blocks.",lt_none:"No links.",lt_source:"Source",lt_target:"Target",lt_condition:"Condition",
+bd_run:" · start: ",bd_idle:" · idle: ",bd_stop:" · stop: ",bd_step_a:"step ",bd_prot_a:"margin ",bd_out_mid:" · output: ",bd_delay_a:", delay ",bd_delay_b:" ms",bd_random:" · randomly from:",bd_trigger:"trigger: ",tr_auto:"auto",bd_speed_a:"speed ",bd_speed_b:"% · margin ",bd_dir:"direction: ",bd_dir_fwd:"forward",bd_dir_rev:"reverse",bd_out_a:"output: ",
+bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"== Blocks ==",bt_links:"== Links ==",
+st_no_scheme:"No scheme",st_png_saved:"Image saved",st_png_fail:"Failed to generate the image",st_txt_saved:"Description saved",
+confirm_new:"Create a new scheme? Unsaved changes will be lost.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",
+st_writing_outputs:"Writing outputs...",st_outputs_written:"Outputs written",st_outputs_not_written:"Outputs not written: ",st_impout_a:"Outputs imported: ",st_impout_none:"No new outputs",
+new_scheme_name:"New locomotive scheme",
+s_engine_off:"Off / silent entry",s_engine_start:"Engine start",s_engine_idle:"Idle",s_engine_run:"Moving ",s_engine_stop:"Engine stop",s_silent_in:" / silent entry",s_choose:" / pick",s_short:" (short)",s_begin:" start",s_cycle:" loop",s_finish:" end",s_delay:" / delay",
+v_states_a:"States ",v_states_b:" > ",v_states_c:". Simplify the scheme.",v_sound_states_a:"Sound states > ",v_transitions_a:"Transitions ",v_transitions_b:" > ",v_effects_a:"Effects > ",
+v_engine_entry:"The engine entry must be silent.",v_effect_entry:"The effect entry must be silent.",v_dup_prio_a:"Duplicate priority at source ",v_no_state_a:"No state ",v_no_wav_a:"No WAV on the device: ",v_no_wav_b:" (check before applying).",
+v_bad_aux:"Invalid AUX channel.",v_need_fn:"Set an F-key or a link to a block.",v_engine_word:"Engine",v_name_l:"\"",v_name_r:"\"",v_multiple_a:" is used by several blocks: "
+}
+};
+let lang="ru";
+function detectLang(){
+  try{const q=new URLSearchParams(location.search).get("lang");if(q==="ru"||q==="en")return q;}catch(e){}
+  try{const s=localStorage.getItem("aura_lang");if(s==="ru"||s==="en")return s;}catch(e){}
+  return "ru";
+}
+function t(k){const d=I18N[lang]||I18N.ru;return (d&&d[k]!=null)?d[k]:((I18N.ru[k]!=null)?I18N.ru[k]:k);}
+function tr(v){if(v&&typeof v==="object")return (v[lang]!=null)?v[lang]:v.ru;return v;}
+
 const LIMITS={states:57,soundStates:31,transitions:128,effects:24,assets:31,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
 const GRID=20;const NODE_W=240;const NODE_H=120;const SPEED_STEP=25;const SPEED_HYST=5;
 
 /* ---- catalogs -------------------------------------------------------- */
 const AUX_NAMES=["AUX1","AUX2","AUX3","AUX4","AUX5","AUX6","AUX7"];
-const LIGHT_FX=[{v:0,n:"Постоянный"},{v:1,n:"Лампа накаливания"},{v:2,n:"Марс"},{v:3,n:"Ходовые"},{v:4,n:"Маяк"},{v:5,n:"Строб"},{v:6,n:"Топка"}];
-const LOGIC_OPS=[{v:1,n:"Mute стоп"},{v:2,n:"Mute ход"},{v:3,n:"Mute свет"},{v:4,n:"Удержание хода"},{v:5,n:"Выбег"},{v:6,n:"Дин. тормоз"},{v:7,n:"Набор позиции"},{v:8,n:"Сброс позиции"}];
+const LIGHT_FX=[{v:0,n:{ru:"Постоянный",en:"Constant"}},{v:1,n:{ru:"Лампа накаливания",en:"Incandescent"}},{v:2,n:{ru:"Марс",en:"Mars"}},{v:3,n:{ru:"Ходовые",en:"Ditch lights"}},{v:4,n:{ru:"Маяк",en:"Beacon"}},{v:5,n:{ru:"Строб",en:"Strobe"}},{v:6,n:{ru:"Топка",en:"Firebox"}}];
+const LOGIC_OPS=[{v:1,n:{ru:"Mute стоп",en:"Mute stop"}},{v:2,n:{ru:"Mute ход",en:"Mute move"}},{v:3,n:{ru:"Mute свет",en:"Mute lights"}},{v:4,n:{ru:"Удержание хода",en:"Hold motion"}},{v:5,n:{ru:"Выбег",en:"Coast"}},{v:6,n:{ru:"Дин. тормоз",en:"Dynamic brake"}},{v:7,n:{ru:"Набор позиции",en:"Position up"}},{v:8,n:{ru:"Сброс позиции",en:"Position reset"}}];
 const CATALOG=[
-  {type:"engine",name:"Двигатель",group:"Основные",kind:"engine",mode:"engine"},
-  {type:"horn",name:"Гудок",group:"Сигналы",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
-  {type:"whistle",name:"Тифон",group:"Сигналы",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"bell",name:"Звонок",group:"Сигналы",kind:"sound",mode:"latched",roles:["sound"]},
-  {type:"random",name:"Случайный звук",group:"Сигналы",kind:"sound",mode:"random"},
-  {type:"compressor",name:"Компрессор",group:"Механика",kind:"sound",mode:"loopHeld",roles:["sound"]},
-  {type:"brake",name:"Тормоз",group:"Механика",kind:"sound",mode:"decel",roles:["sound"]},
-  {type:"coupler",name:"Сцепка",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"sander",name:"Песочница",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"pantograph",name:"Токоприёмник",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"doors",name:"Двери",group:"Механика",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"speed",name:"Скоростной звук",group:"Механика",kind:"sound",mode:"speed"},
-  {type:"custom",name:"Свой сценарий",group:"Дополнительно",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
-  {type:"headlight",name:"Фары",group:"Свет и выходы",kind:"output",mode:"headlight"},
-  {type:"aux",name:"AUX-выход",group:"Свет и выходы",kind:"output",mode:"aux",fx:true},
-  {type:"logic",name:"Логика",group:"Свет и выходы",kind:"logic",mode:"logic"}
+  {type:"engine",name:{ru:"Двигатель",en:"Engine"},group:"main",kind:"engine",mode:"engine"},
+  {type:"volume",name:{ru:"Громкость",en:"Volume"},group:"main",kind:"setting",mode:"volume"},
+  {type:"horn",name:{ru:"Гудок",en:"Horn"},group:"signals",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
+  {type:"whistle",name:{ru:"Тифон",en:"Whistle"},group:"signals",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"bell",name:{ru:"Звонок",en:"Bell"},group:"signals",kind:"sound",mode:"latched",roles:["sound"]},
+  {type:"random",name:{ru:"Случайный звук",en:"Random sound"},group:"signals",kind:"sound",mode:"random"},
+  {type:"compressor",name:{ru:"Компрессор",en:"Compressor"},group:"mech",kind:"sound",mode:"loopHeld",roles:["sound"]},
+  {type:"brake",name:{ru:"Тормоз",en:"Brake"},group:"mech",kind:"sound",mode:"decel",roles:["sound"]},
+  {type:"coupler",name:{ru:"Сцепка",en:"Coupler"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"sander",name:{ru:"Песочница",en:"Sander"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"pantograph",name:{ru:"Токоприёмник",en:"Pantograph"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"doors",name:{ru:"Двери",en:"Doors"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"speed",name:{ru:"Скоростной звук",en:"Speed sound"},group:"mech",kind:"sound",mode:"speed"},
+  {type:"custom",name:{ru:"Свой сценарий",en:"Custom scenario"},group:"extra",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
+  {type:"headlight",name:{ru:"Фары",en:"Headlights"},group:"light",kind:"output",mode:"headlight"},
+  {type:"aux",name:{ru:"AUX-выход",en:"AUX output"},group:"light",kind:"output",mode:"aux",fx:true},
+  {type:"logic",name:{ru:"Логика",en:"Logic"},group:"light",kind:"logic",mode:"logic"}
 ];
 const BY_TYPE={};CATALOG.forEach(c=>BY_TYPE[c.type]=c);
-const GROUP_COLORS={"Основные":"#e0a24a","Сигналы":"#4a9eff","Механика":"#5fbf7a","Свет и выходы":"#e0d24a","Освещение (AUX)":"#e08a4a","Дополнительно":"#a06fe0"};
+const GROUP_COLORS={main:"#e0a24a",signals:"#4a9eff",mech:"#5fbf7a",light:"#e0d24a",aux:"#e08a4a",extra:"#a06fe0"};
+const GROUP_NAMES={main:{ru:"Основные",en:"Basic"},signals:{ru:"Сигналы",en:"Signals"},mech:{ru:"Механика",en:"Mechanics"},light:{ru:"Свет и выходы",en:"Light & outputs"},aux:{ru:"Освещение (AUX)",en:"Lighting (AUX)"},extra:{ru:"Дополнительно",en:"Extras"}};
 const LEGACY_FX={fx_incandescent:1,fx_mars:2,fx_ditch:3,fx_beacon:4,fx_strobe:5,fx_firebox:6};
 function normalizeProject(p){
   if(!p||!Array.isArray(p.blocks))return p;
   for(const b of p.blocks){
-    if(b.type==="signal"){b.type="whistle";b.name=b.name||"Тифон";}
-    else if(b.type==="lightfx"){b.type="aux";b.name="AUX-выход";}
-    else if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="aux";b.name="AUX-выход";}
-    if(!BY_TYPE[b.type]){b.type="aux";b.name=b.name||"AUX-выход";}
+    if(b.type==="signal"){b.type="whistle";b.name=b.name||tr(BY_TYPE.whistle.name);}
+    else if(b.type==="lightfx"){b.type="aux";b.name=tr(BY_TYPE.aux.name);}
+    else if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="aux";b.name=tr(BY_TYPE.aux.name);}
+    if(!BY_TYPE[b.type]){b.type="aux";b.name=b.name||tr(BY_TYPE.aux.name);}
     const cat=BY_TYPE[b.type];
     if(cat&&cat.kind==="output"){
       if(b.type!=="headlight"&&b.channel===undefined)b.channel=0;
@@ -238,14 +353,18 @@ function normalizeProject(p){
     if(b.type==="speed"){if(!Array.isArray(b.bands))b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
     if(b.type==="random"&&!Array.isArray(b.files.random))b.files.random=["","","",""];
     if(b.type==="engine"){if(b.files&&Array.isArray(b.files.run)){b.run=b.files.run.map((f,i)=>({from:i*SPEED_STEP,to:(i+1)*SPEED_STEP,file:f||""}));delete b.files.run;}if(!Array.isArray(b.run))b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
+    if(b.type==="volume"){if(b.master===undefined)b.master=20;if(b.engine===undefined)b.engine=20;if(b.effects===undefined)b.effects=20;}
   }
   if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
+  /* Engine and Volume are always present, like fixed device settings. */
+  if(!p.blocks.some(b=>b.type==="engine"))addBlockTo(p,"engine");
+  if(!p.blocks.some(b=>b.type==="volume"))addBlockTo(p,"volume");
   return p;
 }
-const ROLE_NAMES={start:"Начало",loop:"Тело (цикл)",end:"Конец",short:"Короткий",sound:"Звук"};
-const TRIGGER_NAMES={auto:"Авто (по связи/F)",fn:"F-клавиша",engine:"При двигателе",speed:"По скорости",dir:"По направлению"};
-const MODE_NAMES={engine:"Двигатель",shortLong:"Короткий/длинный",oneshot:"Один раз",latched:"Переключатель",loopHeld:"Цикл пока активно",decel:"По замедлению",speed:"По скорости",random:"Случайный выбор",headlight:"Фары",aux:"Выход",logic:"Логика"};
-const DIRS=[{v:"auto",n:"Авто (вперёд/назад)"},{v:"fwd",n:"Только вперёд"},{v:"rev",n:"Только назад"},{v:"any",n:"Без направления"}];
+const ROLE_NAMES={start:{ru:"Начало",en:"Start"},loop:{ru:"Тело (цикл)",en:"Loop body"},end:{ru:"Конец",en:"End"},short:{ru:"Короткий",en:"Short"},sound:{ru:"Звук",en:"Sound"}};
+const TRIGGER_NAMES={auto:{ru:"Авто (по связи/F)",en:"Auto (by link/F)"},fn:{ru:"F-клавиша",en:"F-key"},engine:{ru:"При двигателе",en:"When engine runs"},speed:{ru:"По скорости",en:"By speed"},dir:{ru:"По направлению",en:"By direction"}};
+const MODE_NAMES={engine:{ru:"Двигатель",en:"Engine"},volume:{ru:"Громкость",en:"Volume"},shortLong:{ru:"Короткий/длинный",en:"Short/long"},oneshot:{ru:"Один раз",en:"One-shot"},latched:{ru:"Переключатель",en:"Toggle"},loopHeld:{ru:"Цикл пока активно",en:"Loop while active"},decel:{ru:"По замедлению",en:"By deceleration"},speed:{ru:"По скорости",en:"By speed"},random:{ru:"Случайный выбор",en:"Random pick"},headlight:{ru:"Фары",en:"Headlights"},aux:{ru:"Выход",en:"Output"},logic:{ru:"Логика",en:"Logic"}};
+const DIRS=[{v:"auto",n:{ru:"Авто (вперёд/назад)",en:"Auto (fwd/rev)"}},{v:"fwd",n:{ru:"Только вперёд",en:"Forward only"}},{v:"rev",n:{ru:"Только назад",en:"Reverse only"}},{v:"any",n:{ru:"Без направления",en:"No direction"}}];
 const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 
 /* ---- state ----------------------------------------------------------- */
@@ -261,22 +380,26 @@ const $=id=>document.getElementById(id);
 const clone=v=>JSON.parse(JSON.stringify(v));
 const nid=(p,ids)=>{let i=1;while(ids.includes(p+i))i++;return p+i;};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const blockName=b=>{if(!b)return "";const cat=BY_TYPE[b.type];if(!b.name)return cat?tr(cat.name):"";if(cat&&(b.name===cat.name.ru||b.name===cat.name.en))return tr(cat.name);return b.name;};
+const schemeName=()=>{const n=project&&project.name;if(n===I18N.ru.new_scheme_name||n===I18N.en.new_scheme_name)return t("new_scheme_name");return n||(project&&project.id)||"";};
 const hexA=(hex,a)=>{const h=hex.replace("#","");const n=parseInt(h.length===3?h.split("").map(x=>x+x).join(""):h,16);return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";};
 const pctSpeed=p=>Math.max(0,Math.min(255,Math.round((Number(p)||0)*255/100)));
 const snap=v=>project.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
 
 function newProject(){
-  const p={format:"sound-blocks",schemaVersion:1,id:"blocks_graph",name:"Новая схема тепловоза",
+  const p={format:"sound-blocks",schemaVersion:1,id:"blocks_graph",name:t("new_scheme_name"),
     blocks:[],links:[],editor:{viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]}};
   addBlockTo(p,"engine");
+  addBlockTo(p,"volume");
   return p;
 }
 function nextFn(p){const used=new Set(p.blocks.map(b=>b.fn));let f=0;while(used.has(f)&&f<28)f++;return f;}
 function addBlockTo(p,type){
   const cat=BY_TYPE[type];if(!cat)return null;
-  if(type==="engine"&&p.blocks.some(b=>b.type==="engine"))return null;
-  const id=nid(type==="engine"?"engine_":"b",p.blocks.map(b=>b.id));
-  const b={id,type,name:cat.name,fn:type==="engine"?8:nextFn(p),trigger:"auto",volume:80,rate:1000,level:100,files:{}};
+  if((type==="engine"||type==="volume")&&p.blocks.some(b=>b.type===type))return null;
+  const id=nid(type==="engine"?"engine_":(type==="volume"?"vol_":"b"),p.blocks.map(b=>b.id));
+  const b={id,type,name:tr(cat.name),fn:type==="engine"?8:(type==="volume"?-1:nextFn(p)),trigger:"auto",volume:80,rate:1000,level:100,files:{}};
+  if(type==="volume"){b.master=20;b.engine=20;b.effects=20;}
   if(cat.kind==="output"){b.channel=0;b.effect=cat.effect||0;b.dir=type==="headlight"?"auto":"any";}
   if(cat.kind==="logic")b.logic=1;
   (cat.roles||[]).forEach(r=>b.files[r]="");
@@ -299,23 +422,23 @@ function compile(){
   const addEdge=(source,target,condition,priority=10,timing="immediate")=>{transitions.push({id:"t"+(++tid),source,target,priority,timing,condition});};
   const engine=project.blocks.find(b=>b.type==="engine");
   const engineEntry=engine?engine.id+"_off":"engine_off";
-  silent(engineEntry,"Выкл / тихий вход");
+  silent(engineEntry,t("s_engine_off"));
   const linkedFromEngine=id=>project.links.some(l=>l.to===id&&(project.blocks.find(b=>b.id===l.from)||{}).type==="engine");
   const triggerOf=b=>b.trigger==="auto"?(linkedFromEngine(b.id)?"engine":"fn"):b.trigger;
 
   for(const b of project.blocks){
     const kind=BY_TYPE[b.type].kind;
-    if(kind==="output"||kind==="logic")continue;
+    if(kind==="output"||kind==="logic"||kind==="setting")continue;
     const fn=b.fn,vol=b.volume,rate=b.rate||1000;
     if(b.type==="engine"){
       const has=f=>!!f;
       const start=b.files.start,idle=b.files.idle,stop=b.files.stop||"";
       const runs=(Array.isArray(b.run)?b.run:[]).filter(x=>x&&x.file);
       speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
-      if(has(start))addState(b.id+"_start","Запуск двигателя",start,false,vol,rate);
-      addState(b.id+"_idle","Холостой ход",idle,true,vol,rate);
-      runs.forEach((x,i)=>addState(b.id+"_run"+i,"Движение "+(i+1),x.file,true,vol,rate));
-      if(has(stop))addState(b.id+"_stop","Останов двигателя",stop,false,vol,rate);
+      if(has(start))addState(b.id+"_start",t("s_engine_start"),start,false,vol,rate);
+      addState(b.id+"_idle",t("s_engine_idle"),idle,true,vol,rate);
+      runs.forEach((x,i)=>addState(b.id+"_run"+i,t("s_engine_run")+(i+1),x.file,true,vol,rate));
+      if(has(stop))addState(b.id+"_stop",t("s_engine_stop"),stop,false,vol,rate);
       const first=has(start)?b.id+"_start":b.id+"_idle";
       addEdge(b.id+"_off",first,{type:"engine_on"},10);
       if(has(start))addEdge(b.id+"_start",b.id+"_idle",{type:"sample_done"},10);
@@ -335,28 +458,28 @@ function compile(){
       startCondOf[b.id]={type:"engine_on"};
       continue;
     }
-    const entry=b.id+"_off";silent(entry,b.name+" / тихий вход");
+    const entry=b.id+"_off";silent(entry,blockName(b)+t("s_silent_in"));
     effects.push({id:b.id,entry,fn});
     const mode0=BY_TYPE[b.type].mode;
     if(mode0==="speed"){
       speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
       const bands=(Array.isArray(b.bands)?b.bands:[]).filter(x=>x&&x.file),items=[];
-      bands.forEach(x=>{const s=b.id+"_sp"+items.length;addState(s,b.name+" "+Math.round(x.from||0)+"-"+Math.round(x.to==null?100:x.to)+"%",x.file,true,vol,rate);items.push({state:s,lo:pctSpeed(x.from),hi:pctSpeed(x.to==null?100:x.to)});});
+      bands.forEach(x=>{const s=b.id+"_sp"+items.length;addState(s,blockName(b)+" "+Math.round(x.from||0)+"-"+Math.round(x.to==null?100:x.to)+"%",x.file,true,vol,rate);items.push({state:s,lo:pctSpeed(x.from),hi:pctSpeed(x.to==null?100:x.to)});});
       items.forEach((it,i)=>addEdge(entry,it.state,{type:"speed",min:it.lo,max:it.hi},i+1,"after_sample"));
       items.forEach((it,i)=>items.forEach((jt,j)=>{if(i!==j)addEdge(it.state,jt.state,{type:"speed",min:jt.lo,max:jt.hi},j+1,"after_sample");}));
       items.forEach(it=>addEdge(it.state,entry,{type:"engine_off"},255));
       continue;
     }
     if(mode0==="decel"){
-      if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",{type:"decel",min:1,max:255},10,"after_sample");addEdge(b.id+"_play",entry,{type:"sample_done"},10);audible[b.id]=b.id+"_play";terminal[b.id]=b.id+"_play";}
+      if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",{type:"decel",min:1,max:255},10,"after_sample");addEdge(b.id+"_play",entry,{type:"sample_done"},10);audible[b.id]=b.id+"_play";terminal[b.id]=b.id+"_play";}
       continue;
     }
     if(mode0==="random"){
       const files=(Array.isArray(b.files.random)?b.files.random:[]).filter(Boolean);
       if(files.length){
-        const ready=b.id+"_ready";addState(ready,b.name+" / выбор","",false,100,1000);
+        const ready=b.id+"_ready";addState(ready,blockName(b)+t("s_choose"),"",false,100,1000);
         addEdge(entry,ready,{type:"fn_press",fn},10);
-        files.forEach((f,i)=>{const s=b.id+"_r"+i;addState(s,b.name+" "+(i+1),f,false,vol,rate);addEdge(ready,s,{type:"random",min:100},10);addEdge(s,entry,{type:"sample_done"},10);});
+        files.forEach((f,i)=>{const s=b.id+"_r"+i;addState(s,blockName(b)+" "+(i+1),f,false,vol,rate);addEdge(ready,s,{type:"random",min:100},10);addEdge(s,entry,{type:"sample_done"},10);});
       }
       continue;
     }
@@ -369,13 +492,13 @@ function compile(){
     const mode=(trig==="speed"||trig==="dir")?"loopHeld":mode0;
     startCondOf[b.id]=startCond;
     if(mode==="oneshot"){
-      if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",startCond,10);addEdge(b.id+"_play",entry,{type:"sample_done"},10);audible[b.id]=b.id+"_play";terminal[b.id]=b.id+"_play";}
+      if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",startCond,10);addEdge(b.id+"_play",entry,{type:"sample_done"},10);audible[b.id]=b.id+"_play";terminal[b.id]=b.id+"_play";}
     }else if(mode==="shortLong"){
-      if(b.files.short){addState(b.id+"_short",b.name+" (короткий)",b.files.short,false,vol,rate);addEdge(entry,b.id+"_short",startCond,1);addEdge(b.id+"_short",entry,{type:"sample_done"},1);}
+      if(b.files.short){addState(b.id+"_short",blockName(b)+t("s_short"),b.files.short,false,vol,rate);addEdge(entry,b.id+"_short",startCond,1);addEdge(b.id+"_short",entry,{type:"sample_done"},1);}
       const first=b.files.start?b.id+"_start":b.files.loop?b.id+"_loop":b.files.end?b.id+"_end":"";
-      if(b.files.start)addState(b.id+"_start",b.name+" начало",b.files.start,false,vol,rate);
-      if(b.files.loop)addState(b.id+"_loop",b.name+" цикл",b.files.loop,true,vol,rate);
-      if(b.files.end)addState(b.id+"_end",b.name+" конец",b.files.end,false,vol,rate);
+      if(b.files.start)addState(b.id+"_start",blockName(b)+t("s_begin"),b.files.start,false,vol,rate);
+      if(b.files.loop)addState(b.id+"_loop",blockName(b)+t("s_cycle"),b.files.loop,true,vol,rate);
+      if(b.files.end)addState(b.id+"_end",blockName(b)+t("s_finish"),b.files.end,false,vol,rate);
       if(first)addEdge(entry,first,startCond,10);
       if(b.files.start&&b.files.loop)addEdge(b.id+"_start",b.id+"_loop",{type:"sample_done"},10);
       if(b.files.end){addEdge(first||entry,b.id+"_end",stopCond,5);addEdge(b.id+"_end",entry,{type:"sample_done"},10);}
@@ -383,7 +506,7 @@ function compile(){
       else if(b.files.start)addEdge(b.id+"_start",entry,{type:"sample_done"},10);
       audible[b.id]=first;terminal[b.id]=b.files.end?b.id+"_end":((!b.files.loop&&b.files.start)?b.id+"_start":null);
     }else if(mode==="loopHeld"){
-      if(b.files.sound){addState(b.id+"_loop",b.name,b.files.sound,true,vol,rate);
+      if(b.files.sound){addState(b.id+"_loop",blockName(b),b.files.sound,true,vol,rate);
         addEdge(entry,b.id+"_loop",startCond,10,trig==="speed"?"after_sample":"immediate");
         if(trig==="speed"){
           if(speedRange.min>0)addEdge(b.id+"_loop",entry,{type:"speed",min:0,max:speedRange.min-1},5,"after_sample");
@@ -392,7 +515,7 @@ function compile(){
         }else addEdge(b.id+"_loop",entry,stopCond,10);
       }
     }else if(mode==="latched"){
-      if(b.files.sound){addState(b.id+"_play",b.name,b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);}
+      if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);}
     }
   }
   for(const l of project.links){
@@ -407,7 +530,7 @@ function compile(){
     const srcState=ev==="start"?(to.id+"_off"):terminal[from.id];
     if(!srcState||!cond)continue;
     const prio=prioFor(srcState);
-    if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,from.name+" / задержка");addEdge(srcState,w,cond,prio);addEdge(w,a,{type:"timeout",min:Math.max(1,Math.min(255,Math.round(delay/50)))},prio);}
+    if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));addEdge(srcState,w,cond,prio);addEdge(w,a,{type:"timeout",min:Math.max(1,Math.min(255,Math.round(delay/50)))},prio);}
     else addEdge(srcState,a,cond,prio);
   }
   const positions={};project.blocks.forEach(b=>positions[b.id]={x:b.x,y:b.y});
@@ -445,45 +568,46 @@ function validate(){
   const {payload,files}=compile();const out=[];
   const err=(id,message)=>out.push({id,message,severity:"error"});
   const warn=(id,message)=>out.push({id,message,severity:"warning"});
-  if(payload.states.length>LIMITS.states)err("","Состояний "+payload.states.length+" > "+LIMITS.states+". Упростите схему.");
-  if(payload.states.filter(s=>s.file).length>LIMITS.soundStates)err("","Звуковых состояний > "+LIMITS.soundStates+".");
-  if(payload.transitions.length>LIMITS.transitions)err("","Переходов "+payload.transitions.length+" > "+LIMITS.transitions+".");
-  if(payload.effects.length>LIMITS.effects)err("","Эффектов > "+LIMITS.effects+".");
+  if(payload.states.length>LIMITS.states)err("",t("v_states_a")+payload.states.length+t("v_states_b")+LIMITS.states+t("v_states_c"));
+  if(payload.states.filter(s=>s.file).length>LIMITS.soundStates)err("",t("v_sound_states_a")+LIMITS.soundStates+".");
+  if(payload.transitions.length>LIMITS.transitions)err("",t("v_transitions_a")+payload.transitions.length+t("v_transitions_b")+LIMITS.transitions+".");
+  if(payload.effects.length>LIMITS.effects)err("",t("v_effects_a")+LIMITS.effects+".");
   const silent=new Set(payload.states.filter(s=>!s.file).map(s=>s.id));
-  if(!silent.has(payload.engine.entry))err("","Вход двигателя должен быть тихим.");
-  payload.effects.forEach(e=>{if(!silent.has(e.entry))err(e.id,"Вход эффекта должен быть тихим.");});
+  if(!silent.has(payload.engine.entry))err("",t("v_engine_entry"));
+  payload.effects.forEach(e=>{if(!silent.has(e.entry))err(e.id,t("v_effect_entry"));});
   const used={};payload.transitions.forEach(e=>{const k=e.source+":"+e.priority;
-    if(used[k]){if(!(e.condition&&e.condition.type==="random"&&used[k].condition&&used[k].condition.type==="random"))err(e.id,"Дублирующийся приоритет у источника "+e.source+".");}
+    if(used[k]){if(!(e.condition&&e.condition.type==="random"&&used[k].condition&&used[k].condition.type==="random"))err(e.id,t("v_dup_prio_a")+e.source+".");}
     else used[k]=e;});
   const ids=new Set(payload.states.map(s=>s.id));
-  payload.transitions.forEach(e=>{if(!ids.has(e.source))err(e.id,"Нет состояния "+e.source);if(!ids.has(e.target))err(e.id,"Нет состояния "+e.target);});
-  files.forEach(f=>{if(!assets[f])warn("","Нет WAV на устройстве: "+f+" (проверьте перед применением).");});
+  payload.transitions.forEach(e=>{if(!ids.has(e.source))err(e.id,t("v_no_state_a")+e.source);if(!ids.has(e.target))err(e.id,t("v_no_state_a")+e.target);});
+  files.forEach(f=>{if(!assets[f])warn("",t("v_no_wav_a")+f+t("v_no_wav_b"));});
   for(const b of outputBlocks()){
-    if(BY_TYPE[b.type].kind==="output"&&b.type!=="headlight"&&(b.channel|0)>6)err(b.id,"Недопустимый AUX-канал.");
-    if(sourceFnOf(b.id)==null&&!(b.fn>=0&&b.fn<=28))err(b.id,"Задайте F-клавишу или связь с блоком.");
+    if(BY_TYPE[b.type].kind==="output"&&b.type!=="headlight"&&(b.channel|0)>6)err(b.id,t("v_bad_aux"));
+    if(sourceFnOf(b.id)==null&&!(b.fn>=0&&b.fn<=28))err(b.id,t("v_need_fn"));
   }
   const fnUse={};const addUse=(f,who)=>{if(f==null||f<0||f>28)return;(fnUse[f]=fnUse[f]||[]).push(who);};
   const linkedFromEngine=id=>project.links.some(l=>l.to===id&&(project.blocks.find(x=>x.id===l.from)||{}).type==="engine");
   const trigOf=b=>b.trigger==="auto"?(linkedFromEngine(b.id)?"engine":"fn"):b.trigger;
   project.blocks.forEach(b=>{const c=BY_TYPE[b.type];
-    if(c.kind==="engine"){addUse(b.fn,"Двигатель");return;}
-    if(c.kind==="sound"){if(c.mode==="speed"||c.mode==="decel")return;if(trigOf(b)==="fn")addUse(b.fn,"«"+b.name+"»");return;}
-    const src=sourceFnOf(b.id);addUse(src!=null?src:b.fn,"«"+b.name+"»");});
-  Object.keys(fnUse).forEach(f=>{if(fnUse[f].length>1)warn("","F"+f+" используется несколькими блоками: "+fnUse[f].join(", ")+".");});
+    if(c.kind==="setting")return;
+    if(c.kind==="engine"){addUse(b.fn,t("v_engine_word"));return;}
+    if(c.kind==="sound"){if(c.mode==="speed"||c.mode==="decel")return;if(trigOf(b)==="fn")addUse(b.fn,t("v_name_l")+blockName(b)+t("v_name_r"));return;}
+    const src=sourceFnOf(b.id);addUse(src!=null?src:b.fn,t("v_name_l")+blockName(b)+t("v_name_r"));});
+  Object.keys(fnUse).forEach(f=>{if(fnUse[f].length>1)warn("","F"+f+t("v_multiple_a")+fnUse[f].join(", ")+".");});
   return {payload,files,diagnostics:out};
 }
 
 /* ---- API ------------------------------------------------------------- */
 async function req(path,init){
   const r=await fetch(path,Object.assign({cache:"no-store"},init||{}));
-  let data;try{data=JSON.parse(await r.text());}catch(e){throw new Error("Устройство вернуло не-JSON ("+r.status+")");}
-  if(!r.ok||data.ok!==true)throw new Error(data.error||("Ошибка "+r.status));
+  let data;try{data=JSON.parse(await r.text());}catch(e){throw new Error(t("err_not_json")+r.status+")");}
+  if(!r.ok||data.ok!==true)throw new Error(data.error||(t("err_http")+r.status));
   return data;
 }
 const qs=o=>Object.keys(o).map(k=>encodeURIComponent(k)+"="+encodeURIComponent(o[k])).join("&");
 async function refreshStatus(){
   try{const s=await req("/api/sound/graph/state");online=true;revision=Number(s.revision)||0;}catch(e){online=false;}
-  $("on").classList.toggle("on",online);$("on_txt").textContent=online?"Подключено":"Нет связи";
+  $("on").classList.toggle("on",online);$("on_txt").textContent=online?t("connected"):t("offline");
   try{const t=await req("/api/audio/tracks");tracks=(t.tracks||[]).map(x=>String(x.file||"").replace(/^audio\//,"")).filter(f=>/^[A-Za-z0-9_-]+\.wav$/.test(f));}catch(e){tracks=[];}
   try{const sf=await req("/api/sound-files");soundFiles=(sf.files||[]).filter(f=>/\.wav$/i.test(f));}catch(e){soundFiles=[];}
   try{const rb=await req("/api/func-map?view=bind");deviceBinds=rb.binds||[];}catch(e){deviceBinds=[];}
@@ -492,27 +616,33 @@ async function refreshStatus(){
 }
 async function fetchAssets(files){for(const f of files){if(assets[f])continue;try{const a=await req("/api/sound/graph/asset?file="+encodeURIComponent(f));assets[f]=a.asset;}catch(e){}}}
 async function doValidate(){
-  if(busy)return;busy=true;refreshButtons();setStatus("Проверка...");
+  if(busy)return;busy=true;refreshButtons();setStatus(t("st_checking"));
   try{const v=validate();await fetchAssets(v.files);const v2=validate();diagnostics=v2.diagnostics;
     if(online){try{const r=await req("/api/sound/graph/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});if(r.diagnostics)r.diagnostics.forEach(d=>diagnostics.push(d));}catch(e){diagnostics.push({id:"",message:e.message,severity:"error"});}}
-    renderSummary();renderDiag();setStatus(diagnostics.some(d=>d.severity!=="warning")?"Есть ошибки":"Проверка пройдена");
-  }catch(e){setStatus("Ошибка: "+e.message);}finally{busy=false;refreshButtons();}
+    renderSummary();renderDiag();setStatus(diagnostics.some(d=>d.severity!=="warning")?t("st_has_errors"):t("st_check_ok"));
+  }catch(e){setStatus(t("st_error_prefix")+e.message);}finally{busy=false;refreshButtons();}
 }
 async function doSave(){
-  if(busy)return;busy=true;refreshButtons();setStatus("Сохранение...");
-  try{const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error("Исправьте ошибки перед сохранением");}
+  if(busy)return;busy=true;refreshButtons();setStatus(t("st_saving"));
+  try{const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
     await fetchAssets(v.files);v.payload.assets=Object.keys(assets).map(f=>assets[f]);
     const r=await req("/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0}),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});
-    revision=Number(r.revision)||revision;savedId=project.id;setStatus("Сохранена версия "+revision);await refreshStatus();
-  }catch(e){setStatus("Не сохранено: "+e.message);}finally{busy=false;refreshButtons();}
+    revision=Number(r.revision)||revision;savedId=project.id;setStatus(t("st_saved_version")+revision);await refreshStatus();
+  }catch(e){setStatus(t("st_not_saved")+e.message);}finally{busy=false;refreshButtons();}
 }
 async function doApply(){
-  if(busy||!revision)return;busy=true;refreshButtons();setStatus("Применение...");
+  if(busy||!revision)return;busy=true;refreshButtons();setStatus(t("st_applying"));
   try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});
-    await applyOutputs();setStatus("Применена версия "+revision+", выходы записаны");
-  }catch(e){setStatus("Не применено: "+e.message);}finally{busy=false;refreshButtons();}
+    await applyOutputs();setStatus(t("st_applied_prefix")+revision+t("st_applied_suffix"));
+  }catch(e){setStatus(t("st_not_applied")+e.message);}finally{busy=false;refreshButtons();}
+}
+function volumeBlock(){return project.blocks.find(b=>b.type==="volume");}
+async function applyVolumes(){
+  const v=volumeBlock();if(!v)return;
+  try{await req("/api/audio/volume?"+qs({master:v.master|0,engine:v.engine|0,effects:v.effects|0}),{method:"POST"});}catch(e){}
 }
 async function applyOutputs(){
+  await applyVolumes();
   const desired=desiredBindings();
   const list=async()=>(await req("/api/func-map?view=bind")).binds||[];
   const existing=await list();
@@ -535,8 +665,8 @@ function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,
 const projectSig=()=>JSON.stringify({b:project.blocks,l:project.links,id:project.id,name:project.name});
 function historyReset(){history=[];hIndex=-1;lastSig=null;historyPush();}
 function historyPush(){const sig=projectSig();if(sig===lastSig)return;history=history.slice(0,hIndex+1);history.push(JSON.stringify(project));hIndex=history.length-1;lastSig=sig;if(history.length>100){history.shift();hIndex--;}}
-function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";render();setStatus("Отменено");}
-function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";render();setStatus("Повторено");}
+function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";render();setStatus(t("st_undone"));}
+function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";render();setStatus(t("st_redone"));}
 function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
 const THEME_KEY="aura_theme";
 function applyTheme(t){if(t!=="light")t="dark";document.documentElement.setAttribute("data-theme",t);const b=$("b_theme");if(b)b.textContent=t==="light"?"☾":"☀";try{localStorage.setItem(THEME_KEY,t);}catch(e){}}
@@ -545,43 +675,44 @@ function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-th
 /* ---- rendering ------------------------------------------------------- */
 function renderPalette(){
   const groups={};CATALOG.forEach(c=>{(groups[c.group]=groups[c.group]||[]).push(c);});
-  const hasEngine=project.blocks.some(b=>b.type==="engine");let html="";
-  for(const g in groups){html+='<div class="pal-group"><header>'+esc(g)+"</header>";groups[g].forEach(c=>{
-    const dis=c.type==="engine"&&hasEngine,col=GROUP_COLORS[c.group]||"#2b3547";
-    html+='<button data-add="'+c.type+'" style="border-left:3px solid '+col+'"'+(dis?" disabled":"")+'><b>'+esc(c.name)+"</b><small>"+esc(MODE_NAMES[c.mode]||"")+(c.fx?" · выбор эффекта":"")+"</small></button>";
+  const hasEngine=project.blocks.some(b=>b.type==="engine");const hasVolume=project.blocks.some(b=>b.type==="volume");let html="";
+  for(const g in groups){html+='<div class="pal-group"><header>'+esc(tr(GROUP_NAMES[g]))+"</header>";groups[g].forEach(c=>{
+    const dis=(c.type==="engine"&&hasEngine)||(c.type==="volume"&&hasVolume),col=GROUP_COLORS[c.group]||"#2b3547";
+    html+='<button data-add="'+c.type+'" style="border-left:3px solid '+col+'"'+(dis?" disabled":"")+'><b>'+esc(tr(c.name))+"</b><small>"+esc(tr(MODE_NAMES[c.mode])||"")+(c.fx?t("pal_fx"):"")+"</small></button>";
   });html+="</div>";}
   $("palette").innerHTML=html;
   $("palette").querySelectorAll("[data-add]").forEach(btn=>btn.onclick=()=>{const b=addBlockTo(project,btn.getAttribute("data-add"));if(b){selected=b.id;render();}});
 }
 function nodeSummary(b){
   const kind=BY_TYPE[b.type].kind;
-  if(b.type==="engine")return "Ступени: <span class='k'>"+((b.run||[]).filter(x=>x.file).length)+"</span> · защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"% · F"+b.fn;
+  if(kind==="setting")return t("vol_master")+" <span class='k'>"+(b.master|0)+"</span> · "+t("vol_engine")+" "+(b.engine|0)+" · "+t("vol_effects")+" "+(b.effects|0);
+  if(b.type==="engine")return t("ns_steps")+"<span class='k'>"+((b.run||[]).filter(x=>x.file).length)+"</span>"+t("ns_prot")+(b.hyst==null?SPEED_HYST:b.hyst)+"% · F"+b.fn;
   if(kind==="output"){
     const src=sourceFnOf(b.id);
-    if(b.type==="headlight")return "F"+(src!=null?src:b.fn)+" · "+(DIRS.find(d=>d.v===b.dir)||{}).n+" · "+b.level+"%";
-    return "F"+(src!=null?src:b.fn)+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+((LIGHT_FX.find(f=>f.v===b.effect)||{}).n||"")+" · "+b.level+"%";
+    if(b.type==="headlight")return "F"+(src!=null?src:b.fn)+" · "+tr((DIRS.find(d=>d.v===b.dir)||{}).n)+" · "+b.level+"%";
+    return "F"+(src!=null?src:b.fn)+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+(tr((LIGHT_FX.find(f=>f.v===b.effect)||{}).n)||"")+" · "+b.level+"%";
   }
-  if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n||"");}
+  if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+(tr((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n)||"");}
   const cat=BY_TYPE[b.type],parts=[];
-  if(cat.mode==="speed")return "Скорость % · диапазонов "+((b.bands||[]).filter(x=>x.file).length)+" · защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"%";
-  if(cat.mode==="decel")return "F"+b.fn+" · по замедлению"+(b.files.sound?" · "+esc(b.files.sound):" · файл не задан");
-  if(cat.mode==="random")return "F"+b.fn+" · случайно из "+((b.files.random||[]).filter(Boolean).length)+" звуков";
-  (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(ROLE_NAMES[r]+": "+esc(b.files[r]));});
-  return "F"+b.fn+" · "+(parts.length?parts.join("<br>"):"файлы не заданы");
+  if(cat.mode==="speed")return t("ns_speed")+((b.bands||[]).filter(x=>x.file).length)+t("ns_prot")+(b.hyst==null?SPEED_HYST:b.hyst)+"%";
+  if(cat.mode==="decel")return "F"+b.fn+t("ns_decel")+(b.files.sound?" · "+esc(b.files.sound):t("ns_file_none"));
+  if(cat.mode==="random")return "F"+b.fn+t("ns_random_a")+((b.files.random||[]).filter(Boolean).length)+t("ns_random_b");
+  (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(tr(ROLE_NAMES[r])+": "+esc(b.files[r]));});
+  return "F"+b.fn+" · "+(parts.length?parts.join("<br>"):t("ns_files_none"));
 }
 function renderNodes(){
   const box=$("nodes");box.innerHTML="";
   for(const b of project.blocks){
     const cat=BY_TYPE[b.type],kind=cat.kind;
-    const hasIn=b.type!=="engine",hasOut=kind!=="output";
+    const hasIn=b.type!=="engine"&&kind!=="setting",hasOut=kind!=="output"&&kind!=="setting";
     const el=document.createElement("div");
     const color=GROUP_COLORS[cat.group]||"#2b3547";
     el.className="node"+(selected===b.id?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
     el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;el.style.borderColor=color;
-    el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.20)+'"><b>'+esc(b.name)+'</b>'+(readyIds.has(b.id)?'<span class="okbadge" title="Блок настроен">✓</span>':'')+'<button class="x" data-del="'+b.id+'" title="Удалить блок" aria-label="Удалить блок">'+TRASH+'</button></div>'+
+    el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.20)+'"><b>'+esc(blockName(b))+'</b>'+(readyIds.has(b.id)?'<span class="okbadge" title="'+esc(t("tip_configured"))+'">✓</span>':'')+'<button class="x" data-del="'+b.id+'" title="'+esc(t("tip_del_block"))+'" aria-label="'+esc(t("tip_del_block"))+'">'+TRASH+'</button></div>'+
       '<div class="bd">'+nodeSummary(b)+"</div>"+
-      (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">вход</span></div>':'')+
-      (hasOut?'<div class="port out" data-out="'+b.id+'"><span class="lbl">выход</span></div>':'');
+      (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">'+esc(t("port_in"))+'</span></div>':'')+
+      (hasOut?'<div class="port out" data-out="'+b.id+'"><span class="lbl">'+esc(t("port_out"))+'</span></div>':'');
     box.appendChild(el);
   }
   box.querySelectorAll("[data-drag]").forEach(h=>h.addEventListener("pointerdown",onNodeDown));
@@ -615,18 +746,18 @@ function renderTempLink(){
   tmp.setAttribute("d",curve(p1.x,p1.y,linking.x,linking.y));
 }
 function soundOptions(sel){
-  const known=tracks.concat(soundFiles);let h='<option value="">— нет —</option>';
+  const known=tracks.concat(soundFiles);let h='<option value="">'+esc(t("opt_none"))+'</option>';
   if(sel&&!known.includes(sel))h+='<option value="'+esc(sel)+'" selected>'+esc(sel)+"</option>";
-  if(tracks.length)h+='<optgroup label="На устройстве">'+tracks.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
-  if(soundFiles.length)h+='<optgroup label="Тест (SOUND)">'+soundFiles.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
+  if(tracks.length)h+='<optgroup label="'+esc(t("opt_on_device"))+'">'+tracks.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
+  if(soundFiles.length)h+='<optgroup label="'+esc(t("opt_test"))+'">'+soundFiles.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
   return h;
 }
-function fileField(role,b){return '<div class="frow"><select data-role="'+role+'">'+soundOptions(b.files[role]||"")+'</select><button class="play" data-play="'+role+'" title="Прослушать">▶</button></div>';}
+function fileField(role,b){return '<div class="frow"><select data-role="'+role+'">'+soundOptions(b.files[role]||"")+'</select><button class="play" data-play="'+role+'" title="'+esc(t("tip_play"))+'">▶</button></div>';}
 async function playFile(name){
-  if(!name){setStatus("Звук не выбран");return;}
+  if(!name){setStatus(t("st_sound_none"));return;}
   const m=/^slot0*(\d+)\.wav$/i.exec(name);
-  if(m){try{await req("/api/audio/play?slot="+Number(m[1]),{method:"POST"});setStatus("Играю "+name+" (устройство)");}catch(e){setStatus("Не играет: "+e.message);}return;}
-  try{const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;await a.play();setStatus("Играю "+name+" (тест)");}catch(e){setStatus("Прослушивание доступно в превью (SOUND)");}
+  if(m){try{await req("/api/audio/play?slot="+Number(m[1]),{method:"POST"});setStatus(t("st_playing_dev_a")+name+t("st_playing_dev_b"));}catch(e){setStatus(t("st_not_playing")+e.message);}return;}
+  try{const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;await a.play();setStatus(t("st_playing_dev_a")+name+t("st_playing_test_b"));}catch(e){setStatus(t("st_preview_only"));}
 }
 function blockFiles(b){const roles=BY_TYPE[b.type].roles||[];return roles.map(r=>b.files[r]).filter(Boolean);}
 async function testBlock(b){
@@ -634,30 +765,30 @@ async function testBlock(b){
   if(kind==="sound"){
     if(BY_TYPE[b.type].mode==="speed"){
       const set=(b.bands||[]).filter(x=>x.file);
-      if(!set.length)out.push({id:b.id,message:"Не задан ни один диапазон скорости",severity:"error"});
-      else out.push({id:b.id,message:"Диапазонов: "+set.length+", защита "+(b.hyst==null?SPEED_HYST:b.hyst)+" %",severity:"ok"});
+      if(!set.length)out.push({id:b.id,message:t("tb_no_band"),severity:"error"});
+      else out.push({id:b.id,message:t("tb_bands_a")+set.length+t("tb_prot")+(b.hyst==null?SPEED_HYST:b.hyst)+" %",severity:"ok"});
     }else if(BY_TYPE[b.type].mode==="random"){
       const set=(b.files.random||[]).filter(Boolean);
-      if(!set.length)out.push({id:b.id,message:"Не задан ни один звук",severity:"error"});
-      else out.push({id:b.id,message:"Случайно из "+set.length+" звуков",severity:"ok"});
+      if(!set.length)out.push({id:b.id,message:t("tb_no_sound"),severity:"error"});
+      else out.push({id:b.id,message:t("tb_random_a")+set.length+t("tb_random_b"),severity:"ok"});
     }else{
       const roles=BY_TYPE[b.type].roles||[],set=roles.filter(r=>b.files[r]);
-      if(!set.length)out.push({id:b.id,message:"Не задан ни один WAV-файл",severity:"error"});
-      else out.push({id:b.id,message:"Файлы: "+set.map(r=>ROLE_NAMES[r]).join(", "),severity:"ok"});
+      if(!set.length)out.push({id:b.id,message:t("tb_no_wav"),severity:"error"});
+      else out.push({id:b.id,message:t("tb_files")+set.map(r=>tr(ROLE_NAMES[r])).join(", "),severity:"ok"});
     }
   }else if(b.type==="engine"){
-    if(!b.files.idle)out.push({id:b.id,message:"Нет файла холостого хода",severity:"warning"});else out.push({id:b.id,message:"Холостой ход: "+b.files.idle,severity:"ok"});
+    if(!b.files.idle)out.push({id:b.id,message:t("tb_no_idle"),severity:"warning"});else out.push({id:b.id,message:t("tb_idle")+b.files.idle,severity:"ok"});
   }else{
-    const fn=sourceFnOf(b.id);if(fn==null&&!(b.fn>=0&&b.fn<=28))out.push({id:b.id,message:"Не задан источник (F-клавиша или связь)",severity:"error"});else out.push({id:b.id,message:"F-клавиша: F"+(fn!=null?fn:b.fn),severity:"ok"});
+    const fn=sourceFnOf(b.id);if(fn==null&&!(b.fn>=0&&b.fn<=28))out.push({id:b.id,message:t("tb_no_source"),severity:"error"});else out.push({id:b.id,message:t("tb_fn")+(fn!=null?fn:b.fn),severity:"ok"});
   }
   validate().diagnostics.filter(d=>d.id===b.id).forEach(d=>out.push(d));
   diagnostics=out;renderDiag();
   const playable=blockFiles(b)[0]||b.files.idle||(b.files.random||[]).filter(Boolean)[0]||((b.bands||[]).find(x=>x.file)||{}).file;if(playable)await playFile(playable);
   const bad=out.filter(x=>x.severity==="error").length;
-  setStatus("Тест блока «"+b.name+"»: "+(bad?bad+" ошибок":"в порядке"));
+  setStatus(t("tb_result_a")+blockName(b)+t("tb_result_b")+(bad?bad+t("tb_errors"):t("tb_ok")));
 }
 async function testScheme(){
-  if(busy)return;busy=true;refreshButtons();setStatus("Тест схемы...");
+  if(busy)return;busy=true;refreshButtons();setStatus(t("st_testing"));
   try{
     const v=validate();await fetchAssets(v.files);const v2=validate();diagnostics=[...v2.diagnostics];
     const lines=[];let ok=0,err=0;
@@ -666,23 +797,23 @@ async function testScheme(){
       if(kind==="sound"){bad=(BY_TYPE[b.type].mode==="speed")?!(b.bands||[]).some(x=>x.file):(BY_TYPE[b.type].mode==="random")?!(b.files.random||[]).some(Boolean):!((BY_TYPE[b.type].roles||[]).some(r=>b.files[r]));}
       else if(b.type==="engine")bad=!b.files.idle;
       else{const fn=sourceFnOf(b.id);bad=(fn==null&&!(b.fn>=0&&b.fn<=28));}
-      if(bad){err++;lines.push({id:b.id,message:"Блок «"+b.name+"» не готов",severity:"error"});}else ok++;
+      if(bad){err++;lines.push({id:b.id,message:t("ts_not_ready_a")+blockName(b)+t("ts_not_ready_b"),severity:"error"});}else ok++;
     }
     if(online){try{const r=await req("/api/sound/graph/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});(r.diagnostics||[]).forEach(d=>diagnostics.push(d));}catch(e){diagnostics.push({id:"",message:e.message,severity:"error"});}}
     diagnostics=[...lines,...diagnostics];renderDiag();
     const anyErr=diagnostics.some(d=>d.severity!=="warning");
-    setStatus("Тест схемы: "+ok+" блоков готово, "+err+" с ошибками"+(anyErr?", проверьте список":" — можно сохранять"));
-  }catch(e){setStatus("Ошибка теста: "+e.message);}finally{busy=false;refreshButtons();}
+    setStatus(t("ts_result_a")+ok+t("ts_result_ok_a")+err+t("ts_result_err_b")+(anyErr?t("ts_check_list"):t("ts_can_save")));
+  }catch(e){setStatus(t("st_test_error")+e.message);}finally{busy=false;refreshButtons();}
 }
 function renderInspector(){
   const insp=$("inspector");
   const lk=project.links.find(l=>l.id===selectedLink);
   if(lk){
     const a=project.blocks.find(x=>x.id===lk.from),c=project.blocks.find(x=>x.id===lk.to);
-    const kindName={gate:"При двигателе",bind:"Выход от F-клавиши",after:"Цепочка звуков"}[lk.kind]||"Связь";
-    let h='<div class="hint">Связь: «'+esc(a?a.name:"?")+'» → «'+esc(c?c.name:"?")+'»</div><label>Тип</label><div class="hint">'+esc(kindName)+'</div>';
-    if(lk.kind==="after")h+='<div class="hint">Событие и задержку задаёт блок-источник «'+esc(a?a.name:"?")+'» (выход: '+(a&&a.outEvent==="start"?"напрямую":"после события")+', задержка '+(a?(a.outDelay|0):0)+' мс).</div>';
-    h+='<div class="row" style="margin-top:10px"><button class="primary" id="l_close">Готово</button><button id="l_del">Удалить связь</button></div>';
+    const kindKey={gate:"link_kind_gate",bind:"link_kind_bind",after:"link_kind_after"}[lk.kind]||"link_kind";
+    let h='<div class="hint">'+esc(t("li_link_a"))+esc(a?blockName(a):"?")+esc(t("li_link_b"))+esc(c?blockName(c):"?")+esc(t("li_link_c"))+'</div><label>'+esc(t("li_type"))+'</label><div class="hint">'+esc(t(kindKey))+'</div>';
+    if(lk.kind==="after")h+='<div class="hint">'+esc(t("li_after_a"))+esc(a?blockName(a):"?")+esc(t("li_after_b"))+(a&&a.outEvent==="start"?esc(t("li_direct")):esc(t("li_after_event")))+esc(t("li_delay_mid"))+(a?(a.outDelay|0):0)+esc(t("li_delay_end"))+'</div>';
+    h+='<div class="row" style="margin-top:10px"><button class="primary" id="l_close">'+esc(t("done"))+'</button><button id="l_del">'+esc(t("li_del"))+'</button></div>';
     insp.innerHTML=h;
     const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
     on("l_close","click",()=>{selectedLink="";render();});
@@ -690,63 +821,70 @@ function renderInspector(){
     return;
   }
   const b=project.blocks.find(x=>x.id===selected);
-  if(!b){insp.innerHTML='<p class="hint">Выберите блок на холсте или добавьте новый слева.</p>';return;}
-  const cat=BY_TYPE[b.type],kind=cat.kind,mode0=cat.mode;let h='<label>Название</label><input id="i_name" value="'+esc(b.name)+'">';
+  if(!b){insp.innerHTML='<p class="hint">'+esc(t("select_hint"))+'</p>';return;}
+  const cat=BY_TYPE[b.type],kind=cat.kind,mode0=cat.mode;let h='<label>'+esc(t("f_name"))+'</label><input id="i_name" value="'+esc(blockName(b))+'">';
   if(mode0==="speed"){
-    h+='<div class="row"><label>Защитный интервал, %</label><label>Громкость</label></div><div class="row">'+
+    h+='<div class="row"><label>'+esc(t("f_hyst"))+'</label><label>'+esc(t("f_volume"))+'</label></div><div class="row">'+
        '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">'+
        '<input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'"></div>';
-    h+='<div class="hint">Диапазоны скорости в процентах; шаг по умолчанию 25 %.</div>';
+    h+='<div class="hint">'+esc(t("f_bands_hint"))+'</div>';
     (b.bands||[]).forEach((bd,i)=>{
-      h+='<div class="row" style="margin-top:6px"><label>От %</label><label>До %</label><span style="flex:0 0 34px"></span></div>'+
+      h+='<div class="row" style="margin-top:6px"><label>'+esc(t("f_from"))+'</label><label>'+esc(t("f_to"))+'</label><span style="flex:0 0 34px"></span></div>'+
          '<div class="row"><input data-bfrom="'+i+'" type="number" min="0" max="100" value="'+Math.round(bd.from||0)+'">'+
          '<input data-bto="'+i+'" type="number" min="0" max="100" value="'+Math.round(bd.to==null?100:bd.to)+'">'+
-         '<button class="play" data-bplay="'+i+'" title="Прослушать">▶</button></div>'+
+         '<button class="play" data-bplay="'+i+'" title="'+esc(t("tip_play"))+'">▶</button></div>'+
          '<div class="frow"><select data-bfile="'+i+'">'+soundOptions(bd.file||"")+'</select></div>';
     });
-    h+='<div class="row" style="margin-top:6px"><button id="i_addband">+ Диапазон</button></div>';
+    h+='<div class="row" style="margin-top:6px"><button id="i_addband">'+esc(t("f_add_band"))+'</button></div>';
   }else if(mode0==="random"){
-    h+='<div class="row"><label>F-клавиша</label><label>Громкость</label></div><div class="row">'+
+    h+='<div class="row"><label>'+esc(t("f_fn"))+'</label><label>'+esc(t("f_volume"))+'</label></div><div class="row">'+
        '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
        '<input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'"></div>';
-    h+='<div class="hint">При нажатии F проигрывается один случайный звук из списка.</div>';
-    (b.files.random||[]).forEach((f,i)=>{h+='<div class="frow" style="margin-top:6px"><select data-rand="'+i+'">'+soundOptions(f||"")+'</select><button class="play" data-randplay="'+i+'" title="Прослушать">▶</button></div>';});
-    h+='<div class="row" style="margin-top:6px"><button id="i_addrand">+ Звук</button></div>';
+    h+='<div class="hint">'+esc(t("f_random_hint"))+'</div>';
+    (b.files.random||[]).forEach((f,i)=>{h+='<div class="frow" style="margin-top:6px"><select data-rand="'+i+'">'+soundOptions(f||"")+'</select><button class="play" data-randplay="'+i+'" title="'+esc(t("tip_play"))+'">▶</button></div>';});
+    h+='<div class="row" style="margin-top:6px"><button id="i_addrand">'+esc(t("f_add_sound"))+'</button></div>';
+  }else if(mode0==="volume"){
+    [["master","vol_master"],["engine","vol_engine"],["effects","vol_effects"]].forEach(function(pair){
+      var k=pair[0],key=pair[1];
+      h+='<label>'+esc(t(key))+'</label><div class="row"><input id="i_vol_'+k+'" type="range" min="0" max="100" value="'+(b[k]|0)+'"><span class="muted" id="i_vol_'+k+'_v">'+(b[k]|0)+'</span></div>';
+    });
+    h+='<div class="hint">'+esc(t("f_levels_hint"))+'</div>';
   }else{
-    h+='<div class="row"><label>F-клавиша</label><label>'+(kind==="output"?"Яркость %":"Громкость")+'</label></div><div class="row">'+
+    h+='<div class="row"><label>'+esc(t("f_fn"))+'</label><label>'+(kind==="output"?esc(t("f_brightness")):esc(t("f_volume")))+'</label></div><div class="row">'+
        '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
        '<input type="number" id="i_vol" min="0" max="100" value="'+(kind==="output"?b.level:b.volume)+'"></div>';
-    if(kind==="sound")h+='<label>Запуск</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+TRIGGER_NAMES[k]+"</option>").join("")+"</select>";
-    if(kind==="sound"&&b.trigger==="speed")h+='<div class="row"><label>От %</label><label>До %</label><label>Защита %</label></div><div class="row">'+
+    if(kind==="sound")h+='<label>'+esc(t("f_trigger"))+'</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+esc(tr(TRIGGER_NAMES[k]))+"</option>").join("")+"</select>";
+    if(kind==="sound"&&b.trigger==="speed")h+='<div class="row"><label>'+esc(t("f_from"))+'</label><label>'+esc(t("f_to"))+'</label><label>'+esc(t("f_prot"))+'</label></div><div class="row">'+
        '<input type="number" id="i_smin" min="0" max="100" value="'+(b.speedMin==null?0:b.speedMin)+'">'+
        '<input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'">'+
        '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'"></div>';
-    if(kind==="sound"&&b.trigger==="dir")h+='<label>Направление</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>Вперёд</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>Назад</option></select>';
+    if(kind==="sound"&&b.trigger==="dir")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>'+esc(t("dir_fwd"))+'</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>'+esc(t("dir_rev"))+'</option></select>';
     if((kind==="sound"&&["oneshot","shortLong","decel","loopHeld"].indexOf(mode0)>=0)||b.type==="engine"){
-      h+='<label>Выход</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>Напрямую</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>После события</option></select>';
-      h+='<label>Выход: задержка, мс</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">0 — сразу; применяется к связям «к другому блоку».</div>';
+      h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
+      h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
     }
-    if(b.type==="headlight")h+='<label>Направление</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+d.n+"</option>").join("")+"</select>";
-    if(kind==="output"&&b.type!=="headlight")h+='<label>Канал</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
-    if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>Эффект</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+f.n+"</option>").join("")+"</select>";
-    if(kind==="logic")h+='<label>Операция</label><select id="i_logic">'+LOGIC_OPS.map(o=>'<option value="'+o.v+'"'+((b.logic|0)===o.v?" selected":"")+">"+o.n+"</option>").join("")+"</select>";
+    if(b.type==="headlight")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+esc(tr(d.n))+"</option>").join("")+"</select>";
+    if(kind==="output"&&b.type!=="headlight")h+='<label>'+esc(t("f_channel"))+'</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
+    if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>'+esc(t("f_effect"))+'</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+esc(tr(f.n))+"</option>").join("")+"</select>";
+    if(kind==="logic")h+='<label>'+esc(t("f_logic"))+'</label><select id="i_logic">'+LOGIC_OPS.map(o=>'<option value="'+o.v+'"'+((b.logic|0)===o.v?" selected":"")+">"+esc(tr(o.n))+"</option>").join("")+"</select>";
     if(b.type==="engine"){
-      h+='<label>Начало (запуск)</label>'+fileField("start",b)+'<label>Холостой ход (цикл)</label>'+fileField("idle",b);
-      h+='<label>Ступени движения, % скорости</label>';
+      h+='<label>'+esc(t("f_engine_start"))+'</label>'+fileField("start",b)+'<label>'+esc(t("f_engine_idle"))+'</label>'+fileField("idle",b);
+      h+='<label>'+esc(t("f_steps"))+'</label>';
       (b.run||[]).forEach((x,i)=>{h+='<div class="row" style="margin-top:6px"><input data-rfrom="'+i+'" type="number" min="0" max="100" value="'+Math.round(x.from||0)+'"><input data-rto="'+i+'" type="number" min="0" max="100" value="'+Math.round(x.to==null?100:x.to)+'"></div>'+
-        '<div class="frow"><select data-rfile="'+i+'">'+soundOptions(x.file||"")+'</select><button class="play" data-rplay="'+i+'" title="Прослушать">▶</button><button class="sm" data-rdel="'+i+'" title="Удалить ступень">✕</button></div>';});
-      h+='<div class="row" style="margin-top:6px"><button id="i_addrrun">+ Ступень</button></div>';
-      h+='<label>Останов</label>'+fileField("stop",b);
-      h+='<label>Защитный интервал, %</label><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">';
+        '<div class="frow"><select data-rfile="'+i+'">'+soundOptions(x.file||"")+'</select><button class="play" data-rplay="'+i+'" title="'+esc(t("tip_play"))+'">▶</button><button class="sm" data-rdel="'+i+'" title="'+esc(t("f_del_step"))+'">✕</button></div>';});
+      h+='<div class="row" style="margin-top:6px"><button id="i_addrrun">'+esc(t("f_add_step"))+'</button></div>';
+      h+='<label>'+esc(t("f_stop"))+'</label>'+fileField("stop",b);
+      h+='<label>'+esc(t("f_hyst"))+'</label><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">';
     }else if(kind==="sound"){
-      (cat.roles||[]).forEach(r=>{h+='<label>'+ROLE_NAMES[r]+'</label>'+fileField(r,b);});
+      (cat.roles||[]).forEach(r=>{h+='<label>'+esc(tr(ROLE_NAMES[r]))+'</label>'+fileField(r,b);});
     }
   }
-  if(kind==="output"||kind==="logic")h+='<p class="hint">Вход блока можно соединить с другим блоком — тогда F-клавиша берётся от него.</p>';
-  if(mode0==="speed")h+='<p class="hint">Звук меняется по скорости поезда; защитный интервал не даёт дребезжать на границах.</p>';
-  h+='<div class="row" style="margin-top:10px"><button class="primary" id="i_test">▶ Тест блока</button><button id="i_close">Готово</button><button id="i_del">Удалить</button></div>';
+  if(kind==="output"||kind==="logic")h+='<p class="hint">'+esc(t("f_input_hint"))+'</p>';
+  if(mode0==="speed")h+='<p class="hint">'+esc(t("f_speed_hint"))+'</p>';
+  h+='<div class="row" style="margin-top:10px">'+(kind==="setting"?"":'<button class="primary" id="i_test">'+esc(t("f_test"))+'</button>')+'<button id="i_close">'+esc(t("done"))+'</button><button id="i_del">'+esc(t("f_delete"))+'</button></div>';
   insp.innerHTML=h;
   const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
+  if(mode0==="volume"){["master","engine","effects"].forEach(function(k){on("i_vol_"+k,"input",function(e){b[k]=Number(e.target.value)|0;var s=$("i_vol_"+k+"_v");if(s)s.textContent=String(b[k]);});on("i_vol_"+k,"change",function(){render();});});}
   on("i_name","change",e=>{b.name=e.target.value;render();});
   on("i_fn","change",e=>{b.fn=Number(e.target.value);render();});
   on("i_vol","change",e=>{const v=Math.max(0,Math.min(100,Number(e.target.value)));if(kind==="output")b.level=v;else b.volume=v;render();});
@@ -785,7 +923,7 @@ function renderInspector(){
   on("i_del","click",()=>removeBlock(b.id));
 }
 function removeBlock(id){
-  if(project.blocks.find(b=>b.id===id&&b.type==="engine"))return;
+  if(project.blocks.find(b=>b.id===id&&(b.type==="engine"||b.type==="volume")))return;
   project.blocks=project.blocks.filter(b=>b.id!==id);
   project.links=project.links.filter(l=>l.from!==id&&l.to!==id);
   if(selected===id)selected="";render();
@@ -800,20 +938,21 @@ function cloneBlock(src,dx,dy){
   b.x=snapTo(project,b.x+(dx==null?GRID*2:dx));b.y=snapTo(project,b.y+(dy==null?GRID*2:dy));
   project.blocks.push(b);return b;
 }
-function duplicateSelected(){const b=project.blocks.find(x=>x.id===selected);if(!b)return;if(b.type==="engine"){setStatus("Двигатель нельзя дублировать");return;}const c=cloneBlock(b);selected=c.id;render();setStatus("Блок продублирован");}
-function copySelected(){const b=project.blocks.find(x=>x.id===selected);if(!b||b.type==="engine"){setStatus("Нет блока для копирования");return;}clip=JSON.parse(JSON.stringify(b));setStatus("Блок скопирован");}
-function pasteClip(){if(!clip){setStatus("Буфер пуст");return;}const c=cloneBlock(clip);selected=c.id;render();setStatus("Блок вставлен");}
+function duplicateSelected(){const b=project.blocks.find(x=>x.id===selected);if(!b)return;if(b.type==="engine"||b.type==="volume"){setStatus(t("st_cant_dup"));return;}const c=cloneBlock(b);selected=c.id;render();setStatus(t("st_duplicated"));}
+function copySelected(){const b=project.blocks.find(x=>x.id===selected);if(!b||b.type==="engine"||b.type==="volume"){setStatus(t("st_nothing_copy"));return;}clip=JSON.parse(JSON.stringify(b));setStatus(t("st_copied"));}
+function pasteClip(){if(!clip){setStatus(t("st_clip_empty"));return;}const c=cloneBlock(clip);selected=c.id;render();setStatus(t("st_pasted"));}
 function renderSummary(){
   const p=compile().payload;const dyn=(p.effects.length||0);
-  $("counts").textContent="Состояний "+p.states.length+"/"+LIMITS.states+" · переходов "+p.transitions.length+"/"+LIMITS.transitions+" · эффектов "+dyn+"/"+LIMITS.effects+" · блоков "+project.blocks.length;
+  $("counts").textContent=t("sum_states")+p.states.length+"/"+LIMITS.states+t("sum_transitions")+p.transitions.length+"/"+LIMITS.transitions+t("sum_effects")+dyn+"/"+LIMITS.effects+t("sum_blocks")+project.blocks.length;
   const e=diagnostics.filter(d=>d.severity!=="warning").length,w=diagnostics.filter(d=>d.severity==="warning").length;
-  $("summary").textContent=e+" ошибок / "+w+" предупреждений";
+  $("summary").textContent=e+t("sum_errors_mid")+w+t("sum_warnings");
 }
 function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":d.severity==="ok"?"ok":"d")+'">'+esc(d.message)+"</div>").join("");}
 function render(){computeReady();renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();renderMini();renderLinkTable();saveDraft();}
 function isReady(b){
   const cat=BY_TYPE[b.type];if(!cat)return false;
   if(cat.kind==="engine")return !!b.files.idle;
+  if(cat.kind==="setting")return true;
   if(cat.kind==="output")return b.type==="headlight"||((b.channel|0)>=0&&(b.channel|0)<=6);
   if(cat.kind==="logic")return (b.logic|0)>=1&&(b.logic|0)<=8;
   if(cat.mode==="speed")return (b.bands||[]).some(x=>x.file);
@@ -825,7 +964,7 @@ function computeReady(){let errIds=new Set();try{errIds=new Set(validate().diagn
   readyIds=new Set(project.blocks.filter(b=>isReady(b)&&!errIds.has(b.id)).map(b=>b.id));}
 function setStatus(t){$("status_txt").textContent=t;}
 function refreshButtons(){$("b_save").disabled=!online||busy;$("b_outputs").disabled=!online||busy;$("b_impout").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;$("b_validate").disabled=busy;}
-function renderSnapBtn(){$("b_snap").textContent="Сетка: "+(project.editor.snap?"вкл":"выкл");$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
+function renderSnapBtn(){$("b_snap").textContent=t("snap_a")+(project.editor.snap?t("snap_on"):t("snap_off"));$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
 function worldPoint(ev){const r=$("stage").getBoundingClientRect(),v=project.editor.viewport;return {x:(ev.clientX-r.left-v.x)/v.zoom,y:(ev.clientY-r.top-v.y)/v.zoom};}
@@ -885,19 +1024,19 @@ function graphLayers(){
 function autoLayout(){
   const {cols}=graphLayers();const COL_W=300,ROW_H=140;
   Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(L=>{cols[L].forEach((n,i)=>{n.x=snapTo(project,40+L*COL_W);n.y=snapTo(project,40+i*ROW_H);});});
-  render();setStatus("Блоки выровнены по связям");
+  render();setStatus(t("st_aligned"));
 }
 function linkCondText(l){
   const a=project.blocks.find(x=>x.id===l.from);
-  if(l.kind==="gate")return "при двигателе";
-  if(l.kind==="bind")return "F-клавиша источника";
-  if(l.kind==="after"){const ev=(a&&a.outEvent==="start")?"напрямую":"после события";const d=(a&&a.outDelay)?(", задержка "+a.outDelay+" мс"):"";return ev+d;}
-  return "связь";
+  if(l.kind==="gate")return t("lc_gate");
+  if(l.kind==="bind")return t("lc_bind");
+  if(l.kind==="after"){const ev=(a&&a.outEvent==="start")?t("lc_direct"):t("lc_after_event");const d=(a&&a.outDelay)?(t("lc_delay_a")+a.outDelay+t("lc_delay_b")):"";return ev+d;}
+  return t("lc_link");
 }
 function renderMini(){
   const box=$("mini");const {cols}=graphLayers();
   const layers=Object.keys(cols).map(Number).sort((a,b)=>a-b);
-  if(!layers.length||!project.blocks.length){box.innerHTML='<div class="hint">Нет блоков.</div>';return;}
+  if(!layers.length||!project.blocks.length){box.innerHTML='<div class="hint">'+esc(t("mini_none"))+'</div>';return;}
   const maxRows=Math.max.apply(null,layers.map(L=>cols[L].length));
   const W=280,rowH=22,padX=6,padY=8,nodeW=46,nodeH=16;
   const colX=L=>layers.length>1?padX+(W-2*padX-nodeW)*layers.indexOf(L)/(layers.length-1):padX;
@@ -912,33 +1051,34 @@ function renderMini(){
 }
 function renderLinkTable(){
   const box=$("linktable");
-  if(!project.links.length){box.innerHTML='<div class="hint">Связей нет.</div>';return;}
+  if(!project.links.length){box.innerHTML='<div class="hint">'+esc(t("lt_none"))+'</div>';return;}
   const rows=project.links.map(l=>{const a=project.blocks.find(x=>x.id===l.from),c=project.blocks.find(x=>x.id===l.to);
-    return '<tr><td>'+esc(a?a.name:"?")+'</td><td>→</td><td>'+esc(c?c.name:"?")+'</td><td>'+esc(linkCondText(l))+'</td></tr>';}).join("");
-  box.innerHTML='<table><thead><tr><th>Источник</th><th></th><th>Цель</th><th>Условие</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    return '<tr><td>'+esc(a?blockName(a):"?")+'</td><td>→</td><td>'+esc(c?blockName(c):"?")+'</td><td>'+esc(linkCondText(l))+'</td></tr>';}).join("");
+  box.innerHTML='<table><thead><tr><th>'+esc(t("lt_source"))+'</th><th></th><th>'+esc(t("lt_target"))+'</th><th>'+esc(t("lt_condition"))+'</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
 function exportMiniPng(){exportSchemePng();}
 function blockDetailLines(b){
   const cat=BY_TYPE[b.type],L=[];if(!cat)return L;
+  if(cat.kind==="setting"){L.push(t("vol_master")+": "+(b.master|0)+", "+t("vol_engine")+": "+(b.engine|0)+", "+t("vol_effects")+": "+(b.effects|0));return L;}
   if(cat.kind==="engine"){
-    L.push("F"+b.fn+" · запуск: "+(b.files.start||"—")+" · холостой: "+(b.files.idle||"—")+" · стоп: "+(b.files.stop||"—"));
-    (b.run||[]).forEach((x,i)=>L.push("ступень "+(i+1)+" "+Math.round(x.from)+"–"+Math.round(x.to)+"%: "+(x.file||"—")));
-    L.push("защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"% · выход: "+(b.outEvent==="start"?"напрямую":"после события")+(b.outDelay?", задержка "+b.outDelay+" мс":""));
+    L.push("F"+b.fn+t("bd_run")+(b.files.start||"—")+t("bd_idle")+(b.files.idle||"—")+t("bd_stop")+(b.files.stop||"—"));
+    (b.run||[]).forEach((x,i)=>L.push(t("bd_step_a")+(i+1)+" "+Math.round(x.from)+"–"+Math.round(x.to)+"%: "+(x.file||"—")));
+    L.push(t("bd_prot_a")+(b.hyst==null?SPEED_HYST:b.hyst)+"%"+t("bd_out_mid")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));
     return L;
   }
   if(cat.kind==="output"){
-    if(b.type==="headlight")L.push("F"+b.fn+" · "+((DIRS.find(d=>d.v===b.dir)||{}).n||"")+" · "+(b.level|0)+"%");
-    else L.push("F"+b.fn+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+((LIGHT_FX.find(f=>f.v===(b.effect|0))||{}).n||"")+" · "+(b.level|0)+"%");
+    if(b.type==="headlight")L.push("F"+b.fn+" · "+tr((DIRS.find(d=>d.v===b.dir)||{}).n||"")+" · "+(b.level|0)+"%");
+    else L.push("F"+b.fn+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+tr((LIGHT_FX.find(f=>f.v===(b.effect|0))||{}).n||"")+" · "+(b.level|0)+"%");
     return L;
   }
-  if(cat.kind==="logic"){L.push("F"+b.fn+" · "+((LOGIC_OPS.find(o=>o.v===(b.logic|0))||{}).n||""));return L;}
-  if(cat.mode==="speed"){L.push("защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"%");(b.bands||[]).forEach(x=>{if(x.file)L.push(Math.round(x.from)+"–"+Math.round(x.to)+"%: "+x.file);});return L;}
-  if(cat.mode==="random"){L.push("F"+b.fn+" · случайно из:");(b.files.random||[]).forEach(f=>{if(f)L.push(f);});return L;}
-  (cat.roles||[]).forEach(r=>{if(b.files[r])L.push(ROLE_NAMES[r]+": "+b.files[r]);});
-  L.push("запуск: "+((TRIGGER_NAMES[b.trigger]||"авто")));
-  if(b.trigger==="speed")L.push("скорость "+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+"% · защита "+(b.hyst==null?SPEED_HYST:b.hyst)+"%");
-  if(b.trigger==="dir")L.push("направление: "+(b.dirTrigger==="rev"?"назад":"вперёд"));
-  if(["oneshot","shortLong","decel","loopHeld"].indexOf(cat.mode)>=0)L.push("выход: "+(b.outEvent==="start"?"напрямую":"после события")+(b.outDelay?", задержка "+b.outDelay+" мс":""));
+  if(cat.kind==="logic"){L.push("F"+b.fn+" · "+tr((LOGIC_OPS.find(o=>o.v===(b.logic|0))||{}).n||""));return L;}
+  if(cat.mode==="speed"){L.push(t("bd_prot_a")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");(b.bands||[]).forEach(x=>{if(x.file)L.push(Math.round(x.from)+"–"+Math.round(x.to)+"%: "+x.file);});return L;}
+  if(cat.mode==="random"){L.push("F"+b.fn+t("bd_random"));(b.files.random||[]).forEach(f=>{if(f)L.push(f);});return L;}
+  (cat.roles||[]).forEach(r=>{if(b.files[r])L.push(tr(ROLE_NAMES[r])+": "+b.files[r]);});
+  L.push(t("bd_trigger")+(tr(TRIGGER_NAMES[b.trigger])||t("tr_auto")));
+  if(b.trigger==="speed")L.push(t("bd_speed_a")+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+t("bd_speed_b")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");
+  if(b.trigger==="dir")L.push(t("bd_dir")+(b.dirTrigger==="rev"?t("bd_dir_rev"):t("bd_dir_fwd")));
+  if(["oneshot","shortLong","decel","loopHeld"].indexOf(cat.mode)>=0)L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));
   return L;
 }
 function buildSchemeSvg(){
@@ -959,35 +1099,35 @@ function buildSchemeSvg(){
     svg+='<text x="'+((x1+x2)/2)+'" y="'+((y1+y2)/2-4)+'" fill="#9fb0c8" font-size="10" text-anchor="middle">'+esc(linkCondText(l))+'</text>';});
   layers.forEach(L=>cols[L].forEach(n=>{const p=pos[n.id];const c=GROUP_COLORS[(BY_TYPE[n.type]||{}).group]||"#888";
     svg+='<rect x="'+p.x+'" y="'+p.y+'" width="'+CARD_W+'" height="'+p.h+'" rx="8" fill="#1b2230" stroke="'+c+'"/>';
-    svg+='<text x="'+(p.x+10)+'" y="'+(p.y+18)+'" fill="#e7ecf5" font-size="13" font-weight="600">'+esc(n.name)+'</text>';
+    svg+='<text x="'+(p.x+10)+'" y="'+(p.y+18)+'" fill="#e7ecf5" font-size="13" font-weight="600">'+esc(blockName(n))+'</text>';
     (info[n.id]||[]).forEach((line,i)=>{svg+='<text x="'+(p.x+10)+'" y="'+(p.y+35+i*LH)+'" fill="#93a0b5" font-size="11">'+esc(line)+'</text>';});}));
   svg+='</svg>';return svg;
 }
 function exportSchemePng(){
-  if(!project.blocks.length){setStatus("Нет схемы");return;}
+  if(!project.blocks.length){setStatus(t("st_no_scheme"));return;}
   const svgStr=buildSchemeSvg();const m=svgStr.match(/width="(\d+)" height="(\d+)"/);const W=m?+m[1]:800,H=m?+m[2]:600;
   const img=new Image();
   img.onload=()=>{const sc=2;const cv=document.createElement("canvas");cv.width=W*sc;cv.height=H*sc;const ctx=cv.getContext("2d");
     ctx.fillStyle="#0f1420";ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(img,0,0,cv.width,cv.height);
-    const a=document.createElement("a");a.href=cv.toDataURL("image/png");a.download=project.id+"-scheme.png";a.click();setStatus("Картинка сохранена");};
-  img.onerror=()=>setStatus("Не удалось сформировать картинку");
+    const a=document.createElement("a");a.href=cv.toDataURL("image/png");a.download=project.id+"-scheme.png";a.click();setStatus(t("st_png_saved"));};
+  img.onerror=()=>setStatus(t("st_png_fail"));
   img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svgStr);
 }
 function buildText(){
-  const L=[];L.push("Схема: "+(project.name||project.id));L.push("Блоков: "+project.blocks.length+", связей: "+project.links.length);L.push("");
-  L.push("== Блоки ==");
-  project.blocks.forEach(b=>{L.push("* "+b.name+" ["+BY_TYPE[b.type].name+"]");blockDetailLines(b).forEach(x=>L.push("    "+x));});
-  L.push("");L.push("== Связи ==");
-  project.links.forEach(l=>{const a=project.blocks.find(x=>x.id===l.from),c=project.blocks.find(x=>x.id===l.to);L.push("- "+(a?a.name:"?")+" -> "+(c?c.name:"?")+" : "+linkCondText(l));});
+  const L=[];L.push(t("bt_scheme")+schemeName());L.push(t("bt_counts_a")+project.blocks.length+t("bt_counts_b")+project.links.length);L.push("");
+  L.push(t("bt_blocks"));
+  project.blocks.forEach(b=>{L.push("* "+blockName(b)+" ["+tr(BY_TYPE[b.type].name)+"]");blockDetailLines(b).forEach(x=>L.push("    "+x));});
+  L.push("");L.push(t("bt_links"));
+  project.links.forEach(l=>{const a=project.blocks.find(x=>x.id===l.from),c=project.blocks.find(x=>x.id===l.to);L.push("- "+(a?blockName(a):"?")+" -> "+(c?blockName(c):"?")+" : "+linkCondText(l));});
   return L.join("\r\n");
 }
-function exportText(){const blob=new Blob([buildText()],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+"-logic.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setStatus("Описание сохранено");}
+function exportText(){const blob=new Blob([buildText()],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+"-logic.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setStatus(t("st_txt_saved"));}
 
 /* ---- toolbar --------------------------------------------------------- */
-$("b_new").onclick=()=>{if(!confirm("Создать новую схему? Несохранённые правки будут потеряны."))return;project=newProject();selected="";revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus("Новая схема");};
+$("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();selected="";revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
 $("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+".blocks.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $("b_import").onclick=()=>$("f_import").click();
-$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error("Это не файл блоков");project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus("Импортирована схема");}catch(err){alert("Импорт не удался: "+err.message);}};
+$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error(t("err_not_blocks_file"));project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_imported"));}catch(err){alert(t("err_import")+err.message);}};
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
 $("b_theme").onclick=toggleTheme;
 $("b_pal").onclick=()=>document.body.classList.toggle("show-pal");
@@ -1011,7 +1151,7 @@ window.addEventListener("keydown",ev=>{
 $("b_test").onclick=testScheme;
 $("b_validate").onclick=doValidate;
 $("b_save").onclick=doSave;
-$("b_outputs").onclick=async()=>{if(busy)return;busy=true;refreshButtons();setStatus("Запись выходов...");try{await applyOutputs();setStatus("Выходы записаны");}catch(e){setStatus("Выходы не записаны: "+e.message);}finally{busy=false;refreshButtons();}};
+$("b_outputs").onclick=async()=>{if(busy)return;busy=true;refreshButtons();setStatus(t("st_writing_outputs"));try{await applyOutputs();setStatus(t("st_outputs_written"));}catch(e){setStatus(t("st_outputs_not_written")+e.message);}finally{busy=false;refreshButtons();}};
 $("b_impout").onclick=()=>{
   let added=0;
   for(const bd of deviceBinds){
@@ -1021,11 +1161,23 @@ $("b_impout").onclick=()=>{
       else{const ch=id-2;if(project.blocks.some(x=>x.type==="aux"&&x.fn===fn&&(x.channel|0)===ch))continue;const nb=addBlockTo(project,"aux");if(nb){nb.fn=fn;nb.channel=ch;nb.level=(deviceAux[ch]&&deviceAux[ch].level!=null)?deviceAux[ch].level:100;nb.effect=(deviceAux[ch]&&deviceAux[ch].effect!=null)?deviceAux[ch].effect:0;added++;}}
     }else if(type===4){if(project.blocks.some(x=>x.type==="logic"&&x.fn===fn&&(x.logic|0)===id))continue;const nb=addBlockTo(project,"logic");if(nb){nb.fn=fn;nb.logic=id;added++;}}
   }
-  render();setStatus(added?("Импортировано выходов: "+added):"Новых выходов нет");
+  render();setStatus(added?(t("st_impout_a")+added):t("st_impout_none"));
 };
 $("b_apply").onclick=doApply;
 
 /* ---- boot ------------------------------------------------------------ */
+lang=detectLang();
+function applyStatic(){
+  document.querySelectorAll("[data-i18n]").forEach(el=>{el.textContent=t(el.getAttribute("data-i18n"));});
+  document.querySelectorAll("[data-i18n-title]").forEach(el=>{el.setAttribute("title",t(el.getAttribute("data-i18n-title")));});
+  document.querySelectorAll("[data-i18n-aria]").forEach(el=>{el.setAttribute("aria-label",t(el.getAttribute("data-i18n-aria")));});
+  document.documentElement.setAttribute("lang",lang);
+  document.title=t("doc_title");
+  const b=$("b_lang");if(b){b.textContent=lang.toUpperCase();b.setAttribute("title",t("lang_tip"));}
+}
+function toggleLang(){lang=(lang==="en")?"ru":"en";try{localStorage.setItem("aura_lang",lang);}catch(e){}applyStatic();renderSnapBtn();render();}
+$("b_lang").onclick=toggleLang;
+applyStatic();
 loadDraft();if(!project)project=newProject();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();historyReset();render();refreshStatus();setInterval(refreshStatus,3000);
 window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,blockDetailLines:blockDetailLines,project:()=>project};
 })();

@@ -55,7 +55,7 @@ test('production build stamp hashes the complete source and build inputs', async
       if (entry.isDirectory()) await collect(path); else expected.push(path);
     }
   }
-  await collect('src'); await collect('scripts');
+  await collect('src'); await collect('scripts'); await collect('public');
   assert.deepEqual(Object.keys(stamp.files).sort(), expected.sort());
   for (const [path, hash] of Object.entries(stamp.files)) assert.equal(createHash('sha256').update(await readFile(join(root, path))).digest('hex'), hash);
 });

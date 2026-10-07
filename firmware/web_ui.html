@@ -159,7 +159,8 @@ label{color:var(--text);font-weight:600}
 .uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
 .uptime-line #uptime{color:var(--text);font-weight:700}
 /* top nav (page tabs) + theme switch */
-.hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hd-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
 .theme-btn{min-width:46px;font-size:15px;line-height:1}
 .page-tabs{display:flex;gap:6px}
 .page-tabs .nav-tab{flex:0 0 auto;min-height:38px;padding:8px 14px}
@@ -180,6 +181,10 @@ label{color:var(--text);font-weight:600}
 @media(max-width:760px){
   .fn-grid{grid-template-columns:repeat(auto-fill,minmax(50px,1fr))}
   .nav-tab{padding:9px 8px}
+  .hd{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center}
+  .hd-left{grid-column:1;grid-row:1}
+  .hd-right{grid-column:2;grid-row:1;margin-left:0;justify-self:end}
+  .page-tabs{grid-column:1/-1;grid-row:2}
 }
 @media(max-width:600px){
   .brand{font-size:14px}
@@ -195,49 +200,52 @@ label{color:var(--text);font-weight:600}
 <body>
 <div class="shell">
 
-  <div class="offline-banner" id="offline_banner">⚠ Нет связи с устройством. Проверьте подключение к точке доступа.</div>
+  <div class="offline-banner" id="offline_banner" data-i18n="offline_banner">⚠ Нет связи с устройством. Проверьте подключение к точке доступа.</div>
 
   <div class="hd">
-    <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
-    <div class="hd-right">
-      <div class="page-tabs">
-        <button class="nav-tab active" id="nav_control" onclick="showPage('control')">Управление</button>
-        <button class="nav-tab" id="nav_settings" onclick="showPage('settings')">Настройки</button>
-      </div>
+    <div class="hd-left">
+      <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
       <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
-      <button class="btn sm ghost theme-btn" id="theme_btn" onclick="toggleTheme()" title="Светлая / тёмная тема" aria-label="Переключить тему">☀</button>
+    </div>
+    <div class="page-tabs">
+      <button class="nav-tab active" id="nav_control" onclick="showPage('control')" data-i18n="nav_control">Управление</button>
+      <button class="nav-tab" id="nav_settings" onclick="showPage('settings')" data-i18n="nav_settings">Настройки</button>
+    </div>
+    <div class="hd-right">
+      <button class="btn sm ghost theme-btn" id="lang_btn" onclick="toggleLang()" title="Switch to English" aria-label="Switch language" data-i18n-title="lang_title" data-i18n-aria="lang_aria">RU</button>
+      <button class="btn sm ghost theme-btn" id="theme_btn" onclick="toggleTheme()" title="Светлая / тёмная тема" aria-label="Переключить тему" data-i18n-title="theme_title" data-i18n-aria="theme_aria">☀</button>
     </div>
   </div>
 
   <div class="page" data-page="control">
     <div class="panel">
-      <h2>Управление через</h2>
+      <h2 data-i18n="ctrl_via">Управление через</h2>
       <div class="bd">
         <div class="seg">
-          <button class="btn" id="src_rails" onclick="setControlSource('rails')">Рельсы</button>
-          <button class="btn" id="src_web" onclick="setControlSource('web')">Веб</button>
+          <button class="btn" id="src_rails" onclick="setControlSource('rails')" data-i18n="src_rails">Рельсы</button>
+          <button class="btn" id="src_web" onclick="setControlSource('web')" data-i18n="src_web">Веб</button>
         </div>
         <div class="row" style="margin-top:2px">
           <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-            <input type="checkbox" id="mode_dc" style="width:auto" onchange="toggleMode()">DC — аналоговое управление
+            <input type="checkbox" id="mode_dc" style="width:auto" onchange="toggleMode()"><span data-i18n="ctrl_dc">DC — аналоговое управление</span>
           </label>
         </div>
-        <div class="hint" id="src_hint">Управление скоростью и функциями — с выбранного источника.</div>
+        <div class="hint" id="src_hint" data-i18n="ctrl_hint_default">Управление скоростью и функциями — с выбранного источника.</div>
       </div>
     </div>
     <div class="panel">
-      <h2>Управление</h2>
+      <h2 data-i18n="ctrl_title">Управление</h2>
       <div class="bd" id="control_body">
         <div class="speed-row">
-          <label>Скорость</label>
+          <label data-i18n="ctrl_speed">Скорость</label>
           <input type="range" id="speed" min="0" max="126" value="0" oninput="onSpeedInput()">
           <span class="val" id="speed_v">0</span>
         </div>
         <div class="dir-row">
-          <button class="btn" id="btn_rev" onclick="setDir(false)">◀ Назад</button>
-          <button class="btn danger" id="btn_stop" onclick="setStop()">■ Стоп</button>
-          <button class="btn emergency" id="btn_emergency" onclick="emergencyStop()">⛔ Экстренный Стоп</button>
-          <button class="btn" id="btn_fwd" onclick="setDir(true)">▶ Вперёд</button>
+          <button class="btn" id="btn_rev" onclick="setDir(false)" data-i18n="ctrl_back">◀ Назад</button>
+          <button class="btn danger" id="btn_stop" onclick="setStop()" data-i18n="ctrl_stop">■ Стоп</button>
+          <button class="btn emergency" id="btn_emergency" onclick="emergencyStop()" data-i18n="ctrl_emergency">⛔ Экстренный Стоп</button>
+          <button class="btn" id="btn_fwd" onclick="setDir(true)" data-i18n="ctrl_fwd">Вперёд ▶</button>
         </div>
         <div class="fn-grid" id="fn_grid"></div>
       </div>
@@ -246,59 +254,59 @@ label{color:var(--text);font-weight:600}
 
   <div class="page" data-page="settings" style="display:none">
   <div class="panel info-panel span-all" data-page="settings" style="display:none">
-    <h2>Информация</h2>
+    <h2 data-i18n="info_title">Информация</h2>
     <div class="bd">
       <div class="info-device">
-        <span class="info-key">Устройство</span>
-        <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ">
-        <button class="btn primary sm" id="device_save" onclick="saveDeviceName()" style="display:none">Сохранить</button>
+        <span class="info-key" data-i18n="info_device">Устройство</span>
+        <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ" data-i18n-ph="info_placeholder">
+        <button class="btn primary sm" id="device_save" onclick="saveDeviceName()" style="display:none" data-i18n="save">Сохранить</button>
       </div>
       <div class="info-grid">
-        <div class="info-row"><span class="info-key">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
-        <div class="info-row"><span class="info-key">Адрес</span><span class="info-val" id="info_addr">—</span></div>
-        <div class="info-row"><span class="info-key">Состояние</span><span class="info-val" id="info_conn">—</span></div>
+        <div class="info-row"><span class="info-key" data-i18n="info_fw">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
+        <div class="info-row"><span class="info-key" data-i18n="info_addr">Адрес</span><span class="info-val" id="info_addr">—</span></div>
+        <div class="info-row"><span class="info-key" data-i18n="info_state">Состояние</span><span class="info-val" id="info_conn">—</span></div>
       </div>
     </div>
   </div>
 
   <div class="set-side">
-  <nav class="set-nav" data-page="settings" style="display:none" aria-label="Разделы настроек">
-    <div class="set-group">Движение</div>
-    <button class="set-item" data-target="panel_bemf" onclick="showSetting('panel_bemf')">Калибровка BEMF</button>
-    <div class="set-group">Звук</div>
-    <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')">Загрузка звуков</button>
-    <button class="set-item" data-target="panel_blocks" onclick="showSetting('panel_blocks')">Конструктор блоков</button>
-    <div class="set-group">Настройки</div>
-    <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')">CV</button>
-    <button class="set-item" data-target="panel_wifi" onclick="showSetting('panel_wifi')">Wi-Fi</button>
-    <button class="set-item" data-target="panel_ota" onclick="showSetting('panel_ota')">Обновление</button>
-    <button class="set-item" data-target="panel_bemf_base" onclick="showSetting('panel_bemf_base')">Базовые настройки</button>
-    <div class="set-group">Сервис</div>
-    <button class="set-item" data-target="panel_log" onclick="showSetting('panel_log')">Журнал</button>
+  <nav class="set-nav" data-page="settings" style="display:none" aria-label="Разделы настроек" data-i18n-aria="set_nav_aria">
+    <div class="set-group" data-i18n="grp_motion">Движение</div>
+    <button class="set-item" data-target="panel_bemf" onclick="showSetting('panel_bemf')" data-i18n="nav_bemf">Калибровка BEMF</button>
+    <div class="set-group" data-i18n="grp_sound">Звук</div>
+    <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')" data-i18n="nav_snd">Загрузка звуков</button>
+    <button class="set-item" data-target="panel_blocks" onclick="showSetting('panel_blocks')" data-i18n="nav_blocks">Конструктор блоков</button>
+    <div class="set-group" data-i18n="grp_settings">Настройки</div>
+    <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')" data-i18n="nav_cv">CV</button>
+    <button class="set-item" data-target="panel_wifi" onclick="showSetting('panel_wifi')" data-i18n="nav_wifi">Wi-Fi</button>
+    <button class="set-item" data-target="panel_ota" onclick="showSetting('panel_ota')" data-i18n="nav_ota">Обновление</button>
+    <button class="set-item" data-target="panel_bemf_base" onclick="showSetting('panel_bemf_base')" data-i18n="nav_bemf_base">Базовые настройки</button>
+    <div class="set-group" data-i18n="grp_service">Сервис</div>
+    <button class="set-item" data-target="panel_log" onclick="showSetting('panel_log')" data-i18n="nav_log">Журнал</button>
   </nav>
 
-  <div class="uptime-line" data-page="settings" style="display:none"><span>Устройство работает:</span> <span id="uptime">—</span></div>
+  <div class="uptime-line" data-page="settings" style="display:none"><span data-i18n="uptime_label">Устройство работает:</span> <span id="uptime">—</span></div>
   </div>
 
   <div class="set-body">
 
   <div class="panel" data-page="settings" style="display:none" id="panel_bemf">
     <div class="panel-hd" id="hd_bemf" onclick="togglePanel('bemf')">
-      <h2>Калибровка BEMF</h2>
+      <h2 data-i18n="nav_bemf">Калибровка BEMF</h2>
       <span class="chev" id="chev_bemf">▸</span>
     </div>
     <div class="bd" id="bd_bemf" style="display:none">
       <div class="row" style="margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-          <input type="checkbox" id="bemf_use" style="width:auto" onchange="setBemfUse()">Использовать BEMF для двигателя
+          <input type="checkbox" id="bemf_use" style="width:auto" onchange="setBemfUse()"><span data-i18n="bemf_use">Использовать BEMF для двигателя</span>
         </label>
       </div>
       <div class="row" style="margin-bottom:8px">
-        <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()">Калибровать</button>
-        <button class="btn danger" id="bemf_clear_btn" onclick="clearBemfCal()">Сброс</button>
-        <button class="btn danger" id="bemf_cancel_btn" onclick="cancelBemfCal()" disabled>Отменить</button>
+        <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()" data-i18n="bemf_calibrate">Калибровать</button>
+        <button class="btn danger" id="bemf_clear_btn" onclick="clearBemfCal()" data-i18n="bemf_reset">Сброс</button>
+        <button class="btn danger" id="bemf_cancel_btn" onclick="cancelBemfCal()" disabled data-i18n="bemf_cancel">Отменить</button>
       </div>
-      <div class="muted" id="bemf_status">Статус: —</div>
+      <div class="muted" id="bemf_status" data-i18n="bemf_status_idle">Статус: —</div>
       <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
       <div class="up-meta" id="bemf_meta"></div>
     </div>
@@ -306,84 +314,81 @@ label{color:var(--text);font-weight:600}
 
   <div class="panel" data-page="settings" style="display:none" id="panel_snd">
     <div class="panel-hd" id="hd_snd" onclick="togglePanel('snd')">
-      <h2>Загрузка звуков</h2>
+      <h2 data-i18n="snd_title">Загрузка звуков</h2>
       <span class="chev" id="chev_snd">▸</span>
     </div>
     <div class="bd" id="bd_snd" style="display:none">
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
-        <span class="chip" id="free_space">Свободно: —</span>
+        <span class="chip" id="free_space" data-i18n="free_space_idle">Свободно: —</span>
         <div style="display:flex;gap:8px">
-          <button class="btn sm ghost" onclick="loadTracks()">Обновить</button>
-          <button class="btn sm danger" onclick="stopAudio()">■ Стоп</button>
+          <button class="btn sm ghost" onclick="loadTracks()" data-i18n="refresh">Обновить</button>
+          <button class="btn sm danger" onclick="stopAudio()" data-i18n="stop">■ Стоп</button>
         </div>
       </div>
-      <div class="vol"><label>Общая</label><input type="range" min="0" max="100" value="20" id="vol_master" oninput="onVolInput('master')"><span class="val" id="vol_master_v">20</span></div>
-      <div class="vol"><label>Двигатель</label><input type="range" min="0" max="100" value="20" id="vol_engine" oninput="onVolInput('engine')"><span class="val" id="vol_engine_v">20</span></div>
-      <div class="vol"><label>Эффекты</label><input type="range" min="0" max="100" value="20" id="vol_effects" oninput="onVolInput('effects')"><span class="val" id="vol_effects_v">20</span></div>
       <div class="s-grid" id="sound_grid" style="margin-top:12px"></div>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_blocks">
     <div class="panel-hd" id="hd_blocks" onclick="togglePanel('blocks')">
-      <h2>Конструктор блоков (простой)</h2>
+      <h2 data-i18n="blocks_title">Конструктор блоков (простой)</h2>
       <span class="chev" id="chev_blocks">▸</span>
     </div>
     <div class="bd" id="bd_blocks" style="display:none">
-      <div class="hint" style="margin-bottom:10px">Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.</div>
-      <button class="btn sm" onclick="window.open('/sound-editor/blocks.html','_blank')">Открыть конструктор блоков</button>
+      <div class="hint" style="margin-bottom:10px" data-i18n="blocks_hint">Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.</div>
+      <button class="btn sm" onclick="window.open('/sound-editor/blocks.html?lang='+lang,'_blank')" data-i18n="blocks_open">Открыть конструктор блоков</button>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_cv">
     <div class="panel-hd" id="hd_cv" onclick="togglePanel('cv')">
-      <h2>CV</h2>
+      <h2 data-i18n="cv_title">CV</h2>
       <span class="chev" id="chev_cv">▸</span>
     </div>
     <div class="bd" id="bd_cv" style="display:none">
       <div class="cv-quick">
-        <div class="field"><label>Номер CV</label><input id="cv_quick_index" type="number" min="1" max="1024" value="1" oninput="jumpToCv()"></div>
-        <div class="field"><label>Значение</label><input id="cv_quick_value" type="number" min="0" max="255" value="0" oninput="setActiveValue(this.value)"></div>
+        <div class="field"><label data-i18n="cv_num">Номер CV</label><input id="cv_quick_index" type="number" min="1" max="1024" value="1" oninput="jumpToCv()"></div>
+        <div class="field"><label data-i18n="cv_value">Значение</label><input id="cv_quick_value" type="number" min="0" max="255" value="0" oninput="setActiveValue(this.value)"></div>
         <button class="btn sm ghost" onclick="stepCv(-1)">◀</button>
         <button class="btn sm ghost" onclick="stepCv(1)">▶</button>
-        <button class="btn primary" onclick="writeActiveCv()">Записать</button>
+        <button class="btn primary" onclick="writeActiveCv()" data-i18n="cv_write">Записать</button>
       </div>
       <div class="muted" id="cv_active_name" style="margin-bottom:8px">CV 1</div>
       <div class="cv-list" id="cv_list"></div>
       <div class="row" style="margin-top:12px">
-        <button class="btn danger" onclick="cvFactoryReset()">К заводским параметрам CV</button>
+        <button class="btn danger" onclick="cvFactoryReset()" data-i18n="cv_factory">К заводским параметрам CV</button>
       </div>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_wifi">
     <div class="panel-hd" id="hd_wifi" onclick="togglePanel('wifi')">
-      <h2>Настройки WiFi</h2>
+      <h2 data-i18n="wifi_title">Настройки WiFi</h2>
       <span class="chev" id="chev_wifi">▸</span>
     </div>
     <div class="bd" id="bd_wifi" style="display:none">
-      <div class="field"><label>IP-адрес точки доступа</label><input id="wifi_ap_ip" type="text" inputmode="decimal" maxlength="15" placeholder="192.168.100.1"></div>
-      <div class="field"><label>Имя точки доступа (SSID)</label><input id="wifi_ap_ssid" type="text" maxlength="32"></div>
-      <div class="field"><label>Новый пароль точки доступа (≥8 символов)</label><input id="wifi_ap_password" type="password" placeholder="пусто = оставить текущий пароль"></div>
-      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_clear_password" style="width:auto">Удалить пароль и открыть сеть</label></div>
-      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_auto_off" style="width:auto">Автовыключение WiFi через 3 минуты без подключения</label></div>
+      <div class="field"><label data-i18n="wifi_ip">IP-адрес точки доступа</label><input id="wifi_ap_ip" type="text" inputmode="decimal" maxlength="15" placeholder="192.168.100.1"></div>
+      <div class="field"><label data-i18n="wifi_ssid">Имя точки доступа (SSID)</label><input id="wifi_ap_ssid" type="text" maxlength="32"></div>
+      <div class="field"><label data-i18n="wifi_pw">Новый пароль точки доступа (≥8 символов)</label><input id="wifi_ap_password" type="password" placeholder="пусто = оставить текущий пароль" data-i18n-ph="wifi_pw_ph"></div>
+      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_clear_password" style="width:auto"><span data-i18n="wifi_clear_pw">Удалить пароль и открыть сеть</span></label></div>
+      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_auto_off" style="width:auto"><span data-i18n="wifi_auto_off">Автовыключение WiFi через 3 минуты без подключения</span></label></div>
       <div class="row" style="margin-top:10px">
-        <button class="btn primary" onclick="saveWifi()">Сохранить и перезагрузить</button>
-        <button class="btn danger" onclick="resetWifi()">Сброс настроек</button>
+        <button class="btn primary" onclick="saveWifi()" data-i18n="wifi_save">Сохранить и перезагрузить</button>
+        <button class="btn danger" onclick="resetWifi()" data-i18n="wifi_reset">Сброс настроек</button>
       </div>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_ota">
     <div class="panel-hd" id="hd_ota" onclick="togglePanel('ota')">
-      <h2>Обновление</h2>
+      <h2 data-i18n="ota_title">Обновление</h2>
       <span class="chev" id="chev_ota">▸</span>
     </div>
     <div class="bd" id="bd_ota" style="display:none">
       <div class="ota-row">
-        <label class="btn ghost" for="ota_file">Выбрать bin файл и прошить</label>
+        <label class="btn ghost" for="ota_file" data-i18n="ota_pick">Выбрать bin файл и прошить</label>
         <input type="file" id="ota_file" accept=".bin" onchange="uploadOta(this)" style="display:none">
-        <span class="hint" id="ota_hint">Прошивка или комбинированный файл «прошивка + звуки»</span>
+        <span class="hint" id="ota_hint" data-i18n="ota_hint">Прошивка или комбинированный файл «прошивка + звуки»</span>
       </div>
       <div class="up-bar" id="ota_bar" style="margin-top:8px"><i id="otabar"></i></div>
       <div class="up-meta" id="ota_meta"></div>
@@ -392,22 +397,22 @@ label{color:var(--text);font-weight:600}
 
   <div class="panel" data-page="settings" style="display:none" id="panel_bemf_base">
     <div class="panel-hd" id="hd_bemf_base" onclick="togglePanel('bemf_base')">
-      <h2>Базовые настройки</h2>
+      <h2 data-i18n="base_title">Базовые настройки</h2>
       <span class="chev" id="chev_bemf_base">▸</span>
     </div>
     <div class="bd" id="bd_bemf_base" style="display:none">
       <div class="row">
-        <button class="btn danger" id="factory_reset_btn" onclick="factoryReset()">Сброс к заводским</button>
+        <button class="btn danger" id="factory_reset_btn" onclick="factoryReset()" data-i18n="base_reset">Сброс к заводским</button>
       </div>
-      <div class="hint" style="margin-top:6px">Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.</div>
+      <div class="hint" style="margin-top:6px" data-i18n="base_hint">Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.</div>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_log">
-    <h2>Журнал</h2>
+    <h2 data-i18n="log_title">Журнал</h2>
     <div class="bd">
       <div class="row" style="justify-content:flex-end;margin-bottom:6px">
-        <button class="btn sm ghost" onclick="clearLog()">Очистить</button>
+        <button class="btn sm ghost" onclick="clearLog()" data-i18n="log_clear">Очистить</button>
       </div>
       <div class="log" id="app_log"></div>
     </div>
@@ -419,8 +424,8 @@ label{color:var(--text);font-weight:600}
     <div class="box">
       <div class="msg" id="modal_msg"></div>
       <div class="acts">
-        <button class="btn" id="modal_no" onclick="dlgAnswer(false)">Нет</button>
-        <button class="btn primary" id="modal_yes" onclick="dlgAnswer(true)">Да</button>
+        <button class="btn" id="modal_no" onclick="dlgAnswer(false)" data-i18n="no">Нет</button>
+        <button class="btn primary" id="modal_yes" onclick="dlgAnswer(true)" data-i18n="yes">Да</button>
       </div>
     </div>
   </div>
@@ -450,6 +455,211 @@ function clamp(v,a,b){v=Number(v);if(isNaN(v))return a;return Math.max(a,Math.mi
 function byId(id){return document.getElementById(id);}
 function setText(id,text){var el=byId(id);if(el)el.textContent=text;}
 function fmtTime(){return new Date().toLocaleTimeString();}
+
+/* i18n: Russian / English. Russian is the default; the choice is stored in the
+   browser and toggled by the header button left of the theme switch. */
+var LANG_KEY='aura_lang';
+var lang='ru';
+var I18N={
+ru:{
+nav_control:'Управление',nav_settings:'Настройки',
+conn_online:'Онлайн',conn_offline:'Офлайн',
+offline_banner:'⚠ Нет связи с устройством. Проверьте подключение к точке доступа.',
+theme_title:'Светлая / тёмная тема',theme_aria:'Переключить тему',
+lang_aria:'Переключить язык',lang_title:'Переключить на английский',
+ctrl_via:'Управление через',src_rails:'Рельсы',src_web:'Веб',
+ctrl_dc:'DC — аналоговое управление',
+ctrl_hint_default:'Управление скоростью и функциями — с выбранного источника.',
+ctrl_title:'Управление',ctrl_speed:'Скорость',
+ctrl_back:'◀ Назад',ctrl_stop:'■ Стоп',ctrl_emergency:'⛔ Экстренный Стоп',ctrl_fwd:'Вперёд ▶',
+hint_web:'Управление мотором и функциями — с веб-интерфейса.',
+hint_rails:'Управление — с рельс. По умолчанию режим DCC; включите «DC», чтобы управлять от напряжения на рельсах.',
+info_title:'Информация',info_device:'Устройство',info_placeholder:'ТЕПЛОВОЗ',save:'Сохранить',
+info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Состояние',
+set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Звук',grp_settings:'Настройки',grp_service:'Сервис',
+nav_bemf:'Калибровка BEMF',nav_snd:'Загрузка звуков',nav_blocks:'Конструктор блоков',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
+uptime_label:'Устройство работает:',
+bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',
+bemf_status_idle:'Статус: —',
+bemf_lbl_idle:'Калибровка не выполнялась',bemf_lbl_running:'Калибровка идёт, не трогайте мотор...',bemf_lbl_saving:'Сохранение калибровки...',bemf_lbl_succeeded:'Новая калибровка завершена и сохранена',bemf_lbl_cancelled:'Калибровка отменена',bemf_lbl_failed:'Калибровка не удалась',
+bemf_rsn_adc:'ошибка АЦП',bemf_rsn_rail:'нет допустимого напряжения рельс',bemf_rsn_timeout:'таймаут',bemf_rsn_control:'остановка управления',bemf_rsn_curve:'некорректная кривая',bemf_rsn_storage:'ошибка сохранения',bemf_rsn_start:'ошибка запуска',
+bemf_wait_cleanup:'; ожидание завершения очистки',
+bemf_prev:'Сохраненная предыдущая калибровка доступна для двигателя.',
+bemf_meta_running:'Калибровка идёт, не трогайте мотор...',
+bemf_unknown:'Статус калибровки неизвестен: связь потеряна',
+bemf_step:'Калибровка: шаг ',bemf_step_of:' из ',
+bemf_confirm_clear:'Сбросить сохранённую калибровку BEMF?',
+snd_title:'Загрузка звуков',free_prefix:'Свободно: ',free_space_idle:'Свободно: —',refresh:'Обновить',stop:'■ Стоп',
+slot_prefix:'Слот ',cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
+cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
+upload_wav:'Загрузить WAV',del_track_title:'Удалить трек',
+blocks_title:'Конструктор блоков (простой)',
+blocks_hint:'Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.',
+blocks_open:'Открыть конструктор блоков',
+cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',
+nothing_found:'Ничего не найдено',readonly:'только чтение',
+wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
+wifi_pw:'Новый пароль точки доступа (≥8 символов)',wifi_pw_ph:'пусто = оставить текущий пароль',
+wifi_clear_pw:'Удалить пароль и открыть сеть',wifi_auto_off:'Автовыключение WiFi через 3 минуты без подключения',
+wifi_save:'Сохранить и перезагрузить',wifi_reset:'Сброс настроек',
+ota_title:'Обновление',ota_pick:'Выбрать bin файл и прошить',ota_hint:'Прошивка или комбинированный файл «прошивка + звуки»',
+base_title:'Базовые настройки',base_reset:'Сброс к заводским',
+base_hint:'Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.',
+log_title:'Журнал',log_clear:'Очистить',log_event:'Событие',
+yes:'Да',no:'Нет',
+tag_control:'Управление',tag_mode:'Режим',tag_motor:'Мотор',tag_stop:'Стоп',tag_fn:'Функции',tag_sound:'Звук',tag_upload:'Загрузка',tag_ota:'OTA',tag_cv:'CV',tag_wifi:'Wi-Fi',tag_name:'Имя',tag_reset:'Сброс',tag_link:'Связь',tag_bemf:'BEMF',
+err_prefix:'ошибка: ',err_network:'СЕТЬ (нет связи)',err_timeout:'ТАЙМАУТ ',sec_suffix:' с',err_not_json:'не JSON (',no_ct:'нет content-type',
+msg_source:'источник: ',motor_stopped:' (мотор остановлен)',msg_mode:'переключено: ',
+load_failed:'загрузка не удалась',failed:'не удалось',not_saved:'не сохранено',not_reset:'не сброшено',cmd_rejected:'команда не принята',write_failed:'запись не удалась',
+upload_busy:'уже идёт загрузка, подождите',started:'запущен',stopped:'остановлен',
+written:'Записано: ',of:' из ',bytes_suffix:' Б',kb_per_s:'КБ/с',transferred:'Передано: ',done:'ГОТОВО: ',error_prefix:'ОШИБКА: ',in_seconds:' за ',
+file_gt:'файл > ',unit_mb:'МБ',unit_kb:'КБ',unit_b:'Б',day_short:'д',
+upload_file:'Загрузка ',fw_written:'Прошивка записана, идёт перезагрузка...',ota_error:'Ошибка: ',ota_only_bin:'только .bin файлы',fw_uploaded:'прошивка загружена (',
+factory_confirm:'Сбросить ВСЕ настройки устройства к заводским?\nБудут стёрты CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровка BEMF.\nЗвуковые файлы сохранятся.',
+reboot_factory:'заводские настройки, перезагрузка...',
+del_confirm_a:'Удалить трек из слота ',del_confirm_b:'? Файл будет удалён с платы.',slot_deleted_a:'трек слота #',slot_deleted_b:' удалён',deletion_slot:'удаление слота ',
+name_empty:'имя не может быть пустым',saved:'сохранено: ',
+reboot_no_answer:'Устройство не ответило после перезагрузки. Адрес: http://',emergency_log:'ЭКСТРЕННЫЙ СТОП',
+cv_was:'было ',cv_will_be:'станет ',cv_write_q:'Записать?',cv8_warn:'ВНИМАНИЕ: запись CV8 = 8 сбросит ВСЕ CV к заводским.\n\n',cv_wrote:'Записать CV ',cv_factory_confirm:'Сбросить ВСЕ CV к заводским значениям (адрес, кривая скорости, BEMF, таймаут)? Настройки Wi-Fi и звуки сохранятся.',cv_all_reset:'все CV сброшены к заводским',cv_reset_fail:'сброс к заводским: ',
+wifi_load_failed:'не удалось загрузить настройки',wifi_pw_conflict:'выберите новый пароль или удаление пароля',wifi_pw_short:'пароль точки доступа должен быть ≥ 8 символов',wifi_saving:'сохраняю настройки и перезагружаю...',wifi_saved_reboot:'настройки сохранены, перезагрузка...',wifi_reset_confirm:'Сбросить настройки WiFi к заводским и перезагрузить?',wifi_resetting:'сброс настроек и перезагрузка...',wifi_reset_reboot:'настройки сброшены, перезагрузка...',
+bemf_log_started:'калибровка запущена, не трогайте мотор',bemf_log_cal:'калибровка: ',bemf_log_reset:'сброс: ',bemf_log_cleared:'калибровка сброшена',bemf_log_cancel:'отмена: ',bemf_log_cancel_req:'отмена запрошена',bemf_on:'регулятор включён',bemf_off:'регулятор выключен, движение только по ШИМ'
+},
+en:{
+nav_control:'Control',nav_settings:'Settings',
+conn_online:'Online',conn_offline:'Offline',
+offline_banner:'⚠ No connection to the device. Check the access point connection.',
+theme_title:'Light / dark theme',theme_aria:'Toggle theme',
+lang_aria:'Switch language',lang_title:'Switch to Russian',
+ctrl_via:'Control via',src_rails:'Rails',src_web:'Web',
+ctrl_dc:'DC — analog control',
+ctrl_hint_default:'Speed and function control come from the selected source.',
+ctrl_title:'Control',ctrl_speed:'Speed',
+ctrl_back:'◀ Reverse',ctrl_stop:'■ Stop',ctrl_emergency:'⛔ Emergency Stop',ctrl_fwd:'Forward ▶',
+hint_web:'Motor and function control come from the web interface.',
+hint_rails:'Control comes from the rails. DCC by default; enable «DC» to control from track voltage.',
+info_title:'Information',info_device:'Device',info_placeholder:'LOCOMOTIVE',save:'Save',
+info_fw:'Firmware version',info_addr:'Address',info_state:'State',
+set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Sound',grp_settings:'Settings',grp_service:'Service',
+nav_bemf:'BEMF calibration',nav_snd:'Sound upload',nav_blocks:'Block builder',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
+uptime_label:'Uptime:',
+bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',
+bemf_status_idle:'Status: —',
+bemf_lbl_idle:'Calibration has not been run',bemf_lbl_running:'Calibration in progress, do not touch the motor...',bemf_lbl_saving:'Saving calibration...',bemf_lbl_succeeded:'New calibration completed and stored',bemf_lbl_cancelled:'Calibration cancelled',bemf_lbl_failed:'Calibration failed',
+bemf_rsn_adc:'ADC error',bemf_rsn_rail:'no valid track voltage',bemf_rsn_timeout:'timeout',bemf_rsn_control:'control stop',bemf_rsn_curve:'invalid curve',bemf_rsn_storage:'storage error',bemf_rsn_start:'start error',
+bemf_wait_cleanup:'; waiting for cleanup to finish',
+bemf_prev:'The previously stored calibration is available for the motor.',
+bemf_meta_running:'Calibration in progress, do not touch the motor...',
+bemf_unknown:'Calibration status unknown: connection lost',
+bemf_step:'Calibration: step ',bemf_step_of:' of ',
+bemf_confirm_clear:'Reset the stored BEMF calibration?',
+snd_title:'Sound upload',free_prefix:'Free: ',free_space_idle:'Free: —',refresh:'Refresh',stop:'■ Stop',
+slot_prefix:'Slot ',cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
+cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
+upload_wav:'Upload WAV',del_track_title:'Delete track',
+blocks_title:'Block builder (simple)',
+blocks_hint:'Build a sound graph from ready locomotive blocks: engine, horn, whistle, bell, compressor, coupling and more. Blocks are placed and moved on the canvas; files and the F-key are set on the right.',
+blocks_open:'Open block builder',
+cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',
+nothing_found:'Nothing found',readonly:'is read-only',
+wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
+wifi_pw:'New access point password (≥8 characters)',wifi_pw_ph:'empty = keep the current password',
+wifi_clear_pw:'Remove password and open the network',wifi_auto_off:'Turn WiFi off after 3 minutes without a connection',
+wifi_save:'Save and reboot',wifi_reset:'Reset settings',
+ota_title:'Update',ota_pick:'Choose a .bin file and flash',ota_hint:'Firmware or combined «firmware + sounds» file',
+base_title:'Basic settings',base_reset:'Factory reset',
+base_hint:'Resets EVERYTHING: CVs, Wi-Fi, volumes, name, control source, sound slots and BEMF calibration. Sound files on the storage are kept. The device will reboot.',
+log_title:'Log',log_clear:'Clear',log_event:'Event',
+yes:'Yes',no:'No',
+tag_control:'Control',tag_mode:'Mode',tag_motor:'Motor',tag_stop:'Stop',tag_fn:'Functions',tag_sound:'Sound',tag_upload:'Upload',tag_ota:'OTA',tag_cv:'CV',tag_wifi:'Wi-Fi',tag_name:'Name',tag_reset:'Reset',tag_link:'Link',tag_bemf:'BEMF',
+err_prefix:'error: ',err_network:'NETWORK (no link)',err_timeout:'TIMEOUT ',sec_suffix:' s',err_not_json:'not JSON (',no_ct:'no content-type',
+msg_source:'source: ',motor_stopped:' (motor stopped)',msg_mode:'switched: ',
+load_failed:'load failed',failed:'failed',not_saved:'not saved',not_reset:'not reset',cmd_rejected:'command rejected',write_failed:'write failed',
+upload_busy:'an upload is already in progress, please wait',started:'started',stopped:'stopped',
+written:'Written: ',of:' of ',bytes_suffix:' B',kb_per_s:'KB/s',transferred:'Sent: ',done:'DONE: ',error_prefix:'ERROR: ',in_seconds:' in ',
+file_gt:'file > ',unit_mb:'MB',unit_kb:'KB',unit_b:'B',day_short:'d',
+upload_file:'Uploading ',fw_written:'Firmware written, rebooting...',ota_error:'Error: ',ota_only_bin:'only .bin files',fw_uploaded:'firmware uploaded (',
+factory_confirm:'Reset ALL device settings to factory defaults?\nCVs, Wi-Fi, volumes, name, control source, sound slots and BEMF calibration will be erased.\nSound files are kept.',
+reboot_factory:'factory settings, rebooting...',
+del_confirm_a:'Delete the track from slot ',del_confirm_b:'? The file will be deleted from the board.',slot_deleted_a:'track in slot #',slot_deleted_b:' deleted',deletion_slot:'delete slot ',
+name_empty:'name cannot be empty',saved:'saved: ',
+reboot_no_answer:'Device did not respond after reboot. Address: http://',emergency_log:'EMERGENCY STOP',
+cv_was:'was ',cv_will_be:'will be ',cv_write_q:'Write?',cv8_warn:'WARNING: writing CV8 = 8 will reset ALL CVs to factory defaults.\n\n',cv_wrote:'Write CV ',cv_factory_confirm:'Reset ALL CVs to factory defaults (address, speed curve, BEMF, timeout)? Wi-Fi settings and sounds are kept.',cv_all_reset:'all CVs reset to factory defaults',cv_reset_fail:'reset to factory: ',
+wifi_load_failed:'failed to load settings',wifi_pw_conflict:'choose a new password or password removal',wifi_pw_short:'the access point password must be ≥ 8 characters',wifi_saving:'saving settings and rebooting...',wifi_saved_reboot:'settings saved, rebooting...',wifi_reset_confirm:'Reset WiFi settings to factory defaults and reboot?',wifi_resetting:'resetting settings and rebooting...',wifi_reset_reboot:'settings reset, rebooting...',
+bemf_log_started:'calibration started, do not touch the motor',bemf_log_cal:'calibration: ',bemf_log_reset:'reset: ',bemf_log_cleared:'calibration reset',bemf_log_cancel:'cancel: ',bemf_log_cancel_req:'cancel requested',bemf_on:'regulator enabled',bemf_off:'regulator disabled, PWM-only motion'
+}
+};
+function t(k){var d=I18N[lang]||I18N.ru;return (d&&d[k]!=null)?d[k]:((I18N.ru[k]!=null)?I18N.ru[k]:k);}
+function tr(v){if(v&&typeof v==='object')return (v[lang]!=null)?v[lang]:v.ru;return v;}
+function langTitle(){return lang==='ru'?'Switch to English':'Переключить на русский';}
+function applyLangStatic(){
+  if(document.querySelectorAll){
+    var els=document.querySelectorAll('[data-i18n]');
+    for(var i=0;i<els.length;i++){els[i].textContent=t(els[i].getAttribute('data-i18n'));}
+    var ts=document.querySelectorAll('[data-i18n-title]');
+    for(var j=0;j<ts.length;j++){ts[j].setAttribute('title',t(ts[j].getAttribute('data-i18n-title')));}
+    var ps=document.querySelectorAll('[data-i18n-ph]');
+    for(var p=0;p<ps.length;p++){ps[p].setAttribute('placeholder',t(ps[p].getAttribute('data-i18n-ph')));}
+    var ar=document.querySelectorAll('[data-i18n-aria]');
+    for(var a=0;a<ar.length;a++){ar[a].setAttribute('aria-label',t(ar[a].getAttribute('data-i18n-aria')));}
+  }
+  var lb=byId('lang_btn');
+  if(lb){lb.textContent=lang.toUpperCase();if(lb.setAttribute)lb.setAttribute('title',langTitle());}
+  if(document.documentElement&&document.documentElement.setAttribute)document.documentElement.setAttribute('lang',lang);
+}
+function updateConnectionText(){
+  var txt=t(isOffline?'conn_offline':'conn_online');
+  setText('connection',txt);
+  setText('info_conn',txt);
+}
+/* Re-translate everything that is generated by script (the static attributes
+   are handled by applyLangStatic). Called on language change, not on init. */
+function applyLang(){
+  applyLangStatic();
+  updateConnectionText();
+  if(typeof renderControlSource==='function')renderControlSource();
+  if(typeof renderFunctions==='function')renderFunctions();
+  if(typeof renderMode==='function')renderMode();
+  lastSlotsSig='';
+  if(typeof renderSlots==='function')renderSlots();
+  if(typeof renderCvList==='function')renderCvList();
+  if(typeof setActiveCaption==='function')setActiveCaption(activeCv);
+  if(typeof renderUptime==='function')renderUptime();
+  if(typeof loadFreeSpace==='function')loadFreeSpace();
+  if(typeof loadBemfCal==='function')loadBemfCal();
+  if(typeof uploadBusy!=='undefined'&&!uploadBusy)setText('ota_hint',t('ota_hint'));
+}
+function toggleLang(){
+  lang=(lang==='en')?'ru':'en';
+  try{if(typeof localStorage!=='undefined')localStorage.setItem(LANG_KEY,lang);}catch(e){}
+  applyLang();
+}
+function initLang(){
+  var l='ru';
+  try{if(typeof localStorage!=='undefined'){var s=localStorage.getItem(LANG_KEY);if(s==='ru'||s==='en')l=s;}}catch(e){}
+  lang=l;
+  applyLangStatic();
+  updateConnectionText();
+}
+/* Device track labels are plain data from the device, most of them default
+   locomotive sound names in Russian. Translate the well-known ones and the
+   "Слот N" fallback; custom user labels pass through unchanged. */
+var LABEL_EN={
+'Тепловоз':'Locomotive','Отправление':'Departure','Свисток':'Whistle','Тифон':'Air horn',
+'Компрессор':'Compressor','Вентилятор':'Fan','Сцепка':'Coupler','Тормоз':'Brake','Тормоза':'Brakes',
+'Гудок':'Horn','Стрелка':'Switch','Колёса':'Wheels','Песок':'Sand','Генератор':'Generator',
+'Дизель':'Diesel','Токоприёмник':'Pantograph','Шасси':'Chassis','Дверь':'Door','Двери':'Doors',
+'Кондиционер':'Air conditioner','Дребезг':'Rattle','Обрыв':'Break','Мотор':'Motor','Двигатель':'Engine',
+'Звонок':'Bell','Холостой ход':'Idle','Тяга':'Traction','Останов':'Stop','Останов двигателя':'Engine stop'
+};
+function localizeLabel(raw,slot){
+  if(raw==null||raw==='')return raw;
+  var m=/^Слот\s*(\d+)$/i.exec(raw)||/^Slot\s*(\d+)$/i.exec(raw);
+  if(m)return t('slot_prefix')+m[1];
+  if(lang==='en'&&LABEL_EN[raw])return LABEL_EN[raw];
+  if(lang==='ru'){for(var k in LABEL_EN){if(LABEL_EN[k]===raw)return k;}}
+  return raw;
+}
+
 /* Modal Да/Нет: Promise<boolean>, resolves true on "Да". */
 var dlgResolve=null;
 function confirmDialog(msg){
@@ -493,8 +703,7 @@ function setConnected(ok){
   if(ok||connFail>=3){
     var dot=byId('link_dot');
     if(dot)dot.classList.toggle('ok',ok);
-    setText('connection',ok?'Онлайн':'Офлайн');
-    setText('info_conn',ok?'Онлайн':'Офлайн');
+    updateConnectionText();
     var banner=byId('offline_banner');
     if(banner)banner.classList.toggle('show',!ok);
     /* The bottom uptime clock is only meaningful while the board answers: keep
@@ -515,11 +724,11 @@ async function api(path,opts){
     var r=await fetch(path,o);
     var ct=(r.headers.get('content-type')||'').toLowerCase();
     if(!r.ok)throw new Error('HTTP '+r.status);
-    if(ct.indexOf('json')<0)throw new Error('не JSON ('+(ct||'нет content-type')+')');
+    if(ct.indexOf('json')<0)throw new Error(t('err_not_json')+(ct||t('no_ct'))+')');
     return await r.json();
   }catch(e){
-    var kind=(e&&e.name==='AbortError')?('ТАЙМАУТ '+(timeout/1000)+' с')
-      :(e&&e.name==='TypeError')?'СЕТЬ (нет связи)'
+    var kind=(e&&e.name==='AbortError')?(t('err_timeout')+(timeout/1000)+t('sec_suffix'))
+      :(e&&e.name==='TypeError')?t('err_network')
       :((e&&e.message)||String(e));
     throw new Error(kind);
   }finally{
@@ -538,8 +747,7 @@ var state={
 };
 var tracks=[];
 var slotCats=[];
-var savedDeviceName='ТЕПЛОВОЗ';
-var volTimers={master:null,engine:null,effects:null};
+var savedDeviceName='';
 var speedTimer=null;
 var motorRevision=0,motorPending=0,motorQueue=Promise.resolve();
 var rebooting=false,rebootRevision=0;
@@ -589,7 +797,7 @@ async function refreshStatus(){
       if(dl.entries){
         for(var j=0;j<dl.entries.length;j++){
           var ev=dl.entries[j];
-          log(ev.tag||'Событие',ev.text||'');
+          log(ev.tag||t('log_event'),ev.text||'');
         }
       }
       if(typeof dl.seq==='number')logSeq=dl.seq;
@@ -613,9 +821,9 @@ document.addEventListener('visibilitychange',function(){
 function fmtBytes(n){
   n=Number(n);
   if(!isFinite(n)||n<0)return '—';
-  if(n>=1024*1024)return (n/(1024*1024)).toFixed(1)+' МБ';
-  if(n>=1024)return Math.round(n/1024)+' КБ';
-  return n+' Б';
+  if(n>=1024*1024)return (n/(1024*1024)).toFixed(1)+' '+t('unit_mb');
+  if(n>=1024)return Math.round(n/1024)+' '+t('unit_kb');
+  return n+' '+t('unit_b');
 }
 /* Free space on the audio storage. Fetched on demand (panel open, after
    upload/delete) instead of on the 3 s poll: the LittleFS free-size scan on
@@ -623,7 +831,7 @@ function fmtBytes(n){
 async function loadFreeSpace(){
   try{
     var d=await api('/api/storage');
-    if(d&&d.ok)setText('free_space','Свободно: '+fmtBytes(d.free));
+    if(d&&d.ok)setText('free_space',t('free_prefix')+fmtBytes(d.free));
   }catch(e){}
 }
 
@@ -631,10 +839,10 @@ async function loadFreeSpace(){
 async function setControlSource(src){
   try{
     var d=await api('/api/control/source?source='+src,{method:'POST'});
-    if(!d||!d.ok)throw new Error('не удалось');
+    if(!d||!d.ok)throw new Error(t('failed'));
     state.control_source=d.source||src;
-    log('Управление','источник: '+(state.control_source==='web'?'Веб':'Рельсы')+(state.motor.speed>0?' (мотор остановлен)':''));
-  }catch(e){log('Управление','ошибка: '+e.message);}
+    log(t('tag_control'),t('msg_source')+(state.control_source==='web'?t('src_web'):t('src_rails'))+(state.motor.speed>0?t('motor_stopped'):''));
+  }catch(e){log(t('tag_control'),t('err_prefix')+e.message);}
   renderControlSource();
 }
 function renderControlSource(){
@@ -642,7 +850,7 @@ function renderControlSource(){
   var sr=byId('src_rails'),sw=byId('src_web');
   if(sr){sr.classList.toggle('active',!web);}
   if(sw){sw.classList.toggle('active',web);}
-  setText('src_hint',web?'Управление мотором и функциями — с веб-интерфейса.':'Управление — с рельс. По умолчанию режим DCC; включите «DC», чтобы управлять от напряжения на рельсах.');
+  setText('src_hint',t(web?'hint_web':'hint_rails'));
   var body=byId('control_body');
   if(body)body.classList.toggle('locked',!web);
   var els=[byId('speed'),byId('btn_rev'),byId('btn_stop'),byId('btn_fwd')];
@@ -656,10 +864,10 @@ function renderControlSource(){
 async function setMode(mode){
   try{
     var d=await api('/api/mode?mode='+mode,{method:'POST'});
-    if(!d||!d.ok)throw new Error('не удалось');
+    if(!d||!d.ok)throw new Error(t('failed'));
     state.mode=d.mode||mode;
-    log('Режим','переключено: '+(state.mode==='dc'?'DC':'DCC'));
-  }catch(e){log('Режим','ошибка: '+e.message);}
+    log(t('tag_mode'),t('msg_mode')+(state.mode==='dc'?'DC':'DCC'));
+  }catch(e){log(t('tag_mode'),t('err_prefix')+e.message);}
   renderMode();
 }
 function toggleMode(){
@@ -688,20 +896,20 @@ async function startBemfCal(){
   bemfCommandBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
     var d=await api('/api/bemf/calibrate?start=1',{method:'POST',timeout:3000});
-    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');
-    log('BEMF','калибровка запущена, не трогайте мотор');
-  }catch(e){log('BEMF','калибровка: '+e.message);
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+    log(t('tag_bemf'),t('bemf_log_started'));
+  }catch(e){log(t('tag_bemf'),t('bemf_log_cal')+e.message);
   }finally{bemfCommandBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
 }
 async function clearBemfCal(){
   if(bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown)return;
-  if(!confirm('Сбросить сохранённую калибровку BEMF?'))return;
+  if(!confirm(t('bemf_confirm_clear')))return;
   bemfCommandBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
     var d=await api('/api/bemf/calibrate?reset=1',{method:'POST',timeout:3000});
-    if(!d||!d.ok)throw new Error('не удалось');
-    log('BEMF','калибровка сброшена');
-  }catch(e){log('BEMF','сброс: '+e.message);
+    if(!d||!d.ok)throw new Error(t('failed'));
+    log(t('tag_bemf'),t('bemf_log_cleared'));
+  }catch(e){log(t('tag_bemf'),t('bemf_log_reset')+e.message);
   }finally{bemfCommandBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
 }
 async function cancelBemfCal(){
@@ -709,9 +917,9 @@ async function cancelBemfCal(){
   bemfCancelBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
     var d=await api('/api/bemf/calibrate?cancel=1',{method:'POST',timeout:3000});
-    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');
-    log('BEMF','отмена запрошена');
-  }catch(e){log('BEMF','отмена: '+e.message);
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+    log(t('tag_bemf'),t('bemf_log_cancel_req'));
+  }catch(e){log(t('tag_bemf'),t('bemf_log_cancel')+e.message);
   }finally{bemfCancelBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
 }
 function bemfStartPoll(immediate){
@@ -727,7 +935,7 @@ async function loadBemfCal(){
   try{
     var d=await api('/api/bemf/cal',{timeout:3000});
     if(revision!==bemfRevision)return;
-    if(!d||!d.ok)throw new Error('не удалось');
+    if(!d||!d.ok)throw new Error(t('failed'));
     var active=d.active===true||d.active==='true';
     var result=d.result||'idle';
     bemfActive=active||result==='running'||result==='saving';
@@ -737,17 +945,17 @@ async function loadBemfCal(){
     if(result==='running'&&Number(d.total)>0){
       bar.style.display='block';
       barIn.style.width=Math.round((Number(d.progress)||0)/Number(d.total)*100)+'%';
-      setText('bemf_status','Калибровка: шаг '+(Number(d.progress)||0)+' из '+d.total);
+      setText('bemf_status',t('bemf_step')+(Number(d.progress)||0)+t('bemf_step_of')+d.total);
     }else{
       bar.style.display='none';
-      var reasons={adc:'ошибка АЦП',rail:'нет допустимого напряжения рельс',timeout:'таймаут',control:'остановка управления',curve:'некорректная кривая',storage:'ошибка сохранения',start:'ошибка запуска'};
-      var labels={idle:'Калибровка не выполнялась',running:'Калибровка идёт, не трогайте мотор...',saving:'Сохранение калибровки...',succeeded:'Новая калибровка завершена и сохранена',cancelled:'Калибровка отменена',failed:'Калибровка не удалась'};
+      var reasons={adc:t('bemf_rsn_adc'),rail:t('bemf_rsn_rail'),timeout:t('bemf_rsn_timeout'),control:t('bemf_rsn_control'),curve:t('bemf_rsn_curve'),storage:t('bemf_rsn_storage'),start:t('bemf_rsn_start')};
+      var labels={idle:t('bemf_lbl_idle'),running:t('bemf_lbl_running'),saving:t('bemf_lbl_saving'),succeeded:t('bemf_lbl_succeeded'),cancelled:t('bemf_lbl_cancelled'),failed:t('bemf_lbl_failed')};
       var status=labels[result]||labels.failed;
       if((result==='failed'||result==='cancelled')&&reasons[d.error])status+=': '+reasons[d.error];
-      if(active&&(result==='failed'||result==='cancelled'))status+='; ожидание завершения очистки';
+      if(active&&(result==='failed'||result==='cancelled'))status+=t('bemf_wait_cleanup');
       setText('bemf_status',status);
     }
-    setText('bemf_meta',d.stored&&result!=='succeeded'?'Сохраненная предыдущая калибровка доступна для двигателя.':(result==='running'?'Калибровка идёт, не трогайте мотор...':''));
+    setText('bemf_meta',d.stored&&result!=='succeeded'?t('bemf_prev'):(result==='running'?t('bemf_meta_running'):''));
     var useCb=byId('bemf_use');
     if(useCb&&!bemfUseBusy&&useRevision===bemfUseRevision&&typeof d.use!=='undefined'){
       bemfUseActual=(d.use===true||d.use==='true');useCb.checked=bemfUseActual;
@@ -757,7 +965,7 @@ async function loadBemfCal(){
   }catch(e){
     if(revision===bemfRevision&&bemfDiscoverTries>0&&--bemfDiscoverTries===0&&!bemfActive){
       bemfPollActive=false;if(bemfPollTimer)clearInterval(bemfPollTimer);bemfPollTimer=null;
-      setText('bemf_status','Статус калибровки неизвестен: связь потеряна');
+      setText('bemf_status',t('bemf_unknown'));
     }
   }finally{bemfPollBusy=false;renderBemfButtons();}
 }
@@ -768,10 +976,10 @@ async function setBemfUse(){
   try{
     var d=await api('/api/bemf/use?enabled='+(on?1:0),{method:'POST',timeout:3000});
     if(d&&typeof d.enabled==='boolean'){bemfUseActual=d.enabled;cb.checked=d.enabled;}
-    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'не удалось');
-    log('BEMF',d.enabled?'регулятор включён':'регулятор выключен, движение только по ШИМ');
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+    log(t('tag_bemf'),d.enabled?t('bemf_on'):t('bemf_off'));
   }catch(e){
-    log('BEMF','ошибка: '+e.message);
+    log(t('tag_bemf'),t('err_prefix')+e.message);
     try{var actual=await api('/api/bemf/use',{timeout:3000});if(actual&&actual.ok&&typeof actual.enabled==='boolean')bemfUseActual=actual.enabled;}catch(ignored){}
     if(bemfUseActual!==null)cb.checked=bemfUseActual;
   }finally{bemfUseBusy=false;cb.disabled=false;}
@@ -798,7 +1006,7 @@ function reloadAfterReboot(delayMs,newHost){
     if(ok){if(host!==location.hostname)location.href='http://'+host+'/';else location.reload();return;}
     if(++tries>=30){
       rebooting=false;setConnected(false);
-      log('Связь','Устройство не ответило после перезагрузки. Адрес: http://'+host+'/');
+      log(t('tag_link'),t('reboot_no_answer')+host+'/');
       if(host===location.hostname){startStatusPoll();startHeartbeat();}
       return;
     }
@@ -809,13 +1017,13 @@ function reloadAfterReboot(delayMs,newHost){
 
 /* full factory reset */
 async function factoryReset(){
-  if(!confirm('Сбросить ВСЕ настройки устройства к заводским?\nБудут стёрты CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровка BEMF.\nЗвуковые файлы сохранятся.'))return;
+  if(!confirm(t('factory_confirm')))return;
   try{
     var d=await api('/api/reset',{method:'POST'});
-    if(!d||!d.ok)throw new Error('не удалось');
-    log('Сброс','заводские настройки, перезагрузка...');
+    if(!d||!d.ok)throw new Error(t('failed'));
+    log(t('tag_reset'),t('reboot_factory'));
     reloadAfterReboot(2000,(d&&d.ap_ip)||'192.168.100.1');
-  }catch(e){log('Сброс','ошибка: '+e.message);}
+  }catch(e){log(t('tag_reset'),t('err_prefix')+e.message);}
 }
 
 /* motor */
@@ -844,9 +1052,9 @@ function queueMotorCommand(speed,forward){
   motorQueue=motorQueue.catch(function(){}).then(async function(){
     if(revision!==motorRevision)return;
     var d=await api('/api/motor?speed='+speed+'&forward='+(forward?1:0),{method:'POST',timeout:3000});
-    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'команда не принята');
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('cmd_rejected'));
     if(revision===motorRevision){state.motor.speed=Number(d.speed)||0;state.motor.forward=d.forward===true||d.forward==='true';renderMotor();}
-  }).catch(function(e){log('Мотор','ошибка: '+e.message);}).finally(function(){motorPending--;});
+  }).catch(function(e){log(t('tag_motor'),t('err_prefix')+e.message);}).finally(function(){motorPending--;});
   return motorQueue;
 }
 function sendMotorSpeed(){
@@ -869,11 +1077,11 @@ function emergencyStop(){
   state.motor.speed=0;
   for(var f=0;f<=28;f++)state.fnStates[f]=false;
   renderMotor();renderFunctions();
-  log('Стоп','ЭКСТРЕННЫЙ СТОП');
+  log(t('tag_stop'),t('emergency_log'));
   return api('/api/emergency',{method:'POST',timeout:3000}).then(function(d){
-    if(!d||!d.ok)throw new Error(d&&d.error?d.error:'команда не принята');
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('cmd_rejected'));
     refreshStatus();
-  }).catch(function(e){log('Стоп','экстренный: '+e.message);});
+  }).catch(function(e){log(t('tag_stop'),t('err_prefix')+e.message);});
 }
 
 /* functions — F0..F28 on/off buttons */
@@ -893,53 +1101,16 @@ function toggleFn(fn){
   renderFunctions();
   api('/api/function?fn='+fn+'&state='+(next?1:0),{method:'POST'})
     .then(function(d){
-      if(!d||!d.ok){state.fnStates[fn]=!next;renderFunctions();log('Функции','ошибка: '+(d&&d.error?d.error:'не удалось'));}
+      if(!d||!d.ok){state.fnStates[fn]=!next;renderFunctions();log(t('tag_fn'),t('err_prefix')+(d&&d.error?d.error:t('failed')));}
     })
-    .catch(function(e){state.fnStates[fn]=!next;renderFunctions();log('Функции','ошибка: '+e.message);});
+    .catch(function(e){state.fnStates[fn]=!next;renderFunctions();log(t('tag_fn'),t('err_prefix')+e.message);});
 }
 
-/* volume */
-function onVolInput(k){
-  var v=clamp(byId('vol_'+k).value,0,100);
-  setText('vol_'+k+'_v',String(v));
-  clearTimeout(volTimers[k]);
-  volTimers[k]=setTimeout(applyVolume,300);
-}
-async function applyVolume(){
-  var m=byId('vol_master').value,e=byId('vol_engine').value,f=byId('vol_effects').value;
-  try{
-    var d=await api('/api/audio/volume?master='+m+'&engine='+e+'&effects='+f,{method:'POST'});
-    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    state.audio.master=Number(m);state.audio.engine=Number(e);state.audio.effects=Number(f);
-  }catch(e){log('Звук','громкость: '+e.message);}
-}
+/* volume levels now live in the block editor (always-present "Volume" block) */
 function applyAudioStatus(d){
   state.audio.playing=d.playing===true||d.playing==='true';
   state.audio.active_slot=Number(d.active_slot)||0;
-  state.audio.master=Number(d.master_volume);
-  state.audio.engine=Number(d.engine_volume);
-  state.audio.effects=Number(d.effects_volume);
-  renderVolumes();
   renderSlots();
-}
-function renderVolumes(){
-  var keys=['master','engine','effects'];
-  for(var i=0;i<keys.length;i++){
-    var k=keys[i];
-    var el=byId('vol_'+k);
-    if(!el||document.activeElement===el)continue;
-    var v=clamp(state.audio[k],0,100);
-    el.value=v;
-    setText('vol_'+k+'_v',String(v));
-  }
-}
-/* Fetch the real volumes from the board at page load so the sliders are
-   never left showing stale values (e.g. after the board rebooted). */
-async function loadVolumes(){
-  try{
-    var d=await api('/api/audio/status');
-    if(d&&d.ok)applyAudioStatus(d);
-  }catch(e){}
 }
 
 /* sound slots */
@@ -955,20 +1126,20 @@ function renderSlots(){
   var grid=byId('sound_grid');if(!grid)return;
   var rows=[];
   for(var s=1;s<=SOUND_SLOTS;s++){
-    var t=null;
-    for(var i=0;i<tracks.length;i++){if(tracks[i].slot===s){t=tracks[i];break;}}
+    var tk=null;
+    for(var i=0;i<tracks.length;i++){if(tracks[i].slot===s){tk=tracks[i];break;}}
     var playing=state.audio.playing&&state.audio.active_slot===s;
-    var file=t?t.file:'';
-    var disp=(t&&t.label)?t.label:(file?file.replace(/^audio\//,'').replace(/\.wav$/i,''):'');
+    var file=tk?tk.file:'';
+    var disp=(tk&&tk.label)?localizeLabel(tk.label,s):(file?file.replace(/^audio\//,'').replace(/\.wav$/i,''):'');
     var isEngine=(slotCats[s-1]||0)===0;
     rows.push('<div class="slot'+(playing?' playing':'')+'">'
-      +'<div class="head"><span class="idx">Слот '+s+'</span><span class="name"><span class="ni">'+esc(disp)+'</span></span></div>'
+      +'<div class="head"><span class="idx">'+esc(t('slot_prefix')+s)+'</span><span class="name"><span class="ni">'+esc(disp)+'</span></span></div>'
       +'<div class="acts">'
       +(playing?'<button class="btn sm danger" onclick="stopAudio()">■</button>':'<button class="btn sm primary" onclick="playSlot('+s+')">▶</button>')
-      +'<button class="btn sm '+(isEngine?'':'ghost')+'" title="'+(isEngine?'Двигатель (громкость «Двигатель»)':'Эффект (громкость «Эффекты»)')+'" onclick="toggleSlotCat('+s+')">'+(isEngine?'ДВ':'ЭФ')+'</button>'
-      +'<label class="btn sm ghost" for="file_'+s+'">Загрузить WAV</label>'
+      +'<button class="btn sm '+(isEngine?'':'ghost')+'" title="'+esc(isEngine?t('cat_engine_title'):t('cat_effect_title'))+'" onclick="toggleSlotCat('+s+')">'+esc(isEngine?t('cat_short_engine'):t('cat_short_effect'))+'</button>'
+      +'<label class="btn sm ghost" for="file_'+s+'">'+esc(t('upload_wav'))+'</label>'
       +'<input type="file" id="file_'+s+'" accept=".wav,audio/wav" onchange="uploadTrack('+s+',this)">'
-      +(t?'<button class="btn x" title="Удалить трек" onclick="deleteTrack('+s+')">✕</button>':'')
+      +(tk?'<button class="btn x" title="'+esc(t('del_track_title'))+'" onclick="deleteTrack('+s+')">✕</button>':'')
       +'</div>'
       +'<div class="up-bar" id="up_'+s+'"><i id="upbar_'+s+'"></i></div>'
       +'<div class="up-meta" id="upmeta_'+s+'"></div>'
@@ -979,53 +1150,53 @@ function renderSlots(){
 async function loadTracks(){
   try{
     var d=await api('/api/audio/tracks');
-    if(!d||!d.ok)throw new Error('загрузка не удалась');
+    if(!d||!d.ok)throw new Error(t('load_failed'));
     tracks=d.tracks||[];
     if(d.cats&&d.cats.length)slotCats=d.cats;
     renderSlots();
-  }catch(e){log('Звук','треки: '+e.message);}
+  }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
 }
 async function toggleSlotCat(slot){
   var cur=(slotCats[slot-1]||0);
   var next=cur===0?1:0;
   try{
     var d=await api('/api/track/category?slot='+slot+'&cat='+next,{method:'POST'});
-    if(!d||!d.ok)throw new Error('не удалось');
+    if(!d||!d.ok)throw new Error(t('failed'));
     slotCats[slot-1]=next;
     renderSlots();
-    log('Звук','слот '+slot+': '+(next===0?'двигатель':'эффекты'));
-  }catch(e){log('Звук','категория слота '+slot+': '+e.message);}
+    log(t('tag_sound'),t('slot_prefix')+slot+': '+(next===0?t('cat_engine'):t('cat_effects')));
+  }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
 }
 async function playSlot(s){
   if(state.audio.playing&&state.audio.active_slot===s){stopAudio();return;}
   try{
     var d=await api('/api/audio/play?slot='+s,{method:'POST'});
     if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    log('Звук','Play #'+s+' запущен');
+    log(t('tag_sound'),'Play #'+s+' '+t('started'));
     refreshStatus();
-  }catch(e){log('Звук','Play #'+s+': '+e.message);}
+  }catch(e){log(t('tag_sound'),'Play #'+s+': '+e.message);}
 }
 async function stopAudio(){
   try{
     var d=await api('/api/audio/stop',{method:'POST'});
     if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    log('Звук','остановлен');
+    log(t('tag_sound'),t('stopped'));
     refreshStatus();
-  }catch(e){log('Звук','Стоп: '+e.message);}
+  }catch(e){log(t('tag_sound'),t('stop')+': '+e.message);}
 }
 async function deleteTrack(slot){
-  if(!confirm('Удалить трек из слота '+slot+'? Файл будет удалён с платы.'))return;
+  if(!confirm(t('del_confirm_a')+slot+t('del_confirm_b')))return;
   try{
     var d=await api('/api/audio/delete?slot='+slot,{method:'POST'});
     if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    log('Звук','трек слота #'+slot+' удалён');
+    log(t('tag_sound'),t('slot_deleted_a')+slot+t('slot_deleted_b'));
     var nt=[];
     for(var i=0;i<tracks.length;i++){if(tracks[i].slot!==slot)nt.push(tracks[i]);}
     tracks=nt;
     renderSlots();
     loadTracks();
     loadFreeSpace();
-  }catch(e){log('Звук','удаление слота '+slot+': '+e.message);}
+  }catch(e){log(t('tag_sound'),t('deletion_slot')+slot+': '+e.message);}
 }
 /* audio upload */
 var upPollTimer=null,upPollBusy=false,upServerOk=false,upStarted=0,upSlot=0,upOta=false;
@@ -1038,11 +1209,11 @@ function startUpPoll(){
     if(upPollBusy)return;
     upPollBusy=true;
     var ctrl=new AbortController();
-    var t=setTimeout(function(){ctrl.abort();},2000);
+    var tmr=setTimeout(function(){ctrl.abort();},2000);
     fetch('http://'+location.hostname+':81/progress',{cache:'no-store',signal:ctrl.signal})
       .then(function(r){return r.json();})
       .then(function(d){
-        clearTimeout(t);
+        clearTimeout(tmr);
         if(!d||!d.ok||!d.active||d.total<=0)return;
         var pct=Math.round(d.received/d.total*100);
         var sec=Math.max(0.1,(Date.now()-upStarted)/1000);
@@ -1050,31 +1221,31 @@ function startUpPoll(){
         if(upOta){
           var ob=byId('otabar');
           if(ob)ob.style.width=pct+'%';
-          setText('ota_meta','Записано: '+d.received+' из '+d.total+' Б · '+speed+' КБ/с');
+          setText('ota_meta',t('written')+d.received+t('of')+d.total+t('bytes_suffix')+' · '+speed+' '+t('kb_per_s'));
           upServerOk=true;
         }else{
           var barIn=byId('upbar_'+upSlot),meta=byId('upmeta_'+upSlot);
           if(!barIn||!meta)return;
           upServerOk=true;
           barIn.style.width=pct+'%';
-          meta.textContent='Записано: '+d.received+' из '+d.total+' Б · '+speed+' КБ/с';
+          meta.textContent=t('written')+d.received+t('of')+d.total+t('bytes_suffix')+' · '+speed+' '+t('kb_per_s');
         }
       })
-      .catch(function(){clearTimeout(t);})
+      .catch(function(){clearTimeout(tmr);})
       .then(function(){upPollBusy=false;});
   },400);
 }
 function uploadTrack(slot,input){
   var file=input.files&&input.files[0];
   if(!file)return;
-  if(uploadBusy){log('Загрузка','уже идёт загрузка, подождите');input.value='';return;}
-  var label='Слот '+slot;
-  if(file.size>2*1024*1024){log('Звук','файл > 2 МБ: '+file.name);input.value='';return;}
+  if(uploadBusy){log(t('tag_upload'),t('upload_busy'));input.value='';return;}
+  var label=t('slot_prefix')+slot;
+  if(file.size>2*1024*1024){log(t('tag_sound'),t('file_gt')+'2 '+t('unit_mb')+': '+file.name);input.value='';return;}
   uploadBusy=true;
   var bar=byId('up_'+slot),barIn=byId('upbar_'+slot),meta=byId('upmeta_'+slot);
   bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
-  meta.textContent='Записано: 0 из '+file.size+' Б · 0 КБ/с';
-  log('Загрузка','слот '+slot+': '+file.name+' ('+file.size+' Б)');
+  meta.textContent=t('written')+'0'+t('of')+file.size+t('bytes_suffix')+' · 0 '+t('kb_per_s');
+  log(t('tag_upload'),t('slot_prefix')+slot+': '+file.name+' ('+file.size+t('bytes_suffix')+')');
   var started=Date.now();
   stopStatusPoll();
   stopHeartbeat();
@@ -1097,7 +1268,7 @@ function uploadTrack(slot,input){
     bar.style.display='none';meta.style.display='none';
     finishUp();
     if(ok){
-      log('Загрузка','ГОТОВО: '+file.name+' за '+Math.round((Date.now()-started)/1000)+' с');
+      log(t('tag_upload'),t('done')+file.name+t('in_seconds')+Math.round((Date.now()-started)/1000)+t('sec_suffix'));
       input.value='';
       var upFile=res&&res.file?res.file:('audio/'+file.name);
       var upLabel=res&&res.label?res.label:label;
@@ -1111,14 +1282,14 @@ function uploadTrack(slot,input){
       renderSlots();
       loadTracks();
     }else{
-      log('Загрузка','ОШИБКА: '+file.name+': '+(res&&res.error?res.error:('HTTP '+xhr.status)));
+      log(t('tag_upload'),t('error_prefix')+file.name+': '+(res&&res.error?res.error:('HTTP '+xhr.status)));
       input.value='';
     }
   };
   xhr.onerror=function(){
     bar.style.display='none';meta.style.display='none';
     finishUp();
-    log('Загрузка','ОШИБКА: '+file.name+': СЕТЬ (нет связи)');
+    log(t('tag_upload'),t('error_prefix')+file.name+': '+t('err_network'));
     input.value='';
   };
   xhr.ontimeout=xhr.onabort=xhr.onerror;
@@ -1127,35 +1298,35 @@ function uploadTrack(slot,input){
 
 /* CV */
 var cvDB=[
-  {index:1,name:'Основной адрес',value:3,desc:'Короткий адрес локомотива (1..127)'},
-  {index:2,name:'Стартовая скорость',value:0,desc:'Уровень ШИМ на 1-й ступени (0..255)'},
-  {index:3,name:'Разгон',value:0,desc:'Время разгона 0..max, секунды (0=без инерции)'},
-  {index:4,name:'Торможение',value:0,desc:'Время торможения max..0, секунды (0=без инерции)'},
-  {index:5,name:'Максимальная скорость',value:255,desc:'Максимальный уровень ШИМ (255=полная)'},
-  {index:6,name:'Средняя скорость',value:128,desc:'Уровень ШИМ в середине кривой (по умолчанию 128 = половина)'},
-  {index:7,name:'Версия',value:1,desc:'Версия декодера (только чтение)'},
-  {index:8,name:'Производитель',value:0,vendor:'Additipus',desc:'Чтение: ID производителя. Запись значения 8 = сброс CV к заводским'},
-  {index:11,name:'Таймаут пакетов',value:0,desc:'Остановка при пропаже DCC-пакетов: значение x 20 мс (0=выкл)'},
-  {index:17,name:'Длинный адрес, старший байт',value:0,desc:'CV17 (действует при CV29 бит 5 = 1)'},
-  {index:18,name:'Длинный адрес, младший байт',value:0,desc:'CV18'},
-  {index:19,name:'Адрес состава',value:0,desc:'Адрес при движении в составе (1..127), бит 7 = реверс'},
-  {index:29,name:'Конфигурация (CV29)',value:2,desc:'Биты: 2=28/128 шагов, 4=DC, 16=таблица CV67..94, 32=длинный адрес'},
-  {index:30,name:'Звук: флаги',value:0,desc:'Бит 0 = не запускать D1 со стопа, бит 1 = без стоп-таблицы при остановке'},
-  {index:63,name:'Громкость (общая)',value:20,desc:'Общая громкость звука (алиас мастер-громкости), 0..255'},
-  {index:114,name:'Звук: разгон звука',value:0,desc:'Масштаб скорости звука 0..127, если у таблицы не задан'},
-  {index:115,name:'Звук: мин. скорость',value:0,desc:'Нижний предел скорости воспроизведения, десятые промилле (0=по умолчанию)'},
-  {index:116,name:'Звук: макс. скорость',value:0,desc:'Верхний предел скорости воспроизведения, десятые промилле (0=по умолчанию)'},
-  {index:54,name:'BEMF PID — Kp',value:128,desc:'Пропорциональный коэффициент регулятора BEMF (0=BEMF выкл, 255=максимум)'},
-  {index:55,name:'BEMF PID — Ki',value:60,desc:'Интегральный коэффициент регулятора BEMF'},
-  {index:56,name:'BEMF PID — Kd',value:32,desc:'Дифференциальный коэффициент регулятора BEMF'},
-  {index:65,name:'Кикстарт',value:0,desc:'Импульс ШИМ при трогании (0=выкл, 255=максимум)'}
+  {index:1,name:{ru:'Основной адрес',en:'Primary address'},value:3,desc:{ru:'Короткий адрес локомотива (1..127)',en:'Short locomotive address (1..127)'}},
+  {index:2,name:{ru:'Стартовая скорость',en:'Starting speed'},value:0,desc:{ru:'Уровень ШИМ на 1-й ступени (0..255)',en:'PWM level at speed step 1 (0..255)'}},
+  {index:3,name:{ru:'Разгон',en:'Acceleration'},value:0,desc:{ru:'Время разгона 0..max, секунды (0=без инерции)',en:'Acceleration time 0..max, seconds (0=no inertia)'}},
+  {index:4,name:{ru:'Торможение',en:'Deceleration'},value:0,desc:{ru:'Время торможения max..0, секунды (0=без инерции)',en:'Deceleration time max..0, seconds (0=no inertia)'}},
+  {index:5,name:{ru:'Максимальная скорость',en:'Maximum speed'},value:255,desc:{ru:'Максимальный уровень ШИМ (255=полная)',en:'Maximum PWM level (255=full)'}},
+  {index:6,name:{ru:'Средняя скорость',en:'Mid speed'},value:128,desc:{ru:'Уровень ШИМ в середине кривой (по умолчанию 128 = половина)',en:'PWM level at the middle of the curve (default 128 = half)'}},
+  {index:7,name:{ru:'Версия',en:'Version'},value:1,desc:{ru:'Версия декодера (только чтение)',en:'Decoder version (read-only)'}},
+  {index:8,name:{ru:'Производитель',en:'Manufacturer'},value:0,vendor:'Additipus',desc:{ru:'Чтение: ID производителя. Запись значения 8 = сброс CV к заводским',en:'Read: manufacturer ID. Writing 8 = reset CVs to factory defaults'}},
+  {index:11,name:{ru:'Таймаут пакетов',en:'Packet timeout'},value:0,desc:{ru:'Остановка при пропаже DCC-пакетов: значение x 20 мс (0=выкл)',en:'Stop when DCC packets are lost: value x 20 ms (0=off)'}},
+  {index:17,name:{ru:'Длинный адрес, старший байт',en:'Long address, high byte'},value:0,desc:{ru:'CV17 (действует при CV29 бит 5 = 1)',en:'CV17 (active when CV29 bit 5 = 1)'}},
+  {index:18,name:{ru:'Длинный адрес, младший байт',en:'Long address, low byte'},value:0,desc:{ru:'CV18',en:'CV18'}},
+  {index:19,name:{ru:'Адрес состава',en:'Consist address'},value:0,desc:{ru:'Адрес при движении в составе (1..127), бит 7 = реверс',en:'Address when in a consist (1..127), bit 7 = reverse'}},
+  {index:29,name:{ru:'Конфигурация (CV29)',en:'Configuration (CV29)'},value:2,desc:{ru:'Биты: 2=28/128 шагов, 4=DC, 16=таблица CV67..94, 32=длинный адрес',en:'Bits: 2=28/128 steps, 4=DC, 16=CV67..94 table, 32=long address'}},
+  {index:30,name:{ru:'Звук: флаги',en:'Sound: flags'},value:0,desc:{ru:'Бит 0 = не запускать D1 со стопа, бит 1 = без стоп-таблицы при остановке',en:'Bit 0 = do not start D1 from stop, bit 1 = no stop table when stopping'}},
+  {index:63,name:{ru:'Громкость (общая)',en:'Volume (master)'},value:20,desc:{ru:'Общая громкость звука (алиас мастер-громкости), 0..255',en:'Overall sound volume (alias of master volume), 0..255'}},
+  {index:114,name:{ru:'Звук: разгон звука',en:'Sound: sound acceleration'},value:0,desc:{ru:'Масштаб скорости звука 0..127, если у таблицы не задан',en:'Sound speed scale 0..127 when not set by the table'}},
+  {index:115,name:{ru:'Звук: мин. скорость',en:'Sound: min. speed'},value:0,desc:{ru:'Нижний предел скорости воспроизведения, десятые промилле (0=по умолчанию)',en:'Lower playback speed limit, tenths of a permille (0=default)'}},
+  {index:116,name:{ru:'Звук: макс. скорость',en:'Sound: max. speed'},value:0,desc:{ru:'Верхний предел скорости воспроизведения, десятые промилле (0=по умолчанию)',en:'Upper playback speed limit, tenths of a permille (0=default)'}},
+  {index:54,name:{ru:'BEMF PID — Kp',en:'BEMF PID — Kp'},value:128,desc:{ru:'Пропорциональный коэффициент регулятора BEMF (0=BEMF выкл, 255=максимум)',en:'BEMF regulator proportional gain (0=BEMF off, 255=max)'}},
+  {index:55,name:{ru:'BEMF PID — Ki',en:'BEMF PID — Ki'},value:60,desc:{ru:'Интегральный коэффициент регулятора BEMF',en:'BEMF regulator integral gain'}},
+  {index:56,name:{ru:'BEMF PID — Kd',en:'BEMF PID — Kd'},value:32,desc:{ru:'Дифференциальный коэффициент регулятора BEMF',en:'BEMF regulator derivative gain'}},
+  {index:65,name:{ru:'Кикстарт',en:'Kickstart'},value:0,desc:{ru:'Импульс ШИМ при трогании (0=выкл, 255=максимум)',en:'PWM kick at start (0=off, 255=max)'}}
 ];
-for(var cvs=0;cvs<28;cvs++){cvDB.push({index:67+cvs,name:'Таблица скоростей CV'+(67+cvs),value:Math.round(cvs*255/27),desc:'Уровень ШИМ для внутренней ступени '+(cvs+1)+' из 28 (действует при CV29 бит 4 = 1)'});}
+for(var cvs=0;cvs<28;cvs++){cvDB.push({index:67+cvs,name:{ru:'Таблица скоростей CV'+(67+cvs),en:'Speed table CV'+(67+cvs)},value:Math.round(cvs*255/27),desc:{ru:'Уровень ШИМ для внутренней ступени '+(cvs+1)+' из 28 (действует при CV29 бит 4 = 1)',en:'PWM level for internal step '+(cvs+1)+' of 28 (active when CV29 bit 4 = 1)'}});}
 var readOnlyCv={7:1};
 function cvByIndex(index){for(var i=0;i<cvDB.length;i++){if(cvDB[i].index===index)return cvDB[i];}return null;}
 function setActiveCaption(index){
   var def=cvByIndex(index);
-  setText('cv_active_name',def?('CV '+index+' — '+def.name+(def.vendor?' ('+def.vendor+')':'')):('CV '+index));
+  setText('cv_active_name',def?('CV '+index+' — '+tr(def.name)+(def.vendor?' ('+def.vendor+')':'')):('CV '+index));
 }
 function filteredCv(){
   return cvDB;
@@ -1187,17 +1358,17 @@ function jumpToCv(){setActiveCv(Number(byId('cv_quick_index').value)||1);}
 function renderCvList(){
   var list=byId('cv_list');
   var rows=filteredCv();
-  if(!rows.length){list.innerHTML='<div class="muted">Ничего не найдено</div>';return;}
+  if(!rows.length){list.innerHTML='<div class="muted">'+esc(t('nothing_found'))+'</div>';return;}
   var html=[];
   for(var i=0;i<rows.length;i++){
     var cv=rows[i];
     var ro=readOnlyCv[cv.index];
     html.push('<div class="cv-card '+(cv.index===activeCv?'active':'')+'" data-cv="'+cv.index+'" onclick="setActiveCv('+cv.index+')">'
-      +'<div class="head"><div class="name">'+esc(cv.name)+(cv.vendor?'<span class="vendor">'+esc(cv.vendor)+'</span>':'')+'</div><div class="idx">CV '+cv.index+'</div></div>'
-      +'<div class="desc">'+esc(cv.desc)+'</div>'
+      +'<div class="head"><div class="name">'+esc(tr(cv.name))+(cv.vendor?'<span class="vendor">'+esc(cv.vendor)+'</span>':'')+'</div><div class="idx">CV '+cv.index+'</div></div>'
+      +'<div class="desc">'+esc(tr(cv.desc))+'</div>'
       +'<div class="ctrl">'
       +'<input id="cv_value_'+cv.index+'" type="number" min="0" max="255" value="'+cvValueOf(cv.index)+'" onclick="event.stopPropagation()" oninput="if('+cv.index+'===activeCv)byId(\'cv_quick_value\').value=this.value">'
-      +(ro?'<button class="btn sm primary" disabled>Записать</button>':'<button class="btn sm primary" onclick="event.stopPropagation();writeCv('+cv.index+')">Записать</button>')
+      +(ro?'<button class="btn sm primary" disabled>'+esc(t('cv_write'))+'</button>':'<button class="btn sm primary" onclick="event.stopPropagation();writeCv('+cv.index+')">'+esc(t('cv_write'))+'</button>')
       +'</div></div>');
   }
   list.innerHTML=html.join('');
@@ -1210,42 +1381,42 @@ function cvValueOf(index){
 async function loadCvValues(){
   try{
     var d=await api('/api/cv/all');
-    if(!d||!d.ok||!d.values)throw new Error('чтение не удалось');
+    if(!d||!d.ok||!d.values)throw new Error(t('load_failed'));
     cvValues={};
     for(var i=0;i<d.values.length;i++){cvValues[i+1]=Number(d.values[i])||0;}
     renderCvList();
     var f=byId('cv_value_'+activeCv);
     byId('cv_quick_value').value=f?f.value:cvValueOf(activeCv);
-  }catch(e){log('CV','значения: '+e.message);}
+  }catch(e){log(t('tag_cv'),t('err_prefix')+e.message);}
 }
 async function writeCv(index){
   var target=Number(index)||activeCv;
-  if(readOnlyCv[target]){log('CV','CV '+target+' только чтение');return;}
+  if(readOnlyCv[target]){log(t('tag_cv'),'CV '+target+' '+t('readonly'));return;}
   var f=byId('cv_value_'+target);
   var value=f?f.value:byId('cv_quick_value').value;
   var oldv=(cvValues[target]!=null)?cvValues[target]:cvValueOf(target);
-  var msg='CV '+target+': было '+oldv+', станет '+Number(value)+'.\n\nЗаписать?';
-  if(target===8&&Number(value)===8)msg='ВНИМАНИЕ: запись CV8 = 8 сбросит ВСЕ CV к заводским.\n\n'+msg;
+  var msg='CV '+target+': '+t('cv_was')+oldv+', '+t('cv_will_be')+Number(value)+'.\n\n'+t('cv_write_q');
+  if(target===8&&Number(value)===8)msg=t('cv8_warn')+msg;
   if(!await confirmDialog(msg))return;
   try{
     var d=await api('/api/cv/write?index='+target+'&value='+encodeURIComponent(value)+'&commit=1',{method:'POST'});
-    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'запись не удалась');
+    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:t('write_failed'));
     cvValues[target]=Number(value)||0;
     var wf=byId('cv_value_'+target);
     if(wf)wf.value=cvValues[target];
     if(target===activeCv)byId('cv_quick_value').value=cvValues[target];
-    log('CV','Записать CV '+target+' = '+value+' OK');
-  }catch(e){log('CV','Записать CV '+target+': '+e.message);}
+    log(t('tag_cv'),t('cv_wrote')+target+' = '+value+' OK');
+  }catch(e){log(t('tag_cv'),t('cv_wrote')+target+': '+e.message);}
 }
 function writeActiveCv(){writeCv(activeCv);}
 async function cvFactoryReset(){
-  if(!await confirmDialog('Сбросить ВСЕ CV к заводским значениям (адрес, кривая скорости, BEMF, таймаут)? Настройки Wi-Fi и звуки сохранятся.'))return;
+  if(!await confirmDialog(t('cv_factory_confirm')))return;
   try{
     var d=await api('/api/cv/write?index=8&value=8&commit=1',{method:'POST'});
-    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:'не удалось');
-    log('CV','все CV сброшены к заводским');
+    if(!d||!d.ok)throw new Error((d&&d.error)?d.error:t('failed'));
+    log(t('tag_cv'),t('cv_all_reset'));
     await loadCvValues();
-  }catch(e){log('CV','сброс к заводским: '+e.message);}
+  }catch(e){log(t('tag_cv'),t('cv_reset_fail')+e.message);}
 }
 
 /* wifi settings */
@@ -1253,14 +1424,14 @@ var wifiLoaded=false;
 async function loadWifi(){
   try{
     var d=await api('/api/wifi');
-    if(!d||!d.ok){log('Wi-Fi','не удалось загрузить настройки');return;}
+    if(!d||!d.ok){log(t('tag_wifi'),t('wifi_load_failed'));return;}
     byId('wifi_ap_ip').value=(d.ap_ip&&d.ap_ip!=='0.0.0.0')?d.ap_ip:'192.168.100.1';
     if(d.ap_ssid)byId('wifi_ap_ssid').value=d.ap_ssid;
     byId('wifi_auto_off').checked=(Number(d.auto_off_min)||0)>0;
     byId('wifi_ap_password').value='';
     byId('wifi_clear_password').checked=false;
     wifiLoaded=true;
-  }catch(e){log('Wi-Fi','ошибка: '+e.message);}
+  }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
 }
 function wifiQuery(){
   var p='mode=1&port=80';
@@ -1275,26 +1446,26 @@ function wifiQuery(){
   return p;
 }
 async function saveWifi(){
-  if(byId('wifi_clear_password').checked&&byId('wifi_ap_password').value){log('Wi-Fi','выберите новый пароль или удаление пароля');return;}
-  if(byId('wifi_ap_password').value&&byId('wifi_ap_password').value.length<8){log('Wi-Fi','пароль точки доступа должен быть ≥ 8 символов');return;}
+  if(byId('wifi_clear_password').checked&&byId('wifi_ap_password').value){log(t('tag_wifi'),t('wifi_pw_conflict'));return;}
+  if(byId('wifi_ap_password').value&&byId('wifi_ap_password').value.length<8){log(t('tag_wifi'),t('wifi_pw_short'));return;}
   try{
     var p=wifiQuery();
-    log('Wi-Fi','сохраняю настройки и перезагружаю...');
+    log(t('tag_wifi'),t('wifi_saving'));
     var d=await api('/api/wifi?'+p,{method:'POST',timeout:15000});
-    if(!d||!d.ok)throw new Error('не сохранено');
-    log('Wi-Fi','настройки сохранены, перезагрузка...');
+    if(!d||!d.ok)throw new Error(t('not_saved'));
+    log(t('tag_wifi'),t('wifi_saved_reboot'));
     reloadAfterReboot(2000,byId('wifi_ap_ip').value.trim());
-  }catch(e){log('Wi-Fi','ошибка: '+e.message);}
+  }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
 }
 async function resetWifi(){
-  if(!confirm('Сбросить настройки WiFi к заводским и перезагрузить?'))return;
+  if(!confirm(t('wifi_reset_confirm')))return;
   try{
-    log('Wi-Fi','сброс настроек и перезагрузка...');
+    log(t('tag_wifi'),t('wifi_resetting'));
     var d=await api('/api/wifi/reset',{method:'POST',timeout:15000});
-    if(!d||!d.ok)throw new Error('не сброшено');
-    log('Wi-Fi','настройки сброшены, перезагрузка...');
+    if(!d||!d.ok)throw new Error(t('not_reset'));
+    log(t('tag_wifi'),t('wifi_reset_reboot'));
     reloadAfterReboot(2000,(d&&d.ap_ip)||'192.168.100.1');
-  }catch(e){log('Wi-Fi','ошибка: '+e.message);}
+  }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
 }
 
 /* uptime footer (bottom bar) */
@@ -1303,7 +1474,7 @@ function fmtUptime(s){
   s=Math.max(0,Math.floor(s));
   var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60),x=s%60;
   function p(n){return (n<10?'0':'')+n;}
-  return (d>0?d+' д ':'')+p(h)+' '+p(m)+' '+p(x);
+  return (d>0?d+' '+t('day_short')+' ':'')+p(h)+' '+p(m)+' '+p(x);
 }
 function renderUptime(){
   var el=byId('uptime');
@@ -1356,7 +1527,7 @@ async function loadDevice(){
   try{
     var d=await api('/api/device');
     if(d&&d.ok){
-      savedDeviceName=d.name||'ТЕПЛОВОЗ';
+      savedDeviceName=d.name||t('info_placeholder');
       byId('device_name').value=savedDeviceName;
       uptimeBaseSec=Number(d.uptime)||0;
       uptimeAtMs=Date.now();
@@ -1365,7 +1536,7 @@ async function loadDevice(){
       setText('info_version',d.version||'—');
       setText('info_addr',location.hostname||'—');
     }
-  }catch(e){log('Имя','ошибка: '+e.message);}
+  }catch(e){log(t('tag_name'),t('err_prefix')+e.message);}
 }
 function onDeviceNameInput(){
   var btn=byId('device_save');
@@ -1374,31 +1545,31 @@ function onDeviceNameInput(){
 }
 async function saveDeviceName(){
   var name=(byId('device_name').value||'').trim();
-  if(!name){log('Имя','имя не может быть пустым');return;}
+  if(!name){log(t('tag_name'),t('name_empty'));return;}
   try{
     var d=await api('/api/device?name='+encodeURIComponent(name),{method:'POST'});
-    if(!d||!d.ok)throw new Error('не удалось');
+    if(!d||!d.ok)throw new Error(t('failed'));
     savedDeviceName=d.name;
     byId('device_name').value=d.name;
     onDeviceNameInput();
     setText('info_name',d.name);
-    log('Имя','сохранено: '+d.name);
-  }catch(e){log('Имя','ошибка: '+e.message);}
+    log(t('tag_name'),t('saved')+d.name);
+  }catch(e){log(t('tag_name'),t('err_prefix')+e.message);}
 }
 
 /* ota */
 function uploadOta(input){
   var file=input.files&&input.files[0];
   if(!file)return;
-  if(!/\.bin$/i.test(file.name)){log('OTA','только .bin файлы');input.value='';return;}
-  if(uploadBusy){log('OTA','уже идёт загрузка, подождите');input.value='';return;}
-  if(file.size>8*1024*1024){log('OTA','файл > 8 МБ');input.value='';return;}
+  if(!/\.bin$/i.test(file.name)){log(t('tag_ota'),t('ota_only_bin'));input.value='';return;}
+  if(uploadBusy){log(t('tag_ota'),t('upload_busy'));input.value='';return;}
+  if(file.size>8*1024*1024){log(t('tag_ota'),t('file_gt')+'8 '+t('unit_mb'));input.value='';return;}
   uploadBusy=true;
   var bar=byId('ota_bar'),barIn=byId('otabar'),meta=byId('ota_meta');
   bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
-  meta.textContent='Записано: 0 из '+file.size+' Б · 0 КБ/с';
-  setText('ota_hint','Загрузка '+file.name+'...');
-  log('OTA','загрузка '+file.name+' ('+file.size+' Б)');
+  meta.textContent=t('written')+'0'+t('of')+file.size+t('bytes_suffix')+' · 0 '+t('kb_per_s');
+  setText('ota_hint',t('upload_file')+file.name+'...');
+  log(t('tag_ota'),t('upload_file')+file.name+' ('+file.size+t('bytes_suffix')+')');
   var started=Date.now();
   stopStatusPoll();
   stopHeartbeat();
@@ -1413,7 +1584,7 @@ function uploadOta(input){
       var cp=Math.round(e.loaded/e.total*100);
       if(cp>=100)cp=99; /* реальный приём подтверждает только сервер */
       barIn.style.width=cp+'%';
-      meta.textContent='Передано: '+e.loaded+' из '+e.total+' Б · '+Math.round((e.loaded/1024)/sec)+' КБ/с';
+      meta.textContent=t('transferred')+e.loaded+t('of')+e.total+t('bytes_suffix')+' · '+Math.round((e.loaded/1024)/sec)+' '+t('kb_per_s');
     }
   };
   function finishUp(){
@@ -1430,22 +1601,22 @@ function uploadOta(input){
     bar.style.display='none';meta.style.display='none';
     finishUp();
     if(ok){
-      log('OTA','прошивка загружена ('+res.bytes+' Б)');
+      log(t('tag_ota'),t('fw_uploaded')+res.bytes+t('bytes_suffix')+')');
       input.value='';
-      setText('ota_hint','Прошивка записана, идёт перезагрузка...');
+      setText('ota_hint',t('fw_written'));
       reloadAfterReboot(2000,null);
     }else{
-      setText('ota_hint','Ошибка: '+(res&&res.error?res.error:'HTTP '+xhr.status));
-      log('OTA','ошибка: '+(res&&res.error?res.error:'HTTP '+xhr.status));
+      setText('ota_hint',t('ota_error')+(res&&res.error?res.error:'HTTP '+xhr.status));
+      log(t('tag_ota'),t('ota_error')+(res&&res.error?res.error:'HTTP '+xhr.status));
       input.value='';
       resumePoll();
     }
   };
   xhr.onerror=function(){
     bar.style.display='none';meta.style.display='none';
-    setText('ota_hint','Ошибка: СЕТЬ (нет связи)');
+    setText('ota_hint',t('ota_error')+t('err_network'));
     finishUp();
-    log('OTA','ошибка: СЕТЬ (нет связи)');
+    log(t('tag_ota'),t('ota_error')+t('err_network'));
     input.value='';
     resumePoll();
   };
@@ -1557,6 +1728,7 @@ function togglePanel(name){
 
 /* init */
 function init(){
+  initLang();
   initTheme();
   showPage(pageFromHash());
   if(typeof addEventListener!=='undefined')addEventListener('hashchange',function(){showPage(pageFromHash());});
@@ -1569,7 +1741,6 @@ function init(){
   renderMode();
   loadDevice();
   loadWifi();
-  loadVolumes();
   loadTrackList();
   loadBemfCal();
   refreshStatus();
@@ -1585,7 +1756,7 @@ function loadTrackList(){
       if(d.cats&&d.cats.length)slotCats=d.cats;
       renderSlots();
     }
-  }).catch(function(e){log('Звук','треки: '+e.message);});
+  }).catch(function(e){log(t('tag_sound'),t('err_prefix')+e.message);});
 }
 init();
 </script>

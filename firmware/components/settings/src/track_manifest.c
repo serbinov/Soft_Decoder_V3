@@ -231,6 +231,27 @@ esp_err_t settings_manifest_sync(void)
     return err;
 }
 
+/* Remove the on-storage metadata backup so a factory reset is not undone by
+ * boot recovery (which would otherwise restore names/categories/function map
+ * from the file that survives the NVS erase). A missing file or unmounted
+ * storage is a no-op success. */
+esp_err_t settings_manifest_remove(void)
+{
+    esp_err_t err = manifest_begin(false);
+    if (err == ESP_ERR_NOT_FOUND) return ESP_OK;      /* same-task restore setter */
+    if (err == ESP_ERR_INVALID_STATE) return ESP_OK;  /* storage unavailable: nothing to clear */
+    if (err != ESP_OK) return err;
+    err = settings_metadata_lock();
+    if (err == ESP_OK) {
+        if (remove(MANIFEST_PATH) != 0 && errno != ENOENT) err = ESP_FAIL;
+        (void)remove(MANIFEST_PATH ".tmp");
+        settings_manifest_result(ESP_OK);
+        settings_metadata_unlock();
+    }
+    manifest_end();
+    return err;
+}
+
 static esp_err_t manifest_load_owned(void)
 {
     FILE *f = fopen(MANIFEST_PATH, "r");

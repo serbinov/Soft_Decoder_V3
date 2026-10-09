@@ -41,24 +41,19 @@ routing for outputs and logic: `FUNC_TARGET_OUTPUT` (F0F/F0R/AUX1..7),
 `FUNC_TARGET_SOUND`, `FUNC_TARGET_LOGIC` (mute stop/move/light, drive hold,
 coast, dynamic brake, notch), gated by `dir` and `state`.
 
-## 3. Editor authoring layer (`sound_editor`, schema v2)
+## 3. Authoring (`/sound-editor/blocks.html`)
 
-The web editor (`/sound-editor/`) authors two layers that compile to the
-device graph:
+The sound scheme is authored with the **block constructor**
+(`/sound-editor/blocks.html`, see `docs/sound_blocks_editor.md`): the user places
+ready-made locomotive blocks on a canvas and links them — engine, signals
+(horn/whistle/bell/random), mechanics (compressor/brake/coupler/…), the «Звуковая
+схема» primitives (Start/End/Simple/Loop/Mute), outputs/logic, and custom
+scenarios. The page is vanilla HTML/CSS/JS with no external dependencies, and is
+reachable from the device UI under Настройки → «Конструктор звуков».
 
-- **Effect-table library** (`effectTables`) — reusable sound definitions:
-  `kind` (horn/motor/brake/bell/coupler/custom), `preset`
-  (oneShot/loopHeld/shortLong/latched/random/state), `init`/`loop`/`end`/`short`
-  WAVs, `shortMs`, `volume`, `rate`, and an optional `behavior` entry.
-- **Routing** (`sources`, `blocks`, `sinks`, `wires`) — the three-column patch
-  panel: F/engine/motion/direction/state sources, sound or logic blocks, and
-  AUX/audio sinks, connected by wires that carry an event and direction/state
-  gates. Sound blocks are pure references to a library table.
-
-On save/apply the editor sends the schema-v1 device payload
-(`states/transitions/effects/assets`) so the device runner is unchanged; the
-routing compiles to `func_binding_t` for outputs/logic. v1 graphs load and are
-migrated to the v2 authoring layer (`migrateV1toV2`).
+On save/apply it compiles the blocks to the schema-v1 device payload
+(`states`/`transitions`/`effects`/`assets`) so the runner is unchanged, and
+compiles output/logic blocks to `func_binding_t` for outputs and logic.
 
 The engine condition set is `fn_press/release/on/off`, `engine_on/off`, `speed`,
 `accel`/`decel` and `sample_done`, plus `dir_fwd`/`dir_rev` (travel direction,
@@ -66,13 +61,6 @@ passed into `sg_runner_tick`) and `random` (chance in `min`; equal-priority
 `random` transitions from one state form a random group picked uniformly). While
 any effect voice is audible the engine voice is ducked to `SOUND_DUCK_PCT` (40 %)
 through `audio_voice_set_volume_live` and restored when effects end.
-
-A second, simpler authoring path is the **block constructor**
-(`/sound-editor/blocks.html`, see `docs/sound_blocks_editor.md`): the user places
-ready-made locomotive blocks (engine, horn, whistle, bell, compressor, coupler,
-…) and the page compiles them to the same schema-v1 payload. It is vanilla JS,
-has no Svelte dependency, and is reachable from the device UI under
-Настройки → «Конструктор блоков (простой)».
 
 ## 4. REST
 
@@ -92,5 +80,4 @@ has no Svelte dependency, and is reachable from the device UI under
 ## 5. Limits
 
 `states` 57 (31 sounding + 26 silent), `transitions` 128, `effects` 24,
-`assets` 31, JSON body ≤ 128 KiB. Editor limits add `effectTables` 16,
-`blocks` 64, `sinks` 9.
+`assets` 31, JSON body ≤ 128 KiB.

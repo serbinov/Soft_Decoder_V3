@@ -1,9 +1,19 @@
 param(
-    [string]$SoundDir = (Join-Path $PSScriptRoot "..\..\SOUND")
+    [string]$SoundDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
+
+# Prefer <repo>\SOUND (Soft_Decoder_V3\SOUND); keep the sibling-of-repo fallback.
+if (-not $SoundDir) {
+    foreach ($c in @((Join-Path $PSScriptRoot "..\SOUND"), (Join-Path $PSScriptRoot "..\..\SOUND"))) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Container)) {
+            $SoundDir = (Resolve-Path -LiteralPath $c).Path
+            break
+        }
+    }
+}
 
 $version = (Get-Content (Join-Path $PSScriptRoot "version.txt") -Raw).Trim()
 $src = Join-Path $PSScriptRoot "build\soft_decoder_v3.bin"

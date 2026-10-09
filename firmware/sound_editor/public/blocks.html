@@ -4,24 +4,27 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="data:," />
-<title>Конструктор звуковых блоков</title>
+<title>Конструктор звуков</title>
 <style>
   :root{
     --bg:#0f1420; --panel:#161b26; --panel2:#1e2533; --line:#2b3547;
-    --text:#e7ecf5; --muted:#93a0b5; --accent:#4a9eff; --ok:#4caf72;
-    --warn:#e0a24a; --err:#e05a5a; --node:#1b2230; --nodehd:#242f42;
+    --text:#e7ecf5; --muted:#e7ecf5; --accent:#4a9eff; --ok:#4caf72; --on-accent:#04101f; --ok-ink:#6fe0a0;
+    --warn:#e0a24a; --err:#ff8f8f; --node:#1b2230; --nodehd:#242f42;
     --stage:#0c1119; --grid:#1a2230; --link:#6f8bb0;
   }
   html[data-theme=light]{
     --bg:#eef1f7; --panel:#ffffff; --panel2:#f4f6fb; --line:#d3dae8;
-    --text:#0b0f16; --muted:#5a6678; --accent:#2f6fd0; --ok:#1f9d63;
-    --warn:#b8791a; --err:#d64545; --node:#ffffff; --nodehd:#eef2f9;
+    --text:#0b0f16; --muted:#0b0f16; --accent:#2f6fd0; --ok:#1f9d63; --on-accent:#ffffff; --ok-ink:#127a45;
+    --warn:#8a5a00; --err:#b3261e; --node:#ffffff; --nodehd:#eef2f9;
     --stage:#f7f9fd; --grid:#dde3ee; --link:#8a99b5;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
   body{display:flex;flex-direction:column;overflow:hidden}
-  header.top{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header.top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .hd-left{display:flex;align-items:center;gap:8px;justify-self:start;min-width:0}
+  .hd-mid{display:flex;align-items:center;gap:8px;justify-self:center;flex-wrap:wrap}
+  .hd-right{display:flex;align-items:center;gap:8px;justify-self:end}
   .brand{font-weight:600}
   .brand span{color:var(--accent);font-weight:400}
   .grow{flex:1}
@@ -30,12 +33,19 @@
   .dot.on{background:var(--ok)}
   button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
   button:hover{border-color:var(--accent)}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#04101f;font-weight:600}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
   button.apply{background:var(--ok);border-color:var(--ok);color:#04170c;font-weight:600}
-  button.on{background:var(--accent);border-color:var(--accent);color:#04101f}
+  button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   button:disabled{opacity:.45;cursor:not-allowed}
   button.sm{padding:3px 7px;font-size:12px}
   .sep{width:1px;height:22px;background:var(--line);margin:0 2px}
+  .tm{position:relative}
+  .tm>.tm-btn::after{content:"▾";margin-left:6px;font-size:10px;opacity:.7}
+  .tm-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:208px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;z-index:60;box-shadow:0 12px 32px rgba(0,0,0,.4)}
+  .tm.open>.tm-panel{display:block}
+  .tm-panel button{display:block;width:100%;text-align:left;margin:3px 0;background:transparent;border-color:transparent}
+  .tm-panel button:hover{background:var(--panel2);border-color:var(--line)}
+  .tm-panel button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   main{flex:1;display:flex;min-height:0}
   aside{background:var(--panel);border-right:1px solid var(--line);width:230px;overflow:auto;padding:10px}
   aside.right{border-right:none;border-left:1px solid var(--line);width:290px}
@@ -48,6 +58,7 @@
   .pal button small{color:var(--muted)}
   #stage{position:relative;flex:1;overflow:hidden;background:var(--stage);--gstep:20px;--gx:0px;--gy:0px}
   #stage.grid-bg{background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:var(--gstep) var(--gstep);background-position:var(--gx) var(--gy)}
+  #marquee{position:absolute;border:1px solid var(--accent);background:rgba(74,158,255,.15);pointer-events:none;z-index:6;display:none}
   #world{position:absolute;left:0;top:0;transform-origin:0 0;width:6000px;height:4000px}
   #links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
   #links path.link{stroke:var(--link);stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
@@ -58,39 +69,29 @@
   #arrowTemp path{stroke:var(--accent)}
   .node{position:absolute;width:240px;height:80px;background:var(--node);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);user-select:none}
   .node.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(74,158,255,.35)}
-  .node.engine{border-color:#e0a24a}
-  .node.output{border-color:#5fbf7a}
-  .node.logic{border-color:#a06fe0}
+  .node.engine{border-color:#f97316}
+  .node.output{border-color:#22c55e}
+  .node.logic{border-color:#a855f7}
   .node .hd{display:flex;align-items:center;gap:6px;padding:4px 9px;border-radius:9px 9px 0 0;background:var(--nodehd);cursor:grab}
   .node .hd b{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .node .hd .x{background:none;border:none;color:var(--muted);padding:0 3px;cursor:pointer;display:flex;align-items:center}
   .node .hd .x:hover{color:var(--err)}
-  .node .hd .okbadge{color:#3ddc84;font-weight:700;font-size:13px;flex:0 0 auto}
+  .node .hd .okbadge{color:var(--ok-ink);font-weight:700;font-size:13px;flex:0 0 auto}
+  .node .hd .chain{background:none;border:none;color:var(--muted);padding:0 3px;cursor:pointer;display:flex;align-items:center;font-size:11px}
+  .node .hd .chain:hover{color:var(--ok-ink)}
   .node .bd{padding:4px 44px;font-size:11px;line-height:1.35;color:var(--muted);min-height:30px;max-height:46px;overflow:hidden}
   .node .bd .k{color:var(--text)}
   .port{position:absolute;top:32px;width:14px;height:14px;border-radius:50%;border:2px solid var(--node);cursor:crosshair}
-  .port.in{left:-8px;background:#4a8fe0}
-  .port.out{right:-8px;background:#4caf72}
-  .port .lbl{position:absolute;top:50%;transform:translateY(-50%);font-size:9px;white-space:nowrap;pointer-events:none}
-  .port.in .lbl{left:12px;color:#7fb3ff}
-  .port.out .lbl{right:12px;color:#7fd39f}
+  .port.in{left:-8px;background:var(--accent)}
+  .port.out{right:-8px;background:var(--ok)}
+  .port .lbl{position:absolute;top:50%;transform:translateY(-50%);font-size:9px;white-space:nowrap;pointer-events:none;color:var(--text)}
   aside.right label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
   aside.right input,aside.right select{width:100%;padding:5px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px}
   .row{display:flex;gap:8px}.row>*{flex:1}
   .frow{display:flex;gap:6px;align-items:center}
   .frow select{flex:1;min-width:0}
   .frow .play{flex:0 0 auto;padding:5px 9px;font-size:12px}
-  .diag .ok{color:var(--ok)}
-  .mini svg{width:100%;height:auto;display:block;background:var(--panel2);border:1px solid var(--line);border-radius:6px}
-  .ltable{font-size:11px}
-  .ltable table{width:100%;border-collapse:collapse}
-  .ltable th,.ltable td{border-bottom:1px solid var(--line);padding:2px 4px;text-align:left;vertical-align:top}
-  .ltable th{color:var(--muted);font-weight:600}
-  .modal{position:fixed;inset:0;background:#0008;z-index:100;display:flex;align-items:center;justify-content:center}
-  .modal.hidden{display:none}
-  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:min(560px,92vw);max-height:88vh;overflow:auto;box-shadow:0 10px 40px #000a}
-  .modal-hd{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
-  .modal-bd{padding:12px}
+  .diag .ok{color:var(--ok-ink)}
   .hint{font-size:11px;color:var(--muted);margin:6px 0}
   footer.foot{display:flex;gap:12px;align-items:center;padding:6px 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
   .diag{max-height:76px;overflow:auto;font-size:11px;width:100%}
@@ -104,37 +105,63 @@
     body.show-pal aside.left{transform:none}
     body.show-insp aside.right{transform:none}
     .mob{display:inline-block}
+    .brand span{display:none}
+    header.top{display:flex;flex-wrap:wrap}
+    .hd-left{flex:1 1 auto}
+    .hd-right{order:1}
+    .hd-mid{order:2;flex:1 1 100%;justify-content:flex-start}
   }
 </style>
 </head>
 <body>
 <header class="top">
-  <button id="b_pal" class="mob" title="Палитра" data-i18n-title="palette">☰</button>
-  <div class="brand">AURA-X <span data-i18n="brand_sub">КОНСТРУКТОР БЛОКОВ</span></div>
-  <div class="status"><i class="dot" id="on"></i><span id="on_txt" data-i18n="offline">Нет связи</span></div>
-  <div class="sep"></div>
-  <button id="b_new" data-i18n="new">Новая</button>
-  <button id="b_import" data-i18n="import">Импорт</button>
-  <button id="b_export" data-i18n="export">Экспорт</button>
-  <div class="sep"></div>
-  <button id="b_snap" class="on">Сетка: вкл</button>
-  <button id="b_align" data-i18n="align">Выровнять</button>
-  <button id="b_undo" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip">↶</button>
-  <button id="b_redo" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip">↷</button>
-  <button id="b_dup" title="Дублировать (Ctrl+D)" data-i18n-title="dup_tip" data-i18n="dup">Дубль</button>
-  <div class="grow"></div>
-  <button id="b_scheme" title="Схема и таблица связей" aria-label="Схема и связи" data-i18n-title="scheme_tip" data-i18n-aria="scheme_aria"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="7" height="6" rx="1"/><rect x="15" y="3" width="7" height="6" rx="1"/><rect x="8" y="15" width="8" height="6" rx="1"/><path d="M9 6h6M5 9v3h7v3M19 9v3h-7"/></svg></button>
-  <button id="b_test" data-i18n="test">▶ Тест</button>
-  <button id="b_validate" data-i18n="validate">Проверить</button>
+  <div class="hd-left">
+    <button id="b_pal" class="mob" title="Палитра" data-i18n-title="palette">☰</button>
+    <div class="brand">AURA-X <span data-i18n="brand_sub">КОНСТРУКТОР ЗВУКОВ</span></div>
+    <div class="status"><i class="dot" id="on"></i><span id="on_txt" data-i18n="offline">Нет связи</span></div>
+  </div>
+  <div class="hd-mid">
+  <div class="tm" data-menu>
+    <button type="button" class="tm-btn" data-i18n="m_file">Файл</button>
+    <div class="tm-panel">
+      <button id="b_new" data-i18n="new">Новый</button>
+      <button id="b_import" data-i18n="import">Импорт</button>
+      <button id="b_export" data-i18n="export">Экспорт</button>
+      <button id="b_file_png" data-i18n="download_png">Скачать картинку</button>
+      <button id="b_file_txt" data-i18n="download_txt">Скачать текст</button>
+    </div>
+  </div>
+  <div class="tm" data-menu>
+    <button type="button" class="tm-btn" data-i18n="m_edit">Правка</button>
+    <div class="tm-panel">
+      <button id="b_undo" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip" data-i18n="m_undo">↶ Отменить</button>
+      <button id="b_redo" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip" data-i18n="m_redo">↷ Повторить</button>
+      <button id="b_copy" title="Копировать (Ctrl+C)" data-i18n-title="copy_tip" data-i18n="m_copy">Копировать</button>
+      <button id="b_paste" title="Вставить (Ctrl+V)" data-i18n-title="paste_tip" data-i18n="m_paste">Вставить</button>
+    </div>
+  </div>
+  <div class="tm" data-menu>
+    <button type="button" class="tm-btn" data-i18n="m_check">Проверка</button>
+    <div class="tm-panel">
+      <button id="b_test" data-i18n="test">▶ Тест</button>
+      <button id="b_validate" data-i18n="validate">Проверить</button>
+    </div>
+  </div>
+  <div class="tm" data-menu>
+    <button type="button" class="tm-btn" data-i18n="m_settings">Настройки</button>
+    <div class="tm-panel">
+      <button id="b_snap" class="on">Сетка: вкл</button>
+      <button id="b_theme" title="Светлая / тёмная тема" data-i18n-title="theme_tip">☀ Тема: тёмная</button>
+      <button id="b_lang" title="Switch to English" data-i18n-title="lang_tip">Язык: RU</button>
+    </div>
+  </div>
   <button class="primary" id="b_save" disabled data-i18n="save">Сохранить</button>
-  <button id="b_outputs" disabled data-i18n="outputs">Выходы</button>
-  <button id="b_impout" disabled title="Загрузить привязки с устройства" data-i18n-title="impout_tip" data-i18n="impout">Импорт выходов</button>
-  <button class="apply" id="b_apply" disabled data-i18n="apply">Применить</button>
-  <button onclick="window.location.href='/'"><span data-i18n="to_decoder">Интерфейс декодера</span></button>
-  <button id="b_theme" title="Светлая / тёмная тема" data-i18n-title="theme_tip">☀</button>
-  <button id="b_lang" title="Switch to English" data-i18n-title="lang_tip">RU</button>
-  <button id="b_insp" class="mob" title="Настройки" data-i18n-title="insp_tip">⚙</button>
+  <button onclick="window.location.href='/#settings'"><span data-i18n="to_decoder">Выйти</span></button>
   <input type="file" id="f_import" accept=".json,application/json" class="hidden" />
+  </div>
+  <div class="hd-right">
+    <button id="b_insp" class="mob" title="Настройки" data-i18n-title="insp_tip">⚙</button>
+  </div>
 </header>
 
 <main>
@@ -159,6 +186,7 @@
       </svg>
       <div id="nodes"></div>
     </div>
+    <div id="marquee"></div>
   </section>
 
   <aside class="right">
@@ -168,17 +196,6 @@
     <div id="summary" class="hint"></div>
   </aside>
 </main>
-
-<div id="schemeModal" class="modal hidden">
-  <div class="modal-box">
-    <div class="modal-hd"><b data-i18n="scheme_title">Схема и таблица связей</b><button id="m_close" title="Закрыть" data-i18n-title="close_tip">✕</button></div>
-    <div class="modal-bd">
-      <div id="mini" class="mini"></div>
-      <div class="row" style="margin:8px 0"><button id="b_minipng" class="sm" data-i18n="download_png">Скачать картинку</button><button id="b_minitxt" class="sm" data-i18n="download_txt">Скачать текст</button></div>
-      <div id="linktable" class="ltable"></div>
-    </div>
-  </div>
-</div>
 
 <footer class="foot">
   <span id="status_txt" data-i18n="ready">Готово</span>
@@ -194,37 +211,37 @@
 /* ---- i18n (Russian / English), chosen by ?lang= or the site preference --- */
 const I18N={
 ru:{
-doc_title:"Конструктор звуковых блоков",brand_sub:"КОНСТРУКТОР БЛОКОВ",palette:"Палитра",
+doc_title:"Конструктор звуков",brand_sub:"КОНСТРУКТОР ЗВУКОВ",palette:"Палитра",
 connected:"Подключено",offline:"Нет связи",
-new:"Новая",import:"Импорт",export:"Экспорт",align:"Выровнять",dup:"Дубль",
+  new:"Новый",import:"Импорт",export:"Экспорт",align:"Выровнять",dup:"Дубль",m_file:"Файл",m_edit:"Правка",m_canvas:"Холст",m_check:"Проверка",m_device:"Устройство",m_undo:"↶ Отменить",m_redo:"↷ Повторить",m_scheme:"Схема и связи",m_settings:"Настройки",m_theme:"Тема",theme_light:"светлая",theme_dark:"тёмная",m_lang:"Язык",m_copy:"Копировать",m_paste:"Вставить",copy_tip:"Копировать (Ctrl+C)",paste_tip:"Вставить (Ctrl+V)",
 snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",
 undo_tip:"Отменить (Ctrl+Z)",redo_tip:"Повторить (Ctrl+Y)",dup_tip:"Дублировать (Ctrl+D)",
 scheme_tip:"Схема и таблица связей",scheme_aria:"Схема и связи",
-test:"▶ Тест",validate:"Проверить",save:"Сохранить",outputs:"Выходы",
-impout_tip:"Загрузить привязки с устройства",impout:"Импорт выходов",apply:"Применить",
-to_decoder:"Интерфейс декодера",theme_tip:"Светлая / тёмная тема",insp_tip:"Настройки",lang_tip:"Switch to English",
+test:"▶ Тест",validate:"Проверить",save:"Сохранить",outputs:"Выходы",m_outputs:"Выходы",out_write:"⬆ Записать в устройство",out_read:"⬇ Считать с устройства",outputs_tip:"Записать привязки выходов/логики и настройки AUX в устройство",
+impout_tip:"Считать привязки выходов/логики с устройства и создать блоки",impout:"Импорт выходов",apply:"Применить",
+to_decoder:"Выйти",theme_tip:"Светлая / тёмная тема",insp_tip:"Настройки",lang_tip:"Switch to English",
 ready_blocks:"Готовые блоки",block_setup:"Настройка блока",check:"Проверка",
 select_hint:"Выберите блок на холсте или добавьте новый слева.",
-scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Скачать картинку",download_txt:"Скачать текст",ready:"Готово",
+scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Экспорт блок-схемы в JPG",download_txt:"Экспорт блок-схемы в TXT",ready:"Готово",
 st_checking:"Проверка...",st_has_errors:"Есть ошибки",st_check_ok:"Проверка пройдена",st_error_prefix:"Ошибка: ",
 st_saving:"Сохранение...",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранена версия ",st_not_saved:"Не сохранено: ",
 st_applying:"Применение...",st_applied_prefix:"Применена версия ",st_applied_suffix:", выходы записаны",st_not_applied:"Не применено: ",
 err_not_json:"Устройство вернуло не-JSON (",err_http:"Ошибка ",
-pal_fx:" · выбор эффекта",ns_steps:"Ступени: ",ns_prot:" · защита ",ns_speed:"Скорость % · диапазонов ",ns_decel:" · по замедлению",ns_file_none:" · файл не задан",
+pal_fx:" · выбор эффекта",ns_steps:"Ступени: ",ns_prot:" · защита ",ns_speed:"Скорость % · диапазонов ",ns_decel:" · по замедлению",ns_file_none:" · файл не задан",ns_start:"Запуск: ",ns_end:"Конец: ",ns_simple:"Звук: ",ns_loop:"Цикл: ",ns_mute:"Пауза",
 ns_random_a:" · случайно из ",ns_random_b:" звуков",ns_files_none:"файлы не заданы",tip_configured:"Блок настроен",tip_del_block:"Удалить блок",port_in:"вход",port_out:"выход",
-opt_none:"— нет —",opt_on_device:"На устройстве",opt_test:"Тест (SOUND)",tip_play:"Прослушать",
-st_sound_none:"Звук не выбран",st_playing_dev_a:"Играю ",st_playing_dev_b:" (устройство)",st_not_playing:"Не играет: ",st_playing_test_b:" (тест)",st_preview_only:"Прослушивание доступно в превью (SOUND)",
+opt_none:"— нет —",opt_on_device:"На устройстве",opt_test:"Тест (SOUND)",opt_sounds:"Звуки на устройстве",tip_play:"Прослушать",f_chain:"Проиграть по цепочке",chain_none:"в цепочке нет звуков",chain_playing_a:"Цепочка: ",chain_playing_b:"",chain_arrow:"→",chain_done:"Цепочка проиграна",
+st_sound_none:"Звук не выбран",st_playing_dev_a:"Играю ",st_playing_dev_b:" (устройство)",st_not_playing:"Не играет: ",st_playing_test_b:" (тест)",st_preview_only:"Прослушивание доступно в превью (SOUND)",st_playing_pc_b:" (ПК)",
 tb_no_band:"Не задан ни один диапазон скорости",tb_bands_a:"Диапазонов: ",tb_prot:", защита ",tb_no_sound:"Не задан ни один звук",tb_random_a:"Случайно из ",tb_random_b:" звуков",
-tb_no_wav:"Не задан ни один WAV-файл",tb_files:"Файлы: ",tb_no_idle:"Нет файла холостого хода",tb_idle:"Холостой ход: ",tb_no_source:"Не задан источник (F-клавиша или связь)",tb_fn:"F-клавиша: F",
+tb_no_wav:"Не задан ни один WAV-файл",tb_files:"Файлы: ",tb_no_idle:"Нет файла холостого хода",tb_idle:"Холостой ход: ",tb_no_source:"Не задан источник (F-клавиша или связь)",tb_fn:"F-клавиша: F",tb_mute:"Пауза схемы (без звука)",tb_scheme_ok:"Блок готов",
 tb_result_a:"Тест блока «",tb_result_b:"»: ",tb_errors:" ошибок",tb_ok:"в порядке",
 st_testing:"Тест схемы...",ts_not_ready_a:"Блок «",ts_not_ready_b:"» не готов",ts_result_a:"Тест схемы: ",ts_result_ok_a:" блоков готово, ",ts_result_err_b:" с ошибками",ts_check_list:", проверьте список",ts_can_save:" — можно сохранять",st_test_error:"Ошибка теста: ",
 link_kind_gate:"При двигателе",link_kind_bind:"Выход от F-клавиши",link_kind_after:"Цепочка звуков",link_kind:"Связь",
 li_link_a:"Связь: «",li_link_b:"» → «",li_link_c:"»",li_type:"Тип",
 li_after_a:"Событие и задержку задаёт блок-источник «",li_after_b:"» (выход: ",li_direct:"напрямую",li_after_event:"после события",li_delay_mid:", задержка ",li_delay_end:" мс).",
 done:"Готово",li_del:"Удалить связь",
-f_name:"Название",f_hyst:"Защитный интервал, %",f_volume:"Громкость",f_bands_hint:"Диапазоны скорости в процентах; шаг по умолчанию 25 %.",f_from:"От %",f_to:"До %",f_add_band:"+ Диапазон",
+f_name:"Название",f_hyst:"Защитный интервал, %",f_volume:"Громкость",f_bands_hint:"Диапазоны скорости в процентах; шаг по умолчанию 25 %.",f_from:"От %",f_to:"До %",f_add_band:"+ Диапазон",f_sound:"Звук",f_end_sound:"Финальный звук",f_duration:"Длительность паузы, мс",f_loop_exit:"Выход из цикла",f_start_hint:"Стартовая часть звука: играет один раз по запуску, затем идёт дальше по связи.",f_end_hint:"Последняя часть звука: играет и завершает ветку.",f_simple_hint:"Часть звука: играет один раз и передаёт управление дальше по связи.",f_loop_hint:"Цикличный звук: повторяется и завершается по выбранному условию, затем идёт дальше.",f_mute_hint:"Пауза: тишина заданной длительности, затем дальше по связи.",
 f_fn:"F-клавиша",f_random_hint:"При нажатии F проигрывается один случайный звук из списка.",f_add_sound:"+ Звук",f_brightness:"Яркость %",f_trigger:"Запуск",f_prot:"Защита %",f_direction:"Направление",
-dir_fwd:"Вперёд",dir_rev:"Назад",f_out:"Выход",out_direct:"Напрямую",out_after:"После события",f_out_delay:"Выход: задержка, мс",f_out_delay_hint:"0 — сразу; применяется к связям «к другому блоку».",
+dir_fwd:"Вперёд",dir_rev:"Назад",f_out:"Выход",out_direct:"Напрямую",out_after:"После события",f_out_delay:"Выход: задержка, мс",f_out_delay_hint:"0 — сразу; применяется к связям «к другому блоку».",loop_hold:"Пока активно",loop_time:"По времени",loop_count:"По количеству раз",loop_event:"По событию",f_loop_mode:"Завершение цикла",f_loop_ms:"Длительность цикла, мс",f_loop_count:"Количество повторов",f_loop_event:"Событие завершения",ns_times:" раз",f_short_ms:"Порог короткого нажатия, мс",
 f_channel:"Канал",vol_master:"Общая",vol_engine:"Двигатель",vol_effects:"Эффекты",f_levels_hint:"Уровни громкости хранятся в схеме и записываются на устройство кнопкой «Применить».",st_cant_dup:"Этот блок нельзя дублировать",f_effect:"Эффект",f_logic:"Операция",f_engine_start:"Начало (запуск)",f_engine_idle:"Холостой ход (цикл)",f_steps:"Ступени движения, % скорости",f_del_step:"Удалить ступень",f_add_step:"+ Ступень",f_stop:"Останов",
 f_input_hint:"Вход блока можно соединить с другим блоком — тогда F-клавиша берётся от него.",f_speed_hint:"Звук меняется по скорости поезда; защитный интервал не даёт дребезжать на границах.",f_test:"▶ Тест блока",f_delete:"Удалить",
 st_cant_dup_engine:"Двигатель нельзя дублировать",st_duplicated:"Блок продублирован",st_nothing_copy:"Нет блока для копирования",st_copied:"Блок скопирован",st_clip_empty:"Буфер пуст",st_pasted:"Блок вставлен",
@@ -234,47 +251,47 @@ lc_gate:"при двигателе",lc_bind:"F-клавиша источника
 mini_none:"Нет блоков.",lt_none:"Связей нет.",lt_source:"Источник",lt_target:"Цель",lt_condition:"Условие",
 bd_run:" · запуск: ",bd_idle:" · холостой: ",bd_stop:" · стоп: ",bd_step_a:"ступень ",bd_prot_a:"защита ",bd_out_mid:" · выход: ",bd_delay_a:", задержка ",bd_delay_b:" мс",bd_random:" · случайно из:",bd_trigger:"запуск: ",tr_auto:"авто",bd_speed_a:"скорость ",bd_speed_b:"% · защита ",bd_dir:"направление: ",bd_dir_fwd:"вперёд",bd_dir_rev:"назад",bd_out_a:"выход: ",
 bt_scheme:"Схема: ",bt_counts_a:"Блоков: ",bt_counts_b:", связей: ",bt_blocks:"== Блоки ==",bt_links:"== Связи ==",
-st_no_scheme:"Нет схемы",st_png_saved:"Картинка сохранена",st_png_fail:"Не удалось сформировать картинку",st_txt_saved:"Описание сохранено",
+st_no_scheme:"Нет схемы",st_png_saved:"Блок-схема сохранена в JPG",st_png_fail:"Не удалось сохранить JPG",st_txt_saved:"Блок-схема сохранена в TXT",
 confirm_new:"Создать новую схему? Несохранённые правки будут потеряны.",st_new_scheme:"Новая схема",err_not_blocks_file:"Это не файл блоков",err_import:"Импорт не удался: ",st_imported:"Импортирована схема",
 st_writing_outputs:"Запись выходов...",st_outputs_written:"Выходы записаны",st_outputs_not_written:"Выходы не записаны: ",st_impout_a:"Импортировано выходов: ",st_impout_none:"Новых выходов нет",
 new_scheme_name:"Новая схема тепловоза",
 s_engine_off:"Выкл / тихий вход",s_engine_start:"Запуск двигателя",s_engine_idle:"Холостой ход",s_engine_run:"Движение ",s_engine_stop:"Останов двигателя",s_silent_in:" / тихий вход",s_choose:" / выбор",s_short:" (короткий)",s_begin:" начало",s_cycle:" цикл",s_finish:" конец",s_delay:" / задержка",
-v_states_a:"Состояний ",v_states_b:" > ",v_states_c:". Упростите схему.",v_sound_states_a:"Звуковых состояний > ",v_transitions_a:"Переходов ",v_transitions_b:" > ",v_effects_a:"Эффектов > ",
+v_states_a:"Состояний ",v_states_b:" > ",v_states_c:". Упростите схему.",v_sound_states_a:"Звуковых состояний > ",v_transitions_a:"Переходов ",v_transitions_b:" > ",v_effects_a:"Эффектов > ",v_assets_a:"Звуковых файлов > ",v_silent_a:"Тихих состояний > ",
 v_engine_entry:"Вход двигателя должен быть тихим.",v_effect_entry:"Вход эффекта должен быть тихим.",v_dup_prio_a:"Дублирующийся приоритет у источника ",v_no_state_a:"Нет состояния ",v_no_wav_a:"Нет WAV на устройстве: ",v_no_wav_b:" (проверьте перед применением).",
-v_bad_aux:"Недопустимый AUX-канал.",v_need_fn:"Задайте F-клавишу или связь с блоком.",v_engine_word:"Двигатель",v_name_l:"«",v_name_r:"»",v_multiple_a:" используется несколькими блоками: "
+v_bad_aux:"Недопустимый AUX-канал.",v_need_fn:"Задайте F-клавишу или связь с блоком.",v_engine_word:"Двигатель",v_name_l:"«",v_name_r:"»",v_multiple_a:" используется несколькими блоками: ",v_link_dropped_src:"Связь из блока не поддерживается: нет завершения звука.",v_link_dropped_dst:"Связь в блок не поддерживается: у блока нет звука.",v_no_link_in:"Нет входящей связи — блок недостижим на устройстве."
 },
 en:{
-doc_title:"Sound block builder",brand_sub:"BLOCK BUILDER",palette:"Palette",
+doc_title:"Sound constructor",brand_sub:"SOUND CONSTRUCTOR",palette:"Palette",
 connected:"Connected",offline:"No connection",
-new:"New",import:"Import",export:"Export",align:"Align",dup:"Duplicate",
+new:"New",import:"Import",export:"Export",align:"Align",dup:"Duplicate",m_file:"File",m_edit:"Edit",m_canvas:"Canvas",m_check:"Check",m_device:"Device",m_undo:"↶ Undo",m_redo:"↷ Redo",m_scheme:"Scheme & links",m_settings:"Settings",m_theme:"Theme",theme_light:"light",theme_dark:"dark",m_lang:"Language",m_copy:"Copy",m_paste:"Paste",copy_tip:"Copy (Ctrl+C)",paste_tip:"Paste (Ctrl+V)",
 snap_a:"Grid: ",snap_on:"on",snap_off:"off",
 undo_tip:"Undo (Ctrl+Z)",redo_tip:"Redo (Ctrl+Y)",dup_tip:"Duplicate (Ctrl+D)",
 scheme_tip:"Diagram and link table",scheme_aria:"Diagram and links",
-test:"▶ Test",validate:"Validate",save:"Save",outputs:"Outputs",
-impout_tip:"Load bindings from the device",impout:"Import outputs",apply:"Apply",
-to_decoder:"Decoder interface",theme_tip:"Light / dark theme",insp_tip:"Settings",lang_tip:"Переключить на русский",
+test:"▶ Test",validate:"Validate",save:"Save",outputs:"Outputs",m_outputs:"Outputs",out_write:"⬆ Write to device",out_read:"⬇ Read from device",outputs_tip:"Write output/logic bindings and AUX settings to the device",
+impout_tip:"Read output/logic bindings from the device and create blocks",impout:"Import outputs",apply:"Apply",
+to_decoder:"Exit",theme_tip:"Light / dark theme",insp_tip:"Settings",lang_tip:"Переключить на русский",
 ready_blocks:"Ready blocks",block_setup:"Block settings",check:"Validation",
 select_hint:"Select a block on the canvas or add a new one on the left.",
-scheme_title:"Diagram and link table",close_tip:"Close",download_png:"Download image",download_txt:"Download text",ready:"Ready",
+scheme_title:"Diagram and link table",close_tip:"Close",download_png:"Export scheme to JPG",download_txt:"Export scheme to TXT",ready:"Ready",
 st_checking:"Validating...",st_has_errors:"There are errors",st_check_ok:"Validation passed",st_error_prefix:"Error: ",
 st_saving:"Saving...",err_fix_before_save:"Fix the errors before saving",st_saved_version:"Saved version ",st_not_saved:"Not saved: ",
 st_applying:"Applying...",st_applied_prefix:"Applied version ",st_applied_suffix:", outputs written",st_not_applied:"Not applied: ",
 err_not_json:"Device returned non-JSON (",err_http:"Error ",
-pal_fx:" · choose effect",ns_steps:"Steps: ",ns_prot:" · margin ",ns_speed:"Speed % · bands ",ns_decel:" · deceleration-based",ns_file_none:" · no file set",
+pal_fx:" · choose effect",ns_steps:"Steps: ",ns_prot:" · margin ",ns_speed:"Speed % · bands ",ns_decel:" · deceleration-based",ns_file_none:" · no file set",ns_start:"Launch: ",ns_end:"End: ",ns_simple:"Sound: ",ns_loop:"Loop: ",ns_mute:"Pause",
 ns_random_a:" · randomly from ",ns_random_b:" sounds",ns_files_none:"no files set",tip_configured:"Block configured",tip_del_block:"Delete block",port_in:"in",port_out:"out",
-opt_none:"— none —",opt_on_device:"On device",opt_test:"Test (SOUND)",tip_play:"Preview",
-st_sound_none:"No sound selected",st_playing_dev_a:"Playing ",st_playing_dev_b:" (device)",st_not_playing:"Not playing: ",st_playing_test_b:" (test)",st_preview_only:"Preview is available in the demo (SOUND)",
+opt_none:"— none —",opt_on_device:"On device",opt_test:"Test (SOUND)",opt_sounds:"Sounds on device",tip_play:"Preview",f_chain:"Play chain",chain_none:"no sounds in the chain",chain_playing_a:"Chain: ",chain_playing_b:"",chain_arrow:"→",chain_done:"Chain finished",
+st_sound_none:"No sound selected",st_playing_dev_a:"Playing ",st_playing_dev_b:" (device)",st_not_playing:"Not playing: ",st_playing_test_b:" (test)",st_preview_only:"Preview is available in the demo (SOUND)",st_playing_pc_b:" (PC)",
 tb_no_band:"No speed band is set",tb_bands_a:"Bands: ",tb_prot:", margin ",tb_no_sound:"No sound is set",tb_random_a:"Randomly from ",tb_random_b:" sounds",
-tb_no_wav:"No WAV file is set",tb_files:"Files: ",tb_no_idle:"No idle file",tb_idle:"Idle: ",tb_no_source:"No source set (F-key or link)",tb_fn:"F-key: F",
+tb_no_wav:"No WAV file is set",tb_files:"Files: ",tb_no_idle:"No idle file",tb_idle:"Idle: ",tb_no_source:"No source set (F-key or link)",tb_fn:"F-key: F",tb_mute:"Scheme pause (silent)",tb_scheme_ok:"Block ready",
 tb_result_a:"Block test \"",tb_result_b:"\": ",tb_errors:" errors",tb_ok:"OK",
 st_testing:"Testing scheme...",ts_not_ready_a:"Block \"",ts_not_ready_b:"\" is not ready",ts_result_a:"Scheme test: ",ts_result_ok_a:" blocks ready, ",ts_result_err_b:" with errors",ts_check_list:", check the list",ts_can_save:" — you can save",st_test_error:"Test error: ",
 link_kind_gate:"When engine runs",link_kind_bind:"Output from F-key",link_kind_after:"Sound chain",link_kind:"Link",
 li_link_a:"Link: \"",li_link_b:"\" → \"",li_link_c:"\"",li_type:"Type",
 li_after_a:"The event and delay are set by the source block \"",li_after_b:"\" (output: ",li_direct:"direct",li_after_event:"after event",li_delay_mid:", delay ",li_delay_end:" ms).",
 done:"Done",li_del:"Delete link",
-f_name:"Name",f_hyst:"Margin, %",f_volume:"Volume",f_bands_hint:"Speed bands in percent; the default step is 25%.",f_from:"From %",f_to:"To %",f_add_band:"+ Band",
+f_name:"Name",f_hyst:"Margin, %",f_volume:"Volume",f_bands_hint:"Speed bands in percent; the default step is 25%.",f_from:"From %",f_to:"To %",f_add_band:"+ Band",f_sound:"Sound",f_end_sound:"Final sound",f_duration:"Pause duration, ms",f_loop_exit:"Loop exit",f_start_hint:"Start sound part: plays once on launch, then continues along the link.",f_end_hint:"Final sound part: plays and finishes the branch.",f_simple_hint:"Sound part: plays once, then continues along the link.",f_loop_hint:"Looping sound: repeats and ends by the chosen condition, then continues.",f_mute_hint:"Pause: silence for the set duration, then continues along the link.",
 f_fn:"F-key",f_random_hint:"Pressing F plays one random sound from the list.",f_add_sound:"+ Sound",f_brightness:"Brightness %",f_trigger:"Trigger",f_prot:"Margin %",f_direction:"Direction",
-dir_fwd:"Forward",dir_rev:"Reverse",f_out:"Output",out_direct:"Direct",out_after:"After event",f_out_delay:"Output: delay, ms",f_out_delay_hint:"0 — immediately; applies to links \"to another block\".",
+dir_fwd:"Forward",dir_rev:"Reverse",f_out:"Output",out_direct:"Direct",out_after:"After event",f_out_delay:"Output: delay, ms",f_out_delay_hint:"0 — immediately; applies to links \"to another block\".",loop_hold:"While active",loop_time:"By time",loop_count:"By repeat count",loop_event:"By event",f_loop_mode:"Loop ending",f_loop_ms:"Loop duration, ms",f_loop_count:"Repeat count",f_loop_event:"Ending event",ns_times:" times",f_short_ms:"Short-press threshold, ms",
 f_channel:"Channel",vol_master:"Master",vol_engine:"Engine",vol_effects:"Effects",f_levels_hint:"Volume levels are stored in the scheme and written to the device with the Apply button.",st_cant_dup:"This block cannot be duplicated",f_effect:"Effect",f_logic:"Operation",f_engine_start:"Start (engine start)",f_engine_idle:"Idle (loop)",f_steps:"Motion steps, % speed",f_del_step:"Delete step",f_add_step:"+ Step",f_stop:"Stop",
 f_input_hint:"The block input can be linked to another block — then the F-key is taken from it.",f_speed_hint:"The sound changes with train speed; the margin prevents flicker at the boundaries.",f_test:"▶ Test block",f_delete:"Delete",
 st_cant_dup_engine:"The engine cannot be duplicated",st_duplicated:"Block duplicated",st_nothing_copy:"No block to copy",st_copied:"Block copied",st_clip_empty:"Clipboard is empty",st_pasted:"Block pasted",
@@ -284,14 +301,14 @@ lc_gate:"when engine runs",lc_bind:"source F-key",lc_direct:"direct",lc_after_ev
 mini_none:"No blocks.",lt_none:"No links.",lt_source:"Source",lt_target:"Target",lt_condition:"Condition",
 bd_run:" · start: ",bd_idle:" · idle: ",bd_stop:" · stop: ",bd_step_a:"step ",bd_prot_a:"margin ",bd_out_mid:" · output: ",bd_delay_a:", delay ",bd_delay_b:" ms",bd_random:" · randomly from:",bd_trigger:"trigger: ",tr_auto:"auto",bd_speed_a:"speed ",bd_speed_b:"% · margin ",bd_dir:"direction: ",bd_dir_fwd:"forward",bd_dir_rev:"reverse",bd_out_a:"output: ",
 bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"== Blocks ==",bt_links:"== Links ==",
-st_no_scheme:"No scheme",st_png_saved:"Image saved",st_png_fail:"Failed to generate the image",st_txt_saved:"Description saved",
+st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",
 confirm_new:"Create a new scheme? Unsaved changes will be lost.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",
 st_writing_outputs:"Writing outputs...",st_outputs_written:"Outputs written",st_outputs_not_written:"Outputs not written: ",st_impout_a:"Outputs imported: ",st_impout_none:"No new outputs",
 new_scheme_name:"New locomotive scheme",
 s_engine_off:"Off / silent entry",s_engine_start:"Engine start",s_engine_idle:"Idle",s_engine_run:"Moving ",s_engine_stop:"Engine stop",s_silent_in:" / silent entry",s_choose:" / pick",s_short:" (short)",s_begin:" start",s_cycle:" loop",s_finish:" end",s_delay:" / delay",
-v_states_a:"States ",v_states_b:" > ",v_states_c:". Simplify the scheme.",v_sound_states_a:"Sound states > ",v_transitions_a:"Transitions ",v_transitions_b:" > ",v_effects_a:"Effects > ",
+v_states_a:"States ",v_states_b:" > ",v_states_c:". Simplify the scheme.",v_sound_states_a:"Sound states > ",v_transitions_a:"Transitions ",v_transitions_b:" > ",v_effects_a:"Effects > ",v_assets_a:"WAV files > ",v_silent_a:"Silent states > ",
 v_engine_entry:"The engine entry must be silent.",v_effect_entry:"The effect entry must be silent.",v_dup_prio_a:"Duplicate priority at source ",v_no_state_a:"No state ",v_no_wav_a:"No WAV on the device: ",v_no_wav_b:" (check before applying).",
-v_bad_aux:"Invalid AUX channel.",v_need_fn:"Set an F-key or a link to a block.",v_engine_word:"Engine",v_name_l:"\"",v_name_r:"\"",v_multiple_a:" is used by several blocks: "
+v_bad_aux:"Invalid AUX channel.",v_need_fn:"Set an F-key or a link to a block.",v_engine_word:"Engine",v_name_l:"\"",v_name_r:"\"",v_multiple_a:" is used by several blocks: ",v_link_dropped_src:"Link from this block is not supported: the sound has no end event.",v_link_dropped_dst:"Link into this block is not supported: the block has no sound.",v_no_link_in:"No incoming link — the block is unreachable on the device."
 }
 };
 let lang="ru";
@@ -314,6 +331,11 @@ const LOGIC_OPS=[{v:1,n:{ru:"Mute стоп",en:"Mute stop"}},{v:2,n:{ru:"Mute х
 const CATALOG=[
   {type:"engine",name:{ru:"Двигатель",en:"Engine"},group:"main",kind:"engine",mode:"engine"},
   {type:"volume",name:{ru:"Громкость",en:"Volume"},group:"main",kind:"setting",mode:"volume"},
+  {type:"start",name:{ru:"Старт",en:"Start"},group:"scheme",kind:"sound",mode:"start",roles:["sound"]},
+  {type:"end",name:{ru:"Конец",en:"End"},group:"scheme",kind:"sound",mode:"end",roles:["sound"]},
+  {type:"simple",name:{ru:"Простой звук",en:"Simple"},group:"scheme",kind:"sound",mode:"simple",roles:["sound"]},
+  {type:"loop",name:{ru:"Цикл",en:"Loop"},group:"scheme",kind:"sound",mode:"loop",roles:["sound"]},
+  {type:"mute",name:{ru:"Пауза",en:"Mute"},group:"scheme",kind:"sound",mode:"mute"},
   {type:"horn",name:{ru:"Гудок",en:"Horn"},group:"signals",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
   {type:"whistle",name:{ru:"Тифон",en:"Whistle"},group:"signals",kind:"sound",mode:"oneshot",roles:["sound"]},
   {type:"bell",name:{ru:"Звонок",en:"Bell"},group:"signals",kind:"sound",mode:"latched",roles:["sound"]},
@@ -331,12 +353,14 @@ const CATALOG=[
   {type:"logic",name:{ru:"Логика",en:"Logic"},group:"light",kind:"logic",mode:"logic"}
 ];
 const BY_TYPE={};CATALOG.forEach(c=>BY_TYPE[c.type]=c);
-const GROUP_COLORS={main:"#e0a24a",signals:"#4a9eff",mech:"#5fbf7a",light:"#e0d24a",aux:"#e08a4a",extra:"#a06fe0"};
-const GROUP_NAMES={main:{ru:"Основные",en:"Basic"},signals:{ru:"Сигналы",en:"Signals"},mech:{ru:"Механика",en:"Mechanics"},light:{ru:"Свет и выходы",en:"Light & outputs"},aux:{ru:"Освещение (AUX)",en:"Lighting (AUX)"},extra:{ru:"Дополнительно",en:"Extras"}};
+const GROUP_COLORS={main:"#f97316",scheme:"#06b6d4",signals:"#3b82f6",mech:"#22c55e",light:"#eab308",aux:"#ec4899",extra:"#a855f7"};
+const GROUP_NAMES={main:{ru:"Основные",en:"Basic"},scheme:{ru:"Звуковая схема",en:"Sound scheme"},signals:{ru:"Сигналы",en:"Signals"},mech:{ru:"Механика",en:"Mechanics"},light:{ru:"Свет и выходы",en:"Light & outputs"},aux:{ru:"Освещение (AUX)",en:"Lighting (AUX)"},extra:{ru:"Дополнительно",en:"Extras"}};
 const LEGACY_FX={fx_incandescent:1,fx_mars:2,fx_ditch:3,fx_beacon:4,fx_strobe:5,fx_firebox:6};
 function normalizeProject(p){
   if(!p||!Array.isArray(p.blocks))return p;
   for(const b of p.blocks){
+    if(!b||typeof b!=="object")continue;
+    if(!b.files||typeof b.files!=="object")b.files={};
     if(b.type==="signal"){b.type="whistle";b.name=b.name||tr(BY_TYPE.whistle.name);}
     else if(b.type==="lightfx"){b.type="aux";b.name=tr(BY_TYPE.aux.name);}
     else if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="aux";b.name=tr(BY_TYPE.aux.name);}
@@ -350,6 +374,7 @@ function normalizeProject(p){
     if(b.trigger===undefined)b.trigger="auto";
     if(b.outEvent===undefined)b.outEvent="finish";
     if(b.outDelay===undefined)b.outDelay=0;
+    if(b.shortMs===undefined)b.shortMs=400;
     if(b.type==="speed"){if(!Array.isArray(b.bands))b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
     if(b.type==="random"&&!Array.isArray(b.files.random))b.files.random=["","","",""];
     if(b.type==="engine"){if(b.files&&Array.isArray(b.files.run)){b.run=b.files.run.map((f,i)=>({from:i*SPEED_STEP,to:(i+1)*SPEED_STEP,file:f||""}));delete b.files.run;}if(!Array.isArray(b.run))b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
@@ -363,13 +388,13 @@ function normalizeProject(p){
 }
 const ROLE_NAMES={start:{ru:"Начало",en:"Start"},loop:{ru:"Тело (цикл)",en:"Loop body"},end:{ru:"Конец",en:"End"},short:{ru:"Короткий",en:"Short"},sound:{ru:"Звук",en:"Sound"}};
 const TRIGGER_NAMES={auto:{ru:"Авто (по связи/F)",en:"Auto (by link/F)"},fn:{ru:"F-клавиша",en:"F-key"},engine:{ru:"При двигателе",en:"When engine runs"},speed:{ru:"По скорости",en:"By speed"},dir:{ru:"По направлению",en:"By direction"}};
-const MODE_NAMES={engine:{ru:"Двигатель",en:"Engine"},volume:{ru:"Громкость",en:"Volume"},shortLong:{ru:"Короткий/длинный",en:"Short/long"},oneshot:{ru:"Один раз",en:"One-shot"},latched:{ru:"Переключатель",en:"Toggle"},loopHeld:{ru:"Цикл пока активно",en:"Loop while active"},decel:{ru:"По замедлению",en:"By deceleration"},speed:{ru:"По скорости",en:"By speed"},random:{ru:"Случайный выбор",en:"Random pick"},headlight:{ru:"Фары",en:"Headlights"},aux:{ru:"Выход",en:"Output"},logic:{ru:"Логика",en:"Logic"}};
+const MODE_NAMES={engine:{ru:"Двигатель",en:"Engine"},volume:{ru:"Громкость",en:"Volume"},start:{ru:"Старт схемы",en:"Scheme start"},end:{ru:"Конец схемы",en:"Scheme end"},simple:{ru:"Один раз",en:"One-shot"},loop:{ru:"Цикл",en:"Loop"},mute:{ru:"Пауза",en:"Mute"},shortLong:{ru:"Короткий/длинный",en:"Short/long"},oneshot:{ru:"Один раз",en:"One-shot"},latched:{ru:"Переключатель",en:"Toggle"},loopHeld:{ru:"Цикл пока активно",en:"Loop while active"},decel:{ru:"По замедлению",en:"By deceleration"},speed:{ru:"По скорости",en:"By speed"},random:{ru:"Случайный выбор",en:"Random pick"},headlight:{ru:"Фары",en:"Headlights"},aux:{ru:"Выход",en:"Output"},logic:{ru:"Логика",en:"Logic"}};
 const DIRS=[{v:"auto",n:{ru:"Авто (вперёд/назад)",en:"Auto (fwd/rev)"}},{v:"fwd",n:{ru:"Только вперёд",en:"Forward only"}},{v:"rev",n:{ru:"Только назад",en:"Reverse only"}},{v:"any",n:{ru:"Без направления",en:"No direction"}}];
 const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 
 /* ---- state ----------------------------------------------------------- */
 let project=null;
-let selected="";
+let selected="",selectedIds=new Set(),marquee=null;
 let dragging=null,panning=null,linking=null;
 let online=false,busy=false,revision=0,savedId="";
 let tracks=[],soundFiles=[],diagnostics=[],assets={};
@@ -406,18 +431,30 @@ function addBlockTo(p,type){
   if(type==="engine"){b.files={start:"",idle:"",stop:""};b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));b.hyst=SPEED_HYST;}
   if(type==="speed"){b.hyst=SPEED_HYST;b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));}
   if(type==="random")b.files.random=["","","",""];
-  const n=p.blocks.length;
-  b.x=snapTo(p,40+(n%3)*260);b.y=snapTo(p,40+Math.floor(n/3)*140);
+  const pos=nextBlockPosition(p);b.x=pos.x;b.y=pos.y;
   p.blocks.push(b);return b;
 }
 function snapTo(p,v){return p.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);}
+/* Place a new block at the top-left of the visible viewport; if that spot is
+ * taken, cascade to the right and then down until a free slot is found. */
+function nextBlockPosition(p){
+  const v=(p.editor&&p.editor.viewport)||{x:0,y:0,zoom:1},z=v.zoom||1,pad=GRID*2;
+  const ax=snapTo(p,(-v.x+pad)/z),ay=snapTo(p,(-v.y+pad)/z);
+  const stepX=NODE_W+GRID,stepY=NODE_H+GRID,cols=3;
+  const free=(x,y)=>!p.blocks.some(b=>Math.abs(b.x-x)<NODE_W+GRID&&Math.abs(b.y-y)<NODE_H+GRID);
+  for(let i=0;i<300;i++){
+    const x=ax+(i%cols)*stepX,y=ay+Math.floor(i/cols)*stepY;
+    if(free(x,y))return {x,y};
+  }
+  return {x:ax,y:ay};
+}
 
 /* ---- compile sound blocks -> device sound-graph (schema v1) ---------- */
 function compile(){
-  const states=[],transitions=[],effects=[];const files=new Set();const speedHysts=[];let tid=0;
-  const audible={},terminal={},startCondOf={},usedPrio={};let waitN=0;
+  const states=[],transitions=[],effects=[];const files=new Set();const speedHysts=[];const dropped=[];let tid=0;
+  const audible={},terminal={},startCondOf={},stopCondOf={},usedPrio={};let waitN=0;
   const prioFor=src=>{usedPrio[src]=usedPrio[src]||new Set();let p=60;while(usedPrio[src].has(p))p--;usedPrio[src].add(p);return p;};
-  const addState=(id,name,file,loop,volume=80,rate=1000)=>{if(states.some(s=>s.id===id))return;states.push({id,name,file:file||"",loop:!!loop,volume,rate});if(file)files.add(file);};
+  const addState=(id,name,file,loop,volume=80,rate=1000,loops=0)=>{if(states.some(s=>s.id===id))return;const st={id,name,file:file||"",loop:!!loop,volume,rate};if(loops)st.loops=loops;states.push(st);if(file)files.add(file);};
   const silent=(id,name)=>addState(id,name,"",false,100,1000);
   const addEdge=(source,target,condition,priority=10,timing="immediate")=>{transitions.push({id:"t"+(++tid),source,target,priority,timing,condition});};
   const engine=project.blocks.find(b=>b.type==="engine");
@@ -425,6 +462,12 @@ function compile(){
   silent(engineEntry,t("s_engine_off"));
   const linkedFromEngine=id=>project.links.some(l=>l.to===id&&(project.blocks.find(b=>b.id===l.from)||{}).type==="engine");
   const triggerOf=b=>b.trigger==="auto"?(linkedFromEngine(b.id)?"engine":"fn"):b.trigger;
+  /* Scheme helpers: walk "after" links backwards to the Start part to learn how
+     the scheme was launched (its condition and F-key), so a linked Loop can end
+     on the same event that started the scheme. */
+  const chainStartCond=id=>{let cur=id,seen=0;while(cur&&seen++<40){const c=project.blocks.find(x=>x.id===cur);if(!c)break;if(BY_TYPE[c.type].mode==="start"){const st=triggerOf(c);return st==="engine"?{type:"engine_on"}:st==="speed"?{type:"speed",min:pctSpeed(c.speedMin==null?0:c.speedMin),max:pctSpeed(c.speedMax==null?100:c.speedMax)}:st==="dir"?{type:c.dirTrigger!=="rev"?"dir_fwd":"dir_rev"}:{type:"fn_press",fn:c.fn};}const inL=project.links.find(l=>l.to===cur&&l.kind==="after");if(!inL)break;cur=inL.from;}return null;};
+  const chainStartFn=id=>{const c=chainStartCond(id);return c&&c.type==="fn_press"?c.fn:null;};
+  const reverseCond=c=>{if(!c)return null;if(c.type==="engine_on")return{type:"engine_off"};if(c.type==="fn_press")return{type:"fn_release",fn:c.fn};if(c.type==="dir_fwd")return{type:"dir_rev"};if(c.type==="dir_rev")return{type:"dir_fwd"};if(c.type==="speed")return{type:"engine_off"};return null;};
 
   for(const b of project.blocks){
     const kind=BY_TYPE[b.type].kind;
@@ -480,7 +523,61 @@ function compile(){
         const ready=b.id+"_ready";addState(ready,blockName(b)+t("s_choose"),"",false,100,1000);
         addEdge(entry,ready,{type:"fn_press",fn},10);
         files.forEach((f,i)=>{const s=b.id+"_r"+i;addState(s,blockName(b)+" "+(i+1),f,false,vol,rate);addEdge(ready,s,{type:"random",min:100},10);addEdge(s,entry,{type:"sample_done"},10);});
+        audible[b.id]=ready;
       }
+      continue;
+    }
+    /* scheme primitives: Start / Simple / Loop / Mute / End.
+       Start is the scheme entry (owns the launch condition, no sound); the
+       other blocks are reached by "after" links from Start/previous blocks and
+       hand over with sample_done (Simple/Mute), the exit condition (Loop) or
+       terminate the branch (End). */
+    if(mode0==="start"){
+      const sTrig=triggerOf(b);
+      const sStart= sTrig==="engine"?{type:"engine_on"}
+        : sTrig==="speed"?{type:"speed",min:pctSpeed(b.speedMin==null?0:b.speedMin),max:pctSpeed(b.speedMax==null?100:b.speedMax)}
+        : sTrig==="dir"?{type:(b.dirTrigger!=="rev")?"dir_fwd":"dir_rev"}
+        : {type:"fn_press",fn};
+      startCondOf[b.id]=sStart;
+      if(sTrig==="speed")speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
+      if(b.files.sound){
+        const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);
+        addEdge(entry,ph,sStart,10,sTrig==="speed"?"after_sample":"immediate");
+        addEdge(ph,entry,{type:"sample_done"},10);
+        audible[b.id]=ph;terminal[b.id]=ph;
+      }
+      continue;
+    }
+    if(mode0==="simple"){
+      if(b.files.sound){const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);addEdge(ph,entry,{type:"sample_done"},10);audible[b.id]=ph;terminal[b.id]=ph;}
+      continue;
+    }
+    if(mode0==="loop"){
+      const lm=b.loopMode||"hold";let sStop=null;
+      if(lm==="time"){const units=Math.max(1,Math.min(255,Math.round((b.loopMs||1000)/50)));sStop={type:"timeout",min:units};}
+      else if(lm==="count"){sStop={type:"sample_done"};}
+      else if(lm==="event"){
+        const et=(b.trigger==="engine"||b.trigger==="dir")?b.trigger:"fn";
+        if(et==="engine")sStop={type:"engine_off"};
+        else if(et==="dir"){const fwd=b.dirTrigger!=="rev";sStop={type:fwd?"dir_rev":"dir_fwd"};}
+        else{const sf=chainStartFn(b.id);sStop={type:"fn_release",fn:sf==null?fn:sf};}
+      }else{sStop=reverseCond(chainStartCond(b.id))||{type:"engine_off"};}
+      if(b.files.sound){
+        const loops=(lm==="count")?Math.max(1,Math.min(255,b.loopCount||2)):0;
+        const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,true,vol,rate,loops);
+        addEdge(ph,entry,sStop,10);
+        stopCondOf[b.id]=sStop;audible[b.id]=ph;terminal[b.id]=ph;
+      }
+      continue;
+    }
+    if(mode0==="mute"){
+      const ph=b.id+"_mute";silent(ph,blockName(b));addEdge(ph,entry,{type:"sample_done"},10);audible[b.id]=ph;terminal[b.id]=ph;
+      continue;
+    }
+    if(mode0==="end"){
+      const ph=b.id+"_end";
+      if(b.files.sound)addState(ph,blockName(b),b.files.sound,false,vol,rate);else silent(ph,blockName(b));
+      audible[b.id]=ph;terminal[b.id]=null;
       continue;
     }
     const trig=triggerOf(b);
@@ -494,17 +591,34 @@ function compile(){
     if(mode==="oneshot"){
       if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,false,vol,rate);addEdge(entry,b.id+"_play",startCond,10);addEdge(b.id+"_play",entry,{type:"sample_done"},10);audible[b.id]=b.id+"_play";terminal[b.id]=b.id+"_play";}
     }else if(mode==="shortLong"){
-      if(b.files.short){addState(b.id+"_short",blockName(b)+t("s_short"),b.files.short,false,vol,rate);addEdge(entry,b.id+"_short",startCond,1);addEdge(b.id+"_short",entry,{type:"sample_done"},1);}
+      /* Short tap plays the short part; holding past the threshold continues
+         into the long chain (start/loop/end). The decision is made in a silent
+         "hold" state: release before the timeout -> short, timeout -> long. */
+      const hasShort=!!b.files.short;
+      if(hasShort)addState(b.id+"_short",blockName(b)+t("s_short"),b.files.short,false,vol,rate);
       const first=b.files.start?b.id+"_start":b.files.loop?b.id+"_loop":b.files.end?b.id+"_end":"";
       if(b.files.start)addState(b.id+"_start",blockName(b)+t("s_begin"),b.files.start,false,vol,rate);
       if(b.files.loop)addState(b.id+"_loop",blockName(b)+t("s_cycle"),b.files.loop,true,vol,rate);
       if(b.files.end)addState(b.id+"_end",blockName(b)+t("s_finish"),b.files.end,false,vol,rate);
-      if(first)addEdge(entry,first,startCond,10);
+      if(hasShort&&first){
+        const hold=b.id+"_hold";silent(hold,blockName(b));
+        const holdUnits=Math.max(1,Math.min(255,Math.round((b.shortMs||400)/50)));
+        addEdge(entry,hold,startCond,10);
+        addEdge(hold,b.id+"_short",stopCond,10);
+        addEdge(hold,first,{type:"timeout",min:holdUnits},5);
+        addEdge(b.id+"_short",entry,{type:"sample_done"},1);
+      }else if(hasShort){
+        addEdge(entry,b.id+"_short",startCond,10);
+        addEdge(b.id+"_short",entry,{type:"sample_done"},1);
+      }else if(first){
+        addEdge(entry,first,startCond,10);
+      }
       if(b.files.start&&b.files.loop)addEdge(b.id+"_start",b.id+"_loop",{type:"sample_done"},10);
-      if(b.files.end){addEdge(first||entry,b.id+"_end",stopCond,5);addEdge(b.id+"_end",entry,{type:"sample_done"},10);}
+      if(b.files.end){addEdge(first||entry,b.id+"_end",stopCond,5);if(b.files.loop&&first!==b.id+"_loop")addEdge(b.id+"_loop",b.id+"_end",stopCond,5);addEdge(b.id+"_end",entry,{type:"sample_done"},10);}
       else if(b.files.loop)addEdge(b.id+"_loop",entry,stopCond,5);
       else if(b.files.start)addEdge(b.id+"_start",entry,{type:"sample_done"},10);
-      audible[b.id]=first;terminal[b.id]=b.files.end?b.id+"_end":((!b.files.loop&&b.files.start)?b.id+"_start":null);
+      audible[b.id]=first||(hasShort?b.id+"_short":"");
+      terminal[b.id]=b.files.end?b.id+"_end":((!b.files.loop&&b.files.start)?b.id+"_start":null);
     }else if(mode==="loopHeld"){
       if(b.files.sound){addState(b.id+"_loop",blockName(b),b.files.sound,true,vol,rate);
         addEdge(entry,b.id+"_loop",startCond,10,trig==="speed"?"after_sample":"immediate");
@@ -513,9 +627,10 @@ function compile(){
           if(speedRange.max<255)addEdge(b.id+"_loop",entry,{type:"speed",min:speedRange.max+1,max:255},6,"after_sample");
           addEdge(b.id+"_loop",entry,{type:"engine_off"},255);
         }else addEdge(b.id+"_loop",entry,stopCond,10);
+        audible[b.id]=b.id+"_loop";
       }
     }else if(mode==="latched"){
-      if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);}
+      if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);audible[b.id]=b.id+"_play";}
     }
   }
   for(const l of project.links){
@@ -523,29 +638,31 @@ function compile(){
     const from=project.blocks.find(x=>x.id===l.from),to=project.blocks.find(x=>x.id===l.to);
     if(!from||!to)continue;
     if(BY_TYPE[from.type].kind!=="sound"||BY_TYPE[to.type].kind!=="sound")continue;
-    const a=audible[to.id];if(!a)continue;
+    const a=audible[to.id];if(!a){dropped.push({id:to.id,reason:"dst"});continue;}
     const ev=from.outEvent==="start"?"start":"finish";
     const delay=Math.max(0,from.outDelay|0);
-    const cond=ev==="start"?startCondOf[from.id]:{type:"sample_done"};
+    const cond=ev==="start"?startCondOf[from.id]:(stopCondOf[from.id]||{type:"sample_done"});
     const srcState=ev==="start"?(to.id+"_off"):terminal[from.id];
-    if(!srcState||!cond)continue;
+    if(!srcState||!cond){dropped.push({id:from.id,reason:"src"});continue;}
     const prio=prioFor(srcState);
     if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));addEdge(srcState,w,cond,prio);addEdge(w,a,{type:"timeout",min:Math.max(1,Math.min(255,Math.round(delay/50)))},prio);}
     else addEdge(srcState,a,cond,prio);
   }
   const positions={};project.blocks.forEach(b=>positions[b.id]={x:b.x,y:b.y});
-  const hystUnits=speedHysts.length?Math.max.apply(null,speedHysts.map(p=>pctSpeed(p))):(engine?3:0);
+  const hystUnits=speedHysts.length?Math.max.apply(null,speedHysts.map(p=>Math.max(0,Math.min(32,pctSpeed(p))))):(engine?3:0);
   const payload={format:"sound-graph",schemaVersion:1,id:project.id,name:project.name,
     engine:{entry:engineEntry,fn:engine?engine.fn:8},hysteresis:hystUnits,
-    effectTables:[],sources:[],blocks:[],sinks:[],wires:[],
     states,transitions,effects,assets:Object.keys(assets).map(f=>assets[f]),
     editor:{positions,viewport:project.editor.viewport}};
-  return {payload,files:[...files]};
+  return {payload,files:[...files],dropped};
 }
 
 /* ---- compile outputs/logic -> func_binding_t ------------------------- */
 function outputBlocks(){return project.blocks.filter(b=>BY_TYPE[b.type].kind==="output"||BY_TYPE[b.type].kind==="logic");}
 function sourceFnOf(id){for(const l of project.links){if(l.to===id){const s=project.blocks.find(b=>b.id===l.from);if(s)return s.fn;}}return null;}
+/* F-key of the Start part upstream of a scheme block (walking "after" links
+   backwards); used to show which key ends a linked Loop. */
+function upstreamStartFn(id){let cur=id,seen=0;while(cur&&seen++<40){const c=project.blocks.find(x=>x.id===cur);if(!c)return null;if(BY_TYPE[c.type].mode==="start")return c.fn;const l=project.links.find(x=>x.to===cur&&x.kind==="after");if(!l)return null;cur=l.from;}return null;}
 function desiredBindings(){
   const out=[];const mk=(fn,type,id,dir,state)=>({fn,type,id,dir:dir|0,state:state|0});
   for(const b of outputBlocks()){
@@ -565,13 +682,15 @@ const bindKey=b=>b.fn+":"+b.type+":"+b.id+":"+(b.dir|0)+":"+(b.state|0);
 
 /* ---- client validation ---------------------------------------------- */
 function validate(){
-  const {payload,files}=compile();const out=[];
+  const {payload,files,dropped}=compile();const out=[];
   const err=(id,message)=>out.push({id,message,severity:"error"});
   const warn=(id,message)=>out.push({id,message,severity:"warning"});
   if(payload.states.length>LIMITS.states)err("",t("v_states_a")+payload.states.length+t("v_states_b")+LIMITS.states+t("v_states_c"));
   if(payload.states.filter(s=>s.file).length>LIMITS.soundStates)err("",t("v_sound_states_a")+LIMITS.soundStates+".");
+  if(payload.states.filter(s=>!s.file).length>26)err("",t("v_silent_a")+26+".");
   if(payload.transitions.length>LIMITS.transitions)err("",t("v_transitions_a")+payload.transitions.length+t("v_transitions_b")+LIMITS.transitions+".");
   if(payload.effects.length>LIMITS.effects)err("",t("v_effects_a")+LIMITS.effects+".");
+  if(files.length>LIMITS.assets)err("",t("v_assets_a")+LIMITS.assets+".");
   const silent=new Set(payload.states.filter(s=>!s.file).map(s=>s.id));
   if(!silent.has(payload.engine.entry))err("",t("v_engine_entry"));
   payload.effects.forEach(e=>{if(!silent.has(e.entry))err(e.id,t("v_effect_entry"));});
@@ -591,9 +710,16 @@ function validate(){
   project.blocks.forEach(b=>{const c=BY_TYPE[b.type];
     if(c.kind==="setting")return;
     if(c.kind==="engine"){addUse(b.fn,t("v_engine_word"));return;}
-    if(c.kind==="sound"){if(c.mode==="speed"||c.mode==="decel")return;if(trigOf(b)==="fn")addUse(b.fn,t("v_name_l")+blockName(b)+t("v_name_r"));return;}
+    if(c.kind==="sound"){if(c.mode==="speed"||c.mode==="decel"||c.mode==="simple"||c.mode==="loop"||c.mode==="mute"||c.mode==="end")return;if(trigOf(b)==="fn")addUse(b.fn,t("v_name_l")+blockName(b)+t("v_name_r"));return;}
     const src=sourceFnOf(b.id);addUse(src!=null?src:b.fn,t("v_name_l")+blockName(b)+t("v_name_r"));});
   Object.keys(fnUse).forEach(f=>{if(fnUse[f].length>1)warn("","F"+f+t("v_multiple_a")+fnUse[f].join(", ")+".");});
+  (dropped||[]).forEach(d=>warn(d.id,d.reason==="src"?t("v_link_dropped_src"):t("v_link_dropped_dst")));
+  for(const b of project.blocks){
+    const m=BY_TYPE[b.type]&&BY_TYPE[b.type].mode;
+    if(m==="simple"||m==="loop"||m==="mute"||m==="end"){
+      if(!project.links.some(l=>l.to===b.id&&l.kind==="after"))warn(b.id,t("v_no_link_in"));
+    }
+  }
   return {payload,files,diagnostics:out};
 }
 
@@ -627,14 +753,10 @@ async function doSave(){
   try{const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
     await fetchAssets(v.files);v.payload.assets=Object.keys(assets).map(f=>assets[f]);
     const r=await req("/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0}),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(v.payload)});
-    revision=Number(r.revision)||revision;savedId=project.id;setStatus(t("st_saved_version")+revision);await refreshStatus();
+    revision=Number(r.revision)||revision;savedId=project.id;
+    try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});await applyOutputs();}catch(e){}
+    setStatus(t("st_saved_version")+revision);await refreshStatus();
   }catch(e){setStatus(t("st_not_saved")+e.message);}finally{busy=false;refreshButtons();}
-}
-async function doApply(){
-  if(busy||!revision)return;busy=true;refreshButtons();setStatus(t("st_applying"));
-  try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});
-    await applyOutputs();setStatus(t("st_applied_prefix")+revision+t("st_applied_suffix"));
-  }catch(e){setStatus(t("st_not_applied")+e.message);}finally{busy=false;refreshButtons();}
 }
 function volumeBlock(){return project.blocks.find(b=>b.type==="volume");}
 async function applyVolumes(){
@@ -665,11 +787,11 @@ function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,
 const projectSig=()=>JSON.stringify({b:project.blocks,l:project.links,id:project.id,name:project.name});
 function historyReset(){history=[];hIndex=-1;lastSig=null;historyPush();}
 function historyPush(){const sig=projectSig();if(sig===lastSig)return;history=history.slice(0,hIndex+1);history.push(JSON.stringify(project));hIndex=history.length-1;lastSig=sig;if(history.length>100){history.shift();hIndex--;}}
-function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";render();setStatus(t("st_undone"));}
-function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";render();setStatus(t("st_redone"));}
+function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_undone"));}
+function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_redone"));}
 function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
 const THEME_KEY="aura_theme";
-function applyTheme(t){if(t!=="light")t="dark";document.documentElement.setAttribute("data-theme",t);const b=$("b_theme");if(b)b.textContent=t==="light"?"☾":"☀";try{localStorage.setItem(THEME_KEY,t);}catch(e){}}
+function applyTheme(th){if(th!=="light")th="dark";document.documentElement.setAttribute("data-theme",th);const b=$("b_theme");if(b)b.textContent=(th==="light"?"☾ ":"☀ ")+t("m_theme")+": "+t(th==="light"?"theme_light":"theme_dark");try{localStorage.setItem(THEME_KEY,th);}catch(e){}}
 function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-theme")==="light"?"dark":"light");}
 
 /* ---- rendering ------------------------------------------------------- */
@@ -681,7 +803,7 @@ function renderPalette(){
     html+='<button data-add="'+c.type+'" style="border-left:3px solid '+col+'"'+(dis?" disabled":"")+'><b>'+esc(tr(c.name))+"</b><small>"+esc(tr(MODE_NAMES[c.mode])||"")+(c.fx?t("pal_fx"):"")+"</small></button>";
   });html+="</div>";}
   $("palette").innerHTML=html;
-  $("palette").querySelectorAll("[data-add]").forEach(btn=>btn.onclick=()=>{const b=addBlockTo(project,btn.getAttribute("data-add"));if(b){selected=b.id;render();}});
+  $("palette").querySelectorAll("[data-add]").forEach(btn=>btn.onclick=()=>{const b=addBlockTo(project,btn.getAttribute("data-add"));if(b){selected=b.id;selectedIds=new Set([b.id]);render();}});
 }
 function nodeSummary(b){
   const kind=BY_TYPE[b.type].kind;
@@ -695,6 +817,17 @@ function nodeSummary(b){
   if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+(tr((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n)||"");}
   const cat=BY_TYPE[b.type],parts=[];
   if(cat.mode==="speed")return t("ns_speed")+((b.bands||[]).filter(x=>x.file).length)+t("ns_prot")+(b.hyst==null?SPEED_HYST:b.hyst)+"%";
+  if(cat.mode==="start")return "F"+b.fn+" · "+esc(tr(TRIGGER_NAMES[b.trigger]||TRIGGER_NAMES.auto))+(b.trigger==="speed"?" ("+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+"%)":(b.trigger==="dir"?" / "+(b.dirTrigger==="rev"?t("dir_rev"):t("dir_fwd")):""))+" · "+esc(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(" "+b.outDelay+t("bd_delay_b")):""))+"<br>"+(b.files.sound?esc(b.files.sound):t("ns_file_none"));
+  if(cat.mode==="end")return (b.files.sound?esc(b.files.sound):t("ns_file_none"));
+  if(cat.mode==="simple")return t("ns_simple")+(b.files.sound?esc(b.files.sound):t("ns_file_none"))+"<br>"+esc(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(" "+b.outDelay+t("bd_delay_b")):""));
+  if(cat.mode==="loop"){
+    const lm=b.loopMode||"hold";let s1;
+    if(lm==="time")s1=t("loop_time")+": "+(b.loopMs||1000)+t("bd_delay_b");
+    else if(lm==="count")s1=t("loop_count")+": "+(b.loopCount||2)+t("ns_times");
+    else if(lm==="event"){const et=(b.trigger==="engine"||b.trigger==="dir")?b.trigger:"fn";if(et==="engine")s1=t("loop_event")+": "+tr(TRIGGER_NAMES.engine);else if(et==="dir")s1=t("loop_event")+": "+tr(TRIGGER_NAMES.dir)+" "+(b.dirTrigger==="rev"?t("dir_rev"):t("dir_fwd"));else{const sf=upstreamStartFn(b.id);s1=t("loop_event")+": F"+(sf==null?b.fn:sf);}}else s1=t("loop_hold");
+    return t("ns_loop")+esc(s1)+"<br>"+(b.files.sound?esc(b.files.sound):t("ns_file_none"));
+  }
+  if(cat.mode==="mute")return t("ns_mute")+(b.outDelay?" · "+(b.outDelay|0)+t("bd_delay_b"):"");
   if(cat.mode==="decel")return "F"+b.fn+t("ns_decel")+(b.files.sound?" · "+esc(b.files.sound):t("ns_file_none"));
   if(cat.mode==="random")return "F"+b.fn+t("ns_random_a")+((b.files.random||[]).filter(Boolean).length)+t("ns_random_b");
   (cat.roles||[]).forEach(r=>{if(b.files[r])parts.push(tr(ROLE_NAMES[r])+": "+esc(b.files[r]));});
@@ -704,12 +837,12 @@ function renderNodes(){
   const box=$("nodes");box.innerHTML="";
   for(const b of project.blocks){
     const cat=BY_TYPE[b.type],kind=cat.kind;
-    const hasIn=b.type!=="engine"&&kind!=="setting",hasOut=kind!=="output"&&kind!=="setting";
+    const hasIn=b.type!=="engine"&&kind!=="setting"&&cat.mode!=="start",hasOut=kind!=="output"&&kind!=="setting"&&cat.mode!=="end";
     const el=document.createElement("div");
     const color=GROUP_COLORS[cat.group]||"#2b3547";
-    el.className="node"+(selected===b.id?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
+    el.className="node"+(selectedIds.has(b.id)?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
     el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;el.style.borderColor=color;
-    el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.20)+'"><b>'+esc(blockName(b))+'</b>'+(readyIds.has(b.id)?'<span class="okbadge" title="'+esc(t("tip_configured"))+'">✓</span>':'')+'<button class="x" data-del="'+b.id+'" title="'+esc(t("tip_del_block"))+'" aria-label="'+esc(t("tip_del_block"))+'">'+TRASH+'</button></div>'+
+    el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.30)+'"><b>'+esc(blockName(b))+'</b>'+(readyIds.has(b.id)?'<span class="okbadge" title="'+esc(t("tip_configured"))+'">✓</span>':'')+(primaryFile(b)?'<button class="chain" data-chain="'+b.id+'" title="'+esc(t("f_chain"))+'" aria-label="'+esc(t("f_chain"))+'">▶</button>':'')+'<button class="x" data-del="'+b.id+'" title="'+esc(t("tip_del_block"))+'" aria-label="'+esc(t("tip_del_block"))+'">'+TRASH+'</button></div>'+
       '<div class="bd">'+nodeSummary(b)+"</div>"+
       (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">'+esc(t("port_in"))+'</span></div>':'')+
       (hasOut?'<div class="port out" data-out="'+b.id+'"><span class="lbl">'+esc(t("port_out"))+'</span></div>':'');
@@ -717,8 +850,9 @@ function renderNodes(){
   }
   box.querySelectorAll("[data-drag]").forEach(h=>h.addEventListener("pointerdown",onNodeDown));
   box.querySelectorAll("[data-del]").forEach(x=>x.onclick=e=>{e.stopPropagation();removeBlock(x.getAttribute("data-del"));});
+  box.querySelectorAll("[data-chain]").forEach(x=>{x.addEventListener("pointerdown",e=>e.stopPropagation());x.onclick=e=>{e.stopPropagation();playChain(project.blocks.find(z=>z.id===x.getAttribute("data-chain")));};});
   box.querySelectorAll("[data-out]").forEach(p=>p.addEventListener("pointerdown",onPortDown));
-  box.querySelectorAll(".node .bd").forEach(bd=>bd.addEventListener("pointerdown",()=>{const id=bd.closest(".node").dataset.id;if(selected!==id){selected=id;selectedLink="";render();}}));
+  box.querySelectorAll(".node .bd").forEach(bd=>bd.addEventListener("pointerdown",ev=>{const id=bd.closest(".node").dataset.id;selectNode(id,ev.shiftKey||ev.ctrlKey||ev.metaKey);}));
 }
 function portPos(id,which){
   const el=$("nodes").querySelector('[data-id="'+id+'"]');
@@ -735,7 +869,7 @@ function renderLinks(){
     const p1=portPos(l.from,"out"),p2=portPos(l.to,"in");
     html+='<path class="link'+(selectedLink===l.id?" sel":"")+'" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x-10,p2.y)+'"></path>';}
   $("linkLayer").innerHTML=html;
-  $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=ev=>{ev.stopPropagation();selectedLink=p.getAttribute("data-link");selected="";render();});
+  $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=ev=>{ev.stopPropagation();selectedLink=p.getAttribute("data-link");selected="";selectedIds=new Set();render();});
   renderTempLink();
 }
 function renderTempLink(){
@@ -746,18 +880,74 @@ function renderTempLink(){
   tmp.setAttribute("d",curve(p1.x,p1.y,linking.x,linking.y));
 }
 function soundOptions(sel){
-  const known=tracks.concat(soundFiles);let h='<option value="">'+esc(t("opt_none"))+'</option>';
-  if(sel&&!known.includes(sel))h+='<option value="'+esc(sel)+'" selected>'+esc(sel)+"</option>";
-  if(tracks.length)h+='<optgroup label="'+esc(t("opt_on_device"))+'">'+tracks.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
-  if(soundFiles.length)h+='<optgroup label="'+esc(t("opt_test"))+'">'+soundFiles.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
+  /* Only real installed files; empty legacy slots (slotNN with no sound) are
+   * not listed. */
+  const files=soundFiles;let h='<option value="">'+esc(t("opt_none"))+'</option>';
+  if(sel&&files.indexOf(sel)<0)h+='<option value="'+esc(sel)+'" selected>'+esc(sel)+"</option>";
+  if(files.length)h+='<optgroup label="'+esc(t("opt_sounds"))+'">'+files.map(f=>'<option value="'+esc(f)+'"'+(f===sel?" selected":"")+">"+esc(f)+"</option>").join("")+"</optgroup>";
   return h;
 }
 function fileField(role,b){return '<div class="frow"><select data-role="'+role+'">'+soundOptions(b.files[role]||"")+'</select><button class="play" data-play="'+role+'" title="'+esc(t("tip_play"))+'">▶</button></div>';}
+function soundPlayTarget(){try{return localStorage.getItem("aura_sound_play")==="decoder"?"decoder":"pc";}catch(e){return "pc";}}
 async function playFile(name){
   if(!name){setStatus(t("st_sound_none"));return;}
+  const target=soundPlayTarget();
   const m=/^slot0*(\d+)\.wav$/i.exec(name);
-  if(m){try{await req("/api/audio/play?slot="+Number(m[1]),{method:"POST"});setStatus(t("st_playing_dev_a")+name+t("st_playing_dev_b"));}catch(e){setStatus(t("st_not_playing")+e.message);}return;}
-  try{const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;await a.play();setStatus(t("st_playing_dev_a")+name+t("st_playing_test_b"));}catch(e){setStatus(t("st_preview_only"));}
+  try{
+    if(target==="decoder"){
+      if(m){await req("/api/audio/play?slot="+Number(m[1]),{method:"POST"});}
+      else{await req("/api/audio/play?name="+encodeURIComponent(name.replace(/\.wav$/i,"")),{method:"POST"});}
+      setStatus(t("st_playing_dev_a")+name+t("st_playing_dev_b"));
+    }else{
+      const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;await a.play();
+      setStatus(t("st_playing_dev_a")+name+t("st_playing_pc_b"));
+    }
+  }catch(e){setStatus(t("st_not_playing")+e.message);}
+}
+/* Play a file in the browser and resolve when it finishes. */
+function playPc(name){
+  return new Promise(resolve=>{
+    try{
+      const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;
+      let done=false;const fin=()=>{if(!done){done=true;resolve();}};
+      a.onended=fin;a.onerror=fin;
+      const p=a.play();if(p&&p.catch)p.catch(fin);
+    }catch(e){resolve();}
+  });
+}
+function primaryFile(b){
+  return blockFiles(b)[0]||b.files.idle||(b.files.random||[]).filter(Boolean)[0]||
+         ((b.bands||[]).find(x=>x.file)||{}).file||"";
+}
+/* Blocks connected by "after" links form a sound chain: play them in order. */
+function chainFrom(start){
+  const seq=[];const seen=new Set();let cur=start;
+  while(cur&&!seen.has(cur.id)){
+    seen.add(cur.id);seq.push(cur);
+    const link=project.links.find(l=>l.from===cur.id&&l.kind==="after");
+    cur=link?project.blocks.find(x=>x.id===link.to):null;
+  }
+  return seq;
+}
+async function playChain(b){
+  if(!b)return;
+  const seq=chainFrom(b).map(bl=>({bl,file:primaryFile(bl)})).filter(x=>x.file);
+  if(!seq.length){setStatus(t("chain_none"));return;}
+  setStatus(t("chain_playing_a")+seq.map(x=>blockName(x.bl)).join(" "+t("chain_arrow")+" ")+t("chain_playing_b"));
+  if(soundPlayTarget()==="decoder"){
+    await fetchAssets(seq.map(x=>x.file));
+    for(const x of seq){
+      try{await req("/api/audio/play?name="+encodeURIComponent(String(x.file).replace(/\.wav$/i,"")),{method:"POST"});}catch(e){}
+      const a=assets[x.file]||{};const ms=Number(a.durationMs)>0?a.durationMs:1500;
+      await new Promise(r=>setTimeout(r,ms+(x.bl.outDelay|0)));
+    }
+  }else{
+    for(const x of seq){
+      await playPc(x.file);
+      const d=x.bl.outDelay|0;if(d>0)await new Promise(r=>setTimeout(r,d));
+    }
+  }
+  setStatus(t("chain_done"));
 }
 function blockFiles(b){const roles=BY_TYPE[b.type].roles||[];return roles.map(r=>b.files[r]).filter(Boolean);}
 async function testBlock(b){
@@ -771,6 +961,8 @@ async function testBlock(b){
       const set=(b.files.random||[]).filter(Boolean);
       if(!set.length)out.push({id:b.id,message:t("tb_no_sound"),severity:"error"});
       else out.push({id:b.id,message:t("tb_random_a")+set.length+t("tb_random_b"),severity:"ok"});
+    }else if(BY_TYPE[b.type].mode==="mute"){
+      out.push({id:b.id,message:t("tb_mute"),severity:"ok"});
     }else{
       const roles=BY_TYPE[b.type].roles||[],set=roles.filter(r=>b.files[r]);
       if(!set.length)out.push({id:b.id,message:t("tb_no_wav"),severity:"error"});
@@ -794,7 +986,7 @@ async function testScheme(){
     const lines=[];let ok=0,err=0;
     for(const b of project.blocks){
       const kind=BY_TYPE[b.type].kind;let bad=false;
-      if(kind==="sound"){bad=(BY_TYPE[b.type].mode==="speed")?!(b.bands||[]).some(x=>x.file):(BY_TYPE[b.type].mode==="random")?!(b.files.random||[]).some(Boolean):!((BY_TYPE[b.type].roles||[]).some(r=>b.files[r]));}
+      if(kind==="sound"){const m0=BY_TYPE[b.type].mode;bad=(m0==="mute")?false:(m0==="speed")?!(b.bands||[]).some(x=>x.file):(m0==="random")?!(b.files.random||[]).some(Boolean):!((BY_TYPE[b.type].roles||[]).some(r=>b.files[r]));}
       else if(b.type==="engine")bad=!b.files.idle;
       else{const fn=sourceFnOf(b.id);bad=(fn==null&&!(b.fn>=0&&b.fn<=28));}
       if(bad){err++;lines.push({id:b.id,message:t("ts_not_ready_a")+blockName(b)+t("ts_not_ready_b"),severity:"error"});}else ok++;
@@ -849,6 +1041,41 @@ function renderInspector(){
       h+='<label>'+esc(t(key))+'</label><div class="row"><input id="i_vol_'+k+'" type="range" min="0" max="100" value="'+(b[k]|0)+'"><span class="muted" id="i_vol_'+k+'_v">'+(b[k]|0)+'</span></div>';
     });
     h+='<div class="hint">'+esc(t("f_levels_hint"))+'</div>';
+  }else if(mode0==="start"){
+    h+='<label>'+esc(t("f_sound"))+'</label>'+fileField("sound",b);
+    h+='<label>'+esc(t("f_volume"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'">';
+    h+='<label>'+esc(t("f_trigger"))+'</label><select id="i_trig">'+Object.keys(TRIGGER_NAMES).map(k=>'<option value="'+k+'"'+(b.trigger===k?" selected":"")+">"+esc(tr(TRIGGER_NAMES[k]))+"</option>").join("")+"</select>";
+    const et=(b.trigger==="engine"||b.trigger==="speed"||b.trigger==="dir")?b.trigger:"fn";
+    if(et==="fn")h+='<label>'+esc(t("f_fn"))+'</label><select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>";
+    if(b.trigger==="speed")h+='<div class="row"><label>'+esc(t("f_from"))+'</label><label>'+esc(t("f_to"))+'</label><label>'+esc(t("f_prot"))+'</label></div><div class="row"><input type="number" id="i_smin" min="0" max="100" value="'+(b.speedMin==null?0:b.speedMin)+'"><input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'"><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'"></div>';
+    if(b.trigger==="dir")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>'+esc(t("dir_fwd"))+'</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>'+esc(t("dir_rev"))+'</option></select>';
+    h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
+    h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
+    h+='<p class="hint">'+esc(t("f_start_hint"))+'</p>';
+  }else if(mode0==="end"){
+    h+='<label>'+esc(t("f_end_sound"))+'</label>'+fileField("sound",b);
+    h+='<label>'+esc(t("f_volume"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'">';
+    h+='<p class="hint">'+esc(t("f_end_hint"))+'</p>';
+  }else if(mode0==="simple"){
+    h+='<label>'+esc(t("f_sound"))+'</label>'+fileField("sound",b);
+    h+='<label>'+esc(t("f_volume"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'">';
+    h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
+    h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
+    h+='<p class="hint">'+esc(t("f_simple_hint"))+'</p>';
+  }else if(mode0==="loop"){
+    h+='<label>'+esc(t("f_sound"))+'</label>'+fileField("sound",b);
+    h+='<label>'+esc(t("f_volume"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'">';
+    h+='<label>'+esc(t("f_loop_mode"))+'</label><select id="i_loopmode">'+[["hold",t("loop_hold")],["time",t("loop_time")],["count",t("loop_count")],["event",t("loop_event")]].map(o=>'<option value="'+o[0]+'"'+(((b.loopMode||"hold")===o[0])?" selected":"")+">"+esc(o[1])+"</option>").join("")+"</select>";
+    if((b.loopMode||"hold")==="time")h+='<label>'+esc(t("f_loop_ms"))+'</label><input type="number" id="i_loopms" min="50" max="12000" step="50" value="'+(b.loopMs||1000)+'">';
+    if((b.loopMode||"hold")==="count")h+='<label>'+esc(t("f_loop_count"))+'</label><input type="number" id="i_loopcount" min="1" max="255" step="1" value="'+(b.loopCount||2)+'">';
+    if((b.loopMode||"hold")==="event")h+='<label>'+esc(t("f_loop_event"))+'</label><select id="i_trig">'+["engine","dir","fn"].map(k=>'<option value="'+k+'"'+((b.trigger===k||((b.trigger==="auto"||b.trigger===undefined)&&k==="fn"))?" selected":"")+">"+esc(tr(TRIGGER_NAMES[k]))+"</option>").join("")+"</select>";
+    if((b.loopMode||"hold")==="event"&&b.trigger==="dir")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>'+esc(t("dir_fwd"))+'</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>'+esc(t("dir_rev"))+'</option></select>';
+    h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
+    h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
+    h+='<p class="hint">'+esc(t("f_loop_hint"))+'</p>';
+  }else if(mode0==="mute"){
+    h+='<label>'+esc(t("f_duration"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
+    h+='<p class="hint">'+esc(t("f_mute_hint"))+'</p>';
   }else{
     h+='<div class="row"><label>'+esc(t("f_fn"))+'</label><label>'+(kind==="output"?esc(t("f_brightness")):esc(t("f_volume")))+'</label></div><div class="row">'+
        '<select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
@@ -859,8 +1086,11 @@ function renderInspector(){
        '<input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'">'+
        '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'"></div>';
     if(kind==="sound"&&b.trigger==="dir")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>'+esc(t("dir_fwd"))+'</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>'+esc(t("dir_rev"))+'</option></select>';
-    if((kind==="sound"&&["oneshot","shortLong","decel","loopHeld"].indexOf(mode0)>=0)||b.type==="engine"){
+    if((kind==="sound"&&["oneshot","shortLong","decel","loopHeld","start","simple","loop"].indexOf(mode0)>=0)||b.type==="engine"){
       h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
+      h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
+    }
+    if(kind==="sound"&&mode0==="mute"){
       h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
     }
     if(b.type==="headlight")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+esc(tr(d.n))+"</option>").join("")+"</select>";
@@ -876,12 +1106,13 @@ function renderInspector(){
       h+='<label>'+esc(t("f_stop"))+'</label>'+fileField("stop",b);
       h+='<label>'+esc(t("f_hyst"))+'</label><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">';
     }else if(kind==="sound"){
+      if(mode0==="shortLong")h+='<label>'+esc(t("f_short_ms"))+'</label><input type="number" id="i_shortms" min="50" max="2000" step="50" value="'+(b.shortMs||400)+'">';
       (cat.roles||[]).forEach(r=>{h+='<label>'+esc(tr(ROLE_NAMES[r]))+'</label>'+fileField(r,b);});
     }
   }
   if(kind==="output"||kind==="logic")h+='<p class="hint">'+esc(t("f_input_hint"))+'</p>';
   if(mode0==="speed")h+='<p class="hint">'+esc(t("f_speed_hint"))+'</p>';
-  h+='<div class="row" style="margin-top:10px">'+(kind==="setting"?"":'<button class="primary" id="i_test">'+esc(t("f_test"))+'</button>')+'<button id="i_close">'+esc(t("done"))+'</button><button id="i_del">'+esc(t("f_delete"))+'</button></div>';
+  h+='<div class="row" style="margin-top:10px">'+(kind==="setting"?"":'<button class="primary" id="i_test">'+esc(t("f_test"))+'</button>')+(kind==="sound"?'<button id="i_chain">'+esc(t("f_chain"))+'</button>':'')+'<button id="i_close">'+esc(t("done"))+'</button><button id="i_del">'+esc(t("f_delete"))+'</button></div>';
   insp.innerHTML=h;
   const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
   if(mode0==="volume"){["master","engine","effects"].forEach(function(k){on("i_vol_"+k,"input",function(e){b[k]=Number(e.target.value)|0;var s=$("i_vol_"+k+"_v");if(s)s.textContent=String(b[k]);});on("i_vol_"+k,"change",function(){render();});});}
@@ -896,6 +1127,10 @@ function renderInspector(){
   on("i_dirtrig","change",e=>{b.dirTrigger=e.target.value;render();});
   on("i_outev","change",e=>{b.outEvent=e.target.value;render();});
   on("i_outdelay","change",e=>{b.outDelay=Math.max(0,Math.min(10000,Number(e.target.value)||0));render();});
+  on("i_loopmode","change",e=>{b.loopMode=e.target.value;render();});
+  on("i_loopms","change",e=>{b.loopMs=Math.max(50,Math.min(12000,Number(e.target.value)||1000));render();});
+  on("i_loopcount","change",e=>{b.loopCount=Math.max(1,Math.min(255,Number(e.target.value)||2));render();});
+  on("i_shortms","change",e=>{b.shortMs=Math.max(50,Math.min(2000,Number(e.target.value)||400));render();});
   on("i_ch","change",e=>{b.channel=Number(e.target.value);render();});
   on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
   on("i_logic","change",e=>{b.logic=Number(e.target.value);render();});
@@ -919,14 +1154,25 @@ function renderInspector(){
   insp.querySelectorAll("[data-rand]").forEach(el=>el.addEventListener("change",e=>{b.files.random[Number(el.getAttribute("data-rand"))]=e.target.value;render();}));
   insp.querySelectorAll("[data-randplay]").forEach(btn=>btn.onclick=()=>playFile((b.files.random||[])[Number(btn.getAttribute("data-randplay"))]));
   on("i_test","click",()=>testBlock(b));
-  on("i_close","click",()=>{selected="";render();});
-  on("i_del","click",()=>removeBlock(b.id));
+  on("i_chain","click",()=>playChain(b));
+  on("i_close","click",()=>{selected="";selectedIds=new Set();render();});
+  on("i_del","click",()=>{if(selectedIds.size>1)deleteSelected();else removeBlock(b.id);});
 }
 function removeBlock(id){
   if(project.blocks.find(b=>b.id===id&&(b.type==="engine"||b.type==="volume")))return;
   project.blocks=project.blocks.filter(b=>b.id!==id);
   project.links=project.links.filter(l=>l.from!==id&&l.to!==id);
-  if(selected===id)selected="";render();
+  selectedIds.delete(id);
+  if(selected===id)selected=[...selectedIds][0]||"";
+  render();
+}
+function deleteSelected(){
+  const ids=[...selectedIds].filter(id=>{const b=project.blocks.find(x=>x.id===id);return b&&b.type!=="engine"&&b.type!=="volume";});
+  if(!ids.length)return;
+  const drop=new Set(ids);
+  project.blocks=project.blocks.filter(b=>!drop.has(b.id));
+  project.links=project.links.filter(l=>!drop.has(l.from)&&!drop.has(l.to));
+  selectedIds=new Set();selected="";render();
 }
 let clip=null;
 function recalcBands(b){const n=(b.bands||[]).length;if(!n)return;b.bands.forEach((x,i)=>{x.from=Math.round(i*100/n);x.to=Math.round((i+1)*100/n);});}
@@ -938,9 +1184,19 @@ function cloneBlock(src,dx,dy){
   b.x=snapTo(project,b.x+(dx==null?GRID*2:dx));b.y=snapTo(project,b.y+(dy==null?GRID*2:dy));
   project.blocks.push(b);return b;
 }
-function duplicateSelected(){const b=project.blocks.find(x=>x.id===selected);if(!b)return;if(b.type==="engine"||b.type==="volume"){setStatus(t("st_cant_dup"));return;}const c=cloneBlock(b);selected=c.id;render();setStatus(t("st_duplicated"));}
-function copySelected(){const b=project.blocks.find(x=>x.id===selected);if(!b||b.type==="engine"||b.type==="volume"){setStatus(t("st_nothing_copy"));return;}clip=JSON.parse(JSON.stringify(b));setStatus(t("st_copied"));}
-function pasteClip(){if(!clip){setStatus(t("st_clip_empty"));return;}const c=cloneBlock(clip);selected=c.id;render();setStatus(t("st_pasted"));}
+function duplicateSelected(){const b=project.blocks.find(x=>x.id===selected);if(!b)return;if(b.type==="engine"||b.type==="volume"){setStatus(t("st_cant_dup"));return;}const c=cloneBlock(b);selected=c.id;selectedIds=new Set([c.id]);render();setStatus(t("st_duplicated"));}
+function copySelected(){
+  const ids=selectedIds.size?[...selectedIds]:(selected?[selected]:[]);
+  const blocks=project.blocks.filter(b=>ids.indexOf(b.id)>=0&&b.type!=="engine"&&b.type!=="volume");
+  if(!blocks.length){setStatus(t("st_nothing_copy"));return;}
+  clip=blocks.map(b=>JSON.parse(JSON.stringify(b)));setStatus(t("st_copied"));
+}
+function pasteClip(){
+  if(!clip){setStatus(t("st_clip_empty"));return;}
+  const list=Array.isArray(clip)?clip:[clip];const pasted=[];
+  list.forEach(src=>{const c=cloneBlock(src);pasted.push(c.id);});
+  selectedIds=new Set(pasted);selected=pasted[pasted.length-1]||"";render();setStatus(t("st_pasted"));
+}
 function renderSummary(){
   const p=compile().payload;const dyn=(p.effects.length||0);
   $("counts").textContent=t("sum_states")+p.states.length+"/"+LIMITS.states+t("sum_transitions")+p.transitions.length+"/"+LIMITS.transitions+t("sum_effects")+dyn+"/"+LIMITS.effects+t("sum_blocks")+project.blocks.length;
@@ -948,7 +1204,7 @@ function renderSummary(){
   $("summary").textContent=e+t("sum_errors_mid")+w+t("sum_warnings");
 }
 function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":d.severity==="ok"?"ok":"d")+'">'+esc(d.message)+"</div>").join("");}
-function render(){computeReady();renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();renderMini();renderLinkTable();saveDraft();}
+function render(){computeReady();renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();saveDraft();}
 function isReady(b){
   const cat=BY_TYPE[b.type];if(!cat)return false;
   if(cat.kind==="engine")return !!b.files.idle;
@@ -958,23 +1214,41 @@ function isReady(b){
   if(cat.mode==="speed")return (b.bands||[]).some(x=>x.file);
   if(cat.mode==="random")return (b.files.random||[]).some(Boolean);
   if(cat.mode==="decel")return !!b.files.sound;
+  if(cat.mode==="mute")return true;
+  if(cat.mode==="start"||cat.mode==="simple"||cat.mode==="loop"||cat.mode==="end")return !!b.files.sound;
   return !!(cat.roles||[]).some(r=>b.files[r]);
 }
 function computeReady(){let errIds=new Set();try{errIds=new Set(validate().diagnostics.filter(d=>d.severity!=="warning").map(d=>d.id));}catch(e){}
   readyIds=new Set(project.blocks.filter(b=>isReady(b)&&!errIds.has(b.id)).map(b=>b.id));}
 function setStatus(t){$("status_txt").textContent=t;}
-function refreshButtons(){$("b_save").disabled=!online||busy;$("b_outputs").disabled=!online||busy;$("b_impout").disabled=!online||busy;$("b_apply").disabled=!online||busy||!revision;$("b_validate").disabled=busy;}
+function refreshButtons(){$("b_save").disabled=!online||busy;$("b_validate").disabled=busy;}
 function renderSnapBtn(){$("b_snap").textContent=t("snap_a")+(project.editor.snap?t("snap_on"):t("snap_off"));$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
 function worldPoint(ev){const r=$("stage").getBoundingClientRect(),v=project.editor.viewport;return {x:(ev.clientX-r.left-v.x)/v.zoom,y:(ev.clientY-r.top-v.y)/v.zoom};}
+function selectNode(id,mod){
+  if(mod){if(selectedIds.has(id))selectedIds.delete(id);else selectedIds.add(id);}
+  else if(!selectedIds.has(id)){selectedIds=new Set([id]);}
+  selected=selectedIds.has(id)?id:([...selectedIds][0]||"");
+  selectedLink="";render();
+}
 function onNodeDown(ev){
   if(ev.target.closest&&ev.target.closest(".x"))return;
   const id=ev.currentTarget.getAttribute("data-drag"),b=project.blocks.find(x=>x.id===id);if(!b)return;
-  if(selected!==id){selected=id;selectedLink="";render();}
-  const p=worldPoint(ev);dragging={id,dx:p.x-b.x,dy:p.y-b.y};
+  if(ev.shiftKey||ev.ctrlKey||ev.metaKey){selectNode(id,true);return;}
+  if(!selectedIds.has(id))selectedIds=new Set([id]);
+  selected=id;selectedLink="";render();
+  const p=worldPoint(ev);
+  dragging={start:{x:p.x,y:p.y},items:[...selectedIds].map(sid=>{const sb=project.blocks.find(x=>x.id===sid);return sb?{id:sid,x0:sb.x,y0:sb.y}:null;}).filter(Boolean)};
   try{if(ev.currentTarget.setPointerCapture)ev.currentTarget.setPointerCapture(ev.pointerId);}catch(e){}
 }
+function marqueeWorldRect(m){const r=$("stage").getBoundingClientRect(),v=project.editor.viewport;
+  const x0=(Math.min(m.c0.x,m.c1.x)-r.left-v.x)/v.zoom,y0=(Math.min(m.c0.y,m.c1.y)-r.top-v.y)/v.zoom;
+  const x1=(Math.max(m.c0.x,m.c1.x)-r.left-v.x)/v.zoom,y1=(Math.max(m.c0.y,m.c1.y)-r.top-v.y)/v.zoom;return {x0,y0,x1,y1};}
+function marqueeHits(m){const w=marqueeWorldRect(m);return new Set(project.blocks.filter(b=>b.x<w.x1&&b.x+NODE_W>w.x0&&b.y<w.y1&&b.y+NODE_H>w.y0).map(b=>b.id));}
+function renderMarquee(){const el=$("marquee");if(!marquee){el.style.display="none";return;}const r=$("stage").getBoundingClientRect();
+  el.style.display="block";el.style.left=(Math.min(marquee.c0.x,marquee.c1.x)-r.left)+"px";el.style.top=(Math.min(marquee.c0.y,marquee.c1.y)-r.top)+"px";
+  el.style.width=Math.abs(marquee.c1.x-marquee.c0.x)+"px";el.style.height=Math.abs(marquee.c1.y-marquee.c0.y)+"px";}
 function onPortDown(ev){ev.stopPropagation();const id=ev.currentTarget.getAttribute("data-out");const p=worldPoint(ev);linking={from:id,x:p.x,y:p.y};renderTempLink();}
 function finishLink(ev){
   if(!linking)return;
@@ -990,13 +1264,32 @@ function finishLink(ev){
   }
   render();
 }
-$("stage").addEventListener("pointerdown",ev=>{if(ev.target===$("stage")||ev.target.id==="world"||ev.target.id==="links"||ev.target.id==="linkLayer"){if(selected||selectedLink){selected="";selectedLink="";render();}const v=project.editor.viewport;panning={px:ev.clientX,py:ev.clientY,x:v.x,y:v.y};}});
+$("stage").addEventListener("contextmenu",ev=>ev.preventDefault());
+$("stage").addEventListener("pointerdown",ev=>{const t=ev.target;
+  if(!(t===$("stage")||t.id==="world"||t.id==="links"||t.id==="linkLayer"))return;
+  if(ev.button===1||ev.button===2||ev.pointerType==="touch"){const v=project.editor.viewport;panning={px:ev.clientX,py:ev.clientY,x:v.x,y:v.y};return;}
+  if(ev.button!==0)return;
+  const mod=ev.shiftKey||ev.ctrlKey||ev.metaKey;
+  if(!mod&&(selectedIds.size||selectedLink)){selectedIds=new Set();selected="";selectedLink="";render();}
+  marquee={c0:{x:ev.clientX,y:ev.clientY},c1:{x:ev.clientX,y:ev.clientY},add:mod,base:mod?new Set(selectedIds):new Set()};
+  renderMarquee();});
 window.addEventListener("pointermove",ev=>{
   if(linking){const p=worldPoint(ev);linking.x=p.x;linking.y=p.y;renderTempLink();return;}
-  if(dragging){const b=project.blocks.find(x=>x.id===dragging.id);if(b){const p=worldPoint(ev);b.x=snap(p.x-dragging.dx);b.y=snap(p.y-dragging.dy);const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el){el.style.left=b.x+"px";el.style.top=b.y+"px";}renderLinks();}}
+  if(marquee){marquee.c1={x:ev.clientX,y:ev.clientY};renderMarquee();
+    const hits=marqueeHits(marquee),sel=marquee.add?new Set([...marquee.base,...hits]):hits;marquee._sel=sel;
+    project.blocks.forEach(b=>{const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el)el.classList.toggle("sel",sel.has(b.id));});return;}
+  if(dragging){const p=worldPoint(ev);const dx=p.x-dragging.start.x,dy=p.y-dragging.start.y;
+    dragging.items.forEach(it=>{const b=project.blocks.find(x=>x.id===it.id);if(!b)return;b.x=snap(it.x0+dx);b.y=snap(it.y0+dy);const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el){el.style.left=b.x+"px";el.style.top=b.y+"px";}});
+    renderLinks();}
   else if(panning){const v=project.editor.viewport;v.x=panning.x+(ev.clientX-panning.px);v.y=panning.y+(ev.clientY-panning.py);applyViewport();}
 });
-window.addEventListener("pointerup",ev=>{if(dragging){dragging=null;saveDraft();}if(panning)panning=null;finishLink(ev);});
+window.addEventListener("pointerup",ev=>{
+  if(dragging){dragging=null;saveDraft();}
+  if(panning)panning=null;
+  if(marquee){const m=marquee;marquee=null;renderMarquee();
+    if(Math.abs(m.c1.x-m.c0.x)>3||Math.abs(m.c1.y-m.c0.y)>3){selectedIds=m._sel||new Set();selected=[...selectedIds][0]||"";selectedLink="";render();}}
+  finishLink(ev);
+});
 $("stage").addEventListener("wheel",ev=>{ev.preventDefault();const v=project.editor.viewport,r=$("stage").getBoundingClientRect();const mx=ev.clientX-r.left,my=ev.clientY-r.top;const f=ev.deltaY<0?1.1:0.9;const nz=Math.max(.3,Math.min(2.5,v.zoom*f));v.x=mx-(mx-v.x)*(nz/v.zoom);v.y=my-(my-v.y)*(nz/v.zoom);v.zoom=nz;applyViewport();saveDraft();},{passive:false});
 function applyViewport(){const v=project.editor.viewport;$("world").style.transform="translate("+v.x+"px,"+v.y+"px) scale("+v.zoom+")";const st=$("stage");st.style.setProperty("--gstep",(GRID*v.zoom)+"px");st.style.setProperty("--gx",v.x+"px");st.style.setProperty("--gy",v.y+"px");}
 
@@ -1021,11 +1314,6 @@ function graphLayers(){
   }
   return {cols,layer};
 }
-function autoLayout(){
-  const {cols}=graphLayers();const COL_W=300,ROW_H=140;
-  Object.keys(cols).map(Number).sort((a,b)=>a-b).forEach(L=>{cols[L].forEach((n,i)=>{n.x=snapTo(project,40+L*COL_W);n.y=snapTo(project,40+i*ROW_H);});});
-  render();setStatus(t("st_aligned"));
-}
 function linkCondText(l){
   const a=project.blocks.find(x=>x.id===l.from);
   if(l.kind==="gate")return t("lc_gate");
@@ -1033,30 +1321,6 @@ function linkCondText(l){
   if(l.kind==="after"){const ev=(a&&a.outEvent==="start")?t("lc_direct"):t("lc_after_event");const d=(a&&a.outDelay)?(t("lc_delay_a")+a.outDelay+t("lc_delay_b")):"";return ev+d;}
   return t("lc_link");
 }
-function renderMini(){
-  const box=$("mini");const {cols}=graphLayers();
-  const layers=Object.keys(cols).map(Number).sort((a,b)=>a-b);
-  if(!layers.length||!project.blocks.length){box.innerHTML='<div class="hint">'+esc(t("mini_none"))+'</div>';return;}
-  const maxRows=Math.max.apply(null,layers.map(L=>cols[L].length));
-  const W=280,rowH=22,padX=6,padY=8,nodeW=46,nodeH=16;
-  const colX=L=>layers.length>1?padX+(W-2*padX-nodeW)*layers.indexOf(L)/(layers.length-1):padX;
-  const H=padY*2+(maxRows-1)*rowH+nodeH;
-  const pos={};layers.forEach(L=>cols[L].forEach((n,i)=>{pos[n.id]={x:colX(L),y:padY+i*rowH};}));
-  let svg='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg"><defs><marker id="marm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10" fill="none" stroke="#8aa2c0" stroke-width="1.6"/></marker></defs>';
-  project.links.forEach(l=>{const a=pos[l.from],b=pos[l.to];if(!a||!b)return;
-    svg+='<line x1="'+(a.x+nodeW)+'" y1="'+(a.y+nodeH/2)+'" x2="'+b.x+'" y2="'+(b.y+nodeH/2)+'" stroke="#8aa2c0" stroke-width="1" marker-end="url(#marm)"/>';});
-  layers.forEach(L=>cols[L].forEach(n=>{const p=pos[n.id];const c=GROUP_COLORS[(BY_TYPE[n.type]||{}).group]||"#888";
-    svg+='<rect x="'+p.x+'" y="'+p.y+'" width="'+nodeW+'" height="'+nodeH+'" rx="3" fill="'+hexA(c,0.35)+'" stroke="'+c+'"/>';}));
-  svg+='</svg>';box.innerHTML=svg;
-}
-function renderLinkTable(){
-  const box=$("linktable");
-  if(!project.links.length){box.innerHTML='<div class="hint">'+esc(t("lt_none"))+'</div>';return;}
-  const rows=project.links.map(l=>{const a=project.blocks.find(x=>x.id===l.from),c=project.blocks.find(x=>x.id===l.to);
-    return '<tr><td>'+esc(a?blockName(a):"?")+'</td><td>→</td><td>'+esc(c?blockName(c):"?")+'</td><td>'+esc(linkCondText(l))+'</td></tr>';}).join("");
-  box.innerHTML='<table><thead><tr><th>'+esc(t("lt_source"))+'</th><th></th><th>'+esc(t("lt_target"))+'</th><th>'+esc(t("lt_condition"))+'</th></tr></thead><tbody>'+rows+'</tbody></table>';
-}
-function exportMiniPng(){exportSchemePng();}
 function blockDetailLines(b){
   const cat=BY_TYPE[b.type],L=[];if(!cat)return L;
   if(cat.kind==="setting"){L.push(t("vol_master")+": "+(b.master|0)+", "+t("vol_engine")+": "+(b.engine|0)+", "+t("vol_effects")+": "+(b.effects|0));return L;}
@@ -1074,11 +1338,17 @@ function blockDetailLines(b){
   if(cat.kind==="logic"){L.push("F"+b.fn+" · "+tr((LOGIC_OPS.find(o=>o.v===(b.logic|0))||{}).n||""));return L;}
   if(cat.mode==="speed"){L.push(t("bd_prot_a")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");(b.bands||[]).forEach(x=>{if(x.file)L.push(Math.round(x.from)+"–"+Math.round(x.to)+"%: "+x.file);});return L;}
   if(cat.mode==="random"){L.push("F"+b.fn+t("bd_random"));(b.files.random||[]).forEach(f=>{if(f)L.push(f);});return L;}
+  if(cat.mode==="start"){L.push(b.files.sound||t("ns_file_none"));L.push("F"+b.fn+" · "+t("bd_trigger")+(tr(TRIGGER_NAMES[b.trigger])||t("tr_auto")));if(b.trigger==="speed")L.push(t("bd_speed_a")+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+t("bd_speed_b")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");if(b.trigger==="dir")L.push(t("bd_dir")+(b.dirTrigger==="rev"?t("bd_dir_rev"):t("bd_dir_fwd")));L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));return L;}
+  if(cat.mode==="end"){L.push(b.files.sound||t("ns_file_none"));return L;}
+  if(cat.mode==="simple"){L.push(b.files.sound||t("ns_file_none"));L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));return L;}
+  if(cat.mode==="loop"){const lm=b.loopMode||"hold";let ev;if(lm==="time")ev=t("loop_time")+", "+(b.loopMs||1000)+t("bd_delay_b");else if(lm==="count")ev=t("loop_count")+", "+(b.loopCount||2)+t("ns_times");else if(lm==="event"){const et=(b.trigger==="engine"||b.trigger==="dir")?b.trigger:"fn";ev=t("loop_event")+" ("+(et==="fn"?("F"+(upstreamStartFn(b.id)==null?b.fn:upstreamStartFn(b.id))):(tr(TRIGGER_NAMES[et])||"")+(et==="dir"?" "+(b.dirTrigger==="rev"?t("dir_rev"):t("dir_fwd")):""))+")";}else ev=t("loop_hold");L.push(b.files.sound||t("ns_file_none"));L.push(t("f_loop_mode")+": "+ev);L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));return L;}
+  if(cat.mode==="mute"){L.push(t("f_duration")+": "+(b.outDelay|0)+" "+t("bd_delay_b"));return L;}
   (cat.roles||[]).forEach(r=>{if(b.files[r])L.push(tr(ROLE_NAMES[r])+": "+b.files[r]);});
+  if(cat.mode==="shortLong"&&b.files.short)L.push(t("f_short_ms")+": "+(b.shortMs||400));
   L.push(t("bd_trigger")+(tr(TRIGGER_NAMES[b.trigger])||t("tr_auto")));
   if(b.trigger==="speed")L.push(t("bd_speed_a")+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+t("bd_speed_b")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");
   if(b.trigger==="dir")L.push(t("bd_dir")+(b.dirTrigger==="rev"?t("bd_dir_rev"):t("bd_dir_fwd")));
-  if(["oneshot","shortLong","decel","loopHeld"].indexOf(cat.mode)>=0)L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));
+  if(["oneshot","shortLong","decel","loopHeld","start","simple","loop"].indexOf(cat.mode)>=0)L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));
   return L;
 }
 function buildSchemeSvg(){
@@ -1109,7 +1379,7 @@ function exportSchemePng(){
   const img=new Image();
   img.onload=()=>{const sc=2;const cv=document.createElement("canvas");cv.width=W*sc;cv.height=H*sc;const ctx=cv.getContext("2d");
     ctx.fillStyle="#0f1420";ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(img,0,0,cv.width,cv.height);
-    const a=document.createElement("a");a.href=cv.toDataURL("image/png");a.download=project.id+"-scheme.png";a.click();setStatus(t("st_png_saved"));};
+    const a=document.createElement("a");a.href=cv.toDataURL("image/jpeg",0.92);a.download=project.id+"-scheme.jpg";a.click();setStatus(t("st_png_saved"));};
   img.onerror=()=>setStatus(t("st_png_fail"));
   img.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svgStr);
 }
@@ -1124,23 +1394,20 @@ function buildText(){
 function exportText(){const blob=new Blob([buildText()],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+"-logic.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setStatus(t("st_txt_saved"));}
 
 /* ---- toolbar --------------------------------------------------------- */
-$("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();selected="";revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
+$("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();selected="";selectedIds=new Set();revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
 $("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+".blocks.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $("b_import").onclick=()=>$("f_import").click();
-$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error(t("err_not_blocks_file"));project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_imported"));}catch(err){alert(t("err_import")+err.message);}};
+$("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error(t("err_not_blocks_file"));project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";selectedIds=new Set();assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_imported"));}catch(err){alert(t("err_import")+err.message);}};
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
 $("b_theme").onclick=toggleTheme;
 $("b_pal").onclick=()=>document.body.classList.toggle("show-pal");
 $("b_insp").onclick=()=>document.body.classList.toggle("show-insp");
-$("b_align").onclick=autoLayout;
-$("b_minipng").onclick=exportMiniPng;
-$("b_minitxt").onclick=exportText;
-$("b_scheme").onclick=()=>{renderMini();renderLinkTable();$("schemeModal").classList.remove("hidden");};
-$("m_close").onclick=()=>$("schemeModal").classList.add("hidden");
-$("schemeModal").onclick=ev=>{if(ev.target===$("schemeModal"))$("schemeModal").classList.add("hidden");};
-$("b_undo").onclick=undo;$("b_redo").onclick=redo;$("b_dup").onclick=duplicateSelected;
+$("b_file_png").onclick=exportSchemePng;
+$("b_file_txt").onclick=exportText;
+$("b_undo").onclick=undo;$("b_redo").onclick=redo;$("b_copy").onclick=copySelected;$("b_paste").onclick=pasteClip;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))return;
+  if((ev.key==="Delete"||ev.key==="Backspace")&&!ev.ctrlKey&&!ev.metaKey){if(selectedIds.size){ev.preventDefault();deleteSelected();}return;}
   if(!(ev.ctrlKey||ev.metaKey))return;const k=(ev.key||"").toLowerCase();
   if(k==="z"&&!ev.shiftKey){ev.preventDefault();undo();}
   else if(k==="y"||(k==="z"&&ev.shiftKey)){ev.preventDefault();redo();}
@@ -1151,19 +1418,6 @@ window.addEventListener("keydown",ev=>{
 $("b_test").onclick=testScheme;
 $("b_validate").onclick=doValidate;
 $("b_save").onclick=doSave;
-$("b_outputs").onclick=async()=>{if(busy)return;busy=true;refreshButtons();setStatus(t("st_writing_outputs"));try{await applyOutputs();setStatus(t("st_outputs_written"));}catch(e){setStatus(t("st_outputs_not_written")+e.message);}finally{busy=false;refreshButtons();}};
-$("b_impout").onclick=()=>{
-  let added=0;
-  for(const bd of deviceBinds){
-    const fn=bd.fn|0,type=bd.type|0,id=bd.id|0;
-    if(type===1){
-      if(id<2){const dir=id===0?"fwd":"rev";if(project.blocks.some(x=>x.type==="headlight"&&x.fn===fn&&x.dir===dir))continue;const nb=addBlockTo(project,"headlight");if(nb){nb.fn=fn;nb.dir=dir;added++;}}
-      else{const ch=id-2;if(project.blocks.some(x=>x.type==="aux"&&x.fn===fn&&(x.channel|0)===ch))continue;const nb=addBlockTo(project,"aux");if(nb){nb.fn=fn;nb.channel=ch;nb.level=(deviceAux[ch]&&deviceAux[ch].level!=null)?deviceAux[ch].level:100;nb.effect=(deviceAux[ch]&&deviceAux[ch].effect!=null)?deviceAux[ch].effect:0;added++;}}
-    }else if(type===4){if(project.blocks.some(x=>x.type==="logic"&&x.fn===fn&&(x.logic|0)===id))continue;const nb=addBlockTo(project,"logic");if(nb){nb.fn=fn;nb.logic=id;added++;}}
-  }
-  render();setStatus(added?(t("st_impout_a")+added):t("st_impout_none"));
-};
-$("b_apply").onclick=doApply;
 
 /* ---- boot ------------------------------------------------------------ */
 lang=detectLang();
@@ -1173,13 +1427,25 @@ function applyStatic(){
   document.querySelectorAll("[data-i18n-aria]").forEach(el=>{el.setAttribute("aria-label",t(el.getAttribute("data-i18n-aria")));});
   document.documentElement.setAttribute("lang",lang);
   document.title=t("doc_title");
-  const b=$("b_lang");if(b){b.textContent=lang.toUpperCase();b.setAttribute("title",t("lang_tip"));}
+  const b=$("b_lang");if(b){b.textContent=t("m_lang")+": "+lang.toUpperCase();b.setAttribute("title",t("lang_tip"));}
+  applyTheme(document.documentElement.getAttribute("data-theme")||"dark");
 }
 function toggleLang(){lang=(lang==="en")?"ru":"en";try{localStorage.setItem("aura_lang",lang);}catch(e){}applyStatic();renderSnapBtn();render();}
 $("b_lang").onclick=toggleLang;
+/* toolbar dropdown menus */
+document.querySelectorAll("header.top .tm").forEach(tm=>{
+  const btn=tm.querySelector(".tm-btn"),panel=tm.querySelector(".tm-panel");
+  btn.addEventListener("click",ev=>{ev.stopPropagation();
+    const open=tm.classList.contains("open");
+    document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));
+    if(!open){tm.classList.add("open");panel.style.left="0";panel.style.right="auto";const r=panel.getBoundingClientRect();if(r.right>window.innerWidth-8){panel.style.left="auto";panel.style.right="0";}}
+  });
+});
+document.addEventListener("click",()=>document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open")));
+window.addEventListener("keydown",ev=>{if(ev.key==="Escape")document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));});
 applyStatic();
 loadDraft();if(!project)project=newProject();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();historyReset();render();refreshStatus();setInterval(refreshStatus,3000);
-window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,blockDetailLines:blockDetailLines,project:()=>project};
+window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,blockDetailLines:blockDetailLines,project:()=>project,compile:compile,validate:validate};
 })();
 </script>
 </body>

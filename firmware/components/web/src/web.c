@@ -1,10 +1,13 @@
 #include "web.h"
 #include "web_html.h"
 #include "web_util.h"
+#include "audio_pack.h"
+#include "ima_adpcm.h"
 #include "sound_editor_assets.h"
 #include "sound_graph_store.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -1256,7 +1259,7 @@ static esp_err_t sound_editor_get(httpd_req_t *req)
     const char *path = req->uri;
     if ((len == 13U && strncmp(path, "/sound-editor", len) == 0) ||
         (len == 14U && strncmp(path, "/sound-editor/", len) == 0)) {
-        path = "/sound-editor/index.html";
+        path = "/sound-editor/blocks.html";
         len = strlen(path);
     }
     for (size_t i = 0; i < sound_editor_asset_count; ++i) {
@@ -1940,6 +1943,373 @@ static esp_err_t aux_effect_post(httpd_req_t *req)
     return send_json(req, json);
 }
 
+/* ---------- sound library (unpacked WAV files under the audio dir) ---------
+ * The "Sound upload" page lists every WAV on the storage with a play button and
+ * a per-file volume. A pack upload replaces the whole library. Volumes persist
+ * in a small sidecar text file so they survive a reboot and match by file name
+ * (the pack index seeds them on unpack). */
+
+#define WEB_LIB_NAME_MAX  (AUDIO_PACK_NAME_MAX + 1)
+#define WEB_LIB_JSON_MAX  (96U * 1024U)
+#define AUDIO_VOL_FILE    WEB_AUDIO_DIR "/volumes.txt"
+/* Upper bound for one upload: the external NOR partition is 16 MB. */
+#define AUDIO_PACK_MAX_BYTES (15U * 1024U * 1024U)
+
+typedef struct {
+    char name[WEB_LIB_NAME_MAX];
+    uint8_t vol;
+} web_vol_t;
+
+/* One installed sound for the list endpoint. `name` is first so the existing
+ * name comparator (which strcmp's the element pointer) keeps working. */
+typedef struct {
+    char name[WEB_LIB_NAME_MAX];
+    uint32_t size;
+} web_lib_item_t;
+
+static char s_preview_name[WEB_LIB_NAME_MAX];
+
+static bool web_name_is_wav(const char *n)
+{
+    size_t l = strlen(n);
+    if (l <= 4U) return false;
+    const char *e = n + l - 4U;
+    return e[0] == '.' && (e[1] == 'w' || e[1] == 'W') &&
+           (e[2] == 'a' || e[2] == 'A') && (e[3] == 'v' || e[3] == 'V');
+}
+
+static int web_name_cmp(const void *a, const void *b)
+{
+    return strcmp((const char *)a, (const char *)b);
+}
+
+/* File size via stdio. Some littlefs VFS ports do not fill st_size/st_mode, so
+ * stat() is unreliable here; fopen+fseek/ftell works on every mount. */
+static uint32_t web_file_size(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) return 0;
+    uint32_t size = 0;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        long end = ftell(f);
+        if (end > 0) size = (uint32_t)end;
+    }
+    fclose(f);
+    return size;
+}
+
+/* Strip directory and a trailing .wav, then sanitize exactly like the packer
+ * and the previous upload path. Empty on failure. */
+static bool web_lib_base_name(const char *in, char *out, size_t out_len)
+{
+    char safe[WEB_LIB_NAME_MAX];
+    sanitize_name(in, safe, sizeof(safe));
+    size_t sl = strlen(safe);
+    if (sl > 4U && strcasecmp(safe + sl - 4U, ".wav") == 0) {
+        safe[sl - 4U] = '\0';
+        sl -= 4U;
+    }
+    if (sl == 0U || strcmp(safe, ".") == 0 || strcmp(safe, "..") == 0) {
+        return false;
+    }
+    snprintf(out, out_len, "%s", safe);
+    return true;
+}
+
+/* Read volumes.txt into `out` (cap entries). Returns the entry count (0 if the
+ * file is missing or malformed). Caller must hold a storage lease. */
+static size_t web_vol_load(web_vol_t *out, size_t cap)
+{
+    FILE *f = fopen(AUDIO_VOL_FILE, "r");
+    if (f == NULL) return 0;
+    char line[160];
+    size_t n = 0;
+    if (fgets(line, sizeof(line), f) == NULL || strncmp(line, "AURAVOL1", 8) != 0) {
+        fclose(f);
+        return 0;
+    }
+    while (n < cap && fgets(line, sizeof(line), f) != NULL) {
+        char *tab = strchr(line, '\t');
+        if (tab == NULL) continue;
+        *tab = '\0';
+        long vol = strtol(line, NULL, 10);
+        char *name = tab + 1;
+        char *nl = strchr(name, '\n');
+        if (nl != NULL) *nl = '\0';
+        if (name[0] == '\0') continue;
+        snprintf(out[n].name, sizeof(out[n].name), "%s", name);
+        out[n].vol = (uint8_t)(vol < 0 ? 0 : (vol > 100 ? 100 : vol));
+        n++;
+    }
+    fclose(f);
+    return n;
+}
+
+static bool web_vol_get(const web_vol_t *v, size_t n, const char *name, uint8_t *out)
+{
+    for (size_t i = 0; i < n; ++i) {
+        if (strcmp(v[i].name, name) == 0) {
+            *out = v[i].vol;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Atomic write of the whole sidecar. Caller must hold a storage lease. */
+static esp_err_t web_vol_save(const web_vol_t *v, size_t n)
+{
+    char tmp[192];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", AUDIO_VOL_FILE);
+    FILE *f = fopen(tmp, "w");
+    if (f == NULL) return ESP_FAIL;
+    bool ok = fputs("AURAVOL1\n", f) >= 0;
+    for (size_t i = 0; i < n && ok; ++i) {
+        ok = fprintf(f, "%u\t%s\n", (unsigned)v[i].vol, v[i].name) > 0;
+    }
+    if (fflush(f) != 0) ok = false;
+    if (fsync(fileno(f)) != 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) { (void)remove(tmp); return ESP_FAIL; }
+    if (rename(tmp, AUDIO_VOL_FILE) != 0) { (void)remove(tmp); return ESP_FAIL; }
+    return ESP_OK;
+}
+
+/* Per-file volume (default 100), safe to call from any task. */
+static uint8_t audio_library_volume_lookup(const char *name)
+{
+    uint8_t vol = 100;
+    web_vol_t *v = malloc(sizeof(*v) * AUDIO_PACK_MAX_FILES);
+    if (v == NULL) return vol;
+    if (storage_access_begin() != ESP_OK) { free(v); return vol; }
+    size_t n = web_vol_load(v, AUDIO_PACK_MAX_FILES);
+    (void)web_vol_get(v, n, name, &vol);
+    storage_access_end();
+    free(v);
+    return vol;
+}
+
+static esp_err_t audio_library_volume_set(const char *name, uint8_t vol)
+{
+    esp_err_t err = storage_access_begin();
+    if (err != ESP_OK) return err;
+    web_vol_t *v = malloc(sizeof(*v) * AUDIO_PACK_MAX_FILES);
+    if (v == NULL) { storage_access_end(); return ESP_ERR_NO_MEM; }
+    size_t n = web_vol_load(v, AUDIO_PACK_MAX_FILES);
+    size_t i = 0;
+    while (i < n && strcmp(v[i].name, name) != 0) ++i;
+    if (i < n) {
+        v[i].vol = vol;
+    } else if (n < AUDIO_PACK_MAX_FILES) {
+        snprintf(v[n].name, sizeof(v[n].name), "%s", name);
+        v[n].vol = vol;
+        n++;
+    } else {
+        err = ESP_ERR_NO_MEM;
+    }
+    if (err == ESP_OK) err = web_vol_save(v, n);
+    storage_access_end();
+    free(v);
+    return err;
+}
+
+/* Sum of the installed WAV sizes (used to size a replacing pack upload). */
+static uint64_t audio_library_bytes(void)
+{
+    uint64_t total = 0;
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d == NULL) return 0;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (!web_name_is_wav(ent->d_name)) continue;
+        char path[320];
+        snprintf(path, sizeof(path), "%s/%s", WEB_AUDIO_DIR, ent->d_name);
+        uint32_t sz = web_file_size(path);
+        if (sz > 0) total += (uint64_t)sz;
+    }
+    closedir(d);
+    return total;
+}
+
+/* Delete the whole installed library (files + volume sidecar). Caller must
+ * hold a storage lease and have stopped playback. */
+static void audio_library_clear(void)
+{
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d != NULL) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            if (!web_name_is_wav(ent->d_name)) continue;
+            char path[320];
+            snprintf(path, sizeof(path), "%s/%s", WEB_AUDIO_DIR, ent->d_name);
+            (void)remove(path);
+        }
+        closedir(d);
+    }
+    (void)remove(AUDIO_VOL_FILE);
+    s_preview_name[0] = '\0';
+}
+
+/* ---------- browser playback over HTTP (play a sound on the PC) -----------
+ * The block editor and the sound page can play a file in the browser of the PC
+ * that has the UI open. PCM16 files are served as-is; IMA ADPCM files are
+ * decoded on the fly into a PCM16 WAV, since browsers cannot play ADPCM. */
+
+/* Minimal RIFF probe for the two encodings we store. */
+static bool web_wav_probe(FILE *f, uint16_t *format, uint16_t *channels,
+                          uint32_t *sample_rate, uint16_t *block_align,
+                          uint16_t *bits, uint16_t *spb,
+                          uint32_t *data_off, uint32_t *data_len)
+{
+    if (fseek(f, 0, SEEK_END) != 0) return false;
+    long flen = ftell(f);
+    if (flen < 12 || fseek(f, 0, SEEK_SET) != 0) return false;
+    char hdr[12];
+    if (fread(hdr, 1, 12, f) != 12 || memcmp(hdr, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4)) {
+        return false;
+    }
+    *format = 0; *channels = 0; *sample_rate = 0; *block_align = 0; *bits = 0; *spb = 0;
+    long pos = 12;
+    bool has_fmt = false, has_data = false;
+    while (pos + 8 <= flen) {
+        char cid[4];
+        uint32_t csize;
+        if (fseek(f, pos, SEEK_SET) != 0) return false;
+        if (fread(cid, 1, 4, f) != 4 || fread(&csize, 1, 4, f) != 4) return false;
+        long body = pos + 8;
+        if ((long)((uint32_t)body + csize) > flen) return false;
+        if (!memcmp(cid, "fmt ", 4) && csize >= 16U) {
+            uint8_t fm[20];
+            size_t want = csize < sizeof(fm) ? csize : sizeof(fm);
+            if (fseek(f, body, SEEK_SET) != 0 || fread(fm, 1, want, f) != want) return false;
+            *format = (uint16_t)(fm[0] | (fm[1] << 8));
+            *channels = (uint16_t)(fm[2] | (fm[3] << 8));
+            *sample_rate = (uint32_t)fm[4] | ((uint32_t)fm[5] << 8) |
+                           ((uint32_t)fm[6] << 16) | ((uint32_t)fm[7] << 24);
+            *block_align = (uint16_t)(fm[12] | (fm[13] << 8));
+            *bits = (uint16_t)(fm[14] | (fm[15] << 8));
+            if (*format == 0x0011U && want >= 20U) {
+                *spb = (uint16_t)(fm[18] | (fm[19] << 8));
+            }
+            has_fmt = true;
+        } else if (!memcmp(cid, "data", 4)) {
+            *data_off = (uint32_t)body;
+            *data_len = csize;
+            has_data = true;
+        }
+        pos = body + (long)csize + (long)(csize & 1U);
+    }
+    return has_fmt && has_data;
+}
+
+/* GET /api/sound-files — list of installed *.wav names for the block editor. */
+static esp_err_t sound_files_list_get(httpd_req_t *req)
+{
+    char *json = malloc(WEB_LIB_JSON_MAX);
+    if (json == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
+    }
+    if (storage_access_begin() != ESP_OK) {
+        free(json);
+        return send_json(req, "{\"ok\":false,\"error\":\"storage busy\"}");
+    }
+    size_t used = 0;
+    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "{\"files\":[");
+    bool first = true;
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d != NULL) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            if (!web_name_is_wav(ent->d_name)) continue;
+            char en[WEB_LIB_NAME_MAX * 2];
+            json_escape(ent->d_name, en, sizeof(en));
+            buf_appendf(json, WEB_LIB_JSON_MAX, &used, "%s\"%s\"", first ? "" : ",", en);
+            first = false;
+        }
+        closedir(d);
+    }
+    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "]}");
+    storage_access_end();
+    esp_err_t err = send_json(req, json);
+    free(json);
+    return err;
+}
+
+/* GET /sound-files/<name> — browser-playable PCM16 WAV. */
+static esp_err_t sound_file_get(httpd_req_t *req)
+{
+    const char *prefix = "/sound-files/";
+    char dec[WEB_LIB_NAME_MAX * 2];
+    url_decode(req->uri + strlen(prefix), dec, sizeof(dec));
+    char base[WEB_LIB_NAME_MAX];
+    if (!web_lib_base_name(dec, base, sizeof(base))) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    char path[192];
+    snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
+    if (storage_access_begin() != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage busy");
+    }
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    (void)setvbuf(f, NULL, _IOFBF, 8192);
+
+    uint16_t format, channels, block_align, bits, spb;
+    uint32_t rate, data_off, data_len;
+    if (!web_wav_probe(f, &format, &channels, &rate, &block_align, &bits, &spb,
+                       &data_off, &data_len) ||
+        !((format == 1U && bits == 16U) || format == 0x0011U)) {
+        fclose(f);
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported audio");
+    }
+    (void)channels; (void)block_align; (void)bits; (void)spb;
+
+    httpd_resp_set_type(req, "audio/wav");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = ESP_OK;
+    if (format == 0x0011U) {
+        uint32_t blocks = data_len / IMA_ADPCM_BLOCK_ALIGN;
+        uint32_t total = blocks * IMA_ADPCM_SAMPLES_PER_BLOCK;
+        uint8_t hdr[AUDIO_PACK_WAV_HDR_MAX];
+        size_t hlen = audio_pack_wav_header(hdr, sizeof(hdr), total * 2U, rate, 1, 16);
+        if (hlen == 0U || fseek(f, (long)data_off, SEEK_SET) != 0 ||
+            httpd_resp_send_chunk(req, (const char *)hdr, (ssize_t)hlen) != ESP_OK) {
+            err = ESP_FAIL;
+        }
+        uint8_t raw[IMA_ADPCM_BLOCK_ALIGN];
+        int16_t pcm[IMA_ADPCM_SAMPLES_PER_BLOCK];
+        for (uint32_t b = 0; err == ESP_OK && b < blocks; ++b) {
+            if (fread(raw, 1, sizeof(raw), f) != sizeof(raw)) { err = ESP_FAIL; break; }
+            int cnt = ima_adpcm_decode_block(raw, sizeof(raw), pcm, IMA_ADPCM_SAMPLES_PER_BLOCK);
+            if (cnt <= 0) { err = ESP_FAIL; break; }
+            if (httpd_resp_send_chunk(req, (const char *)pcm, (ssize_t)cnt * 2) != ESP_OK) {
+                err = ESP_FAIL;
+            }
+        }
+    } else {
+        if (fseek(f, 0, SEEK_SET) != 0) {
+            err = ESP_FAIL;
+        }
+        uint8_t buf[2048];
+        size_t got;
+        while (err == ESP_OK && (got = fread(buf, 1, sizeof(buf), f)) > 0U) {
+            if (httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)got) != ESP_OK) {
+                err = ESP_FAIL;
+            }
+        }
+    }
+    if (fclose(f) != 0 && err == ESP_OK) { err = ESP_FAIL; }
+    storage_access_end();
+    if (err != ESP_OK) {
+        return ESP_FAIL;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t audio_status_get(httpd_req_t *req)
 {
     char json[160];
@@ -1998,6 +2368,34 @@ static esp_err_t audio_play_post(httpd_req_t *req)
         return send_json(req, "{\"ok\":false,\"error\":\"actuation unavailable\"}");
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
+
+    /* Library preview: play one file by base name with its per-file volume. */
+    char qname[WEB_LIB_NAME_MAX * 2];
+    if (parse_query(query, "name", qname, sizeof(qname)) && qname[0] != '\0') {
+        char base[WEB_LIB_NAME_MAX];
+        if (!web_lib_base_name(qname, base, sizeof(base)))
+            return send_json(req, "{\"ok\":false,\"error\":\"bad name\"}");
+        char abs_path[192];
+        snprintf(abs_path, sizeof(abs_path), WEB_AUDIO_DIR "/%s.wav", base);
+        uint8_t vol = audio_library_volume_lookup(base);
+        esp_err_t err = ESP_OK;
+        if (audio_voice_get_state(s_preview_voice) == AUDIO_VOICE_FINISHED)
+            err = audio_voice_alloc_owned(&s_preview_voice);
+        if (err == ESP_OK)
+            err = audio_voice_play_owned(&s_preview_voice, abs_path, false, vol);
+        if (err != ESP_OK) {
+            audio_voice_release_owned(s_preview_voice);
+            memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+            s_preview_name[0] = '\0';
+        } else {
+            snprintf(s_preview_name, sizeof(s_preview_name), "%s", base);
+            web_log_event("Звук", "плей: %s", base);
+        }
+        char json[64];
+        snprintf(json, sizeof(json), "{\"ok\":%s}", err == ESP_OK ? "true" : "false");
+        return send_json(req, json);
+    }
+
     uint8_t slot = 0;
     parse_u8(query, "slot", &slot);
 
@@ -2018,6 +2416,8 @@ static esp_err_t audio_play_post(httpd_req_t *req)
             if (err != ESP_OK) {
                 audio_voice_release_owned(s_preview_voice);
                 memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+            } else {
+                s_preview_name[0] = '\0';
             }
             if (err == ESP_OK) {
                 web_log_event("Звук", "слот %u", (unsigned)slot);
@@ -2034,6 +2434,7 @@ static esp_err_t audio_stop_post(httpd_req_t *req)
 {
     audio_voice_release_owned(s_preview_voice);
     memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+    s_preview_name[0] = '\0';
     web_log_event("Звук", "стоп (все)");
     return send_json(req, "{\"ok\":true}");
 }
@@ -2060,6 +2461,94 @@ static esp_err_t audio_volume_post(httpd_req_t *req)
     if (vol_changed) {
         web_log_event("Звук", "громкость: общ %u, двиг %u, эфф %u",
                       (unsigned)m, (unsigned)e, (unsigned)f);
+    }
+    return send_json(req, "{\"ok\":true}");
+}
+
+/* GET /api/audio/library — every installed WAV with its per-file volume. */
+static esp_err_t audio_library_get(httpd_req_t *req)
+{
+    esp_err_t err = storage_access_begin();
+    if (err != ESP_OK) {
+        return send_json(req, "{\"ok\":false,\"error\":\"storage busy\"}");
+    }
+    web_lib_item_t *items = malloc(sizeof(*items) * AUDIO_PACK_MAX_FILES);
+    web_vol_t *vols = malloc(sizeof(*vols) * AUDIO_PACK_MAX_FILES);
+    char *json = malloc(WEB_LIB_JSON_MAX);
+    if (items == NULL || vols == NULL || json == NULL) {
+        free(items); free(vols); free(json);
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
+    }
+    size_t vn = web_vol_load(vols, AUDIO_PACK_MAX_FILES);
+    size_t n = 0;
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d != NULL) {
+        struct dirent *ent;
+        while (n < AUDIO_PACK_MAX_FILES && (ent = readdir(d)) != NULL) {
+            if (!web_name_is_wav(ent->d_name)) continue;
+            size_t l = strlen(ent->d_name);
+            if (l - 4U >= WEB_LIB_NAME_MAX) continue;
+            memcpy(items[n].name, ent->d_name, l - 4U);
+            items[n].name[l - 4U] = '\0';
+            items[n].size = 0;
+            n++;
+        }
+        closedir(d);
+    }
+    /* Read sizes with the directory stream closed (a plain fopen/ftell per
+     * file, then sort). */
+    for (size_t i = 0; i < n; ++i) {
+        char path[320];
+        snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", items[i].name);
+        items[i].size = web_file_size(path);
+    }
+    storage_access_end();
+    qsort(items, n, sizeof(*items), web_name_cmp);
+
+    size_t used = 0;
+    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "{\"ok\":true,\"count\":%u,\"preview\":\"",
+                (unsigned)n);
+    char pe[WEB_LIB_NAME_MAX * 2];
+    json_escape(s_preview_name, pe, sizeof(pe));
+    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "%s\",\"files\":[", pe);
+    for (size_t i = 0; i < n; ++i) {
+        uint8_t vol = 100;
+        (void)web_vol_get(vols, vn, items[i].name, &vol);
+        char en[WEB_LIB_NAME_MAX * 2];
+        json_escape(items[i].name, en, sizeof(en));
+        buf_appendf(json, WEB_LIB_JSON_MAX, &used,
+                    "%s{\"name\":\"%s\",\"size\":%u,\"vol\":%u}",
+                    i == 0U ? "" : ",", en, (unsigned)items[i].size, (unsigned)vol);
+    }
+    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "]}");
+    err = send_json(req, json);
+    free(items);
+    free(vols);
+    free(json);
+    return err;
+}
+
+/* POST /api/audio/library/volume?name=NAME&vol=0..100 */
+static esp_err_t audio_library_volume_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = { 0 };
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    char raw[WEB_LIB_NAME_MAX * 2];
+    uint8_t vol = 100;
+    if (!parse_query(query, "name", raw, sizeof(raw)) || raw[0] == '\0' ||
+        !parse_u8(query, "vol", &vol) || vol > 100U) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid volume");
+    }
+    char base[WEB_LIB_NAME_MAX];
+    if (!web_lib_base_name(raw, base, sizeof(base)))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad name");
+    esp_err_t err = audio_library_volume_set(base, vol);
+    if (err != ESP_OK)
+        return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+    if (s_preview_name[0] != '\0' && strcmp(s_preview_name, base) == 0 &&
+        audio_voice_get_state(s_preview_voice) != AUDIO_VOICE_FINISHED) {
+        (void)audio_voice_set_volume_live(s_preview_voice.voice, vol);
     }
     return send_json(req, "{\"ok\":true}");
 }
@@ -2712,7 +3201,7 @@ static esp_err_t func_map_post_binding(httpd_req_t *req, const char *query)
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad idx");
         }
         if (sound_graph_active() && (s_func_bind[idx].target_type == FUNC_TARGET_SOUND || s_func_bind[idx].target_type == FUNC_TARGET_SLOT))
-            return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
+            return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/blocks.html");
         if (!web_func_bind_remove(idx)) {
             return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
         }
@@ -2728,8 +3217,17 @@ static esp_err_t func_map_post_binding(httpd_req_t *req, const char *query)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad type");
     }
     if (sound_graph_active() && (type == FUNC_TARGET_SOUND || type == FUNC_TARGET_SLOT))
-        return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
+        return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/blocks.html");
     if (!parse_u8(query, "id", &id)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad id");
+    }
+    /* Reject a target id outside its type's domain up front (defence in depth:
+     * func_eval already bounds OUTPUT, but a bad persisted record should never
+     * be created in the first place). */
+    if ((type == FUNC_TARGET_OUTPUT && id > 8U) ||
+        (type == FUNC_TARGET_LOGIC && (id < 1U || id > 8U)) ||
+        (type == FUNC_TARGET_SLOT && (id < 1U || id > SETTINGS_MAX_TRACKS)) ||
+        (type == FUNC_TARGET_SOUND && id >= SG_MAX_EFFECTS)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad id");
     }
     (void)parse_u8(query, "dir", &dir);
@@ -2796,7 +3294,7 @@ static esp_err_t func_map_post(httpd_req_t *req)
     if (parse_bool(query, "bind", false)) {
         return func_map_post_binding(req, query);
     }
-    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/");
+    if (sound_graph_active()) return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/blocks.html");
     uint8_t fn = 0, sa = 0, sb = 0, dir = 0, spd = 0;
     uint16_t aux = 0;
     if (!parse_u8(query, "fn", &fn) || fn >= WEB_FN_COUNT) {
@@ -3185,6 +3683,153 @@ static int ota_slot_from_name(const char *name)
         return 0;
     }
     return (int)s;
+}
+
+/* POST /api/audio/pack — unpack an AURA Sound Pack straight from the request
+ * body: validate the index, delete the whole old library and stream every PCM16
+ * payload into /userdata/audio/<name>.wav with a generated WAV header. */
+static esp_err_t audio_pack_upload_post(httpd_req_t *req)
+{
+    const char *errmsg = "invalid sound pack";
+    if (!storage_is_mounted())
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage unavailable");
+    if (req->content_len < AUDIO_PACK_HDR_LEN || req->content_len > AUDIO_PACK_MAX_BYTES)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid size");
+    /* A pack can be far larger than a single WAV, so give the transfer more
+     * than the generic 120 s window (the UI XHR timeout matches). */
+    s_transfer_deadline = esp_timer_get_time() + 600000000;
+
+    ota_stream_t *st = calloc(1, sizeof(*st));
+    uint8_t *buf = malloc(8192);
+    audio_pack_entry_t *idx = NULL;
+    if (st == NULL || buf == NULL) {
+        free(st); free(buf);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
+    }
+    st->req = req;
+    st->remaining = (int)req->content_len;
+
+    uint8_t hdr[AUDIO_PACK_HDR_LEN];
+    audio_pack_header_t ph;
+    if (ota_stream_read(st, hdr, sizeof(hdr)) != (int)sizeof(hdr) ||
+        !audio_pack_header_parse(hdr, sizeof(hdr), &ph)) {
+        errmsg = "invalid pack header";
+        goto fail;
+    }
+    idx = calloc(ph.count, sizeof(*idx));
+    if (idx == NULL) {
+        free(st); free(buf);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
+    }
+
+    uint32_t index_end = AUDIO_PACK_HDR_LEN;
+    uint32_t payload_off = ph.data_off;
+    uint64_t total_data = 0;
+    for (uint32_t i = 0; i < ph.count; ++i) {
+        uint8_t eh[AUDIO_PACK_ENTRY_HDR_LEN];
+        if (ota_stream_read(st, eh, sizeof(eh)) != (int)sizeof(eh)) { errmsg = "truncated index"; goto fail; }
+        index_end += AUDIO_PACK_ENTRY_HDR_LEN;
+        uint8_t nlen = 0;
+        if (!audio_pack_entry_head(eh, req->content_len, &idx[i], &nlen)) { errmsg = "bad entry"; goto fail; }
+        uint8_t nm[AUDIO_PACK_NAME_MAX + 1];
+        if (ota_stream_read(st, nm, nlen) != (int)nlen) { errmsg = "truncated name"; goto fail; }
+        index_end += nlen;
+        if (!audio_pack_entry_name(&idx[i], nm, nlen)) { errmsg = "bad name"; goto fail; }
+        char base[WEB_LIB_NAME_MAX];
+        if (!web_lib_base_name(idx[i].name, base, sizeof(base))) { errmsg = "bad name"; goto fail; }
+        for (uint32_t j = 0; j < i; ++j) {
+            if (strcasecmp(idx[j].name, base) == 0) { errmsg = "duplicate sound name"; goto fail; }
+        }
+        snprintf(idx[i].name, sizeof(idx[i].name), "%s", base);
+        if (idx[i].data_off != payload_off) { errmsg = "non-contiguous payload"; goto fail; }
+        payload_off += idx[i].data_len;
+        if ((uint64_t)payload_off > (uint64_t)req->content_len) { errmsg = "payload past end"; goto fail; }
+        total_data += idx[i].data_len;
+    }
+    if (index_end != ph.data_off) { errmsg = "index length mismatch"; goto fail; }
+    if ((uint64_t)payload_off != (uint64_t)req->content_len) { errmsg = "size mismatch"; goto fail; }
+
+    uint64_t freeb = 0;
+    (void)storage_get_free_bytes(&freeb);
+    uint64_t need = total_data + (uint64_t)ph.count * 4096ULL + 262144ULL;
+    if (freeb + audio_library_bytes() < need) {
+        free(idx);
+        free(st); free(buf);
+        return send_json(req, "{\"ok\":false,\"error\":\"not enough space\"}");
+    }
+
+    /* A pack replaces the whole library: stop the preview, delete every old
+     * file, then stream the new ones in. */
+    audio_voice_release_owned(s_preview_voice);
+    memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+    audio_library_clear();
+
+    s_up_slot = 0;
+    size_t done = 0;
+    for (uint32_t i = 0; i < ph.count; ++i) {
+        char path[192];
+        snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", idx[i].name);
+        FILE *f = fopen(path, "wb");
+        bool ok = f != NULL;
+        if (ok) (void)setvbuf(f, NULL, _IOFBF, 8192);
+        uint8_t wh[AUDIO_PACK_WAV_HDR_MAX];
+        size_t whl = audio_pack_wav_header(wh, sizeof(wh), idx[i].data_len,
+                                           idx[i].sample_rate, idx[i].channels, idx[i].bits);
+        if (ok) ok = whl > 0U && fwrite(wh, 1, whl, f) == whl;
+        uint32_t left = idx[i].data_len;
+        while (ok && left > 0U) {
+            size_t want = left > 8192U ? 8192U : (size_t)left;
+            int r = ota_stream_read(st, buf, want);
+            if (r <= 0) { ok = false; break; }
+            if (fwrite(buf, 1, (size_t)r, f) != (size_t)r) { ok = false; break; }
+            left -= (uint32_t)r;
+            s_up_received = (int)req->content_len - st->remaining - (int)(st->len - st->pos);
+        }
+        if (ok && fflush(f) != 0) ok = false;
+        if (f != NULL && fsync(fileno(f)) != 0) ok = false;
+        if (f != NULL && fclose(f) != 0) ok = false;
+        if (!ok) { (void)remove(path); errmsg = "write failed"; break; }
+        done++;
+    }
+
+    if (done != ph.count || st->remaining != 0 || st->pos != st->len ||
+        (s_transfer_deadline != 0 && esp_timer_get_time() >= s_transfer_deadline)) {
+        for (uint32_t i = 0; i < done; ++i) {
+            char path[192];
+            snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", idx[i].name);
+            (void)remove(path);
+        }
+        goto fail;
+    }
+
+    {
+        web_vol_t *v = malloc(sizeof(*v) * ph.count);
+        if (v != NULL) {
+            for (uint32_t i = 0; i < ph.count; ++i) {
+                snprintf(v[i].name, sizeof(v[i].name), "%s", idx[i].name);
+                v[i].vol = idx[i].volume;
+            }
+            (void)web_vol_save(v, ph.count);
+            free(v);
+        }
+    }
+
+    ESP_LOGI(TAG, "PACK: %lu file(s), %lu bytes",
+             (unsigned long)ph.count, (unsigned long)total_data);
+    web_log_event("Звук", "пакет: %lu звук(ов)", (unsigned long)ph.count);
+    char json[128];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"files\":%lu,\"bytes\":%lu}",
+             (unsigned long)ph.count, (unsigned long)total_data);
+    free(idx);
+    free(st);
+    free(buf);
+    return send_json(req, json);
+
+fail:
+    free(idx);
+    free(st);
+    free(buf);
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, errmsg);
 }
 
 /* POST /api/ota/update
@@ -3705,7 +4350,8 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
         (query_err != ESP_OK && query_err != ESP_ERR_NOT_FOUND) || !query_encoding_valid(query))
         return close_rejected_body(req, httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query"));
     esp_err_t (*handler)(httpd_req_t *) = *(esp_err_t (**)(httpd_req_t *))req->user_ctx;
-    if (handler == audio_upload_post || handler == ota_update_post)
+    if (handler == audio_upload_post || handler == ota_update_post ||
+        handler == audio_pack_upload_post)
         return transfer_start(req, handler);
     if (req->content_len != 0U && handler != graph_validate_post && handler != graph_save_post)
         return close_rejected_body(req, httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unexpected body"));
@@ -3821,6 +4467,11 @@ static esp_err_t start_http_server(void)
     register_route("/api/audio/volume", HTTP_POST, audio_volume_post);
     register_route("/api/audio/upload", HTTP_POST, audio_upload_post);
     register_route("/api/audio/delete", HTTP_POST, audio_track_delete_post);
+    register_route("/api/audio/library", HTTP_GET, audio_library_get);
+    register_route("/api/audio/library/volume", HTTP_POST, audio_library_volume_post);
+    register_route("/api/audio/pack", HTTP_POST, audio_pack_upload_post);
+    register_route("/api/sound-files", HTTP_GET, sound_files_list_get);
+    register_route("/sound-files/*", HTTP_GET, sound_file_get);
     register_route("/api/track/category", HTTP_POST, track_category_post);
     register_route("/api/func-map", HTTP_GET, func_map_get);
     register_route("/api/func-map", HTTP_POST, func_map_post);

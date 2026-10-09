@@ -99,6 +99,7 @@ static esp_err_t test_commit(nvs_handle_t h)
  * no VFS, so provide no-op stubs (the manifest itself is not under test here). */
 esp_err_t settings_manifest_sync(void) { return ESP_OK; }
 esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
+esp_err_t settings_manifest_remove(void) { return ESP_OK; }
 bool settings_manifest_write_allowed(void) { return true; }
 
 /* Guard against an out-of-band version bump: version.txt is the single source

@@ -17,14 +17,14 @@ SPEC.loader.exec_module(MODULE)
 class EditorAssetTests(unittest.TestCase):
     def test_missing_build_is_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "npm ci"):
+            with self.assertRaisesRegex(ValueError, "editor build"):
                 MODULE.generate(directory, directory)
 
     def test_exact_bytes_and_deterministic_generation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             original = b'<script>const x = `a\n b`; // keep line\n</script>'
-            (root / "index.html").write_bytes(original)
+            (root / "blocks.html").write_bytes(original)
             output = root / "out"
             output.mkdir()
             first = MODULE.generate(root, output)
@@ -41,7 +41,7 @@ class EditorAssetTests(unittest.TestCase):
     def test_unsupported_files_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "index.html").write_text("test", encoding="utf-8")
+            (root / "blocks.html").write_text("test", encoding="utf-8")
             (root / "debug.map").write_text("unwanted source map", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 MODULE.generate(root, root)
@@ -54,13 +54,13 @@ class EditorAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stamp missing"):
                 MODULE.verify_sources(dist, source)
             files = {}
-            for name in ("index.html", "package.json", "package-lock.json", "tsconfig.json", "vite.config.ts"):
+            for name in ("package.json",):
                 path = source / name
                 path.write_bytes(b"source")
                 files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
             (dist / "build-inputs.json").write_text(json.dumps({"files": files}), encoding="utf-8")
             MODULE.verify_sources(dist, source)
-            (source / "index.html").write_bytes(b"changed")
+            (source / "package.json").write_bytes(b"changed")
             with self.assertRaisesRegex(ValueError, "changed after build"):
                 MODULE.verify_sources(dist, source)
 

@@ -32,6 +32,7 @@ typedef struct {
     bool loop;
     uint8_t volume;
     uint16_t rate;
+    uint8_t loops;          /* repeat count for a looping state; 0 = endless */
 } sg_state_t;
 typedef struct {
     char id[SG_ID_CAP], source[SG_ID_CAP], target[SG_ID_CAP];
@@ -83,6 +84,7 @@ typedef struct {
     bool playing, done, failed;
     sg_handle_t handle;
     uint32_t elapsed_ms;   /* time in the current state, for SG_TIMEOUT */
+    uint16_t loops_done;   /* completed repeats of a finite looping state */
     bool speed_match[SG_MAX_TRANSITIONS];
 } sg_channel_t;
 typedef struct {

@@ -95,9 +95,13 @@ foreach ($k in $files.Keys) {
     }
 }
 if ($Sounds) {
-    $snd = Join-Path (Split-Path $repo -Parent) "SOUND"
-    if (-not (Test-Path -LiteralPath $snd)) { $snd = Join-Path $repo "SOUND" }
-    if (-not (Test-Path -LiteralPath $snd)) { Write-Err "SOUND folder not found"; exit 1 }
+    # Prefer <repo>\SOUND (Soft_Decoder_V3\SOUND); keep the sibling-of-repo
+    # location as a fallback.
+    $snd = $null
+    foreach ($c in @((Join-Path $repo "SOUND"), (Join-Path (Split-Path $repo -Parent) "SOUND"))) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Container)) { $snd = (Resolve-Path -LiteralPath $c).Path; break }
+    }
+    if (-not $snd) { Write-Err "SOUND folder not found"; exit 1 }
 }
 
 $args8 = @("--chip", "esp32s3", "--port", $Port, "--baud", $Baud,
@@ -115,7 +119,7 @@ if ($Sounds) {
     Write-Info "waiting for app boot..."
     Start-Sleep -Seconds 3
     Write-Info "uploading sounds (PROV)..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "provision_sounds.ps1") -Port $Port
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "provision_sounds.ps1") -Port $Port -SoundDir $snd
     if ($LASTEXITCODE -ne 0) { Write-Err "sound upload failed (code $LASTEXITCODE)"; exit $LASTEXITCODE }
 }
 

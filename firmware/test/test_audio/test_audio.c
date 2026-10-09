@@ -51,6 +51,7 @@ static esp_err_t audio_test_i2s_enable(i2s_chan_handle_t channel);
 #define gpio_config audio_test_gpio_config
 #define gpio_set_level audio_test_gpio_level
 #define static
+#include "../../components/audio/src/ima_adpcm.c"
 #include "../../components/audio/src/audio.c"
 #undef i2s_channel_disable
 #undef i2s_del_channel
@@ -1325,9 +1326,29 @@ static void test_reserved_generation_release_stops_only_current_owner(void)
     TEST_ASSERT_EQUAL(0, s_storage_leases);
 }
 
+static void test_ima_adpcm_decode_block(void)
+{
+    /* predictor 1000, index 0, zero nibbles -> constant output */
+    uint8_t blk[6] = { 0xE8, 0x03, 0x00, 0x00, 0x00, 0x00 };
+    int16_t out[8];
+    int n = ima_adpcm_decode_block(blk, sizeof(blk), out, 8);
+    TEST_ASSERT_EQUAL_INT(5, n);
+    for (int i = 0; i < n; ++i) TEST_ASSERT_EQUAL_INT16(1000, out[i]);
+    /* nibble 7 steps the predictor up */
+    uint8_t blk2[5] = { 0x00, 0x00, 0x00, 0x00, 0x77 };
+    n = ima_adpcm_decode_block(blk2, sizeof(blk2), out, 8);
+    TEST_ASSERT_EQUAL_INT(3, n);
+    TEST_ASSERT_TRUE(out[1] > out[0]);
+    TEST_ASSERT_TRUE(out[2] > out[1]);
+    /* invalid input */
+    TEST_ASSERT_EQUAL_INT(-1, ima_adpcm_decode_block(blk, 3, out, 8));
+    TEST_ASSERT_EQUAL_INT(-1, ima_adpcm_decode_block(NULL, 6, out, 8));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_ima_adpcm_decode_block);
     RUN_TEST(test_validate_wav_accepts_pcm16);
     RUN_TEST(test_validate_wav_skips_extra_chunks);
     RUN_TEST(test_validate_wav_rejects_non_pcm16);

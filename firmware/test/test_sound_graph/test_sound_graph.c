@@ -151,6 +151,32 @@ static void test_pending_boundary_rechecks_condition_and_loop_replays(void)
     sg_runner_function(r,2,true); audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true,20);
     TEST_ASSERT_EQUAL(4,plays); TEST_ASSERT_EQUAL_UINT8(2,r->channels[0].state);
 }
+static void test_finite_loop_repeats_then_sample_done(void)
+{
+    /* A looping state with loops=N replays N times, then signals sample_done. */
+    unsigned a = state("loop","loop.wav",true); g->states[a].loops = 3;
+    state("end","end.wav",false);
+    edge("off","loop",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
+    edge("loop","end",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE);
+    init_runner(); sg_runner_power(r,true); sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(2,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state); TEST_ASSERT_FALSE(r->channels[0].done);
+    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(3,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+    audio_state[18] = SG_AUDIO_DONE; sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(4,plays); TEST_ASSERT_EQUAL_UINT8(2,r->channels[0].state);
+}
+static void test_parse_state_loops_field(void)
+{
+    const char *json = "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"t\",\"name\":\"T\",\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":2,"
+        "\"states\":[{\"id\":\"off\",\"name\":\"off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+        "{\"id\":\"l\",\"name\":\"l\",\"file\":\"a.wav\",\"loop\":true,\"volume\":80,\"rate\":1000,\"loops\":4}],"
+        "\"transitions\":[{\"id\":\"e0\",\"source\":\"off\",\"target\":\"l\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"engine_on\"}}],"
+        "\"effects\":[],\"assets\":[],\"editor\":{\"positions\":{},\"viewport\":{\"x\":-1.5,\"zoom\":1e0}}}";
+    TEST_ASSERT_EQUAL(ESP_OK, sg_parse(json,(size_t)strlen(json),g,&diagnostic));
+    TEST_ASSERT_EQUAL_UINT8(4, g->states[1].loops);
+}
 static void test_sample_done_silent_next_tick_and_audible_once(void)
 {
     state("run","run.wav",false); edge("off","run",1,SG_SAMPLE_DONE,0,SG_IMMEDIATE);
@@ -326,7 +352,7 @@ static char *read_fixture(const char *file, size_t *length)
     char path[1024]; snprintf(path,sizeof(path),"%s",__FILE__);
     char *a = strrchr(path,'/'), *b = strrchr(path,'\\'); char *last = a;
     if (b && (!a || b > a)) { last = b; } TEST_ASSERT_NOT_NULL(last); last[1] = 0;
-    size_t used = strlen(path); snprintf(path+used,sizeof(path)-used,"../../sound_editor/test/fixtures/%s",file);
+    size_t used = strlen(path); snprintf(path+used,sizeof(path)-used,"fixtures/%s",file);
     FILE *f = fopen(path,"rb"); TEST_ASSERT_NOT_NULL_MESSAGE(f,path);
     TEST_ASSERT_EQUAL(0,fseek(f,0,SEEK_END)); long size = ftell(f);
     TEST_ASSERT_TRUE(size > 0 && (unsigned long)size <= SG_MAX_JSON); rewind(f);
@@ -359,7 +385,7 @@ int main(void)
     RUN_TEST(test_exact_body_limit_and_token_limit);
     RUN_TEST(test_ids_filenames_and_direct_model_bounds); RUN_TEST(test_validator_references_ranges_priorities);
     RUN_TEST(test_runner_no_autostart_and_toggle_edges); RUN_TEST(test_short_edges_priority_and_one_transition);
-    RUN_TEST(test_pending_boundary_rechecks_condition_and_loop_replays); RUN_TEST(test_sample_done_silent_next_tick_and_audible_once);
+    RUN_TEST(test_pending_boundary_rechecks_condition_and_loop_replays); RUN_TEST(test_finite_loop_repeats_then_sample_done); RUN_TEST(test_parse_state_loops_field); RUN_TEST(test_sample_done_silent_next_tick_and_audible_once);
     RUN_TEST(test_async_and_admission_failure_stop_channel); RUN_TEST(test_effect_channels_do_not_interrupt_engine);
     RUN_TEST(test_filtered_accel_and_decel_ranges); RUN_TEST(test_silent_cycles_and_temporal_events);
     RUN_TEST(test_speed_hysteresis_rejects_threshold_jitter); RUN_TEST(test_state_and_asset_capacity);

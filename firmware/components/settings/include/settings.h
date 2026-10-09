@@ -140,9 +140,10 @@ void settings_cv_commit_deferred(void);
 esp_err_t settings_cv_reset_to_factory(void);
 /* NMRA Hard Reset changes CV19/29/31/32 only, not the address or full store. */
 esp_err_t settings_cv_hard_reset(void);
-/* Erase the whole settings namespace and restore CV defaults. The WiFi config,
- * volumes, name, control source, sound tracks and BEMF calibration are cleared
- * and return to their factory defaults on the next load. */
+/* Erase the whole settings namespace, drop the on-storage metadata manifest and
+ * restore CV defaults. The WiFi config, volumes, name, control source, track
+ * metadata (names/categories/function map) and BEMF calibration are cleared;
+ * the WAV files stay in place and boot recovery rebuilds default slots. */
 esp_err_t settings_factory_reset(void);
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count);
@@ -189,6 +190,9 @@ esp_err_t settings_active_scheme_set(const char *name);
  * callers must not delete old WAVs until this backup succeeds. Worker retries. */
 esp_err_t settings_manifest_sync(void);
 esp_err_t settings_manifest_load(void);
+/* Drop the on-storage metadata backup so a factory reset is not undone by boot
+ * recovery. Missing file / unmounted storage is a no-op success. */
+esp_err_t settings_manifest_remove(void);
 /* Persistent recovery marker: partial restores must be retried even if tracks
  * were already saved. Marker is cleared only after ALL metadata saves succeed. */
 esp_err_t settings_recovery_pending(bool *out);

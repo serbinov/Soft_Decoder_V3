@@ -413,6 +413,7 @@ static esp_err_t asset_inspect_locked(const char *file, sg_asset_t *out, sg_diag
     ok = ok && end >= 12 && (uint64_t)end <= UINT32_MAX && fseek(f, 0, SEEK_SET) == 0 &&
          fread(header, 1, 12, f) == 12 && !memcmp(header, "RIFF", 4) && !memcmp(header + 8, "WAVE", 4);
     uint32_t riff_end = 0, rate = 0, data = 0, channels = 0, bits = 0, align = 0;
+    uint32_t spb = 0; /* IMA ADPCM samples per block; 0 for PCM16 */
     bool fmt = false, have_data = false;
     if (ok) {
         uint64_t boundary = (uint64_t)le32(header + 4) + 8;
@@ -427,18 +428,28 @@ static esp_err_t asset_inspect_locked(const char *file, sg_asset_t *out, sg_diag
         if (next > riff_end) { ok = false; break; }
         if (!memcmp(header, "fmt ", 4)) {
             if (fmt || chunk < 16 || fread(header, 1, 16, f) != 16) { ok = false; break; }
+            uint16_t format = le16(header);
             fmt = true; channels = le16(header + 2); rate = le32(header + 4);
             align = le16(header + 12); bits = le16(header + 14);
-            ok = le16(header) == 1 && (channels == 1 || channels == 2) && bits == 16 &&
-                 rate > 0 && rate <= 192000 && align == channels * 2 &&
-                 le32(header + 8) == rate * align;
+            if (format == 1) {
+                ok = (channels == 1 || channels == 2) && bits == 16 &&
+                     rate > 0 && rate <= 192000 && align == channels * 2 &&
+                     le32(header + 8) == rate * align;
+            } else if (format == 0x0011) { /* WAVE_FORMAT_IMA_ADPCM, mono */
+                unsigned char ext[4];
+                ok = chunk >= 20 && channels == 1 && bits == 4 && align == 256 &&
+                     rate > 0 && rate <= 192000 && fread(ext, 1, sizeof(ext), f) == sizeof(ext);
+                if (ok) { spb = le16(ext + 2); ok = spb > 0; }
+            } else {
+                ok = false;
+            }
         } else if (!memcmp(header, "data", 4)) {
             if (have_data) { ok = false; break; }
             have_data = true; data = chunk;
         }
         pos = (uint32_t)next;
     }
-    ok = ok && fmt && have_data && data >= 2 * align && data % align == 0;
+    ok = ok && fmt && have_data && data >= align && data % align == 0;
     uint32_t crc = UINT32_MAX;
     unsigned char buffer[512];
     if (ok) { ok = fseek(f, 0, SEEK_SET) == 0; }
@@ -449,10 +460,15 @@ static esp_err_t asset_inspect_locked(const char *file, sg_asset_t *out, sg_diag
         if (got < sizeof(buffer)) { ok = !ferror(f) && total == (uint32_t)end; break; }
     }
     if (fclose(f)) { ok = false; }
-    if (!ok) { return diagnostic(diag, ESP_FAIL, "Truncated or unsupported PCM16 WAV"); }
+    if (!ok) { return diagnostic(diag, ESP_FAIL, "Truncated or unsupported WAV"); }
     memset(out, 0, sizeof(*out)); strcpy(out->file, file);
     out->size = total; out->sampleRate = rate; out->channels = channels; out->bits = bits;
-    uint64_t duration = (uint64_t)data * 1000 / ((uint64_t)rate * align);
+    uint64_t duration;
+    if (spb != 0U) {
+        duration = (uint64_t)(data / align) * (uint64_t)spb * 1000 / (uint64_t)rate;
+    } else {
+        duration = (uint64_t)data * 1000 / ((uint64_t)rate * align);
+    }
     if (!duration || duration > UINT32_MAX) {
         memset(out, 0, sizeof(*out)); return diagnostic(diag, ESP_FAIL, "Invalid WAV duration");
     }

@@ -1856,6 +1856,35 @@ static void test_feedback_split_adc_pair_holds_without_renewal(void)
     TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
 }
 
+/* A BEMF sense stuck at an exact zero pair is indistinguishable from a
+ * standstill reading until the PID has driven the duty to saturation. That
+ * sustained condition must latch the feedback fault instead of winding up. */
+static void test_feedback_stuck_zero_sense_latches_at_saturated_drive(void)
+{
+    g_cv[3] = 0;   /* instant ramp */
+    g_cv[5] = 255; /* Vhigh: duty_base near the top -> PID saturates */
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 0;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_was_stopped = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(126, true));
+
+    mock_timer_now_us = 0;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_last_pid_ok); /* the zero pair is still treated as valid */
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] >= (LEDC_MAX * 9U / 10U));
+    TEST_ASSERT_FALSE(s_feedback_fault); /* but only within the fault window */
+
+    mock_timer_now_us = 100000; /* sense stays zero while the duty stays saturated */
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_feedback_fault);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT8(0, s_target_speed);
+    TEST_ASSERT_TRUE(motor_is_inhibited());
+}
+
 static void test_cal_zero_measurements_abort_at_first_step(void)
 {
     g_delay_hook = refresh_calibration_rail;
@@ -2502,6 +2531,7 @@ int main(void)
     RUN_TEST(test_cal_missing_adc_aborts_before_first_drive);
     RUN_TEST(test_feedback_fault_requires_stop_or_explicit_disable_to_rearm);
     RUN_TEST(test_feedback_split_adc_pair_holds_without_renewal);
+    RUN_TEST(test_feedback_stuck_zero_sense_latches_at_saturated_drive);
     RUN_TEST(test_cal_zero_measurements_abort_at_first_step);
     RUN_TEST(test_cal_stale_rail_aborts_first_step_without_full_run);
     RUN_TEST(test_speed_duty_zero);

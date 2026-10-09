@@ -417,7 +417,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     if ((instr & 0xE0U) == 0x80U && payload_len == 1U) {
         /* F0's directional consist mask uses the last accepted direction. */
         bool forward = s_function_forward;
-        emit_function(0, (instr & 0x10U) != 0, function_via_consist, forward, cv21, cv22);
+        /* In 14-step mode F0/FL is carried by the speed packet; NMRA S-9.2.1
+         * declares the group-one bit 4 meaningless, so it must not clear the
+         * light set by the speed packet. */
+        if (!mode14) {
+            emit_function(0, (instr & 0x10U) != 0, function_via_consist, forward, cv21, cv22);
+        }
         for (uint8_t fn = 1; fn <= 4U; fn++) {
             emit_function(fn, (instr & (1U << (fn - 1U))) != 0,
                           function_via_consist, forward, cv21, cv22);

@@ -165,7 +165,9 @@ static bool dcc_packet_timed_out(int64_t now)
     }
     uint8_t cv11 = 0;
     (void)settings_cv_read(11, &cv11);
-    return cv11 != 0U && now - dcc_last_packet_us() > (int64_t)cv11 * 20000LL;
+    /* NMRA packet time-out: 0 disables it, otherwise 0.5 s per CV11 unit
+     * (max 255 -> ~127 s, above the required 20 s minimum). */
+    return cv11 != 0U && now - dcc_last_packet_us() > (int64_t)cv11 * 500000LL;
 }
 
 static void persistence_task(void *arg)

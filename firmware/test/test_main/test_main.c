@@ -464,7 +464,10 @@ static void test_cv11_dcc_timeout_recovery_preserves_other_owners(void)
 {
     bool timeout = false;
     g_cv[11] = 1;
-    g_packet = mock_timer_now_us - 30000;
+    g_packet = mock_timer_now_us - 30000; /* < 0.5 s unit: not yet timed out. */
+    safety_step(&timeout);
+    TEST_ASSERT_FALSE(timeout);
+    g_packet = mock_timer_now_us - 600000; /* > 0.5 s unit: timed out. */
     g_mask |= MOTOR_INHIBIT_SAFETY;
     safety_step(&timeout);
     TEST_ASSERT_TRUE(timeout);
@@ -638,7 +641,7 @@ static void test_emergency_stop_requests_audio_stop_immediately(void)
     TEST_ASSERT_EQUAL(1, g_sound_requests);
     bool timed_out = false;
     g_cv[11] = 1;
-    g_packet = mock_timer_now_us - 30000;
+    g_packet = mock_timer_now_us - 600000; /* > one 0.5 s CV11 unit. */
     safety_step(&timed_out);
     TEST_ASSERT_TRUE(timed_out);
     TEST_ASSERT_TRUE(g_sound_requests >= 2);

@@ -84,6 +84,10 @@ static int64_t s_rail_update_us;
 /* Control-owner history; only an accepted output with fresh feedback renews it. */
 static bool s_feedback_clock_active;
 static int64_t s_feedback_since_us;
+/* Stuck-sense watchdog: an exact-zero BEMF pair held while the PID drives the
+ * duty to saturation is a failed sense, not a valid slow-speed reading. */
+static bool s_zero_clock_active;
+static int64_t s_zero_since_us;
 static bool s_feedback_hold_valid;
 static uint32_t s_feedback_hold_duty;
 static bool s_feedback_hold_forward;
@@ -763,6 +767,24 @@ static void motor_tick(void)
     }
 
     int64_t now = esp_timer_get_time();
+
+    /* A BEMF sense stuck at zero stays "valid" while the PID drives the duty
+     * toward saturation; that is a failed sense, not a valid slow-speed zero.
+     * Only an exact-zero pair (both nodes equal) sustained at high drive is
+     * treated as loss, so a normal start (duty ramps up, BEMF then appears) is
+     * never faulted. */
+    bool sense_zero = enabled && !calibration && s_bemf_adc_ready && applied > 0U &&
+                      s_bemf_valid && s_bemf1_mv == 0U && s_bemf2_mv == 0U &&
+                      duty_final >= (LEDC_MAX * 9U / 10U);
+    if (sense_zero) {
+        if (!s_zero_clock_active) {
+            s_zero_clock_active = true;
+            s_zero_since_us = now;
+        }
+    } else {
+        s_zero_clock_active = false;
+    }
+
     if (enabled && !calibration && applied > 0U && !pid_ok) {
         if (!s_feedback_clock_active) {
             s_feedback_clock_active = true;
@@ -775,21 +797,24 @@ static void motor_tick(void)
                      target_forward == s_applied_forward ? s_feedback_hold_duty : 0U;
         if (duty_final > duty_base) duty_final = duty_base;
         if (duty_final > command_duty) duty_final = command_duty;
-        if (now - s_feedback_since_us >= FEEDBACK_FRESH_US) {
-            portENTER_CRITICAL(&s_output_mux);
-            /* A concurrent STOP/disable supersedes this tick's fault decision. */
-            if (s_bemf_enabled && s_target_speed > 0U && !s_feedback_reset_requested) {
-                s_feedback_fault = true;
-                ++s_output_generation;
-                s_target_speed = 0;
-                s_stop_requested = true;
-                s_applied_state = 0x100U;
-                s_last_duty = 0;
-                pwm_write_locked(0, true);
-            }
-            portEXIT_CRITICAL(&s_output_mux);
-            duty_final = 0;
+    }
+
+    if ((enabled && !calibration && applied > 0U && !pid_ok &&
+         now - s_feedback_since_us >= FEEDBACK_FRESH_US) ||
+        (sense_zero && now - s_zero_since_us >= FEEDBACK_FRESH_US)) {
+        portENTER_CRITICAL(&s_output_mux);
+        /* A concurrent STOP/disable supersedes this tick's fault decision. */
+        if (s_bemf_enabled && s_target_speed > 0U && !s_feedback_reset_requested) {
+            s_feedback_fault = true;
+            ++s_output_generation;
+            s_target_speed = 0;
+            s_stop_requested = true;
+            s_applied_state = 0x100U;
+            s_last_duty = 0;
+            pwm_write_locked(0, true);
         }
+        portEXIT_CRITICAL(&s_output_mux);
+        duty_final = 0;
     }
 
     /* During calibration the cal task owns the bridge directly, so the motor

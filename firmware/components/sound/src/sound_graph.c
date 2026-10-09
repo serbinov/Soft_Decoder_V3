@@ -210,10 +210,11 @@ esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_
 #define SG_ARRAY(k,max,dest) do { arr = sg_get(&p,0,k); if (arr < 0 || p.tokens[arr].type != '[' || p.tokens[arr].count > max) { goto fail; } dest = (uint8_t)p.tokens[arr].count; } while (0)
     SG_ARRAY("states",SG_MAX_STATES,out->state_count); obj = arr + 1;
     for (unsigned i = 0; i < out->state_count; ++i, obj = p.tokens[obj].next) {
-        sg_state_t *s = &out->states[i]; if (!sg_keys(&p,obj,"|id||name||file||loop||volume||rate|")) { goto fail; }
+        sg_state_t *s = &out->states[i]; if (!sg_keys(&p,obj,"|id||name||file||loop||volume||rate||loops|")) { goto fail; }
         SG_STR(obj,"id",s->id); SG_STR(obj,"name",s->name); SG_STR(obj,"file",s->file);
         if (!sg_boolean(&p,sg_get(&p,obj,"loop"),&s->loop)) { goto fail; }
         SG_NUM(obj,"volume",s->volume,100); SG_NUM(obj,"rate",s->rate,3000);
+        int loops = sg_get(&p,obj,"loops"); if (loops >= 0) { SG_NUM(obj,"loops",s->loops,255); }
     }
     SG_ARRAY("transitions",SG_MAX_TRANSITIONS,out->transition_count); obj = arr + 1;
     for (unsigned i = 0; i < out->transition_count; ++i, obj = p.tokens[obj].next) {

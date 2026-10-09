@@ -44,6 +44,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-09 (v0.10) — feat(sound): IMA ADPCM sound packs, on-PC preview, editor chain playback
 - 2026-10-07 (v0.10) — fix(build): pin LF for hashed sound editor sources
 - 2026-10-07 (v0.10) — feat(web): RU/EN localization, header layout, volume block in editor
 - 2026-10-05 (v0.10) — feat(web): header page tabs, sidebar uptime, drop F-map/AUX panels

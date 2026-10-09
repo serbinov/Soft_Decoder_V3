@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ADDITIPUS AURA-X · v__VERSION__</title>
 <style>
-:root{--bg:#0f1420;--panel:#131a2b;--panel2:#0f1830;--text:#ffffff;--muted:#93a1bd;--good:#3ecf8e;--warn:#ffd479;--bad:#ff6b6b;--line:#222d49;--accent:#4da3ff;--accent2:#4da3ff;--input:#0a0e18;--on-accent:#04101f;--on-good:#04101f;--btn-bg:#1c2740;--btn2-bg:#131a2b;--hd-bg:#131a2b;--log-bg:#0a0e18;--app-w:700px;--radius:10px;--radius-sm:8px;--shadow:0 6px 20px rgba(0,0,0,.35)}
-html[data-theme=light]{--bg:#eef1f7;--panel:#ffffff;--panel2:#f4f6fb;--text:#0b1220;--muted:#5b6579;--good:#1f9d63;--warn:#b8791a;--bad:#d64545;--line:#d3dae8;--accent:#2f6fd0;--accent2:#2f6fd0;--input:#ffffff;--on-accent:#ffffff;--on-good:#ffffff;--btn-bg:#e8edf6;--btn2-bg:#f1f4fa;--hd-bg:#ffffff;--log-bg:#f7f9fd;--shadow:0 6px 20px rgba(20,30,60,.12)}
+:root{--bg:#0f1420;--panel:#161b26;--panel2:#1e2533;--text:#e7ecf5;--muted:#e7ecf5;--good:#4caf72;--warn:#e0a24a;--bad:#ff8f8f;--bad-bg:#c0392b;--line:#2b3547;--accent:#4a9eff;--accent2:#4a9eff;--input:#1e2533;--on-accent:#04101f;--on-good:#04101f;--btn-bg:#1e2533;--btn2-bg:#1e2533;--hd-bg:#161b26;--log-bg:#1e2533;--app-w:700px;--radius:10px;--radius-sm:8px;--shadow:0 6px 20px rgba(0,0,0,.35)}
+html[data-theme=light]{--bg:#eef1f7;--panel:#ffffff;--panel2:#f4f6fb;--text:#0b0f16;--muted:#0b0f16;--good:#1f9d63;--warn:#8a5a00;--bad:#b3261e;--bad-bg:#b3261e;--line:#d3dae8;--accent:#2f6fd0;--accent2:#2f6fd0;--input:#f4f6fb;--on-accent:#ffffff;--on-good:#ffffff;--btn-bg:#f4f6fb;--btn2-bg:#f4f6fb;--hd-bg:#ffffff;--log-bg:#f4f6fb;--shadow:0 6px 20px rgba(20,30,60,.12)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
-body{margin:0;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;background:var(--bg);color:var(--text)}
+body{margin:0;font-family:system-ui,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.4;background:var(--bg);color:var(--text)}
 button,input,select{font:inherit}
 button{cursor:pointer}
 input[type=range]{width:100%;accent-color:var(--accent)}
@@ -29,10 +29,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .set-nav{display:none}
 .set-body{display:grid;gap:10px;min-width:0}
 .set-body>.panel{margin-bottom:0;min-width:0}
-.set-item{display:block;width:100%;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px}
-.set-item:hover{background:var(--btn2-bg)}
+.set-item{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:9px 10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-height:40px;margin:2px 0}
+.set-item:hover{border-color:var(--accent)}
 .set-item.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.set-group{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 10px 4px}
+.set-group{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:14px 10px 6px}
+.set-nav .set-group:not(:first-child){border-top:1px solid var(--line);margin-top:6px}
 .info-panel{border-left:3px solid var(--accent);box-shadow:var(--shadow)}
 .info-device{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .info-device .info-key{flex:0 0 auto}
@@ -41,20 +42,40 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   .page[data-page=settings].md-on{grid-template-columns:250px minmax(0,1fr);align-items:start}
   .page[data-page=settings].md-on .set-side{display:flex;flex-direction:column;gap:6px;grid-column:1;position:sticky;top:10px}
   .page[data-page=settings].md-on .set-nav{display:block;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px}
-  .page[data-page=settings].md-on .set-body{grid-column:2}
-  .page[data-page=settings].md-on .info-panel{grid-column:1/-1}
+  .page[data-page=settings].md-on .set-body{grid-column:2;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
   .page[data-page=settings].md-on .uptime-line{margin:0;justify-content:flex-start}
   .page[data-page=settings].md-on .set-body>.panel{display:none}
   .page[data-page=settings].md-on .set-body>.panel.active{display:block}
   .page[data-page=settings].md-on .set-body .panel-hd{cursor:default}
   .page[data-page=settings].md-on .set-body .panel-hd .chev{display:none}
+  /* If a block does not fit the screen height, it spans the whole working zone
+   * and its content is split into two equal columns. */
+  .page[data-page=settings].md-on .set-body>.panel.active.split{grid-column:1/-1}
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 20px;align-items:start}
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.hint,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.up-bar,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.up-meta,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.row,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.ota-row,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.cv-quick,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.lib,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.cv-list,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.log,
+  .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>#cv_active_name{grid-column:1/-1}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px 12px}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .cv-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px}
+  /* A vertical divider makes the two split blocks visibly separate. */
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib,
+  .page[data-page=settings].md-on .set-body>.panel.active.split .cv-list{position:relative}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib::before,
+  .page[data-page=settings].md-on .set-body>.panel.active.split .cv-list::before{content:'';position:absolute;left:50%;top:2px;bottom:2px;border-left:1px solid var(--line)}
 }
 
-.hd{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--hd-bg);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+.hd{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:10px 14px;background:var(--hd-bg);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
 .brand{font-size:16px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
 .brand small{font-size:10px;color:var(--muted);font-weight:600;margin-left:6px}
 .conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);white-space:nowrap;font-weight:600}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex-shrink:0}
+.dot{width:18px;height:18px;border-radius:50%;background:var(--bad);flex-shrink:0}
 .dot.ok{background:var(--good)}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
@@ -69,8 +90,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .btn:hover{border-color:var(--accent)}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent);font-weight:700}
-.btn.bad,.btn.danger{border-color:#7b3030;color:var(--bad)}
-.btn:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.25)}
+.btn.bad,.btn.danger{background:var(--bad-bg);border-color:var(--bad-bg);color:#ffffff;font-weight:700}
+.btn:disabled{opacity:1;cursor:not-allowed;background:var(--panel2);border-color:var(--line);color:var(--muted)}
 .btn.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:700}
 .btn.sm{min-height:36px;padding:6px 10px;font-size:12px}
 .btn.ghost{background:var(--btn2-bg)}
@@ -99,12 +120,12 @@ label{color:var(--text);font-weight:600}
 .dir-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
 .dir-row .btn{white-space:normal;line-height:1.1;padding:8px 4px;font-size:12px;min-height:48px}
 .nav-settings-btn{display:none}
-.btn.emergency{background:var(--bad);border-color:var(--bad);color:#ffffff;font-weight:700}
+.btn.emergency{background:var(--bad-bg);border-color:var(--bad-bg);color:#ffffff;font-weight:700}
 .btn.emergency:hover{border-color:#ffffff}
 .fn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:7px}
 .fn-grid .btn{min-height:44px;font-size:12px;font-weight:700}
 
-.locked{opacity:1}
+.locked{opacity:.45}
 
 .vol{display:grid;grid-template-columns:70px 1fr 2.5em;gap:8px;align-items:center;margin-bottom:8px}
 .vol label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
@@ -124,6 +145,18 @@ label{color:var(--text);font-weight:600}
 .up-bar{height:8px;border-radius:4px;background:var(--input);border:1px solid var(--line);overflow:hidden;display:none}
 .up-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 .up-meta{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;display:none}
+
+.lib{display:flex;flex-direction:column;gap:1px}
+.lib-empty{padding:10px;font-size:12px;color:var(--muted)}
+.lib-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;min-width:0}
+.lib-row:nth-child(odd){background:var(--panel2)}
+.lib-row.playing{outline:1px solid var(--good)}
+.lib-row .nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.lib-row .grow{flex:1 1 auto;min-width:8px}
+.lib-row .idx{flex:none;width:22px;text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lib-row .sz{flex:none;width:54px;text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lib-row input[type=range]{width:96px;flex:none}
+.lib-row .vv{width:30px;flex:none;text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 
 .cv-quick{display:grid;grid-template-columns:130px 130px auto auto auto auto;gap:8px;align-items:end;margin-bottom:10px}
 .cv-list{display:grid;gap:6px}
@@ -159,13 +192,14 @@ label{color:var(--text);font-weight:600}
 .uptime-line{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 0 12px;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em}
 .uptime-line #uptime{color:var(--text);font-weight:700}
 /* top nav (page tabs) + theme switch */
-.hd-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
-.hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.hd-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;justify-self:start}
+.hd-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-self:end}
 .theme-btn{min-width:46px;font-size:15px;line-height:1}
-.page-tabs{display:flex;gap:6px}
-.page-tabs .nav-tab{flex:0 0 auto;min-height:38px;padding:8px 14px}
-.nav-tab{border:1px solid var(--line);background:var(--btn2-bg);color:var(--text);border-radius:10px;padding:8px 14px;font-size:13px;font-weight:700;min-height:38px;cursor:pointer;touch-action:manipulation}
-.nav-tab.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.page-tabs{display:flex;gap:0;justify-self:center;background:var(--btn2-bg);border:1px solid var(--line);border-radius:10px;padding:3px}
+.page-tabs .nav-tab{flex:0 0 auto}
+.nav-tab{border:0;background:transparent;color:var(--text);border-radius:8px;padding:7px 16px;font-size:13px;font-weight:700;min-height:34px;cursor:pointer;touch-action:manipulation}
+.nav-tab+.nav-tab{border-left:1px solid var(--line)}
+.nav-tab.active{background:var(--accent);color:var(--on-accent)}
 /* info grid */
 .info-grid{display:grid;gap:2px}
 @media(min-width:760px){.info-grid{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px}}
@@ -174,10 +208,7 @@ label{color:var(--text);font-weight:600}
 .info-grid .info-row:last-child{border-bottom:0}
 .info-key{color:var(--muted);white-space:nowrap;font-weight:600}
 .info-val{color:var(--text);text-align:right;min-width:0;overflow-wrap:anywhere}
-/* On computers the layout stays a comfortable centered column instead of
-   scaling the whole page: the app is used from a phone, so the desktop view
-   keeps the same single-column structure with slightly larger base text. */
-@media(min-width:1024px){body{font-size:15px}}
+/* Font family and base size match the block constructor on every screen. */
 @media(max-width:760px){
   .fn-grid{grid-template-columns:repeat(auto-fill,minmax(50px,1fr))}
   .nav-tab{padding:9px 8px}
@@ -205,7 +236,7 @@ label{color:var(--text);font-weight:600}
   <div class="hd">
     <div class="hd-left">
       <div class="brand">ADDITIPUS AURA-X<small>v__VERSION__</small></div>
-      <div class="conn"><span class="dot ok" id="link_dot"></span><span id="connection">Онлайн</span></div>
+      <div class="conn"><span class="dot ok" id="link_dot" title="Онлайн"></span></div>
     </div>
     <div class="page-tabs">
       <button class="nav-tab active" id="nav_control" onclick="showPage('control')" data-i18n="nav_control">Управление</button>
@@ -225,12 +256,6 @@ label{color:var(--text);font-weight:600}
           <button class="btn" id="src_rails" onclick="setControlSource('rails')" data-i18n="src_rails">Рельсы</button>
           <button class="btn" id="src_web" onclick="setControlSource('web')" data-i18n="src_web">Веб</button>
         </div>
-        <div class="row" style="margin-top:2px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-            <input type="checkbox" id="mode_dc" style="width:auto" onchange="toggleMode()"><span data-i18n="ctrl_dc">DC — аналоговое управление</span>
-          </label>
-        </div>
-        <div class="hint" id="src_hint" data-i18n="ctrl_hint_default">Управление скоростью и функциями — с выбранного источника.</div>
       </div>
     </div>
     <div class="panel">
@@ -253,29 +278,16 @@ label{color:var(--text);font-weight:600}
   </div>
 
   <div class="page" data-page="settings" style="display:none">
-  <div class="panel info-panel span-all" data-page="settings" style="display:none">
-    <h2 data-i18n="info_title">Информация</h2>
-    <div class="bd">
-      <div class="info-device">
-        <span class="info-key" data-i18n="info_device">Устройство</span>
-        <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ" data-i18n-ph="info_placeholder">
-        <button class="btn primary sm" id="device_save" onclick="saveDeviceName()" style="display:none" data-i18n="save">Сохранить</button>
-      </div>
-      <div class="info-grid">
-        <div class="info-row"><span class="info-key" data-i18n="info_fw">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
-        <div class="info-row"><span class="info-key" data-i18n="info_addr">Адрес</span><span class="info-val" id="info_addr">—</span></div>
-        <div class="info-row"><span class="info-key" data-i18n="info_state">Состояние</span><span class="info-val" id="info_conn">—</span></div>
-      </div>
-    </div>
-  </div>
-
   <div class="set-side">
   <nav class="set-nav" data-page="settings" style="display:none" aria-label="Разделы настроек" data-i18n-aria="set_nav_aria">
+    <div class="set-group" data-i18n="info_title">Информация</div>
+    <button class="set-item" data-target="panel_info" onclick="showSetting('panel_info')" data-i18n="info_device">Устройство</button>
     <div class="set-group" data-i18n="grp_motion">Движение</div>
     <button class="set-item" data-target="panel_bemf" onclick="showSetting('panel_bemf')" data-i18n="nav_bemf">Калибровка BEMF</button>
+    <button class="set-item" data-target="panel_mode" onclick="showSetting('panel_mode')" data-i18n="nav_mode">Режим управления</button>
     <div class="set-group" data-i18n="grp_sound">Звук</div>
     <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')" data-i18n="nav_snd">Загрузка звуков</button>
-    <button class="set-item" data-target="panel_blocks" onclick="showSetting('panel_blocks')" data-i18n="nav_blocks">Конструктор блоков</button>
+    <button class="set-item" data-target="panel_blocks" onclick="showSetting('panel_blocks')" data-i18n="nav_blocks">Конструктор звуков</button>
     <div class="set-group" data-i18n="grp_settings">Настройки</div>
     <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')" data-i18n="nav_cv">CV</button>
     <button class="set-item" data-target="panel_wifi" onclick="showSetting('panel_wifi')" data-i18n="nav_wifi">Wi-Fi</button>
@@ -289,6 +301,25 @@ label{color:var(--text);font-weight:600}
   </div>
 
   <div class="set-body">
+
+  <div class="panel info-panel" data-page="settings" style="display:none" id="panel_info">
+    <div class="panel-hd" id="hd_info" onclick="togglePanel('info')">
+      <h2 data-i18n="info_title">Информация</h2>
+      <span class="chev" id="chev_info">▸</span>
+    </div>
+    <div class="bd" id="bd_info" style="display:none">
+      <div class="info-device">
+        <span class="info-key" data-i18n="info_device">Устройство</span>
+        <input id="device_name" type="text" maxlength="32" placeholder="ТЕПЛОВОЗ" data-i18n-ph="info_placeholder">
+        <button class="btn primary sm" id="device_save" onclick="saveDeviceName()" style="display:none" data-i18n="save">Сохранить</button>
+      </div>
+      <div class="info-grid">
+        <div class="info-row"><span class="info-key" data-i18n="info_fw">Версия прошивки</span><span class="info-val" id="info_version">—</span></div>
+        <div class="info-row"><span class="info-key" data-i18n="info_addr">Адрес</span><span class="info-val" id="info_addr">—</span></div>
+        <div class="info-row"><span class="info-key" data-i18n="info_state">Состояние</span><span class="info-val" id="info_conn">—</span></div>
+      </div>
+    </div>
+  </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_bemf">
     <div class="panel-hd" id="hd_bemf" onclick="togglePanel('bemf')">
@@ -312,31 +343,58 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
+  <div class="panel" data-page="settings" style="display:none" id="panel_mode">
+    <div class="panel-hd" id="hd_mode" onclick="togglePanel('mode')">
+      <h2 data-i18n="nav_mode">Режим управления</h2>
+      <span class="chev" id="chev_mode">▸</span>
+    </div>
+    <div class="bd" id="bd_mode" style="display:none">
+      <div class="seg" style="margin-bottom:8px">
+        <button class="btn" id="mode_dcc" onclick="setMode('dcc')">DCC</button>
+        <button class="btn" id="mode_dc" onclick="setMode('dc')">DC</button>
+      </div>
+      <div class="hint" data-i18n="mode_hint">DCC — цифровое управление с рельс. DC — управление от напряжения на рельсах.</div>
+    </div>
+  </div>
+
   <div class="panel" data-page="settings" style="display:none" id="panel_snd">
     <div class="panel-hd" id="hd_snd" onclick="togglePanel('snd')">
       <h2 data-i18n="snd_title">Загрузка звуков</h2>
       <span class="chev" id="chev_snd">▸</span>
     </div>
     <div class="bd" id="bd_snd" style="display:none">
-      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;grid-column:1/-1">
         <span class="chip" id="free_space" data-i18n="free_space_idle">Свободно: —</span>
-        <div style="display:flex;gap:8px">
-          <button class="btn sm ghost" onclick="loadTracks()" data-i18n="refresh">Обновить</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label class="btn sm primary" for="pack_file" data-i18n="upload_pack">Загрузить звуковой пакет</label>
+          <input type="file" id="pack_file" accept=".asp" onchange="uploadPack(this)" style="display:none">
+          <button class="btn sm ghost" onclick="loadLibrary()" data-i18n="refresh">Обновить</button>
           <button class="btn sm danger" onclick="stopAudio()" data-i18n="stop">■ Стоп</button>
         </div>
       </div>
-      <div class="s-grid" id="sound_grid" style="margin-top:12px"></div>
+      <div class="row" style="justify-content:flex-start;margin-bottom:8px;gap:8px;flex-wrap:wrap;grid-column:1/-1">
+        <label class="hint" style="display:flex;align-items:center;gap:6px">
+          <span data-i18n="play_target">Воспроизведение:</span>
+          <select id="play_target" onchange="setPlayTarget(this.value)" style="width:auto">
+            <option value="pc" data-i18n="play_pc">На компьютере</option>
+            <option value="decoder" data-i18n="play_decoder">На декодере</option>
+          </select>
+        </label>
+      </div>
+      <div class="up-bar" id="pack_bar" style="margin-bottom:6px;grid-column:1/-1"><i id="packbar"></i></div>
+      <div class="up-meta" id="pack_meta" style="grid-column:1/-1"></div>
+      <div class="lib" id="sound_lib" style="grid-column:1/-1"></div>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_blocks">
     <div class="panel-hd" id="hd_blocks" onclick="togglePanel('blocks')">
-      <h2 data-i18n="blocks_title">Конструктор блоков (простой)</h2>
+      <h2 data-i18n="blocks_title">Конструктор звуков</h2>
       <span class="chev" id="chev_blocks">▸</span>
     </div>
     <div class="bd" id="bd_blocks" style="display:none">
-      <div class="hint" style="margin-bottom:10px" data-i18n="blocks_hint">Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.</div>
-      <button class="btn sm" onclick="window.open('/sound-editor/blocks.html?lang='+lang,'_blank')" data-i18n="blocks_open">Открыть конструктор блоков</button>
+      <div class="hint" style="margin-bottom:10px;grid-column:1/-1" data-i18n="blocks_hint">Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.</div>
+      <button class="btn sm" onclick="window.open('/sound-editor/blocks.html?lang='+lang,'_blank')" data-i18n="blocks_open">Открыть конструктор звуков</button>
     </div>
   </div>
 
@@ -346,16 +404,16 @@ label{color:var(--text);font-weight:600}
       <span class="chev" id="chev_cv">▸</span>
     </div>
     <div class="bd" id="bd_cv" style="display:none">
-      <div class="cv-quick">
+      <div class="cv-quick" style="grid-column:1/-1">
         <div class="field"><label data-i18n="cv_num">Номер CV</label><input id="cv_quick_index" type="number" min="1" max="1024" value="1" oninput="jumpToCv()"></div>
         <div class="field"><label data-i18n="cv_value">Значение</label><input id="cv_quick_value" type="number" min="0" max="255" value="0" oninput="setActiveValue(this.value)"></div>
         <button class="btn sm ghost" onclick="stepCv(-1)">◀</button>
         <button class="btn sm ghost" onclick="stepCv(1)">▶</button>
         <button class="btn primary" onclick="writeActiveCv()" data-i18n="cv_write">Записать</button>
       </div>
-      <div class="muted" id="cv_active_name" style="margin-bottom:8px">CV 1</div>
-      <div class="cv-list" id="cv_list"></div>
-      <div class="row" style="margin-top:12px">
+      <div class="muted" id="cv_active_name" style="margin-bottom:8px;grid-column:1/-1">CV 1</div>
+      <div class="cv-list" id="cv_list" style="grid-column:1/-1"></div>
+      <div class="row" style="margin-top:12px;grid-column:1/-1">
         <button class="btn danger" onclick="cvFactoryReset()" data-i18n="cv_factory">К заводским параметрам CV</button>
       </div>
     </div>
@@ -372,7 +430,7 @@ label{color:var(--text);font-weight:600}
       <div class="field"><label data-i18n="wifi_pw">Новый пароль точки доступа (≥8 символов)</label><input id="wifi_ap_password" type="password" placeholder="пусто = оставить текущий пароль" data-i18n-ph="wifi_pw_ph"></div>
       <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_clear_password" style="width:auto"><span data-i18n="wifi_clear_pw">Удалить пароль и открыть сеть</span></label></div>
       <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_auto_off" style="width:auto"><span data-i18n="wifi_auto_off">Автовыключение WiFi через 3 минуты без подключения</span></label></div>
-      <div class="row" style="margin-top:10px">
+      <div class="row" style="margin-top:10px;grid-column:1/-1">
         <button class="btn primary" onclick="saveWifi()" data-i18n="wifi_save">Сохранить и перезагрузить</button>
         <button class="btn danger" onclick="resetWifi()" data-i18n="wifi_reset">Сброс настроек</button>
       </div>
@@ -385,13 +443,13 @@ label{color:var(--text);font-weight:600}
       <span class="chev" id="chev_ota">▸</span>
     </div>
     <div class="bd" id="bd_ota" style="display:none">
-      <div class="ota-row">
+      <div class="ota-row" style="grid-column:1/-1">
         <label class="btn ghost" for="ota_file" data-i18n="ota_pick">Выбрать bin файл и прошить</label>
         <input type="file" id="ota_file" accept=".bin" onchange="uploadOta(this)" style="display:none">
         <span class="hint" id="ota_hint" data-i18n="ota_hint">Прошивка или комбинированный файл «прошивка + звуки»</span>
       </div>
-      <div class="up-bar" id="ota_bar" style="margin-top:8px"><i id="otabar"></i></div>
-      <div class="up-meta" id="ota_meta"></div>
+      <div class="up-bar" id="ota_bar" style="margin-top:8px;grid-column:1/-1"><i id="otabar"></i></div>
+      <div class="up-meta" id="ota_meta" style="grid-column:1/-1"></div>
     </div>
   </div>
 
@@ -404,17 +462,17 @@ label{color:var(--text);font-weight:600}
       <div class="row">
         <button class="btn danger" id="factory_reset_btn" onclick="factoryReset()" data-i18n="base_reset">Сброс к заводским</button>
       </div>
-      <div class="hint" style="margin-top:6px" data-i18n="base_hint">Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.</div>
+      <div class="hint" style="margin-top:6px;grid-column:1/-1" data-i18n="base_hint">Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.</div>
     </div>
   </div>
 
   <div class="panel" data-page="settings" style="display:none" id="panel_log">
     <h2 data-i18n="log_title">Журнал</h2>
     <div class="bd">
-      <div class="row" style="justify-content:flex-end;margin-bottom:6px">
+      <div class="row" style="justify-content:flex-end;margin-bottom:6px;grid-column:1/-1">
         <button class="btn sm ghost" onclick="clearLog()" data-i18n="log_clear">Очистить</button>
       </div>
-      <div class="log" id="app_log"></div>
+      <div class="log" id="app_log" style="grid-column:1/-1"></div>
     </div>
   </div>
   </div>
@@ -468,7 +526,7 @@ offline_banner:'⚠ Нет связи с устройством. Проверь�
 theme_title:'Светлая / тёмная тема',theme_aria:'Переключить тему',
 lang_aria:'Переключить язык',lang_title:'Переключить на английский',
 ctrl_via:'Управление через',src_rails:'Рельсы',src_web:'Веб',
-ctrl_dc:'DC — аналоговое управление',
+ctrl_dc:'DC — аналоговое управление',ctrl_mode:'Режим',mode_hint:'DCC — цифровое управление с рельс. DC — управление от напряжения на рельсах.',
 ctrl_hint_default:'Управление скоростью и функциями — с выбранного источника.',
 ctrl_title:'Управление',ctrl_speed:'Скорость',
 ctrl_back:'◀ Назад',ctrl_stop:'■ Стоп',ctrl_emergency:'⛔ Экстренный Стоп',ctrl_fwd:'Вперёд ▶',
@@ -477,7 +535,7 @@ hint_rails:'Управление — с рельс. По умолчанию ре
 info_title:'Информация',info_device:'Устройство',info_placeholder:'ТЕПЛОВОЗ',save:'Сохранить',
 info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Состояние',
 set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Звук',grp_settings:'Настройки',grp_service:'Сервис',
-nav_bemf:'Калибровка BEMF',nav_snd:'Загрузка звуков',nav_blocks:'Конструктор блоков',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
+nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Загрузка звуков',nav_blocks:'Конструктор звуков',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
 bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',
 bemf_status_idle:'Статус: —',
@@ -490,12 +548,13 @@ bemf_unknown:'Статус калибровки неизвестен: связь
 bemf_step:'Калибровка: шаг ',bemf_step_of:' из ',
 bemf_confirm_clear:'Сбросить сохранённую калибровку BEMF?',
 snd_title:'Загрузка звуков',free_prefix:'Свободно: ',free_space_idle:'Свободно: —',refresh:'Обновить',stop:'■ Стоп',
+upload_pack:'Загрузить звуковой пакет',pack_confirm:'Загрузить звуковой пакет? ВСЕ текущие звуки на устройстве будут удалены и заменены.',pack_uploading:'пакет ',pack_done:'пакет загружен, звуков: ',pack_empty:'на устройстве нет звуков',lib_play:'Воспроизвести',play_target:'Воспроизведение:',play_pc:'На компьютере',play_decoder:'На декодере',pack_bad_ext:'нужен файл .asp: ',size_col:'Размер',
 slot_prefix:'Слот ',cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
 cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
 upload_wav:'Загрузить WAV',del_track_title:'Удалить трек',
-blocks_title:'Конструктор блоков (простой)',
+blocks_title:'Конструктор звуков',
 blocks_hint:'Сборка звуковой схемы из готовых блоков тепловоза: двигатель, гудок, тифон, звонок, компрессор, сцепка и другие. Блоки размещаются и двигаются по холсту, файлы и F-клавиша задаются справа.',
-blocks_open:'Открыть конструктор блоков',
+blocks_open:'Открыть конструктор звуков',
 cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
@@ -531,7 +590,7 @@ offline_banner:'⚠ No connection to the device. Check the access point connecti
 theme_title:'Light / dark theme',theme_aria:'Toggle theme',
 lang_aria:'Switch language',lang_title:'Switch to Russian',
 ctrl_via:'Control via',src_rails:'Rails',src_web:'Web',
-ctrl_dc:'DC — analog control',
+ctrl_dc:'DC — analog control',ctrl_mode:'Mode',mode_hint:'DCC — digital control from the rails. DC — control by the voltage on the rails.',
 ctrl_hint_default:'Speed and function control come from the selected source.',
 ctrl_title:'Control',ctrl_speed:'Speed',
 ctrl_back:'◀ Reverse',ctrl_stop:'■ Stop',ctrl_emergency:'⛔ Emergency Stop',ctrl_fwd:'Forward ▶',
@@ -540,7 +599,7 @@ hint_rails:'Control comes from the rails. DCC by default; enable «DC» to contr
 info_title:'Information',info_device:'Device',info_placeholder:'LOCOMOTIVE',save:'Save',
 info_fw:'Firmware version',info_addr:'Address',info_state:'State',
 set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Sound',grp_settings:'Settings',grp_service:'Service',
-nav_bemf:'BEMF calibration',nav_snd:'Sound upload',nav_blocks:'Block builder',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
+nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sound upload',nav_blocks:'Sound constructor',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
 bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',
 bemf_status_idle:'Status: —',
@@ -553,12 +612,13 @@ bemf_unknown:'Calibration status unknown: connection lost',
 bemf_step:'Calibration: step ',bemf_step_of:' of ',
 bemf_confirm_clear:'Reset the stored BEMF calibration?',
 snd_title:'Sound upload',free_prefix:'Free: ',free_space_idle:'Free: —',refresh:'Refresh',stop:'■ Stop',
+upload_pack:'Upload sound pack',pack_confirm:'Upload the sound pack? ALL current sounds on the device will be deleted and replaced.',pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_empty:'no sounds on the device',lib_play:'Play',play_target:'Playback:',play_pc:'On computer',play_decoder:'On decoder',pack_bad_ext:'expected an .asp file: ',size_col:'Size',
 slot_prefix:'Slot ',cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
 cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
 upload_wav:'Upload WAV',del_track_title:'Delete track',
-blocks_title:'Block builder (simple)',
+blocks_title:'Sound constructor',
 blocks_hint:'Build a sound graph from ready locomotive blocks: engine, horn, whistle, bell, compressor, coupling and more. Blocks are placed and moved on the canvas; files and the F-key are set on the right.',
-blocks_open:'Open block builder',
+blocks_open:'Open sound constructor',
 cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
@@ -608,7 +668,8 @@ function applyLangStatic(){
 }
 function updateConnectionText(){
   var txt=t(isOffline?'conn_offline':'conn_online');
-  setText('connection',txt);
+  var dot=byId('link_dot');
+  if(dot&&dot.setAttribute)dot.setAttribute('title',txt);
   setText('info_conn',txt);
 }
 /* Re-translate everything that is generated by script (the static attributes
@@ -619,8 +680,8 @@ function applyLang(){
   if(typeof renderControlSource==='function')renderControlSource();
   if(typeof renderFunctions==='function')renderFunctions();
   if(typeof renderMode==='function')renderMode();
-  lastSlotsSig='';
-  if(typeof renderSlots==='function')renderSlots();
+  lastLibSig='';
+  if(typeof renderLibrary==='function')renderLibrary();
   if(typeof renderCvList==='function')renderCvList();
   if(typeof setActiveCaption==='function')setActiveCaption(activeCv);
   if(typeof renderUptime==='function')renderUptime();
@@ -870,17 +931,12 @@ async function setMode(mode){
   }catch(e){log(t('tag_mode'),t('err_prefix')+e.message);}
   renderMode();
 }
-function toggleMode(){
-  var cb=byId('mode_dc');
-  if(!cb||cb.disabled)return;
-  setMode(cb.checked?'dc':'dcc');
-}
 function renderMode(){
-  var cb=byId('mode_dc');
-  if(!cb)return;
   var dc=state.mode==='dc';
-  if(document.activeElement!==cb)cb.checked=dc;
-  cb.disabled=state.control_source!=='rails';
+  var b1=byId('mode_dcc'),b2=byId('mode_dc');
+  var locked=state.control_source!=='rails';
+  if(b1){b1.classList.toggle('active',!dc);b1.disabled=locked;}
+  if(b2){b2.classList.toggle('active',dc);b2.disabled=locked;}
 }
 
 /* bemf calibration */
@@ -1106,100 +1162,111 @@ function toggleFn(fn){
     .catch(function(e){state.fnStates[fn]=!next;renderFunctions();log(t('tag_fn'),t('err_prefix')+e.message);});
 }
 
-/* volume levels now live in the block editor (always-present "Volume" block) */
+/* Per-file volume applies to preview playback; master volume stays global. */
 function applyAudioStatus(d){
   state.audio.playing=d.playing===true||d.playing==='true';
   state.audio.active_slot=Number(d.active_slot)||0;
-  renderSlots();
+  if(!state.audio.playing&&libPreview&&getPlayTarget()!=='pc'){libPreview='';renderLibrary();}
 }
 
-/* sound slots */
-function slotsSig(){
-  var s='';
-  for(var i=0;i<tracks.length;i++){s+=tracks[i].slot+':'+tracks[i].label+':'+tracks[i].file+';';}
-  return s+'|'+state.audio.playing+'|'+state.audio.active_slot+'|'+slotCats.join(',');
+/* ---------- sound library (installed files shown as a compact list) ---------- */
+var libFiles=[],libPreview='',lastLibSig='';
+/* Where previews play: in this browser ("pc", default) or on the decoder.
+ * Shared with the block editor via the same localStorage key. */
+var PLAY_TARGET_KEY='aura_sound_play',pcAudio=null;
+function getPlayTarget(){try{return localStorage.getItem(PLAY_TARGET_KEY)==='decoder'?'decoder':'pc';}catch(e){return 'pc';}}
+function setPlayTarget(v){
+  var v2=(v==='decoder')?'decoder':'pc';
+  try{localStorage.setItem(PLAY_TARGET_KEY,v2);}catch(e){}
+  if(v2!=='pc')stopPcAudio();
 }
-function renderSlots(){
-  var sig=slotsSig();
-  if(sig===lastSlotsSig)return;
-  lastSlotsSig=sig;
-  var grid=byId('sound_grid');if(!grid)return;
+function stopPcAudio(){if(pcAudio){try{pcAudio.pause();}catch(e){}pcAudio=null;}}
+function libVolOf(name){for(var i=0;i<libFiles.length;i++){if(libFiles[i].name===name)return Number(libFiles[i].vol);}return 100;}
+function playLibOnPc(name){
+  stopPcAudio();
+  try{
+    var a=new Audio('/sound-files/'+encodeURIComponent(name));
+    a.volume=Math.min(1,Math.max(0,(isNaN(libVolOf(name))?100:libVolOf(name))/100));
+    a.onended=function(){if(libPreview===name){libPreview='';lastLibSig='';renderLibrary();}};
+    pcAudio=a;
+    libPreview=name;lastLibSig='';renderLibrary();
+    var p=a.play();
+    if(p&&p.catch)p.catch(function(e){log(t('tag_sound'),'PC: '+e.message);if(libPreview===name){libPreview='';lastLibSig='';renderLibrary();}});
+  }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
+}
+function libSig(){
+  var s=state.audio.playing+'|'+libPreview+'|';
+  for(var i=0;i<libFiles.length;i++){s+=libFiles[i].name+':'+libFiles[i].vol+':'+libFiles[i].size+';';}
+  return s;
+}
+function renderLibrary(){
+  var sig=libSig();
+  if(sig===lastLibSig)return;
+  lastLibSig=sig;
+  var box=byId('sound_lib');if(!box)return;
+  if(!libFiles.length){box.innerHTML='<div class="lib-empty">'+esc(t('pack_empty'))+'</div>';return;}
   var rows=[];
-  for(var s=1;s<=SOUND_SLOTS;s++){
-    var tk=null;
-    for(var i=0;i<tracks.length;i++){if(tracks[i].slot===s){tk=tracks[i];break;}}
-    var playing=state.audio.playing&&state.audio.active_slot===s;
-    var file=tk?tk.file:'';
-    var disp=(tk&&tk.label)?localizeLabel(tk.label,s):(file?file.replace(/^audio\//,'').replace(/\.wav$/i,''):'');
-    var isEngine=(slotCats[s-1]||0)===0;
-    rows.push('<div class="slot'+(playing?' playing':'')+'">'
-      +'<div class="head"><span class="idx">'+esc(t('slot_prefix')+s)+'</span><span class="name"><span class="ni">'+esc(disp)+'</span></span></div>'
-      +'<div class="acts">'
-      +(playing?'<button class="btn sm danger" onclick="stopAudio()">■</button>':'<button class="btn sm primary" onclick="playSlot('+s+')">▶</button>')
-      +'<button class="btn sm '+(isEngine?'':'ghost')+'" title="'+esc(isEngine?t('cat_engine_title'):t('cat_effect_title'))+'" onclick="toggleSlotCat('+s+')">'+esc(isEngine?t('cat_short_engine'):t('cat_short_effect'))+'</button>'
-      +'<label class="btn sm ghost" for="file_'+s+'">'+esc(t('upload_wav'))+'</label>'
-      +'<input type="file" id="file_'+s+'" accept=".wav,audio/wav" onchange="uploadTrack('+s+',this)">'
-      +(tk?'<button class="btn x" title="'+esc(t('del_track_title'))+'" onclick="deleteTrack('+s+')">✕</button>':'')
-      +'</div>'
-      +'<div class="up-bar" id="up_'+s+'"><i id="upbar_'+s+'"></i></div>'
-      +'<div class="up-meta" id="upmeta_'+s+'"></div>'
+  for(var i=0;i<libFiles.length;i++){
+    var f=libFiles[i];
+    var playing=(libPreview===f.name);
+    var v=Number(f.vol);if(isNaN(v))v=100;
+    var sz=Number(f.size)||0;
+    var num=(i+1);var numTxt=(num<10?'0':'')+num;
+    rows.push('<div class="lib-row'+(playing?' playing':'')+'">'
+      +'<span class="idx">'+numTxt+'</span>'
+      +(playing?'<button class="btn sm danger" title="'+esc(t('stop'))+'" onclick="stopAudio()">■</button>'
+               :'<button class="btn sm primary" title="'+esc(t('lib_play'))+'" onclick="playLib('+i+')">▶</button>')
+      +'<span class="nm" title="'+esc(f.name)+'">'+esc(f.name)+'</span>'
+      +'<span class="sz" title="'+esc(t('size_col'))+'">'+(sz>0?esc(fmtBytes(sz)):'')+'</span>'
+      +'<span class="grow"></span>'
+      +'<input type="range" min="0" max="100" value="'+v+'" oninput="libVolInput('+i+',this)" onchange="libVolCommit('+i+',this)">'
+      +'<span class="vv" id="vv_'+i+'">'+v+'</span>'
       +'</div>');
   }
-  grid.innerHTML=rows.join('');
+  box.innerHTML=rows.join('');
+  if(typeof applyPanelSplit==='function')applyPanelSplit();
 }
-async function loadTracks(){
+async function loadLibrary(){
   try{
-    var d=await api('/api/audio/tracks');
+    var d=await api('/api/audio/library');
     if(!d||!d.ok)throw new Error(t('load_failed'));
-    tracks=d.tracks||[];
-    if(d.cats&&d.cats.length)slotCats=d.cats;
-    renderSlots();
+    libFiles=d.files||[];
+    libPreview=d.preview||'';
+    lastLibSig='';
+    renderLibrary();
   }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
 }
-async function toggleSlotCat(slot){
-  var cur=(slotCats[slot-1]||0);
-  var next=cur===0?1:0;
+async function playLib(i){
+  var f=libFiles[i];if(!f)return;
+  if(libPreview===f.name){stopAudio();return;}
+  if(getPlayTarget()==='pc'){playLibOnPc(f.name);log(t('tag_sound'),'▶ '+f.name+' (PC)');return;}
+  stopPcAudio();
   try{
-    var d=await api('/api/track/category?slot='+slot+'&cat='+next,{method:'POST'});
-    if(!d||!d.ok)throw new Error(t('failed'));
-    slotCats[slot-1]=next;
-    renderSlots();
-    log(t('tag_sound'),t('slot_prefix')+slot+': '+(next===0?t('cat_engine'):t('cat_effects')));
-  }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
-}
-async function playSlot(s){
-  if(state.audio.playing&&state.audio.active_slot===s){stopAudio();return;}
-  try{
-    var d=await api('/api/audio/play?slot='+s,{method:'POST'});
+    var d=await api('/api/audio/play?name='+encodeURIComponent(f.name),{method:'POST'});
     if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    log(t('tag_sound'),'Play #'+s+' '+t('started'));
-    refreshStatus();
-  }catch(e){log(t('tag_sound'),'Play #'+s+': '+e.message);}
+    libPreview=f.name;lastLibSig='';renderLibrary();
+    log(t('tag_sound'),'▶ '+f.name);
+  }catch(e){log(t('tag_sound'),'▶ '+f.name+': '+e.message);}
+}
+function libVolInput(i,el){var v=byId('vv_'+i);if(v)v.textContent=el.value;}
+async function libVolCommit(i,el){
+  var f=libFiles[i];if(!f)return;
+  var vol=Number(el.value)||0;f.vol=vol;lastLibSig='';
+  try{
+    var d=await api('/api/audio/library/volume?name='+encodeURIComponent(f.name)+'&vol='+vol,{method:'POST'});
+    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
+  }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
 }
 async function stopAudio(){
+  stopPcAudio();
   try{
     var d=await api('/api/audio/stop',{method:'POST'});
-    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    log(t('tag_sound'),t('stopped'));
-    refreshStatus();
-  }catch(e){log(t('tag_sound'),t('stop')+': '+e.message);}
-}
-async function deleteTrack(slot){
-  if(!confirm(t('del_confirm_a')+slot+t('del_confirm_b')))return;
-  try{
-    var d=await api('/api/audio/delete?slot='+slot,{method:'POST'});
-    if(!d||!d.ok)throw new Error('err '+(d&&d.error));
-    log(t('tag_sound'),t('slot_deleted_a')+slot+t('slot_deleted_b'));
-    var nt=[];
-    for(var i=0;i<tracks.length;i++){if(tracks[i].slot!==slot)nt.push(tracks[i]);}
-    tracks=nt;
-    renderSlots();
-    loadTracks();
-    loadFreeSpace();
-  }catch(e){log(t('tag_sound'),t('deletion_slot')+slot+': '+e.message);}
+    if(d&&d.ok){}
+  }catch(e){}
+  libPreview='';lastLibSig='';renderLibrary();
 }
 /* audio upload */
-var upPollTimer=null,upPollBusy=false,upServerOk=false,upStarted=0,upSlot=0,upOta=false;
+var upPollTimer=null,upPollBusy=false,upServerOk=false,upStarted=0,upSlot=0,upOta=false,upPack=false;
 var uploadBusy=false;
 function stopUpPoll(){if(upPollTimer){clearInterval(upPollTimer);upPollTimer=null;}}
 function startUpPoll(){
@@ -1223,6 +1290,11 @@ function startUpPoll(){
           if(ob)ob.style.width=pct+'%';
           setText('ota_meta',t('written')+d.received+t('of')+d.total+t('bytes_suffix')+' · '+speed+' '+t('kb_per_s'));
           upServerOk=true;
+        }else if(upPack){
+          var pb=byId('packbar');
+          if(pb)pb.style.width=pct+'%';
+          setText('pack_meta',t('written')+d.received+t('of')+d.total+t('bytes_suffix')+' · '+speed+' '+t('kb_per_s'));
+          upServerOk=true;
         }else{
           var barIn=byId('upbar_'+upSlot),meta=byId('upmeta_'+upSlot);
           if(!barIn||!meta)return;
@@ -1235,28 +1307,29 @@ function startUpPoll(){
       .then(function(){upPollBusy=false;});
   },400);
 }
-function uploadTrack(slot,input){
+function uploadPack(input){
   var file=input.files&&input.files[0];
   if(!file)return;
+  /* Only .asp containers, within the device limit (15 MB). */
+  if(!/\.asp$/i.test(String(file.name||''))){log(t('tag_upload'),t('err_prefix')+t('pack_bad_ext')+file.name);input.value='';return;}
+  if(!file.size||file.size>15*1024*1024){log(t('tag_upload'),t('err_prefix')+t('file_gt')+'15 '+t('unit_mb'));input.value='';return;}
   if(uploadBusy){log(t('tag_upload'),t('upload_busy'));input.value='';return;}
-  var label=t('slot_prefix')+slot;
-  if(file.size>2*1024*1024){log(t('tag_sound'),t('file_gt')+'2 '+t('unit_mb')+': '+file.name);input.value='';return;}
+  if(!confirm(t('pack_confirm'))){input.value='';return;}
   uploadBusy=true;
-  var bar=byId('up_'+slot),barIn=byId('upbar_'+slot),meta=byId('upmeta_'+slot);
+  var bar=byId('pack_bar'),barIn=byId('packbar'),meta=byId('pack_meta');
   bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
   meta.textContent=t('written')+'0'+t('of')+file.size+t('bytes_suffix')+' · 0 '+t('kb_per_s');
-  log(t('tag_upload'),t('slot_prefix')+slot+': '+file.name+' ('+file.size+t('bytes_suffix')+')');
+  log(t('tag_upload'),t('pack_uploading')+file.name+' ('+file.size+t('bytes_suffix')+')');
   var started=Date.now();
   stopStatusPoll();
   stopHeartbeat();
-  upSlot=slot;upOta=false;upStarted=Date.now();startUpPoll();
+  upOta=false;upPack=true;upStarted=Date.now();startUpPoll();
   var xhr=new XMLHttpRequest();
-  xhr.open('POST','/api/audio/upload?slot='+slot+'&enabled=1',true);
-  xhr.timeout=300000;
-  xhr.setRequestHeader('X-File-Name',encodeURIComponent(file.name));
-  xhr.setRequestHeader('X-Label',encodeURIComponent(label));
+  xhr.open('POST','/api/audio/pack',true);
+  xhr.timeout=600000;
   function finishUp(){
     uploadBusy=false;
+    upPack=false;
     stopUpPoll();
     startStatusPoll();startHeartbeat();refreshStatus();
     loadFreeSpace();
@@ -1267,29 +1340,18 @@ function uploadTrack(slot,input){
     var ok=xhr.status===200&&res&&res.ok;
     bar.style.display='none';meta.style.display='none';
     finishUp();
+    input.value='';
     if(ok){
-      log(t('tag_upload'),t('done')+file.name+t('in_seconds')+Math.round((Date.now()-started)/1000)+t('sec_suffix'));
-      input.value='';
-      var upFile=res&&res.file?res.file:('audio/'+file.name);
-      var upLabel=res&&res.label?res.label:label;
-      /* The server response is authoritative: drop any stale entry for this
-         slot (a leftover duplicate would keep the old name visible) and add
-         the fresh one, then re-sync with the board. */
-      var nt=[];
-      for(var i=0;i<tracks.length;i++){if(tracks[i].slot!==slot)nt.push(tracks[i]);}
-      nt.push({slot:slot,file:upFile,label:upLabel,enabled:true});
-      tracks=nt;
-      renderSlots();
-      loadTracks();
+      log(t('tag_upload'),t('pack_done')+(res&&res.files!=null?res.files:0)+t('in_seconds')+Math.round((Date.now()-started)/1000)+t('sec_suffix'));
+      loadLibrary();
     }else{
-      log(t('tag_upload'),t('error_prefix')+file.name+': '+(res&&res.error?res.error:('HTTP '+xhr.status)));
-      input.value='';
+      log(t('tag_upload'),t('error_prefix')+(res&&res.error?res.error:('HTTP '+xhr.status)));
     }
   };
   xhr.onerror=function(){
     bar.style.display='none';meta.style.display='none';
     finishUp();
-    log(t('tag_upload'),t('error_prefix')+file.name+': '+t('err_network'));
+    log(t('tag_upload'),t('error_prefix')+t('err_network'));
     input.value='';
   };
   xhr.ontimeout=xhr.onabort=xhr.onerror;
@@ -1372,6 +1434,7 @@ function renderCvList(){
       +'</div></div>');
   }
   list.innerHTML=html.join('');
+  if(typeof applyPanelSplit==='function')applyPanelSplit();
 }
 function cvValueOf(index){
   if(cvValues[index]!=null)return cvValues[index];
@@ -1658,12 +1721,13 @@ function showPage(name){
 function pageFromHash(){return (location.hash||'').replace('#','')==='settings'?'settings':'control';}
 
 /* settings: on wide screens a section list switches the content pane */
-var currentSetting='panel_bemf',settingsWide=false;
+var currentSetting='panel_info',settingsWide=false;
 function isWide(){return (typeof window!=='undefined')&&Number(window.innerWidth)>=900;}
 function loadSettingData(name){
-  if(name==='snd'){loadTracks();refreshStatus();loadFreeSpace();}
+  if(name==='snd'){var pt=byId('play_target');if(pt)pt.value=getPlayTarget();loadLibrary();refreshStatus();loadFreeSpace();}
   if(name==='wifi'&&!wifiLoaded){loadWifi();}
   if(name==='bemf'){loadBemfCal();}
+  if(name==='mode'){renderMode();}
   if(name==='cv'){loadCvValues();}
 }
 function showSetting(id){
@@ -1682,11 +1746,28 @@ function applySettingVisibility(){
   }
   if(!target&&panels.length){target=panels[0];currentSetting=panels[0].id;target.classList.add('active');}
   if(target){
-    var bd=target.querySelector('.bd');if(bd)bd.style.display='block';
+    var bd=target.querySelector('.bd');if(bd)bd.style.display='';
     var hd=target.querySelector('.panel-hd');if(hd)hd.classList.add('open');
   }
   var items=document.querySelectorAll('.set-nav .set-item');
   for(var j=0;j<items.length;j++){items[j].classList.toggle('active',items[j].getAttribute('data-target')===currentSetting);}
+  applyPanelSplit();
+}
+/* Split the active block into two equal columns when its content is taller
+ * than the screen, so it fills the working zone instead of running off-screen. */
+function applyPanelSplit(){
+  if(!document.querySelector)return;
+  var pg=document.querySelector('.page[data-page=settings]');
+  if(!pg||!pg.classList.contains('md-on'))return;
+  var panel=pg.querySelector('.set-body>.panel.active');
+  if(!panel)return;
+  var bd=panel.querySelector('.bd');
+  if(!bd)return;
+  panel.classList.remove('split');
+  var rect=bd.getBoundingClientRect();
+  var vh=(typeof window!=='undefined'&&window.innerHeight)?window.innerHeight:900;
+  var avail=vh-Math.max(0,rect.top)-16;
+  if(bd.scrollHeight>avail){panel.classList.add('split');}
 }
 function applySettingsMode(){
   if(!document.querySelector)return;
@@ -1721,7 +1802,7 @@ function togglePanel(name){
   if(!bd)return;
   if(document.querySelector){var pg=document.querySelector('.page[data-page=settings]');if(pg&&pg.classList.contains('md-on'))return;}
   var show=bd.style.display==='none';
-  bd.style.display=show?'block':'none';
+  bd.style.display=show?'':'none';
   if(hd)hd.classList.toggle('open',show);
   if(show)loadSettingData(name);
 }
@@ -1732,7 +1813,7 @@ function init(){
   initTheme();
   showPage(pageFromHash());
   if(typeof addEventListener!=='undefined')addEventListener('hashchange',function(){showPage(pageFromHash());});
-  if(typeof addEventListener!=='undefined')addEventListener('resize',function(){applySettingsMode();});
+  if(typeof addEventListener!=='undefined')addEventListener('resize',function(){applySettingsMode();applyPanelSplit();});
   byId('device_name').addEventListener('input',onDeviceNameInput);
   renderCvList();
   setActiveCv(1);
@@ -1741,22 +1822,11 @@ function init(){
   renderMode();
   loadDevice();
   loadWifi();
-  loadTrackList();
+  loadLibrary();
   loadBemfCal();
   refreshStatus();
   startStatusPoll();
   startHeartbeat();
-}
-/* Load the track list once at startup so the sound grid and the function-map
- * sound names are populated even before/without opening the sounds panel. */
-function loadTrackList(){
-  api('/api/audio/tracks').then(function(d){
-    if(d&&d.ok){
-      tracks=d.tracks||[];
-      if(d.cats&&d.cats.length)slotCats=d.cats;
-      renderSlots();
-    }
-  }).catch(function(e){log(t('tag_sound'),t('err_prefix')+e.message);});
 }
 init();
 </script>

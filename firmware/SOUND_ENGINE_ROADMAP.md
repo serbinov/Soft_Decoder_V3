@@ -489,8 +489,8 @@ python tools\gen_web_html.py
 
 ## R5. ✅ REST и веб-интерфейс
 
-> Дизайн-макеты, компоненты, адаптивность и JS-структура — `SOUND_ENGINE_WEB_DESIGN.md`.
-> Шаги ниже реализуют этот дизайн.
+> Авторинг звуковой схемы — конструктор звуков `/sound-editor/blocks.html`
+> (`docs/sound_blocks_editor.md`). Шаги ниже описывают эту реализацию.
 
 - [x] **R5.0. Поднять лимит маршрутов.**
   Файлы: `components/web/src/web.c`.

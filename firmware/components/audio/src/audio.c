@@ -13,6 +13,7 @@
 
 #include "pinmap.h"
 #include "storage.h"
+#include "ima_adpcm.h"
 
 static const char *TAG = "audio";
 
@@ -49,6 +50,14 @@ typedef struct {
     uint32_t size;
 } wav_chunk_t;
 
+/* Base WAV fmt (16 bytes). ADPCM keeps this struct 16 bytes so a single read
+ * matches the format chunk; the IMA extras live beside it. */
+typedef struct {
+    wav_fmt_t fmt;
+    bool adpcm;
+    uint16_t samples_per_block;
+} wav_info_t;
+
 typedef struct {
     bool active;
     FILE *f;
@@ -70,6 +79,11 @@ typedef struct {
     bool stopping;          /* fading out towards silence, then close */
     bool storage_lease;
     bool io_failed;
+    /* IMA ADPCM: decoded block cache (mono). PCM voices never touch it. */
+    bool adpcm;
+    uint32_t dbuf_len;
+    uint32_t dbuf_pos;
+    int16_t dbuf[IMA_ADPCM_SAMPLES_PER_BLOCK];
 } voice_state_t;
 
 typedef struct {
@@ -210,8 +224,9 @@ fail:
 }
 
 /* Validate the complete RIFF chunk walk, including payload bounds and padding,
- * before either accepting an upload or opening a mixer voice. */
-static bool wav_parse(FILE *f, wav_fmt_t *fmt, uint32_t *data_start, uint32_t *data_len)
+ * before either accepting an upload or opening a mixer voice. Accepts PCM16
+ * (1..2 ch) and mono IMA ADPCM (WAVE_FORMAT_IMA_ADPCM). */
+static bool wav_parse(FILE *f, wav_info_t *info, uint32_t *data_start, uint32_t *data_len)
 {
     if (fseek(f, 0, SEEK_END) != 0) { return false; }
     long file_len = ftell(f);
@@ -224,6 +239,8 @@ static bool wav_parse(FILE *f, wav_fmt_t *fmt, uint32_t *data_start, uint32_t *d
     uint64_t end = (uint64_t)riff.size + 8U;
     uint64_t pos = 12;
     bool has_fmt = false, has_data = false;
+    info->adpcm = false;
+    info->samples_per_block = 0;
     while (pos < end) {
         wav_chunk_t ch;
         if (end - pos < sizeof(ch) || fread(&ch, 1, sizeof(ch), f) != sizeof(ch)) {
@@ -233,13 +250,30 @@ static bool wav_parse(FILE *f, wav_fmt_t *fmt, uint32_t *data_start, uint32_t *d
         uint64_t next = pos + ch.size + (ch.size & 1U);
         if (next > end) { return false; }
         if (!memcmp(ch.id, "fmt ", 4)) {
+            wav_fmt_t *fmt = &info->fmt;
             if (has_fmt || ch.size < sizeof(*fmt) ||
                 fread(fmt, 1, sizeof(*fmt), f) != sizeof(*fmt)) { return false; }
-            if (fmt->format != 1 || fmt->bits_per_sample != 16 ||
-                fmt->channels < 1 || fmt->channels > 2 ||
-                fmt->sample_rate == 0 || fmt->sample_rate > 192000 ||
-                fmt->block_align != 2U * fmt->channels ||
-                fmt->byte_rate != fmt->sample_rate * fmt->block_align) { return false; }
+            if (fmt->format == 1) {
+                if (fmt->bits_per_sample != 16 ||
+                    fmt->channels < 1 || fmt->channels > 2 ||
+                    fmt->sample_rate == 0 || fmt->sample_rate > 192000 ||
+                    fmt->block_align != 2U * fmt->channels ||
+                    fmt->byte_rate != fmt->sample_rate * fmt->block_align) { return false; }
+            } else if (fmt->format == 0x0011U) { /* WAVE_FORMAT_IMA_ADPCM */
+                if (ch.size < 20U) { return false; }
+                uint8_t ext[4];
+                if (fread(ext, 1, sizeof(ext), f) != sizeof(ext)) { return false; }
+                uint16_t cb_size = (uint16_t)(ext[0] | (ext[1] << 8));
+                uint16_t spb = (uint16_t)(ext[2] | (ext[3] << 8));
+                if (cb_size < 2U || fmt->channels != 1U || fmt->bits_per_sample != IMA_ADPCM_BITS ||
+                    fmt->block_align != IMA_ADPCM_BLOCK_ALIGN ||
+                    spb != IMA_ADPCM_SAMPLES_PER_BLOCK ||
+                    fmt->sample_rate == 0 || fmt->sample_rate > 192000) { return false; }
+                info->adpcm = true;
+                info->samples_per_block = spb;
+            } else {
+                return false;
+            }
             has_fmt = true;
         } else if (!memcmp(ch.id, "data", 4)) {
             if (has_data) { return false; }
@@ -250,8 +284,9 @@ static bool wav_parse(FILE *f, wav_fmt_t *fmt, uint32_t *data_start, uint32_t *d
         if (fseek(f, (long)next, SEEK_SET) != 0) { return false; }
         pos = next;
     }
-    return has_fmt && has_data && *data_len >= 2U * fmt->block_align &&
-           *data_len % fmt->block_align == 0;
+    uint32_t frame = info->adpcm ? (uint32_t)IMA_ADPCM_BLOCK_ALIGN : info->fmt.block_align;
+    if (!has_fmt || !has_data || *data_len < frame || *data_len % frame != 0U) { return false; }
+    return true;
 }
 
 static esp_err_t validate_wav_file(const char *path, bool allow_inhibited)
@@ -270,9 +305,9 @@ static esp_err_t validate_wav_file(const char *path, bool allow_inhibited)
     ++s_validate_work;
     if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
     FILE *f = fopen(path, "rb");
-    wav_fmt_t fmt;
+    wav_info_t info;
     uint32_t start, len;
-    bool valid = f != NULL && wav_parse(f, &fmt, &start, &len);
+    bool valid = f != NULL && wav_parse(f, &info, &start, &len);
     if (f != NULL) { fclose(f); }
     storage_access_end();
     if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
@@ -291,6 +326,24 @@ esp_err_t audio_inspect_wav(const char *path)
     return validate_wav_file(path, true);
 }
 
+/* Decode one ADPCM block into the voice's sample cache. */
+static bool voice_read_block(voice_state_t *st)
+{
+    uint8_t raw[IMA_ADPCM_BLOCK_ALIGN];
+    if (fread(raw, 1, sizeof(raw), st->f) != sizeof(raw)) {
+        st->io_failed = true;
+        return false;
+    }
+    int cnt = ima_adpcm_decode_block(raw, sizeof(raw), st->dbuf, IMA_ADPCM_SAMPLES_PER_BLOCK);
+    if (cnt <= 0) {
+        st->io_failed = true;
+        return false;
+    }
+    st->dbuf_len = (uint32_t)cnt;
+    st->dbuf_pos = 0;
+    return true;
+}
+
 /* Read the next mono source sample (downmixed), honouring loop/EOF. */
 static bool voice_next_sample(voice_state_t *st, int16_t *out)
 {
@@ -299,11 +352,20 @@ static bool voice_next_sample(voice_state_t *st, int16_t *out)
             if (st->loop && st->samples_total > 0U) {
                 if (fseek(st->f, (long)st->data_start, SEEK_SET) != 0) { st->io_failed = true; return false; }
                 st->samples_left = st->samples_total;
+                st->dbuf_len = 0;
+                st->dbuf_pos = 0;
                 continue;
             }
             return false;
         }
         st->samples_left--;
+        if (st->adpcm) {
+            if (st->dbuf_pos >= st->dbuf_len) {
+                if (!voice_read_block(st)) { return false; }
+            }
+            *out = st->dbuf[st->dbuf_pos++];
+            return true;
+        }
         if (st->channels == 1U) {
             int16_t l;
             if (fread(&l, 2, 1, st->f) != 1) {
@@ -407,15 +469,17 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     st->storage_lease = true;
     if (setvbuf(f, NULL, _IOFBF, VOICE_IO_BUF) != 0) { (void)setvbuf(f, NULL, _IONBF, 0); }
 
-    wav_fmt_t fmt;
+    wav_info_t info;
     uint32_t data_start = 0;
     uint32_t data_len = 0;
-    if (!wav_parse(f, &fmt, &data_start, &data_len)) {
+    if (!wav_parse(f, &info, &data_start, &data_len)) {
         voice_close(st);
         return ESP_FAIL;
     }
 
-    uint32_t samples_total = data_len / fmt.block_align;
+    uint32_t samples_total = info.adpcm
+        ? (data_len / IMA_ADPCM_BLOCK_ALIGN) * IMA_ADPCM_SAMPLES_PER_BLOCK
+        : data_len / info.fmt.block_align;
     if (samples_total < 2U) {
         voice_close(st);
         return ESP_FAIL;
@@ -428,11 +492,14 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
 
     if (fseek(f, (long)data_start, SEEK_SET) != 0) { voice_close(st); return ESP_FAIL; }
     st->f = f;
-    st->sample_rate = fmt.sample_rate;
-    st->channels = fmt.channels;
+    st->sample_rate = info.fmt.sample_rate;
+    st->channels = info.fmt.channels;
     st->data_start = data_start;
     st->samples_total = samples_total;
     st->samples_left = samples_total;
+    st->adpcm = info.adpcm;
+    st->dbuf_len = 0;
+    st->dbuf_pos = 0;
     st->loop = loop;
     st->volume = volume > 100U ? 100U : volume;
     st->pos = 0.0;

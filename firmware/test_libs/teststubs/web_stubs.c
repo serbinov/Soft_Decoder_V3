@@ -1105,6 +1105,8 @@ bool mock_audio_quiescent = true;
 audio_voice_state_t mock_audio_owned_state[AUDIO_MAX_VOICES];
 uint32_t mock_audio_owned_generation[AUDIO_MAX_VOICES];
 bool mock_audio_owned_busy[AUDIO_MAX_VOICES];
+int mock_audio_live_volume_calls = 0;
+uint8_t mock_audio_live_volume = 0;
 
 esp_err_t audio_set_inhibited(bool inhibited)
 {
@@ -1171,6 +1173,14 @@ void audio_voice_release_owned(audio_voice_handle_t handle)
         mock_audio_owned_state[handle.voice] = AUDIO_VOICE_FINISHED;
         ++mock_audio_owned_generation[handle.voice];
     }
+}
+
+esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume)
+{
+    if (voice >= AUDIO_MAX_VOICES) { return ESP_ERR_INVALID_ARG; }
+    mock_audio_live_volume = volume;
+    mock_audio_live_volume_calls++;
+    return ESP_OK;
 }
 
 esp_err_t audio_validate_wav(const char *path)
@@ -1510,7 +1520,7 @@ void dcc_reload_config(void)
 /* Graph transport tests use the real parser with scripted durable/runtime I/O. */
 const unsigned char mock_editor_gzip[] = {0x1f, 0x8b, 0x08};
 const sound_editor_asset_t sound_editor_assets[] = {
-    {"/sound-editor/index.html", "text/html; charset=utf-8", mock_editor_gzip, 3, false},
+    {"/sound-editor/blocks.html", "text/html; charset=utf-8", mock_editor_gzip, 3, false},
     {"/sound-editor/assets/editor-ab12.js", "text/javascript; charset=utf-8", mock_editor_gzip, 3, true},
     {"/sound-editor/assets/editor-ab12.css", "text/css; charset=utf-8", mock_editor_gzip, 3, true},
     {"/sound-editor/THIRD_PARTY_NOTICES.txt", "text/plain; charset=utf-8", mock_editor_gzip, 3, false}

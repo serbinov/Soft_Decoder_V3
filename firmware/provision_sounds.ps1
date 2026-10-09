@@ -1,11 +1,21 @@
 param(
     [string]$Port = "COM3",
-    [string]$SoundDir = (Join-Path $PSScriptRoot "..\..\SOUND")
+    [string]$SoundDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path $SoundDir)) {
+# The sounds normally live in <repo>\SOUND (Soft_Decoder_V3\SOUND); keep the
+# older sibling-of-repo location as a fallback.
+if (-not $SoundDir) {
+    foreach ($c in @((Join-Path $PSScriptRoot "..\SOUND"), (Join-Path $PSScriptRoot "..\..\SOUND"))) {
+        if ($c -and (Test-Path -LiteralPath $c -PathType Container)) {
+            $SoundDir = (Resolve-Path -LiteralPath $c).Path
+            break
+        }
+    }
+}
+if (-not $SoundDir -or -not (Test-Path -LiteralPath $SoundDir)) {
     Write-Host "[ERROR] Sound folder not found: $SoundDir" -ForegroundColor Red
     exit 1
 }
@@ -14,7 +24,12 @@ if ($files.Count -eq 0) {
     Write-Host "[ERROR] No WAV files found in $SoundDir" -ForegroundColor Red
     exit 1
 }
-Write-Host ("[INFO] {0} sound files -> slots 1..{0}" -f $files.Count)
+if ($files.Count -gt 20) {
+    Write-Host ("[ERROR] {0} WAV files: the UART provisioner supports at most 20 slots." -f $files.Count) -ForegroundColor Red
+    Write-Host "[HINT]  Build a sound container (.asp) in the panel and upload it on the device web page." -ForegroundColor Yellow
+    exit 1
+}
+Write-Host ("[INFO] {0} sound files from {1} -> slots 1..{0}" -f $files.Count, $SoundDir)
 Write-Host "[INFO] Port: $Port  (erase external flash + upload sounds)"
 
 $sp = New-Object System.IO.Ports.SerialPort

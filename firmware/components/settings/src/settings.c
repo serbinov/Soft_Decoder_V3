@@ -516,6 +516,17 @@ esp_err_t settings_factory_reset(void)
         err = cv_store_locked();
     }
     xSemaphoreGive(s_lock);
+    /* The metadata manifest lives on external storage and deliberately survives
+     * an NVS erase, so boot recovery would otherwise restore the custom track
+     * names, categories and function map. Drop it so recovery rebuilds factory
+     * slots from the sound files instead. Best effort: a missing storage mount
+     * (or missing file) is not a reset failure. */
+    if (err == ESP_OK) {
+        esp_err_t rerr = settings_manifest_remove();
+        if (rerr != ESP_OK) {
+            ESP_LOGW(TAG, "Factory reset: manifest not cleared: %s", esp_err_to_name(rerr));
+        }
+    }
     ESP_LOGI(TAG, "Full factory reset%s", err == ESP_OK ? "" : " (failed)");
     return err;
 }

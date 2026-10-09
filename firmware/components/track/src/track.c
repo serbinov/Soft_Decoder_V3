@@ -144,13 +144,22 @@ static void track_adc_step(bool *was_driving)
     if (driving) {
         if (motor_set_speed(dc_speed_step(s_rail_mv),
                             s_dc_forward ^ ((cv29 & 0x01U) != 0U)) == ESP_OK) {
+            portENTER_CRITICAL(&s_track_mux);
             s_dc_generation = generation;
             s_dcc_motor_owned = false;
+            portEXIT_CRITICAL(&s_track_mux);
         } else {
             driving = false;
         }
     }
-    if (!driving && *was_driving && generation == s_dc_generation && !s_dcc_motor_owned) {
+    bool dc_owned = false, owner_current = false;
+    if (!driving && *was_driving) {
+        portENTER_CRITICAL(&s_track_mux);
+        dc_owned = s_dcc_motor_owned;
+        owner_current = (generation == s_dc_generation);
+        portEXIT_CRITICAL(&s_track_mux);
+    }
+    if (!driving && *was_driving && owner_current && !dc_owned) {
         /* Only an accepted motor command hands ownership to DCC. Merely
          * receiving addressed functions/CVs must not preserve old DC motion. */
         motor_emergency_stop();

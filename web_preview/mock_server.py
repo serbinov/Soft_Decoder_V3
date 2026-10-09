@@ -6,7 +6,7 @@ Serves the real firmware page (firmware/web_ui.html) and answers every
 /api/* endpoint with in-memory mock data, so the interface can be developed
 and tested in a browser exactly like it renders on the decoder -- without a
 board. State is kept in process, so the controls, settings, log and sound
-graph editor project behave as on the device.
+graph project behave as on the device.
 
 Run:
     python mock_server.py            # http://127.0.0.1:8080/
@@ -16,6 +16,7 @@ Run:
 
 import json
 import os
+import struct
 import sys
 import threading
 import time
@@ -47,6 +48,159 @@ TRACK_LABELS = [
 
 LOCK = threading.Lock()
 START = time.time()
+
+# Uploaded sound library (base name without .wav -> {"vol": int, "wav": bytes}),
+# populated by POST /api/audio/pack. Mirrors the device's /userdata/audio.
+LIBRARY = {}
+PREVIEW = {"name": ""}
+
+# IMA/DVI ADPCM tables, matching firmware/components/audio/src/ima_adpcm.c.
+_IMA_INDEX = (-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8)
+_IMA_STEP = (
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+    50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
+    253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
+    1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327,
+    3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442,
+    11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
+    32767)
+IMA_BLOCK = 256          # 4-byte preamble + 252 data bytes
+IMA_SAMPLES = 505        # 1 preamble sample + 504 nibbles
+
+
+def _ima_decode_block(buf, off, size=IMA_BLOCK):
+    """Decode one mono IMA ADPCM block to a list of int16 samples."""
+    pred = int.from_bytes(buf[off:off + 2], "little", signed=True)
+    index = min(88, max(0, buf[off + 2]))
+    out = [pred]
+    for i in range(off + 4, off + size):
+        byte = buf[i]
+        for half in (0, 1):
+            nib = (byte & 0x0F) if half == 0 else (byte >> 4)
+            step = _IMA_STEP[index]
+            diff = step >> 3
+            if nib & 1:
+                diff += step >> 2
+            if nib & 2:
+                diff += step >> 1
+            if nib & 4:
+                diff += step
+            pred = pred - diff if (nib & 8) else pred + diff
+            pred = max(-32768, min(32767, pred))
+            index = max(0, min(88, index + _IMA_INDEX[nib]))
+            out.append(pred)
+    return out
+
+
+def _pcm16_wav(samples, rate):
+    data = struct.pack("<%dh" % len(samples), *samples)
+    block_align, byte_rate = 2, rate * 2
+    header = (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE" +
+              b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, byte_rate, block_align, 16) +
+              b"data" + struct.pack("<I", len(data)))
+    return header + data
+
+
+def _base(name):
+    """Base sound name: strip the directory and a trailing .wav only (NOT any
+    extension: a name like 'loop1.2' must keep its dot)."""
+    base = os.path.basename(name or "")
+    if base.lower().endswith(".wav"):
+        base = base[:-4]
+    return base
+
+
+def _parse_pack(body):
+    """Validate an AURA Sound Pack (.asp) and return its index entries.
+    Raises ValueError with a short reason on any structural problem."""
+    if len(body) < 16:
+        raise ValueError("файл меньше заголовка")
+    if body[0:8] != b"AURASP01":
+        raise ValueError("не контейнер .asp (магия)")
+    version, count = struct.unpack_from("<HH", body, 8)
+    data_off = struct.unpack_from("<I", body, 12)[0]
+    if version != 1:
+        raise ValueError("неподдерживаемая версия %d" % version)
+    if not (1 <= count <= 400):
+        raise ValueError("неверное число звуков: %d" % count)
+    if data_off < 16 + count * 16:
+        raise ValueError("неверное смещение данных")
+    entries = []
+    seen = set()
+    pos = 16
+    for _ in range(count):
+        if pos + 16 > len(body):
+            raise ValueError("оборванный индекс")
+        nlen, vol, ch, bits = body[pos], body[pos + 1], body[pos + 2], body[pos + 3]
+        rate = struct.unpack_from("<I", body, pos + 4)[0]
+        doff, dlen = struct.unpack_from("<II", body, pos + 8)
+        pos += 16
+        if not (1 <= nlen <= 63) or vol > 100:
+            raise ValueError("неверная запись индекса")
+        if pos + nlen > len(body):
+            raise ValueError("оборванное имя")
+        name = body[pos:pos + nlen]
+        pos += nlen
+        try:
+            name = name.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("не UTF-8 имя")
+        if name in seen:
+            raise ValueError("дубликат имени: %s" % name)
+        seen.add(name)
+        if ch not in (1, 2) or bits not in (4, 16):
+            raise ValueError("формат %d/%d бит не поддержан" % (ch, bits))
+        if bits == 4 and ch != 1:
+            raise ValueError("ADPCM только моно")
+        if not (0 < rate <= 192000):
+            raise ValueError("неверная частота")
+        frame = ch * 2 if bits == 16 else IMA_BLOCK
+        if dlen < frame or dlen % frame != 0:
+            raise ValueError("неверная длина данных")
+        if doff + dlen > len(body):
+            raise ValueError("данные выходят за файл")
+        entries.append({"name": name, "vol": vol, "bits": bits, "channels": ch,
+                        "rate": rate, "off": doff, "len": dlen})
+    if pos != data_off:
+        raise ValueError("длина индекса не совпадает")
+    off = data_off
+    for e in entries:
+        if e["off"] != off:
+            raise ValueError("данные не подряд")
+        off += e["len"]
+    if off != len(body):
+        raise ValueError("размер не совпадает с заголовком")
+    return entries
+
+
+def _load_pack(body):
+    """Replace the in-memory library with an uploaded pack. Returns (files,
+    bytes, encoding) or raises ValueError."""
+    entries = _parse_pack(body)
+    lib = {}
+    encodings = set()
+    for e in entries:
+        payload = body[e["off"]:e["off"] + e["len"]]
+        if e["bits"] == 4:
+            blocks = e["len"] // IMA_BLOCK
+            samples = []
+            for b in range(blocks):
+                samples.extend(_ima_decode_block(payload, b * IMA_BLOCK))
+            encodings.add("ADPCM")
+            stored_hdr = 60  # ADPCM WAV header (+fact)
+        else:
+            samples = list(struct.unpack("<%dh" % (e["len"] // 2), payload))
+            encodings.add("PCM16")
+            stored_hdr = 44  # PCM16 WAV header
+        # "size" mirrors the .wav the device writes on unpack; "wav" is the
+        # decoded PCM16 used only for browser playback.
+        lib[e["name"]] = {"vol": e["vol"], "wav": _pcm16_wav(samples, e["rate"]),
+                          "size": stored_hdr + e["len"]}
+    LIBRARY.clear()
+    LIBRARY.update(lib)
+    PREVIEW["name"] = ""
+    return len(entries), len(body), "/".join(sorted(encodings))
+
 
 
 def _new_tracks():
@@ -234,7 +388,7 @@ STATE = _new_state()
 STATE["cv"][0] = 3        # CV1 primary address
 STATE["cv"][28] = 2       # CV29 28/128 speed steps
 
-# The active sound graph editor project (v2 authoring) and its revision.
+# The active sound graph project and its revision.
 GRAPH = {"project": _new_graph(), "revision": 4, "active": False, "fault": False}
 
 
@@ -314,6 +468,12 @@ def bemf_json():
 
 def tracks_json():
     return ok(cats=list(STATE["cats"]), tracks=[dict(t) for t in STATE["tracks"] if t["enabled"]])
+
+
+def library_json():
+    files = [{"name": n, "size": LIBRARY[n].get("size", 0), "vol": LIBRARY[n]["vol"]}
+             for n in sorted(LIBRARY)]
+    return ok(count=len(files), preview=PREVIEW["name"], files=files)
 
 
 def fmap_json():
@@ -417,17 +577,46 @@ def handle_api(method, path, query, body):
         return 200, tracks_json()
 
     if path == "/api/audio/play":
-        slot = as_int(q1(query, "slot"), 0)
-        s["audio"]["playing"] = True
-        s["audio"]["active_slot"] = slot
-        add_log("Звук", "слот %d" % slot)
+        name = q1(query, "name")
+        if name:
+            base = _base(name)
+            PREVIEW["name"] = base
+            s["audio"]["playing"] = True
+            s["audio"]["active_slot"] = 0
+            add_log("Звук", "плей: %s" % base)
+        else:
+            slot = as_int(q1(query, "slot"), 0)
+            PREVIEW["name"] = ""
+            s["audio"]["playing"] = True
+            s["audio"]["active_slot"] = slot
+            add_log("Звук", "слот %d" % slot)
         return 200, ok()
 
     if path == "/api/audio/stop":
         s["audio"]["playing"] = False
         s["audio"]["active_slot"] = 0
+        PREVIEW["name"] = ""
         add_log("Звук", "стоп (все)")
         return 200, ok()
+
+    if path == "/api/audio/library":
+        return 200, library_json()
+
+    if path == "/api/audio/library/volume":
+        name = _base(q1(query, "name", ""))
+        vol = max(0, min(100, as_int(q1(query, "vol"), 100)))
+        if name in LIBRARY:
+            LIBRARY[name]["vol"] = vol
+        return 200, ok()
+
+    if path == "/api/audio/pack":
+        try:
+            files, size, encoding = _load_pack(body)
+        except ValueError as exc:
+            add_log("Звук", "пакет отклонён: %s" % exc)
+            return 200, {"ok": False, "error": str(exc)}
+        add_log("Звук", "пакет: %d звук(ов), %d Б (%s)" % (files, size, encoding))
+        return 200, ok(files=files, bytes=size, encoding=encoding)
 
     if path == "/api/audio/delete":
         slot = as_int(q1(query, "slot"), 0)
@@ -630,11 +819,12 @@ def handle_api(method, path, query, body):
 
     if path == "/api/sound-files":
         try:
-            files = sorted(name for name in os.listdir(SOUND_DIR)
-                           if name.lower().endswith(".wav"))
+            files = set(name for name in os.listdir(SOUND_DIR)
+                        if name.lower().endswith(".wav"))
         except OSError:
-            files = []
-        return 200, ok(files=files)
+            files = set()
+        files |= set(n + ".wav" for n in LIBRARY)
+        return 200, ok(files=sorted(files))
 
     if path == "/api/clientlog":
         sys.stderr.write("[client] %s\n" % (q1(query, "m", "") or ""))
@@ -721,7 +911,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._serve_ui()
         if path in ("/sound-editor", "/sound-editor/"):
-            return self._serve_file(os.path.join(EDITOR_DIR, "index.html"))
+            return self._serve_file(os.path.join(EDITOR_DIR, "blocks.html"))
         if path.startswith("/sound-editor/"):
             rel = unquote(path[len("/sound-editor/"):])
             safe = os.path.normpath(os.path.join(EDITOR_DIR, rel))
@@ -731,6 +921,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/sound-files/"):
             rel = unquote(path[len("/sound-files/"):])
+            base = _base(rel)
+            if base in LIBRARY:
+                # Uploaded pack entry, already decoded to a PCM16 WAV so the
+                # browser can play it even when the pack is IMA ADPCM.
+                return self._send(200, LIBRARY[base]["wav"], "audio/wav")
             safe = os.path.normpath(os.path.join(SOUND_DIR, rel))
             if safe.startswith(SOUND_DIR):
                 return self._serve_file(safe)

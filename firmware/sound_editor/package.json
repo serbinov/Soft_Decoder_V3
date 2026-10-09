@@ -1,27 +1,10 @@
 {
-  "name": "decoder-sound-editor",
+  "name": "decoder-sound-block-editor",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": "22.18.x", "npm": "10.9.x" },
-  "packageManager": "npm@10.9.3",
+  "engines": { "node": ">=18" },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "test:e2e": "npm run build && playwright test",
-    "build": "vite build && node scripts/package-assets.mjs",
-    "preview": "vite preview --host 127.0.0.1"
-  },
-  "dependencies": {
-    "@xyflow/svelte": "1.7.0",
-    "svelte": "5.57.1"
-  },
-  "devDependencies": {
-    "@playwright/test": "1.63.0",
-    "@sveltejs/vite-plugin-svelte": "6.2.4",
-    "svelte-check": "4.7.6",
-    "typescript": "5.9.3",
-    "vite": "7.3.6"
+    "build": "node scripts/package-assets.mjs"
   }
 }

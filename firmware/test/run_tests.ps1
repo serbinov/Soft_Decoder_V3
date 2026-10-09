@@ -71,7 +71,7 @@ $inc = @(
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
             "test_track_manifest", "test_storage", "test_track_recover", "test_provision",
-            "test_selftest", "test_web", "test_sound", "test_sound_graph", "test_sound_graph_store", "test_main")
+            "test_selftest", "test_web", "test_sound", "test_sound_graph", "test_sound_graph_store", "test_audio_pack", "test_main")
 $failed = 0
 if ($Only.Count -gt 0) {
     foreach ($name in $Only) {

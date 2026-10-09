@@ -90,6 +90,7 @@
       <div class="kv"><span class="lbl">Метод прошивки</span><span class="val" id="st_flasher">…</span></div>
       <div class="kv"><span class="lbl">Файлы прошивки</span><span class="val" id="st_fw">…</span></div>
       <div class="kv"><span class="lbl">Звуки</span><span class="val" id="st_snd">…</span></div>
+      <div class="kv"><span class="lbl">Звуковой контейнер</span><span class="val" id="st_pack">…</span></div>
       <div style="margin-top:8px"><button class="ghost" id="btn_refresh">Обновить</button></div>
     </section>
 
@@ -99,10 +100,12 @@
       <p class="hint">Собирает BIN из исходников и публикует <code>release\flash_download_tool\</code>. Нужен ESP-IDF.</p>
       <button class="big ghost" id="btn_ota">Создать OTA</button>
       <p class="hint">Создаёт <code>release\ADDITIPUS_AURA-X_vX_OTA.bin</code> для обновления через веб-интерфейс декодера.</p>
+      <button class="big ghost" id="btn_pack">Создать звуковой контейнер</button>
+      <p class="hint">Собирает <code>release\ADDITIPUS_sounds.asp</code> из папки <code>SOUND\</code> для загрузки на странице «Загрузка звуков» декодера (до 400 звуков, IMA ADPCM ~4×, реальные имена). Нужен Python 3.</p>
       <button class="big" id="btn_flash">Прошить</button>
       <p class="hint">Полная прошивка по USB (загрузчик + разделы + приложение). Настройки/NVS сохраняются.</p>
       <button class="big" id="btn_flash_snd">Прошить + звуки</button>
-      <p class="hint">То же плюс заливка звуков (WAV) во внешнюю память.</p>
+      <p class="hint">То же плюс заливка WAV из папки <code>SOUND\</code> во внешнюю память (до 20 звуков, по UART).</p>
     </section>
 
     <section>
@@ -141,10 +144,10 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + звуки", ota: "Создать OTA" };
+const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + звуки", ota: "Создать OTA", pack: "Создать звуковой контейнер" };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function setAlert(msg, kind){ const el=$("alert"); if(!msg){el.style.display="none";el.textContent="";return;} el.className="alert "+(kind||""); el.textContent=msg; el.style.display="block"; }
-function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
+function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_pack","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
 
 /* ---------- colored log ---------- */
 let logBuf="";
@@ -181,6 +184,8 @@ async function refreshStatus(){
     $("st_flasher").textContent = (s.flasher === "esptool") ? "esptool (с проверкой хеша)" : "ROM-скрипт (без ESP-IDF)";
     $("st_fw").textContent   = (s.firmware||0)+"/4 файла"+(s.firmwareVersion?(" — v"+s.firmwareVersion):"")+" — "+(s.fwDir||"release\\flash_download_tool");
     $("st_snd").textContent  = (s.sounds||0)+" звук(ов)"+(s.sndDir?(" — "+s.sndDir):" (папка SOUND не найдена)");
+    $("st_pack").textContent = s.packExists ? "готов: release\\ADDITIPUS_sounds.asp"
+      : (s.python ? "не создан (Python найден)" : "не создан (нужен Python 3)");
     setAlert("", "");
     if(!s.firmwareReady) setAlert((s.firmwareErrors||[]).join("; ")+" Нажмите «Собрать прошивку».","warn");
     else if(!s.port) setAlert("Плата не найдена — подключите USB.","warn");
@@ -272,6 +277,7 @@ $("btn_refresh").addEventListener("click", refreshStatus);
 $("btn_build").addEventListener("click", ()=>run("build", ACT_LABEL.build));
 $("btn_stats_refresh").addEventListener("click", refreshStats);
 $("btn_ota").addEventListener("click", ()=>run("ota", ACT_LABEL.ota));
+$("btn_pack").addEventListener("click", ()=>run("pack", ACT_LABEL.pack));
 $("btn_flash").addEventListener("click", ()=>run("flash", ACT_LABEL.flash));
 $("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds", ACT_LABEL.flash_sounds));
 window.addEventListener("load", ()=>{ refreshStatus(); refreshStats(); ping(); setInterval(ping, 3000); });

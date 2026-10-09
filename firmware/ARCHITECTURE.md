@@ -699,6 +699,11 @@ flowchart TD
 | POST | `/api/audio/volume` | громкости |
 | POST | `/api/audio/upload` | async WAV upload через `web_transfer`, validated staging и canonical rename |
 | POST | `/api/audio/delete` | удалить слот |
+| GET | `/api/audio/library` | список установленных звуков + пофайловая громкость |
+| POST | `/api/audio/library/volume` | пофайловая громкость (`name`,`vol`) |
+| POST | `/api/audio/pack` | распаковка `.asp`-пакета (до 400 звуков), заменяет всю библиотеку |
+| GET | `/api/sound-files` | список `*.wav` для конструктора блоков |
+| GET | `/sound-files/<name>` | отдать звук браузеру (ADPCM→PCM16) |
 | POST | `/api/track/category` | категория слота (двигатель/эффект) |
 | GET/POST | `/api/func-map` | карта функций; `?view=bind\|matrix` — канонические привязки, `POST ?bind=1[&remove=1&idx=N]` — добавить/удалить привязку |
 | GET | `/api/sound/state` | живой статус движка (тип, двигатель, таблица, скорость) |
@@ -842,6 +847,22 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 - **OTA**: `POST /api/ota/update`. Поддерживается составной контейнер
   (`AURAOTA2`: заголовок + прошивка + список файлов) — прошивка и звуки одним
   файлом (`build_ota_with_sounds.ps1`). Размер одного аплоада ≤ 8 МБ.
+- **Звуковой пакет** `POST /api/audio/pack`: контейнер `.asp` (до 400 звуков,
+  по умолчанию IMA ADPCM ~4× меньше, `--pcm` для PCM16; собирается на ПК
+  `tools/pack_sounds.py`; формат — `docs/sound_pack.md`). Прошивка стримит тело
+  запроса через `web_transfer`, проверяет индекс до удаления, затем удаляет всю
+  старую библиотеку и распаковывает новые `audio/<name>.wav` с пофайловыми
+  громкостями в `audio/volumes.txt`. ADPCM декодируется в `audio.c`
+  (`components/audio/src/ima_adpcm.c`) блочно в кэш на голос. Страница «Загрузка
+  звуков» показывает компактный список (имя, ▶, громкость) через
+  `GET /api/audio/library`; пофайловый WAV-аплоад, удаление файла и переключатель
+  категории убраны из UI.
+- **Воспроизведение на компьютере** (по умолчанию): страница «Загрузка звуков» и
+  конструктор блоков играют звук в браузере ПК через `GET /sound-files/<name>`
+  (для ADPCM прошивка декодирует в PCM16 на лету). Переключатель «На компьютере /
+  На декодере» хранится в localStorage (`aura_sound_play`).
+- **IMA ADPCM** также принимается валидатором и инспектором WAV (`audio.c`), так
+  что графовые ассеты и `sound.c` работают с сжатыми файлами без изменений.
 - **Восстановление метаданных** (`recover_tracks_from_storage`, `app_main.c`):
   если NVS пуст, сначала читается **манифест** `/userdata/audio/tracks.txt`
   (имена, категории, карта F↔AUX); если его нет — список пересобирается из имён

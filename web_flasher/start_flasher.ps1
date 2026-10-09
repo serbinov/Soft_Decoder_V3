@@ -26,8 +26,8 @@ $fwDir  = Join-Path $repo "release\flash_download_tool"
 . (Join-Path $web "release_info.ps1")
 
 $sndDir = $null
-foreach ($c in @((Join-Path (Split-Path $repo -Parent) "SOUND"), (Join-Path $repo "SOUND"))) {
-    if ($c -and (Test-Path -LiteralPath $c)) { $sndDir = (Resolve-Path $c).Path; break }
+foreach ($c in @((Join-Path $repo "SOUND"), (Join-Path (Split-Path $repo -Parent) "SOUND"))) {
+    if ($c -and (Test-Path -LiteralPath $c)) { $sndDir = (Resolve-Path -LiteralPath $c).Path; break }
 }
 
 # ---- status helpers -------------------------------------------------------
@@ -133,6 +133,11 @@ function Get-ActionSpec([string]$action) {
         # Same path as running build_firmware.bat by hand; it publishes and
         # verifies release\ itself, so it must not require a ready release.
         return @{ script = (Join-Path $repo "build_firmware.bat"); args = @("--no-pause"); needsRelease = $false }
+    }
+    if ($action -eq "pack") {
+        # Builds an .asp sound container from SOUND\ for the device web upload.
+        # Does not need a ready release image.
+        return @{ script = (Join-Path $web "make_sound_pack.ps1"); args = @(); needsRelease = $false }
     }
     if ((Get-EsptoolExe) -or (Get-IdfPath)) {
         # Preferred: esptool writes and self-verifies the hash.
@@ -254,6 +259,9 @@ while ($listener.IsListening) {
                 firmwareErrors = @($releaseInfo.errors); firmwareMissing = @($releaseInfo.missing)
                 fwDir = "release\flash_download_tool"; sndDir = $sndDir
                 flasher = (Get-Flasher)
+                python = [bool](Get-Command python -ErrorAction SilentlyContinue)
+                packFile = (Join-Path $repo "release\ADDITIPUS_sounds.asp")
+                packExists = (Test-Path -LiteralPath (Join-Path $repo "release\ADDITIPUS_sounds.asp") -PathType Leaf)
                 busy = [bool]($script:cur -and -not $script:cur.proc.HasExited)
             }
             Send-Text $ctx ($obj | ConvertTo-Json -Compress) "application/json; charset=utf-8"
@@ -280,7 +288,7 @@ while ($listener.IsListening) {
                 if (-not $cur.done -and $cur.proc.HasExited) { $cur.done = $true; $cur.code = $cur.proc.ExitCode }
                 if ($cur.done -and -not $cur.recorded) {
                     $cur.recorded = $true
-                    if ($cur.action -ne "build") { try {
+                    if ($cur.action -ne "build" -and $cur.action -ne "pack") { try {
                         $d = Get-RunDetails
                         $fin = Get-Date
                         Add-Stat ([ordered]@{

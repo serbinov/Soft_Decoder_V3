@@ -11,7 +11,7 @@ static void sgr_release(sg_runner_t *r, sg_channel_t *c)
 static void sgr_enter(sg_runner_t *r, unsigned channel, uint8_t state)
 {
     sg_channel_t *c = &r->channels[channel]; sgr_release(r,c);
-    c->state = state; c->pending = SG_NONE; c->done = false; c->elapsed_ms = 0;
+    c->state = state; c->pending = SG_NONE; c->done = false; c->elapsed_ms = 0; c->loops_done = 0;
     memset(c->speed_match,0,sizeof(c->speed_match));
     const sg_state_t *s = &r->graph->states[state];
     if (!s->file[0]) { return; }
@@ -108,7 +108,15 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
         if (ch->playing && r->io.poll) {
             sg_audio_state_t audio = r->io.poll(r->io.ctx,ch->handle);
             if (audio == SG_AUDIO_FAILED) { sgr_release(r,ch); ch->failed = true; ch->pending = SG_NONE; continue; }
-            if (audio == SG_AUDIO_DONE) { sgr_release(r,ch); ch->done = true; }
+            if (audio == SG_AUDIO_DONE) {
+                sgr_release(r,ch);
+                const sg_state_t *st = &r->graph->states[ch->state];
+                if (st->loop && st->loops > 0 && ++ch->loops_done < st->loops) {
+                    /* more repeats to go: replay without signalling sample_done */
+                    if (r->io.play && r->io.play(r->io.ctx,i == 0,st,&ch->handle) == ESP_OK) { ch->playing = true; ch->elapsed_ms = 0; ch->done = false; }
+                    else { ch->failed = true; }
+                } else { ch->done = true; }
+            }
         }
         uint8_t imm[SG_MAX_TRANSITIONS], pend[SG_MAX_TRANSITIONS]; int ni = 0, np = 0;
         for (unsigned j = 0; j < r->graph->transition_count; ++j) {
@@ -123,7 +131,8 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
             const sg_transition_t *e = &r->graph->transitions[best];
             sgr_enter(r,i,e->target_index); continue;
         }
-        if (ch->done && r->graph->states[ch->state].loop) { sgr_enter(r,i,ch->state); }
+        const sg_state_t *cs = &r->graph->states[ch->state];
+        if (ch->done && cs->loop && cs->loops == 0) { sgr_enter(r,i,ch->state); }
         else { ch->done = false; }
     }
     r->fn_press = 0; r->fn_release = 0;

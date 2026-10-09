@@ -203,7 +203,7 @@ test('BEMF polling never overlaps', async t => {
 test('page initialization discovers active BEMF and starts exactly one poll', async t => {
   const { context, intervals, element } = fixture(t);
   for (const name of ['renderCvList', 'setActiveCv', 'loadCvValues', 'loadFuncMap',
-    'loadDevice', 'loadWifi', 'loadVolumes', 'loadTrackList', 'refreshStatus',
+    'loadDevice', 'loadWifi', 'loadVolumes', 'loadLibrary', 'refreshStatus',
     'startStatusPoll', 'startHeartbeat']) context[name] = () => {};
   let gets = 0;
   context.api = async url => {
@@ -397,17 +397,46 @@ test('visibility does not restart normal polling during upload', t => {
   assert.equal(intervals.get(context.upPollTimer).ms, 400);
 });
 
-test('WAV timeout and abort release upload state', t => {
+test('pack timeout and abort release upload state', t => {
   const { context, xhrs } = fixture(t);
   context.startHeartbeat = context.refreshStatus = () => {};
-  const input = { files: [{ name: 'test.wav', size: 1000 }], value: 'test.wav' };
-  context.uploadTrack(1, input);
+  const input = { files: [{ name: 'pack.asp', size: 1000 }], value: 'pack.asp' };
+  context.uploadPack(input);
   assert.equal(context.uploadBusy, true);
-  assert.equal(xhrs[0].timeout, 300000);
+  assert.equal(xhrs[0].url, '/api/audio/pack');
+  assert.equal(xhrs[0].timeout, 600000);
   assert.equal(xhrs[0].ontimeout, xhrs[0].onabort);
   xhrs[0].ontimeout();
   assert.equal(context.uploadBusy, false);
   assert.equal(context.upPollTimer, null);
+});
+
+test('pack upload accepts only .asp within the size limit', t => {
+  const { context, xhrs } = fixture(t);
+  context.startHeartbeat = context.refreshStatus = () => {};
+  context.uploadPack({ files: [{ name: 'sound.zip', size: 100 }], value: 'sound.zip' });
+  assert.equal(context.uploadBusy, false);
+  assert.equal(xhrs.length, 0);
+  context.uploadPack({ files: [{ name: 'big.asp', size: 16 * 1024 * 1024 }], value: 'big.asp' });
+  assert.equal(context.uploadBusy, false);
+  assert.equal(xhrs.length, 0);
+  context.uploadPack({ files: [{ name: 'pack.ASP', size: 4096 }], value: 'pack.ASP' });
+  assert.equal(context.uploadBusy, true);
+  assert.equal(xhrs.length, 1);
+  assert.equal(xhrs[0].url, '/api/audio/pack');
+});
+
+test('library rows show index and size', t => {
+  const { context, element } = fixture(t);
+  context.libFiles = [{ name: 'Horn', size: 46080, vol: 100 }, { name: 'Bell', size: 1536, vol: 80 }];
+  context.lastLibSig = '';
+  context.renderLibrary();
+  const html = element('sound_lib').innerHTML;
+  assert.match(html, /class="idx">01</);
+  assert.match(html, /class="idx">02</);
+  assert.match(html, /class="sz"[^>]*>45 КБ</);
+  assert.match(html, /class="sz"[^>]*>2 КБ</);
+  assert.match(html, /Horn/);
 });
 
 test('OTA timeout and abort release upload state', t => {

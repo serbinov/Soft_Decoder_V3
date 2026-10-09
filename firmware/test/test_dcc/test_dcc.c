@@ -620,6 +620,22 @@ static void test_dcc_reload_config_14step(void)
     TEST_ASSERT_TRUE(g_fn_state[0]); /* 14-step bit4 is F0 */
 }
 
+/* In 14-step mode the group-one bit 4 is meaningless (NMRA S-9.2.1): it must
+ * not clear the headlight that the speed packet set. */
+static void test_dcc_14step_group_one_does_not_touch_f0(void)
+{
+    s_speed_mode_14 = true;
+    const uint8_t speed_pkt[] = {0x03, 0x72, 0x71}; /* bit4 = F0 on, speed 9 */
+    feed_packet(speed_pkt, sizeof(speed_pkt), 12);
+    TEST_ASSERT_TRUE(g_fn_state[0]);
+
+    const uint8_t group1[] = {0x03, 0x8F, 0x8C}; /* F1..F4 on, bit4 = 0 */
+    feed_packet(group1, sizeof(group1), 12);
+    TEST_ASSERT_TRUE(g_fn_state[0]); /* F0 unchanged in 14-step */
+    TEST_ASSERT_TRUE(g_fn_state[1]);
+    TEST_ASSERT_TRUE(g_fn_state[4]);
+}
+
 static void test_dcc_reload_config_long_address(void)
 {
     g_cv_table_ok = true;
@@ -1379,6 +1395,7 @@ int main(void)
     RUN_TEST(test_dcc_28step_code_mapping);
     RUN_TEST(test_dcc_long_address_28step);
     RUN_TEST(test_dcc_14step_f0_function);
+    RUN_TEST(test_dcc_14step_group_one_does_not_touch_f0);
     RUN_TEST(test_dcc_128step_speed);
     RUN_TEST(test_dcc_function_f13_group);
     RUN_TEST(test_dcc_half_period_pipeline_speed128);

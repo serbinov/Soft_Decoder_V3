@@ -1,43 +1,40 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+// Dependency-free build for the offline sound block editor.
+//
+// The editor is a single self-contained HTML file (public/blocks.html) with no
+// runtime dependencies. This script copies it to dist/, writes the gzip copies,
+// the size report and the source stamp that tools/gen_sound_editor.py verifies
+// before the firmware embeds the assets. It needs only a stock Node.js runtime.
+
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const source = join(root, 'public');
 const dist = join(root, 'dist');
-const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
-const packages = JSON.parse(await readFile(join(dist, 'bundled-packages.json'), 'utf8'));
-const notices = [];
 
-// Vite records the packages in emitted chunks, excluding compiler-only dependencies.
-for (const name of packages) {
-  const path = `node_modules/${name}`;
-  const metadata = lock.packages[path];
-  if (!metadata) throw new Error(`Bundled package missing from lockfile: ${name}`);
-  const directory = join(root, path);
-  const licenses = (await readdir(directory)).filter((name) => /^(licen[cs]e|copying|notice)([.-]|$)/i.test(name)).sort();
-  if (licenses.length === 0) throw new Error(`Missing license notice: ${path}`);
-  notices.push(`=== ${path.replace(/^node_modules\//, '')} ${metadata.version} (${metadata.license ?? 'see notice'}) ===`);
-  for (const license of licenses) notices.push(await readFile(join(directory, license), 'utf8'));
-}
-await writeFile(join(dist, 'THIRD_PARTY_NOTICES.txt'), notices.join('\n\n'));
+await rm(dist, { recursive: true, force: true });
+await mkdir(dist, { recursive: true });
 
 const assets = [];
 async function packageDirectory(directory) {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      await packageDirectory(path);
-    } else if (/\.(js|css|html|txt)$/.test(entry.name)) {
-      const data = await readFile(path);
-      const gzip = gzipSync(data, { level: 9 });
-      await writeFile(`${path}.gz`, gzip);
-      assets.push({ path: relative(dist, path).replaceAll('\\', '/'), bytes: data.length, gzipBytes: gzip.length });
-    }
+    if (entry.isDirectory()) { await packageDirectory(path); continue; }
+    if (!/\.(js|css|html|txt)$/.test(entry.name)) continue;
+    const data = await readFile(path);
+    const target = join(dist, relative(source, path));
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, data);
+    const gzip = gzipSync(data, { level: 9 });
+    await writeFile(`${target}.gz`, gzip);
+    assets.push({ path: relative(dist, target).replaceAll('\\', '/'), bytes: data.length, gzipBytes: gzip.length });
   }
 }
-await packageDirectory(dist);
+await packageDirectory(source);
+
 const payload = assets.filter((asset) => /\.(js|css|html)$/.test(asset.path));
 const report = {
   gzipLevel: 9,
@@ -47,6 +44,14 @@ const report = {
   totalGzipBytes: assets.reduce((total, asset) => total + asset.gzipBytes, 0),
 };
 await writeFile(join(dist, 'asset-sizes.json'), `${JSON.stringify(report, null, 2)}\n`);
+
+// The block editor bundles no third-party libraries; keep the notice file in
+// place so the firmware asset set keeps a stable shape.
+await writeFile(join(dist, 'THIRD_PARTY_NOTICES.txt'),
+  'AURA-X sound block editor\n\nThis editor is original code and bundles no third-party libraries.\n');
+
+// Source stamp consumed by tools/gen_sound_editor.py: any change to these files
+// after a build makes the firmware build reject the stale bundle.
 const files = {};
 async function hashInputs(directory) {
   for (const entry of (await readdir(join(root, directory), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -55,9 +60,9 @@ async function hashInputs(directory) {
     else files[path] = createHash('sha256').update(await readFile(join(root, path))).digest('hex');
   }
 }
-await hashInputs('src');
-await hashInputs('scripts');
 await hashInputs('public');
-for (const path of ['index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts']) files[path] = createHash('sha256').update(await readFile(join(root, path))).digest('hex');
+await hashInputs('scripts');
+files['package.json'] = createHash('sha256').update(await readFile(join(root, 'package.json'))).digest('hex');
 await writeFile(join(dist, 'build-inputs.json'), `${JSON.stringify({ files }, null, 2)}\n`);
+
 console.log(JSON.stringify(report, null, 2));

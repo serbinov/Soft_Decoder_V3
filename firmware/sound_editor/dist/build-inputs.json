@@ -1,20 +1,7 @@
 {
   "files": {
-    "src/api.ts": "fedc83060a8473433b829328cf595a1565c423985b58763d5463941e97366ce0",
-    "src/App.svelte": "ca8fc6ab562e7ba2a974196342298164809fd62542be6b415dfadb2164d0aa98",
-    "src/draft.ts": "7dd134970cbd712c23ad365f21e6caa779db011f1351ab1de58aa45c6f5f5c74",
-    "src/EffectsPanel.svelte": "a18d2867678a7894fa9eed4090b62de208525d485c6ca59c8d2e8d8b77edfef7",
-    "src/main.ts": "0b04f8e7794e9e3477c470ca3c4ab7ff44ee5ca9aac57eae1369dfe714fb2475",
-    "src/model.ts": "700224069684ec3a331a44b35b0f283282a1e829426f2abc91182883b69091dd",
-    "src/PatchPanel.svelte": "2d156e012b6e7836008d89320f92164f4e86df5a60855bb0fbdbe93ea43656f3",
-    "src/SoundNode.svelte": "250eb309ae1f1fb6eaf11b8fd5b6d1fd22f8bfbc9f6abdeb619895bf9e170399",
-    "src/style.css": "4fe9ce76a5c5be8652a3bee10b5da24b505271c7e5f48d1b0c6ab708f48dde5f",
-    "scripts/package-assets.mjs": "b1855933becd1ea05fdf94e493831f1945305aecc5f0254333b4d6c847fb0123",
-    "public/blocks.html": "98e37bf07a8be73e846eea255560d063e7444b8b8008e91be7a2b420725ac367",
-    "index.html": "9d1ff9a88ff01b51cb42697be8a4463d79ef87e8bedd62e596345d7df66341f1",
-    "package.json": "e75d0bc65ef996ca17d74d7f784f2fe8cdc7c693d0d7379472e50f4b0ee49d1e",
-    "package-lock.json": "e1ced4c80a662a31d214f04ce27f4c47ef1cc587d954f78d6493c13cd7d7c342",
-    "tsconfig.json": "d9aa73e077aeb1ba06792c004e98a40003da943ef3287bdd5a1a7aaa2e0ee55d",
-    "vite.config.ts": "94c9dbf785179a28c952ca431dd8181f8282b78ebd2fdc1ffeed4049b930eb81"
+    "public/blocks.html": "c2855a3569d1677b0331a9c24f061fd1cc1cecbf2bfedb589907acf308ece9e1",
+    "scripts/package-assets.mjs": "3eb8de7e9d358fc5cd383107757146d062179db57da27e184f5e9a589ad8dac7",
+    "package.json": "78f8cded0c998921c4b7cecdcf664a3156da0208fdd309c3f46efd5907521256"
   }
 }

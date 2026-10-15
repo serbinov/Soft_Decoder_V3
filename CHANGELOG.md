@@ -15,6 +15,11 @@
 
 ### Конструктор звуков — подписи на холсте
 
+- `sound_editor/blocks.html`: связи на холсте стало легче выделять — у каждой
+  линии невидимая утолщённая область попадания (16 px, `vector-effect`
+  сохраняет её на любом зуме); выделенная связь удаляется **Del/Backspace**
+  (раньше клик по связи удалял её сразу, теперь — выделяет).
+
 - Фавиконка — большая синяя буква **A** (`#2563eb`) на всех страницах:
   в редакторе (`sound_editor/blocks.html`) и в основном веб-интерфейсе
   (`firmware/web_ui.html`) — встроенный SVG в `data:`-URI; во флешере
@@ -109,6 +114,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-16 (v0.10) — feat(sound-editor): wider link hit area and Del to delete selected link
 - 2026-10-16 (v0.10) — feat(sound-editor): text labels, toolbar cleanup, cross-layout clipboard, favicon
 - 2026-10-16 (v0.10) — feat(sound): global variables and var_cmp/setVar in sound graph
 - 2026-10-09 (v0.10) — feat(sound): IMA ADPCM sound packs, on-PC preview, editor chain playback

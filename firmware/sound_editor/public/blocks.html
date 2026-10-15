@@ -67,9 +67,12 @@
   .textnode.editing{cursor:text;user-select:text;border-color:var(--accent);background:var(--panel2);outline:none}
   button.tbtn{font-weight:700;font-family:Georgia,'Times New Roman',serif;min-width:34px;line-height:1}
   #links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
-  #links path.link{stroke:var(--link);stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
-  #links path.link:hover{stroke:var(--err)}
-  #links path.link.sel{stroke:var(--accent)}
+  #links path.link{stroke:var(--link);stroke-width:2;fill:none;pointer-events:none}
+  #links path.link.sel{stroke:var(--accent);stroke-width:2.6}
+  /* Invisible fat stroke on top of each link gives it a comfortable click area;
+     vector-effect keeps that area the same on screen at any zoom. */
+  #links path.link-hit{stroke:transparent;stroke-width:16;fill:none;pointer-events:stroke;cursor:pointer;vector-effect:non-scaling-stroke}
+  #links path.link-hit:hover+path.link{stroke:var(--err)}
   #links path.temp{stroke:var(--accent);stroke-width:2.5;fill:none;stroke-dasharray:6 5;pointer-events:none}
   #arrow path{stroke:var(--link)}
   #arrowTemp path{stroke:var(--accent)}
@@ -1058,8 +1061,9 @@ function curve(x1,y1,x2,y2){const dx=Math.max(40,Math.abs(x2-x1)/2);return "M"+x
 function renderLinks(){
   const byId={};project.blocks.forEach(b=>byId[b.id]=b);let html="";
   for(const l of project.links){const a=byId[l.from],c=byId[l.to];if(!a||!c||BY_TYPE[a.type].kind==="output")continue;
-    const p1=portPos(l.from,"out",outPortOf(l)),p2=portPos(l.to,"in");
-    html+='<path class="link'+(selectedLink===l.id?" sel":"")+'" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x-10,p2.y)+'"></path>';}
+    const p1=portPos(l.from,"out",outPortOf(l)),p2=portPos(l.to,"in"),d=curve(p1.x,p1.y,p2.x-10,p2.y);
+    html+='<path class="link-hit" data-link="'+l.id+'" d="'+d+'"></path>';
+    html+='<path class="link'+(selectedLink===l.id?" sel":"")+'" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+d+'"></path>';}
   $("linkLayer").innerHTML=html;
   $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=ev=>{ev.stopPropagation();selectedLink=p.getAttribute("data-link");selected="";selectedIds=new Set();render();});
   renderTempLink();
@@ -1741,6 +1745,7 @@ $("b_undo").onclick=undo;$("b_redo").onclick=redo;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&(ev.target.isContentEditable||/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)))return;
   if((ev.key==="Delete"||ev.key==="Backspace")&&!ev.ctrlKey&&!ev.metaKey){
+    if(selectedLink){ev.preventDefault();project.links=project.links.filter(l=>l.id!==selectedLink);selectedLink="";render();return;}
     if(selected&&(project.texts||[]).some(x=>x.id===selected)){ev.preventDefault();removeText(selected);return;}
     if(selectedIds.size){ev.preventDefault();deleteSelected();}
     return;

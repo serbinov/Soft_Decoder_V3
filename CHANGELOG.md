@@ -109,6 +109,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-16 (v0.10) — feat(sound-editor): text labels, toolbar cleanup, cross-layout clipboard, favicon
 - 2026-10-16 (v0.10) — feat(sound): global variables and var_cmp/setVar in sound graph
 - 2026-10-09 (v0.10) — feat(sound): IMA ADPCM sound packs, on-PC preview, editor chain playback
 - 2026-10-07 (v0.10) — fix(build): pin LF for hashed sound editor sources

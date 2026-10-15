@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="icon" href="data:," />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRleHQgeD0iMzIiIHk9IjU0IiBmb250LWZhbWlseT0iQXJpYWwsSGVsdmV0aWNhLHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZvbnQtc2l6ZT0iNjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyNTYzZWIiPkE8L3RleHQ+PC9zdmc+" />
 <title>Конструктор звуков</title>
 <style>
   :root{
@@ -60,6 +60,12 @@
   #stage.grid-bg{background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:var(--gstep) var(--gstep);background-position:var(--gx) var(--gy)}
   #marquee{position:absolute;border:1px solid var(--accent);background:rgba(74,158,255,.15);pointer-events:none;z-index:6;display:none}
   #world{position:absolute;left:0;top:0;transform-origin:0 0;width:6000px;height:4000px}
+  #texts{pointer-events:none}
+  .textnode{pointer-events:auto;position:absolute;min-width:24px;min-height:1.3em;max-width:640px;padding:3px 7px;border:1px dashed transparent;border-radius:6px;color:var(--text);font:16px/1.3 system-ui,Segoe UI,Roboto,sans-serif;white-space:pre-wrap;word-break:break-word;cursor:move;user-select:none}
+  .textnode:hover{border-color:var(--line)}
+  .textnode.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(74,158,255,.35);background:rgba(74,158,255,.06)}
+  .textnode.editing{cursor:text;user-select:text;border-color:var(--accent);background:var(--panel2);outline:none}
+  button.tbtn{font-weight:700;font-family:Georgia,'Times New Roman',serif;min-width:34px;line-height:1}
   #links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
   #links path.link{stroke:var(--link);stroke-width:2;fill:none;pointer-events:stroke;cursor:pointer}
   #links path.link:hover{stroke:var(--err)}
@@ -131,22 +137,9 @@
       <button id="b_file_txt" data-i18n="download_txt">Скачать текст</button>
     </div>
   </div>
-  <div class="tm" data-menu>
-    <button type="button" class="tm-btn" data-i18n="m_edit">Правка</button>
-    <div class="tm-panel">
-      <button id="b_undo" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip" data-i18n="m_undo">↶ Отменить</button>
-      <button id="b_redo" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip" data-i18n="m_redo">↷ Повторить</button>
-      <button id="b_copy" title="Копировать (Ctrl+C)" data-i18n-title="copy_tip" data-i18n="m_copy">Копировать</button>
-      <button id="b_paste" title="Вставить (Ctrl+V)" data-i18n-title="paste_tip" data-i18n="m_paste">Вставить</button>
-    </div>
-  </div>
-  <div class="tm" data-menu>
-    <button type="button" class="tm-btn" data-i18n="m_check">Проверка</button>
-    <div class="tm-panel">
-      <button id="b_test" data-i18n="test">▶ Тест</button>
-      <button id="b_validate" data-i18n="validate">Проверить</button>
-    </div>
-  </div>
+  <button id="b_text" class="tbtn" title="Добавить текст" data-i18n-title="text_tip" aria-label="Добавить текст" data-i18n-aria="text_tip">T</button>
+  <button id="b_undo" class="tbtn" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip" aria-label="Отменить" data-i18n-aria="undo_tip">↶</button>
+  <button id="b_redo" class="tbtn" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip" aria-label="Повторить" data-i18n-aria="redo_tip">↷</button>
   <div class="tm" data-menu>
     <button type="button" class="tm-btn" data-i18n="m_settings">Настройки</button>
     <div class="tm-panel">
@@ -185,6 +178,7 @@
         <path id="tempLink" class="temp hidden" marker-end="url(#arrowTemp)"></path>
       </svg>
       <div id="nodes"></div>
+      <div id="texts"></div>
     </div>
     <div id="marquee"></div>
   </section>
@@ -192,8 +186,6 @@
   <aside class="right">
     <h2 data-i18n="block_setup">Настройка блока</h2>
     <div id="inspector"><p class="hint" data-i18n="select_hint">Выберите блок на холсте или добавьте новый слева.</p></div>
-    <h2 data-i18n="check">Проверка</h2>
-    <div id="summary" class="hint"></div>
   </aside>
 </main>
 
@@ -216,6 +208,7 @@ connected:"Подключено",offline:"Нет связи",
   new:"Новый",import:"Импорт",export:"Экспорт",align:"Выровнять",dup:"Дубль",m_file:"Файл",m_edit:"Правка",m_canvas:"Холст",m_check:"Проверка",m_device:"Устройство",m_undo:"↶ Отменить",m_redo:"↷ Повторить",m_scheme:"Схема и связи",m_settings:"Настройки",m_theme:"Тема",theme_light:"светлая",theme_dark:"тёмная",m_lang:"Язык",m_copy:"Копировать",m_paste:"Вставить",copy_tip:"Копировать (Ctrl+C)",paste_tip:"Вставить (Ctrl+V)",
 snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",
 undo_tip:"Отменить (Ctrl+Z)",redo_tip:"Повторить (Ctrl+Y)",dup_tip:"Дублировать (Ctrl+D)",
+text_tip:"Добавить текст на поле",text_default:"Текст",text_adding:"Кликните по полю, чтобы добавить текст",text_label:"Текст",text_size:"Размер",text_color:"Цвет",text_hint:"Перетащите подпись; двойной клик — редактирование на поле.",bt_texts:"== Подписи ==",
 scheme_tip:"Схема и таблица связей",scheme_aria:"Схема и связи",
 test:"▶ Тест",validate:"Проверить",save:"Сохранить",outputs:"Выходы",m_outputs:"Выходы",out_write:"⬆ Записать в устройство",out_read:"⬇ Считать с устройства",outputs_tip:"Записать привязки выходов/логики и настройки AUX в устройство",
 impout_tip:"Считать привязки выходов/логики с устройства и создать блоки",impout:"Импорт выходов",apply:"Применить",
@@ -248,6 +241,11 @@ st_cant_dup_engine:"Двигатель нельзя дублировать",st_d
 sum_states:"Состояний ",sum_transitions:" · переходов ",sum_effects:" · эффектов ",sum_blocks:" · блоков ",sum_errors_mid:" ошибок / ",sum_warnings:" предупреждений",
 st_aligned:"Блоки выровнены по связям",st_undone:"Отменено",st_redone:"Повторено",
 lc_gate:"при двигателе",lc_bind:"F-клавиша источника",lc_direct:"напрямую",lc_after_event:"после события",lc_delay_a:", задержка ",lc_delay_b:" мс",lc_link:"связь",
+lc_cond:"усл.",lc_fx_on:"Fx включён",lc_fx_off:"Fx выключен",lc_fx_hold:"Fx удержание",lc_true:"True",lc_false:"False",lc_var_set:"переменная",
+f_fxin_hint:"Вход Fx: один выход. Режим задаёт условие запуска: «Вкл/выкл» — по нажатию, «Удержание»/«Строб» — пока клавиша удерживается.",
+f_join:"Объединение условий",f_add_cond:"+ Условие",f_logicv_hint:"Логика читает глобальные переменные и выдаёт True или False. Условия объединяются AND/OR; для отрицания смените оператор.",f_var:"Переменная",f_value:"Значение",f_setvar_hint:"Устанавливает глобальную переменную по имени. Работает как при запуске, так и по входу.",f_delay_ms:"Задержка, мс",f_delay_hint:"Пауза перед выполнением следующего блока.",f_clear:"Очистить",f_not:"NOT",f_fx_mode:"Режим Fx",fx_toggle:"Вкл/выкл",fx_hold:"Удержание",fx_strobe:"Строб",f_stop_now:"Прекратить воспроизведение сейчас",
+li_output:"Выход блока",v_dup_fx:"Несколько блоков «Вход (Fx)» используют один F — оставьте по одному на F.",v_dup_ch:"Несколько блоков «Выход» используют один канал — оставьте по одному на канал.",v_multi_branch:"Ветвление одного выхода в несколько блоков поддерживается только у «Вход (Fx)».",
+vars_title:"Переменные",vars_builtins:"Встроенные",vars_add:"+ Переменная",
 mini_none:"Нет блоков.",lt_none:"Связей нет.",lt_source:"Источник",lt_target:"Цель",lt_condition:"Условие",
 bd_run:" · запуск: ",bd_idle:" · холостой: ",bd_stop:" · стоп: ",bd_step_a:"ступень ",bd_prot_a:"защита ",bd_out_mid:" · выход: ",bd_delay_a:", задержка ",bd_delay_b:" мс",bd_random:" · случайно из:",bd_trigger:"запуск: ",tr_auto:"авто",bd_speed_a:"скорость ",bd_speed_b:"% · защита ",bd_dir:"направление: ",bd_dir_fwd:"вперёд",bd_dir_rev:"назад",bd_out_a:"выход: ",
 bt_scheme:"Схема: ",bt_counts_a:"Блоков: ",bt_counts_b:", связей: ",bt_blocks:"== Блоки ==",bt_links:"== Связи ==",
@@ -266,6 +264,7 @@ connected:"Connected",offline:"No connection",
 new:"New",import:"Import",export:"Export",align:"Align",dup:"Duplicate",m_file:"File",m_edit:"Edit",m_canvas:"Canvas",m_check:"Check",m_device:"Device",m_undo:"↶ Undo",m_redo:"↷ Redo",m_scheme:"Scheme & links",m_settings:"Settings",m_theme:"Theme",theme_light:"light",theme_dark:"dark",m_lang:"Language",m_copy:"Copy",m_paste:"Paste",copy_tip:"Copy (Ctrl+C)",paste_tip:"Paste (Ctrl+V)",
 snap_a:"Grid: ",snap_on:"on",snap_off:"off",
 undo_tip:"Undo (Ctrl+Z)",redo_tip:"Redo (Ctrl+Y)",dup_tip:"Duplicate (Ctrl+D)",
+text_tip:"Add text to the canvas",text_default:"Text",text_adding:"Click the canvas to add text",text_label:"Text",text_size:"Size",text_color:"Color",text_hint:"Drag the label; double-click to edit it on the canvas.",bt_texts:"== Labels ==",
 scheme_tip:"Diagram and link table",scheme_aria:"Diagram and links",
 test:"▶ Test",validate:"Validate",save:"Save",outputs:"Outputs",m_outputs:"Outputs",out_write:"⬆ Write to device",out_read:"⬇ Read from device",outputs_tip:"Write output/logic bindings and AUX settings to the device",
 impout_tip:"Read output/logic bindings from the device and create blocks",impout:"Import outputs",apply:"Apply",
@@ -298,6 +297,11 @@ st_cant_dup_engine:"The engine cannot be duplicated",st_duplicated:"Block duplic
 sum_states:"States ",sum_transitions:" · transitions ",sum_effects:" · effects ",sum_blocks:" · blocks ",sum_errors_mid:" errors / ",sum_warnings:" warnings",
 st_aligned:"Blocks aligned by links",st_undone:"Undone",st_redone:"Redone",
 lc_gate:"when engine runs",lc_bind:"source F-key",lc_direct:"direct",lc_after_event:"after event",lc_delay_a:", delay ",lc_delay_b:" ms",lc_link:"link",
+lc_cond:"cond.",lc_fx_on:"Fx on",lc_fx_off:"Fx off",lc_fx_hold:"Fx hold",lc_true:"True",lc_false:"False",lc_var_set:"variable",
+f_fxin_hint:"Fx input: a single output. The mode sets the trigger: On/off = on press, Hold/Strobe = while held.",
+f_join:"Condition join",f_add_cond:"+ Condition",f_logicv_hint:"Logic reads global variables and yields True or False. Conditions are joined with AND/OR; change the operator to negate.",f_var:"Variable",f_value:"Value",f_setvar_hint:"Assigns a global variable by name. Runs at start or when reached by a link.",f_delay_ms:"Delay, ms",f_delay_hint:"Pause before the next block.",f_clear:"Clear",f_not:"NOT",f_fx_mode:"Fx mode",fx_toggle:"On/off",fx_hold:"Hold",fx_strobe:"Strobe",f_stop_now:"Stop current playback now",
+li_output:"Block output",v_dup_fx:"Several \"Input (Fx)\" blocks share one F — keep one per F.",v_dup_ch:"Several \"Output\" blocks share one channel — keep one per channel.",v_multi_branch:"Branching one output into several blocks is supported only for \"Input (Fx)\".",
+vars_title:"Variables",vars_builtins:"Built-in",vars_add:"+ Variable",
 mini_none:"No blocks.",lt_none:"No links.",lt_source:"Source",lt_target:"Target",lt_condition:"Condition",
 bd_run:" · start: ",bd_idle:" · idle: ",bd_stop:" · stop: ",bd_step_a:"step ",bd_prot_a:"margin ",bd_out_mid:" · output: ",bd_delay_a:", delay ",bd_delay_b:" ms",bd_random:" · randomly from:",bd_trigger:"trigger: ",tr_auto:"auto",bd_speed_a:"speed ",bd_speed_b:"% · margin ",bd_dir:"direction: ",bd_dir_fwd:"forward",bd_dir_rev:"reverse",bd_out_a:"output: ",
 bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"== Blocks ==",bt_links:"== Links ==",
@@ -327,34 +331,46 @@ const GRID=20;const NODE_W=240;const NODE_H=120;const SPEED_STEP=25;const SPEED_
 /* ---- catalogs -------------------------------------------------------- */
 const AUX_NAMES=["AUX1","AUX2","AUX3","AUX4","AUX5","AUX6","AUX7"];
 const LIGHT_FX=[{v:0,n:{ru:"Постоянный",en:"Constant"}},{v:1,n:{ru:"Лампа накаливания",en:"Incandescent"}},{v:2,n:{ru:"Марс",en:"Mars"}},{v:3,n:{ru:"Ходовые",en:"Ditch lights"}},{v:4,n:{ru:"Маяк",en:"Beacon"}},{v:5,n:{ru:"Строб",en:"Strobe"}},{v:6,n:{ru:"Топка",en:"Firebox"}}];
-const LOGIC_OPS=[{v:1,n:{ru:"Mute стоп",en:"Mute stop"}},{v:2,n:{ru:"Mute ход",en:"Mute move"}},{v:3,n:{ru:"Mute свет",en:"Mute lights"}},{v:4,n:{ru:"Удержание хода",en:"Hold motion"}},{v:5,n:{ru:"Выбег",en:"Coast"}},{v:6,n:{ru:"Дин. тормоз",en:"Dynamic brake"}},{v:7,n:{ru:"Набор позиции",en:"Position up"}},{v:8,n:{ru:"Сброс позиции",en:"Position reset"}}];
+const CMP_OPS=[{v:0,sym:"="},{v:1,sym:"!="},{v:2,sym:"<"},{v:3,sym:"<="},{v:4,sym:">"},{v:5,sym:">="}];
+const NEG_OP=[1,0,5,4,3,2];
+const OUTPUT_CHANNELS=[{v:0,n:{ru:"Фары",en:"Headlights"}}].concat(AUX_NAMES.map((n,i)=>({v:i+1,n:{ru:n,en:n}})));
+const VAR_BUILTINS=[{name:"speed",kind:"speed"},{name:"forward",kind:"forward"},{name:"moving",kind:"moving"},{name:"engine",kind:"engine"}];
+/* Aura X block set, split into the two documented sections: Mixes orchestrate
+ * inputs/outputs/logic/schemes, Sound schemes hold the audible flow. Entries
+ * with section null stay addressable (legacy projects) but are not shown. */
 const CATALOG=[
-  {type:"engine",name:{ru:"Двигатель",en:"Engine"},group:"main",kind:"engine",mode:"engine"},
-  {type:"volume",name:{ru:"Громкость",en:"Volume"},group:"main",kind:"setting",mode:"volume"},
-  {type:"start",name:{ru:"Старт",en:"Start"},group:"scheme",kind:"sound",mode:"start",roles:["sound"]},
-  {type:"end",name:{ru:"Конец",en:"End"},group:"scheme",kind:"sound",mode:"end",roles:["sound"]},
-  {type:"simple",name:{ru:"Простой звук",en:"Simple"},group:"scheme",kind:"sound",mode:"simple",roles:["sound"]},
-  {type:"loop",name:{ru:"Цикл",en:"Loop"},group:"scheme",kind:"sound",mode:"loop",roles:["sound"]},
-  {type:"mute",name:{ru:"Пауза",en:"Mute"},group:"scheme",kind:"sound",mode:"mute"},
-  {type:"horn",name:{ru:"Гудок",en:"Horn"},group:"signals",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
-  {type:"whistle",name:{ru:"Тифон",en:"Whistle"},group:"signals",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"bell",name:{ru:"Звонок",en:"Bell"},group:"signals",kind:"sound",mode:"latched",roles:["sound"]},
-  {type:"random",name:{ru:"Случайный звук",en:"Random sound"},group:"signals",kind:"sound",mode:"random"},
-  {type:"compressor",name:{ru:"Компрессор",en:"Compressor"},group:"mech",kind:"sound",mode:"loopHeld",roles:["sound"]},
-  {type:"brake",name:{ru:"Тормоз",en:"Brake"},group:"mech",kind:"sound",mode:"decel",roles:["sound"]},
-  {type:"coupler",name:{ru:"Сцепка",en:"Coupler"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"sander",name:{ru:"Песочница",en:"Sander"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"pantograph",name:{ru:"Токоприёмник",en:"Pantograph"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"doors",name:{ru:"Двери",en:"Doors"},group:"mech",kind:"sound",mode:"oneshot",roles:["sound"]},
-  {type:"speed",name:{ru:"Скоростной звук",en:"Speed sound"},group:"mech",kind:"sound",mode:"speed"},
-  {type:"custom",name:{ru:"Свой сценарий",en:"Custom scenario"},group:"extra",kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
-  {type:"headlight",name:{ru:"Фары",en:"Headlights"},group:"light",kind:"output",mode:"headlight"},
-  {type:"aux",name:{ru:"AUX-выход",en:"AUX output"},group:"light",kind:"output",mode:"aux",fx:true},
-  {type:"logic",name:{ru:"Логика",en:"Logic"},group:"light",kind:"logic",mode:"logic"}
+  {type:"engine",name:{ru:"Двигатель",en:"Engine"},group:"main",section:"main",kind:"engine",mode:"engine"},
+  {type:"volume",name:{ru:"Громкость",en:"Volume"},group:"main",section:"main",kind:"setting",mode:"volume"},
+  {type:"fx_in",name:{ru:"Вход (Fx)",en:"Input (Fx)"},group:"mix",section:"mix",kind:"input",mode:"fxin"},
+  {type:"output",name:{ru:"Выход (AUX/Свет)",en:"Output (AUX/Light)"},group:"mix",section:"mix",kind:"output",mode:"output",fx:true},
+  {type:"sound_cue",name:{ru:"Звук",en:"Sound"},group:"mix",section:"mix",kind:"cue",mode:"cue",roles:["sound"]},
+  {type:"logic",name:{ru:"Логика",en:"Logic"},group:"mix",sections:["mix","scheme"],section:"mix",kind:"logicv",mode:"logicv",outputs:["true","false"]},
+  {type:"set_var",name:{ru:"Установить переменную",en:"Set Variable"},group:"mix",sections:["mix","scheme"],section:"mix",kind:"var",mode:"var"},
+  {type:"delay",name:{ru:"Задержка",en:"Delay"},group:"mix",sections:["mix","scheme"],section:"mix",kind:"delay",mode:"delay"},
+  {type:"start",name:{ru:"Старт",en:"Start"},group:"scheme",section:"scheme",kind:"sound",mode:"start",roles:["sound"]},
+  {type:"simple",name:{ru:"Простой",en:"Simple"},group:"scheme",section:"scheme",kind:"sound",mode:"simple",roles:["sound"]},
+  {type:"loop",name:{ru:"Цикл",en:"Loop"},group:"scheme",section:"scheme",kind:"sound",mode:"loop",roles:["sound"]},
+  {type:"end",name:{ru:"Конец",en:"End"},group:"scheme",section:"scheme",kind:"sound",mode:"end",roles:["sound"]},
+  {type:"mute",name:{ru:"Пауза",en:"Mute"},group:"scheme",section:"scheme",kind:"sound",mode:"mute"},
+  {type:"horn",name:{ru:"Гудок",en:"Horn"},group:"signals",section:null,kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
+  {type:"whistle",name:{ru:"Тифон",en:"Whistle"},group:"signals",section:null,kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"bell",name:{ru:"Звонок",en:"Bell"},group:"signals",section:null,kind:"sound",mode:"latched",roles:["sound"]},
+  {type:"random",name:{ru:"Случайный звук",en:"Random sound"},group:"signals",section:null,kind:"sound",mode:"random"},
+  {type:"compressor",name:{ru:"Компрессор",en:"Compressor"},group:"mech",section:null,kind:"sound",mode:"loopHeld",roles:["sound"]},
+  {type:"brake",name:{ru:"Тормоз",en:"Brake"},group:"mech",section:null,kind:"sound",mode:"decel",roles:["sound"]},
+  {type:"coupler",name:{ru:"Сцепка",en:"Coupler"},group:"mech",section:null,kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"sander",name:{ru:"Песочница",en:"Sander"},group:"mech",section:null,kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"pantograph",name:{ru:"Токоприёмник",en:"Pantograph"},group:"mech",section:null,kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"doors",name:{ru:"Двери",en:"Doors"},group:"mech",section:null,kind:"sound",mode:"oneshot",roles:["sound"]},
+  {type:"speed",name:{ru:"Скоростной звук",en:"Speed sound"},group:"mech",section:null,kind:"sound",mode:"speed"},
+  {type:"custom",name:{ru:"Свой сценарий",en:"Custom scenario"},group:"extra",section:null,kind:"sound",mode:"shortLong",roles:["start","loop","end","short"]},
+  {type:"headlight",name:{ru:"Фары",en:"Headlights"},group:"light",section:null,kind:"output",mode:"headlight"},
+  {type:"aux",name:{ru:"AUX-выход",en:"AUX output"},group:"light",section:null,kind:"output",mode:"aux",fx:true}
 ];
 const BY_TYPE={};CATALOG.forEach(c=>BY_TYPE[c.type]=c);
-const GROUP_COLORS={main:"#f97316",scheme:"#06b6d4",signals:"#3b82f6",mech:"#22c55e",light:"#eab308",aux:"#ec4899",extra:"#a855f7"};
-const GROUP_NAMES={main:{ru:"Основные",en:"Basic"},scheme:{ru:"Звуковая схема",en:"Sound scheme"},signals:{ru:"Сигналы",en:"Signals"},mech:{ru:"Механика",en:"Mechanics"},light:{ru:"Свет и выходы",en:"Light & outputs"},aux:{ru:"Освещение (AUX)",en:"Lighting (AUX)"},extra:{ru:"Дополнительно",en:"Extras"}};
+const GROUP_COLORS={main:"#f97316",mix:"#eab308",scheme:"#06b6d4",signals:"#3b82f6",mech:"#22c55e",light:"#eab308",aux:"#ec4899",extra:"#a855f7"};
+const GROUP_NAMES={main:{ru:"Основные",en:"Basic"},mix:{ru:"Миксы",en:"Mixes"},scheme:{ru:"Звуковые схемы",en:"Sound schemes"},signals:{ru:"Сигналы",en:"Signals"},mech:{ru:"Механика",en:"Mechanics"},light:{ru:"Свет и выходы",en:"Light & outputs"},aux:{ru:"Освещение (AUX)",en:"Lighting (AUX)"},extra:{ru:"Дополнительно",en:"Extras"}};
+const SECTION_ORDER=[["main",{ru:"Основные",en:"Basic"}],["mix",{ru:"Миксы",en:"Mixes"}],["scheme",{ru:"Звуковые схемы",en:"Sound schemes"}]];
 const LEGACY_FX={fx_incandescent:1,fx_mars:2,fx_ditch:3,fx_beacon:4,fx_strobe:5,fx_firebox:6};
 function normalizeProject(p){
   if(!p||!Array.isArray(p.blocks))return p;
@@ -362,15 +378,21 @@ function normalizeProject(p){
     if(!b||typeof b!=="object")continue;
     if(!b.files||typeof b.files!=="object")b.files={};
     if(b.type==="signal"){b.type="whistle";b.name=b.name||tr(BY_TYPE.whistle.name);}
-    else if(b.type==="lightfx"){b.type="aux";b.name=tr(BY_TYPE.aux.name);}
-    else if(LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type];b.type="aux";b.name=tr(BY_TYPE.aux.name);}
-    if(!BY_TYPE[b.type]){b.type="aux";b.name=b.name||tr(BY_TYPE.aux.name);}
+    else if(b.type==="lightfx"||LEGACY_FX[b.type]!==undefined){b.effect=LEGACY_FX[b.type]!==undefined?LEGACY_FX[b.type]:(b.effect||0);b.type="output";b.channel=1;b.name=tr(BY_TYPE.output.name);}
+    else if(b.type==="aux"){b.type="output";b.channel=((b.channel|0)+1)||1;b.name=tr(BY_TYPE.output.name);}
+    else if(b.type==="headlight"){b.type="output";b.channel=0;b.name=tr(BY_TYPE.output.name);}
+    if(!BY_TYPE[b.type]){b.type="output";b.channel=0;b.name=b.name||tr(BY_TYPE.output.name);}
     const cat=BY_TYPE[b.type];
     if(cat&&cat.kind==="output"){
-      if(b.type!=="headlight"&&b.channel===undefined)b.channel=0;
+      if(b.channel===undefined||(b.channel|0)<0||(b.channel|0)>7)b.channel=0;
       if(b.effect===undefined)b.effect=0;
       if(b.level===undefined)b.level=100;
     }
+    if(cat&&cat.kind==="logicv"){if(!Array.isArray(b.conds))b.conds=[];if(b.join!=="or")b.join="and";}
+    if(cat&&cat.kind==="var"){if(typeof b.varName!=="string")b.varName="";if(b.value===undefined||b.value===null)b.value=1;else b.value=Math.max(-32768,Math.min(32767,b.value|0));}
+    if(cat&&cat.kind==="delay"){if(!(b.delayMs>0))b.delayMs=500;else b.delayMs=Math.max(50,Math.min(10000,b.delayMs));}
+    if(cat&&cat.kind==="input"){if(!(b.fn>=0&&b.fn<=28))b.fn=0;if(["toggle","hold","strobe"].indexOf(b.fxMode)<0)b.fxMode="toggle";}
+    if(cat&&cat.mode==="mute"){if(typeof b.stopNow!=="boolean")b.stopNow=false;}
     if(b.trigger===undefined)b.trigger="auto";
     if(b.outEvent===undefined)b.outEvent="finish";
     if(b.outDelay===undefined)b.outDelay=0;
@@ -380,15 +402,24 @@ function normalizeProject(p){
     if(b.type==="engine"){if(b.files&&Array.isArray(b.files.run)){b.run=b.files.run.map((f,i)=>({from:i*SPEED_STEP,to:(i+1)*SPEED_STEP,file:f||""}));delete b.files.run;}if(!Array.isArray(b.run))b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));if(b.hyst==null)b.hyst=SPEED_HYST;}
     if(b.type==="volume"){if(b.master===undefined)b.master=20;if(b.engine===undefined)b.engine=20;if(b.effects===undefined)b.effects=20;}
   }
+  if(!Array.isArray(p.vars))p.vars=[];
+  if(!Array.isArray(p.texts))p.texts=[];
+  p.texts.forEach(tx=>{if(!tx||typeof tx!=="object")return;if(typeof tx.text!=="string")tx.text="";if(typeof tx.x!=="number"||!isFinite(tx.x))tx.x=0;if(typeof tx.y!=="number"||!isFinite(tx.y))tx.y=0;if(!(tx.size>0))tx.size=16;});
+  VAR_BUILTINS.forEach(bi=>{if(!p.vars.some(v=>v&&v.kind===bi.kind))p.vars.push({name:bi.name,kind:bi.kind,init:0});});
+  p.vars.forEach(v=>{if(!v||typeof v!=="object")return;if(!v.kind)v.kind="user";if(!v.name)v.name=v.kind==="user"?"var":v.kind;if(v.kind!=="user"||v.init==null)v.init=0;});
   if(!p.editor)p.editor={viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]};
   /* Engine and Volume are always present, like fixed device settings. */
   if(!p.blocks.some(b=>b.type==="engine"))addBlockTo(p,"engine");
   if(!p.blocks.some(b=>b.type==="volume"))addBlockTo(p,"volume");
   return p;
 }
+/* Global variables shared by both sections: built-in status plus user variables. */
+function userVars(){return (project.vars||[]).filter(v=>v.kind==="user");}
+function varIndexByName(name){return (project.vars||[]).findIndex(v=>v.name===name);}
+
 const ROLE_NAMES={start:{ru:"Начало",en:"Start"},loop:{ru:"Тело (цикл)",en:"Loop body"},end:{ru:"Конец",en:"End"},short:{ru:"Короткий",en:"Short"},sound:{ru:"Звук",en:"Sound"}};
 const TRIGGER_NAMES={auto:{ru:"Авто (по связи/F)",en:"Auto (by link/F)"},fn:{ru:"F-клавиша",en:"F-key"},engine:{ru:"При двигателе",en:"When engine runs"},speed:{ru:"По скорости",en:"By speed"},dir:{ru:"По направлению",en:"By direction"}};
-const MODE_NAMES={engine:{ru:"Двигатель",en:"Engine"},volume:{ru:"Громкость",en:"Volume"},start:{ru:"Старт схемы",en:"Scheme start"},end:{ru:"Конец схемы",en:"Scheme end"},simple:{ru:"Один раз",en:"One-shot"},loop:{ru:"Цикл",en:"Loop"},mute:{ru:"Пауза",en:"Mute"},shortLong:{ru:"Короткий/длинный",en:"Short/long"},oneshot:{ru:"Один раз",en:"One-shot"},latched:{ru:"Переключатель",en:"Toggle"},loopHeld:{ru:"Цикл пока активно",en:"Loop while active"},decel:{ru:"По замедлению",en:"By deceleration"},speed:{ru:"По скорости",en:"By speed"},random:{ru:"Случайный выбор",en:"Random pick"},headlight:{ru:"Фары",en:"Headlights"},aux:{ru:"Выход",en:"Output"},logic:{ru:"Логика",en:"Logic"}};
+const MODE_NAMES={engine:{ru:"Двигатель",en:"Engine"},volume:{ru:"Громкость",en:"Volume"},start:{ru:"Старт схемы",en:"Scheme start"},end:{ru:"Конец схемы",en:"Scheme end"},simple:{ru:"Один раз",en:"One-shot"},loop:{ru:"Цикл",en:"Loop"},mute:{ru:"Пауза",en:"Mute"},shortLong:{ru:"Короткий/длинный",en:"Short/long"},oneshot:{ru:"Один раз",en:"One-shot"},latched:{ru:"Переключатель",en:"Toggle"},loopHeld:{ru:"Цикл пока активно",en:"Loop while active"},decel:{ru:"По замедлению",en:"By deceleration"},speed:{ru:"По скорости",en:"By speed"},random:{ru:"Случайный выбор",en:"Random pick"},headlight:{ru:"Фары",en:"Headlights"},aux:{ru:"Выход",en:"Output"},logic:{ru:"Логика",en:"Logic"},fxin:{ru:"Вход Fx",en:"Fx input"},output:{ru:"Выход",en:"Output"},cue:{ru:"Один раз",en:"One-shot"},logicv:{ru:"Логика",en:"Logic"},var:{ru:"Переменная",en:"Variable"},delay:{ru:"Задержка",en:"Delay"}};
 const DIRS=[{v:"auto",n:{ru:"Авто (вперёд/назад)",en:"Auto (fwd/rev)"}},{v:"fwd",n:{ru:"Только вперёд",en:"Forward only"}},{v:"rev",n:{ru:"Только назад",en:"Reverse only"}},{v:"any",n:{ru:"Без направления",en:"No direction"}}];
 const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 
@@ -396,6 +427,7 @@ const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke=
 let project=null;
 let selected="",selectedIds=new Set(),marquee=null;
 let dragging=null,panning=null,linking=null;
+let textMode=false,draggingText=null,editingText="";
 let online=false,busy=false,revision=0,savedId="";
 let tracks=[],soundFiles=[],diagnostics=[],assets={};
 let history=[],hIndex=-1,lastSig=null;
@@ -413,7 +445,8 @@ const snap=v=>project.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
 
 function newProject(){
   const p={format:"sound-blocks",schemaVersion:1,id:"blocks_graph",name:t("new_scheme_name"),
-    blocks:[],links:[],editor:{viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]}};
+    blocks:[],links:[],texts:[],vars:VAR_BUILTINS.map(bi=>({name:bi.name,kind:bi.kind,init:0})),
+    editor:{viewport:{x:40,y:40,zoom:1},snap:true,bindTuples:[]}};
   addBlockTo(p,"engine");
   addBlockTo(p,"volume");
   return p;
@@ -425,8 +458,11 @@ function addBlockTo(p,type){
   const id=nid(type==="engine"?"engine_":(type==="volume"?"vol_":"b"),p.blocks.map(b=>b.id));
   const b={id,type,name:tr(cat.name),fn:type==="engine"?8:(type==="volume"?-1:nextFn(p)),trigger:"auto",volume:80,rate:1000,level:100,files:{}};
   if(type==="volume"){b.master=20;b.engine=20;b.effects=20;}
-  if(cat.kind==="output"){b.channel=0;b.effect=cat.effect||0;b.dir=type==="headlight"?"auto":"any";}
-  if(cat.kind==="logic")b.logic=1;
+  if(cat.kind==="output"){b.channel=0;b.effect=0;b.level=100;}
+  if(cat.kind==="logicv"){b.conds=[];b.join="and";}
+  if(cat.kind==="var"){b.varName="";b.value=1;}
+  if(cat.kind==="delay"){b.delayMs=500;}
+  if(cat.kind==="input"){b.fxMode="toggle";}
   (cat.roles||[]).forEach(r=>b.files[r]="");
   if(type==="engine"){b.files={start:"",idle:"",stop:""};b.run=[0,25,50,75].map((f,i,a)=>({from:f,to:a[i+1]==null?100:a[i+1],file:""}));b.hyst=SPEED_HYST;}
   if(type==="speed"){b.hyst=SPEED_HYST;b.bands=[0,SPEED_STEP,SPEED_STEP*2,SPEED_STEP*3].map((from,i,arr)=>({from:from,to:arr[i+1]==null?100:arr[i+1],file:""}));}
@@ -453,8 +489,19 @@ function nextBlockPosition(p){
 function compile(){
   const states=[],transitions=[],effects=[];const files=new Set();const speedHysts=[];const dropped=[];let tid=0;
   const audible={},terminal={},startCondOf={},stopCondOf={},usedPrio={};let waitN=0;
+  const ctlEntry={},ctlOut={};
+  /* Links from an Input (Fx) block are trigger assignments, not graph edges:
+     every target becomes its own effect channel, so one Fx event can drive
+     several blocks at once (parallel fan-out). */
+  /* Input (Fx) has a single output. Its mode selects the trigger condition:
+     Вкл/выкл = press event, Удержание = held level, Строб = held level (the
+     target produces the flashing). */
+  const fxCondOf=mode=>({toggle:{type:"fn_press"},hold:{type:"fn_on"},strobe:{type:"fn_on"}}[mode]||{type:"fn_press"});
+  const inputTrigs=id=>{const out=[];for(const l of project.links){if(l.to!==id)continue;const f=project.blocks.find(x=>x.id===l.from);if(!f||BY_TYPE[f.type].kind!=="input")continue;out.push(Object.assign(fxCondOf(f.fxMode),{fn:f.fn}));}return out;};
+  const graphHasIn=id=>project.links.some(l=>{if(l.to!==id)return false;const f=project.blocks.find(x=>x.id===l.from);return !!f&&BY_TYPE[f.type].kind!=="input";});
+  const isLeaf=id=>!project.links.some(l=>l.from===id&&l.kind==="after"&&BY_TYPE[l.to]&&BY_TYPE[l.to].kind!=="output");
   const prioFor=src=>{usedPrio[src]=usedPrio[src]||new Set();let p=60;while(usedPrio[src].has(p))p--;usedPrio[src].add(p);return p;};
-  const addState=(id,name,file,loop,volume=80,rate=1000,loops=0)=>{if(states.some(s=>s.id===id))return;const st={id,name,file:file||"",loop:!!loop,volume,rate};if(loops)st.loops=loops;states.push(st);if(file)files.add(file);};
+  const addState=(id,name,file,loop,volume=80,rate=1000,loops=0)=>{if(states.some(s=>s.id===id))return null;const st={id,name,file:file||"",loop:!!loop,volume,rate};if(loops)st.loops=loops;states.push(st);if(file)files.add(file);return st;};
   const silent=(id,name)=>addState(id,name,"",false,100,1000);
   const addEdge=(source,target,condition,priority=10,timing="immediate")=>{transitions.push({id:"t"+(++tid),source,target,priority,timing,condition});};
   const engine=project.blocks.find(b=>b.type==="engine");
@@ -471,8 +518,68 @@ function compile(){
 
   for(const b of project.blocks){
     const kind=BY_TYPE[b.type].kind;
-    if(kind==="output"||kind==="logic"||kind==="setting")continue;
+    if(kind==="output"||kind==="setting")continue;
     const fn=b.fn,vol=b.volume,rate=b.rate||1000;
+    /* Aura X control blocks (Mixes): silent FSM states that wait for Fx,
+       evaluate variable conditions, assign a variable or delay; chained by links. */
+    if(kind==="input"){
+      /* Input (Fx) is a pure trigger source: its links assign the trigger
+         condition to other blocks (see inputTrigs), so it needs no states. */
+      continue;
+    }
+    if(kind==="var"){
+      const e=b.id+"_off";let st=silent(e,blockName(b));const trigs=inputTrigs(b.id);
+      if(trigs.length){st=silent(b.id+"_gate",blockName(b));trigs.forEach((c,i)=>addEdge(e,b.id+"_gate",c,20+i));}
+      const vi=varIndexByName(b.varName);
+      if(vi>=0&&(project.vars[vi]||{}).kind==="user"){st.setVar=vi;st.setValue=Math.max(-32768,Math.min(32767,b.value|0));}
+      ctlEntry[b.id]=st.id;
+      if(st.id!==e&&isLeaf(b.id))addEdge(st.id,e,{type:"sample_done"},5);
+      if(!graphHasIn(b.id))effects.push({id:b.id,entry:e,fn:b.fn});
+      continue;
+    }
+    if(kind==="delay"){
+      const e=b.id+"_off";let st=silent(e,blockName(b));const trigs=inputTrigs(b.id);
+      if(trigs.length){st=silent(b.id+"_gate",blockName(b));trigs.forEach((c,i)=>addEdge(e,b.id+"_gate",c,20+i));}
+      ctlEntry[b.id]=st.id;
+      if(st.id!==e&&isLeaf(b.id))addEdge(st.id,e,{type:"sample_done"},5);
+      if(!graphHasIn(b.id))effects.push({id:b.id,entry:e,fn:b.fn});
+      continue;
+    }
+    if(kind==="logicv"){
+      const e=b.id+"_off";silent(e,blockName(b));ctlEntry[b.id]=e;
+      const trigs=inputTrigs(b.id);
+      let start=e;
+      if(trigs.length){start=b.id+"_gate";silent(start,blockName(b));trigs.forEach((c,i)=>addEdge(e,start,c,20+i));}
+      const T=b.id+"_true";silent(T,blockName(b)+" \u2713");
+      const conds=(b.conds||[]).filter(c=>c&&varIndexByName(c.var)>=0);
+      const mkCond=(c,neg)=>{let op=(c.op|0);if(!!c.not!==!!neg)op=NEG_OP[op];const cond={type:"var_cmp",var:varIndexByName(c.var),op:op};
+        const rv=varIndexByName(c.rhsVar);if(c.rhsVar&&rv>=0)cond.var2=rv;else cond.value=Math.max(-32768,Math.min(32767,c.value|0));return cond;};
+      if(!conds.length){addEdge(start,T,{type:"sample_done"},10);}
+      else{
+        const F=b.id+"_false";silent(F,blockName(b)+" \u2717");
+        if(b.join==="or"){
+          let cur=start;conds.forEach((c,i)=>{const nxt=i<conds.length-1?(b.id+"_e"+(i+1)):F;if(i<conds.length-1)silent(nxt,blockName(b)+" OR"+(i+1));
+            addEdge(cur,T,mkCond(c,false),20);addEdge(cur,nxt,mkCond(c,true),10);cur=nxt;});
+        }else{
+          let cur=start;conds.forEach((c,i)=>{const nxt=i<conds.length-1?(b.id+"_e"+(i+1)):T;if(i<conds.length-1)silent(nxt,blockName(b)+" AND"+(i+1));
+            addEdge(cur,nxt,mkCond(c,false),20);addEdge(cur,F,mkCond(c,true),10);cur=nxt;});
+        }
+      }
+      if(isLeaf(b.id)){addEdge(T,e,{type:"sample_done"},5);if(conds.length)addEdge(b.id+"_false",e,{type:"sample_done"},5);}
+      if(!graphHasIn(b.id))effects.push({id:b.id,entry:e,fn:b.fn});
+      continue;
+    }
+    if(kind==="cue"){
+      const e=b.id+"_off";silent(e,blockName(b));ctlEntry[b.id]=e;
+      if(b.files.sound){const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);
+        const trigs=inputTrigs(b.id),starts=trigs.length?trigs:[{type:"sample_done"}];
+        starts.forEach((c,i)=>addEdge(e,ph,c,10+i));
+        const leaf=!project.links.some(l=>l.from===b.id&&l.kind==="after"&&BY_TYPE[l.to]&&BY_TYPE[l.to].kind!=="output");
+        if(leaf)addEdge(ph,e,{type:"sample_done"},10);
+        audible[b.id]=ph;terminal[b.id]=ph;}
+      if(!graphHasIn(b.id))effects.push({id:b.id,entry:e,fn:b.fn});
+      continue;
+    }
     if(b.type==="engine"){
       const has=f=>!!f;
       const start=b.files.start,idle=b.files.idle,stop=b.files.stop||"";
@@ -542,14 +649,15 @@ function compile(){
       if(sTrig==="speed")speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
       if(b.files.sound){
         const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);
-        addEdge(entry,ph,sStart,10,sTrig==="speed"?"after_sample":"immediate");
+        const trigs=inputTrigs(b.id),starts=trigs.length?trigs:[sStart];
+        starts.forEach((c,i)=>addEdge(entry,ph,c,10+i,sTrig==="speed"?"after_sample":"immediate"));
         addEdge(ph,entry,{type:"sample_done"},10);
         audible[b.id]=ph;terminal[b.id]=ph;
       }
       continue;
     }
     if(mode0==="simple"){
-      if(b.files.sound){const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);addEdge(ph,entry,{type:"sample_done"},10);audible[b.id]=ph;terminal[b.id]=ph;}
+      if(b.files.sound){const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);inputTrigs(b.id).forEach((c,i)=>addEdge(entry,ph,c,10+i));addEdge(ph,entry,{type:"sample_done"},10);audible[b.id]=ph;terminal[b.id]=ph;}
       continue;
     }
     if(mode0==="loop"){
@@ -565,18 +673,20 @@ function compile(){
       if(b.files.sound){
         const loops=(lm==="count")?Math.max(1,Math.min(255,b.loopCount||2)):0;
         const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,true,vol,rate,loops);
+        inputTrigs(b.id).forEach((c,i)=>addEdge(entry,ph,c,10+i));
         addEdge(ph,entry,sStop,10);
         stopCondOf[b.id]=sStop;audible[b.id]=ph;terminal[b.id]=ph;
       }
       continue;
     }
     if(mode0==="mute"){
-      const ph=b.id+"_mute";silent(ph,blockName(b));addEdge(ph,entry,{type:"sample_done"},10);audible[b.id]=ph;terminal[b.id]=ph;
+      const ph=b.id+"_mute";silent(ph,blockName(b));inputTrigs(b.id).forEach((c,i)=>addEdge(entry,ph,c,10+i));addEdge(ph,entry,{type:"sample_done"},10);audible[b.id]=ph;terminal[b.id]=ph;
       continue;
     }
     if(mode0==="end"){
       const ph=b.id+"_end";
       if(b.files.sound)addState(ph,blockName(b),b.files.sound,false,vol,rate);else silent(ph,blockName(b));
+      inputTrigs(b.id).forEach((c,i)=>addEdge(entry,ph,c,10+i));
       audible[b.id]=ph;terminal[b.id]=null;
       continue;
     }
@@ -633,32 +743,59 @@ function compile(){
       if(b.files.sound){addState(b.id+"_play",blockName(b),b.files.sound,true,vol,rate);addEdge(entry,b.id+"_play",trig==="engine"?{type:"engine_on"}:{type:"fn_on",fn},10);addEdge(b.id+"_play",entry,trig==="engine"?{type:"engine_off"}:{type:"fn_off",fn},10);audible[b.id]=b.id+"_play";}
     }
   }
+  const entryOf=id=>ctlEntry[id]||(id+"_off");
+  const controlPort=(b,l)=>{
+    const cat=BY_TYPE[b.type];
+    if(cat.kind==="logicv"){const port=l.cond==="false"?"false":"true";return {state:b.id+(port==="false"?"_false":"_true"),cond:{type:"sample_done"},port:port};}
+    if(cat.kind==="var")return {state:ctlEntry[b.id],cond:{type:"sample_done"},port:"out"};
+    return {state:ctlEntry[b.id],cond:{type:"timeout",min:Math.max(1,Math.min(255,Math.round((b.delayMs||500)/50)))},port:"out"};
+  };
   for(const l of project.links){
     if(l.kind!=="after")continue;
     const from=project.blocks.find(x=>x.id===l.from),to=project.blocks.find(x=>x.id===l.to);
     if(!from||!to)continue;
-    if(BY_TYPE[from.type].kind!=="sound"||BY_TYPE[to.type].kind!=="sound")continue;
-    const a=audible[to.id];if(!a){dropped.push({id:to.id,reason:"dst"});continue;}
-    const ev=from.outEvent==="start"?"start":"finish";
+    const fk=BY_TYPE[from.type].kind,tk=BY_TYPE[to.type].kind;
+    if(fk==="output"||fk==="input")continue;   /* input links are triggers, output links are binds */
+    if(fk==="logicv"||fk==="var"||fk==="delay"){
+      const src=controlPort(from,l);
+      const dst=tk==="output"?null:(tk==="sound"?audible[to.id]:entryOf(to.id));
+      if(!src.state||!src.cond){dropped.push({id:from.id,reason:"src"});continue;}
+      if(!dst){dropped.push({id:to.id,reason:"dst"});continue;}
+      addEdge(src.state,dst,src.cond,prioFor(src.state));
+      continue;
+    }
     const delay=Math.max(0,from.outDelay|0);
-    const cond=ev==="start"?startCondOf[from.id]:(stopCondOf[from.id]||{type:"sample_done"});
-    const srcState=ev==="start"?(to.id+"_off"):terminal[from.id];
-    if(!srcState||!cond){dropped.push({id:from.id,reason:"src"});continue;}
-    const prio=prioFor(srcState);
-    if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));addEdge(srcState,w,cond,prio);addEdge(w,a,{type:"timeout",min:Math.max(1,Math.min(255,Math.round(delay/50)))},prio);}
-    else addEdge(srcState,a,cond,prio);
+    const waitUnits=Math.max(1,Math.min(255,Math.round(delay/50)));
+    if(tk==="sound"||tk==="cue"){
+      const a=audible[to.id];if(!a){dropped.push({id:to.id,reason:"dst"});continue;}
+      const ev=from.outEvent==="start"?"start":"finish";
+      const cond=ev==="start"?startCondOf[from.id]:(stopCondOf[from.id]||{type:"sample_done"});
+      const srcState=ev==="start"?(to.id+"_off"):terminal[from.id];
+      if(!srcState||!cond){dropped.push({id:from.id,reason:"src"});continue;}
+      const prio=prioFor(srcState);
+      if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));addEdge(srcState,w,cond,prio);addEdge(w,a,{type:"timeout",min:waitUnits},prio);}
+      else addEdge(srcState,a,cond,prio);
+    }else{
+      const dst=tk==="output"?null:entryOf(to.id),srcState=terminal[from.id]||audible[from.id];
+      if(!srcState||!dst){dropped.push({id:from.id,reason:"src"});continue;}
+      const cond=stopCondOf[from.id]||{type:"sample_done"};
+      const prio=prioFor(srcState);
+      if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));addEdge(srcState,w,cond,prio);addEdge(w,dst,{type:"timeout",min:waitUnits},prio);}
+      else addEdge(srcState,dst,cond,prio);
+    }
   }
   const positions={};project.blocks.forEach(b=>positions[b.id]={x:b.x,y:b.y});
+  const vars=(project.vars||[]).map(v=>v.kind==="user"?{name:v.name,kind:"user",init:(v.init|0)}:{name:v.name,kind:v.kind});
   const hystUnits=speedHysts.length?Math.max.apply(null,speedHysts.map(p=>Math.max(0,Math.min(32,pctSpeed(p))))):(engine?3:0);
   const payload={format:"sound-graph",schemaVersion:1,id:project.id,name:project.name,
     engine:{entry:engineEntry,fn:engine?engine.fn:8},hysteresis:hystUnits,
-    states,transitions,effects,assets:Object.keys(assets).map(f=>assets[f]),
+    variables:vars,states,transitions,effects,assets:Object.keys(assets).map(f=>assets[f]),
     editor:{positions,viewport:project.editor.viewport}};
   return {payload,files:[...files],dropped};
 }
 
-/* ---- compile outputs/logic -> func_binding_t ------------------------- */
-function outputBlocks(){return project.blocks.filter(b=>BY_TYPE[b.type].kind==="output"||BY_TYPE[b.type].kind==="logic");}
+/* ---- compile outputs -> func_binding_t ------------------------------- */
+function outputBlocks(){return project.blocks.filter(b=>BY_TYPE[b.type].kind==="output");}
 function sourceFnOf(id){for(const l of project.links){if(l.to===id){const s=project.blocks.find(b=>b.id===l.from);if(s)return s.fn;}}return null;}
 /* F-key of the Start part upstream of a scheme block (walking "after" links
    backwards); used to show which key ends a linked Loop. */
@@ -666,18 +803,14 @@ function upstreamStartFn(id){let cur=id,seen=0;while(cur&&seen++<40){const c=pro
 function desiredBindings(){
   const out=[];const mk=(fn,type,id,dir,state)=>({fn,type,id,dir:dir|0,state:state|0});
   for(const b of outputBlocks()){
-    const kind=BY_TYPE[b.type].kind,fn=sourceFnOf(b.id)!=null?sourceFnOf(b.id):b.fn;
-    if(kind==="logic"){out.push(mk(fn,4,b.logic,0,0));continue;}
-    if(b.type==="headlight"){
-      if(b.dir==="auto"){out.push(mk(fn,1,0,1,0));out.push(mk(fn,1,1,2,0));}
-      else if(b.dir==="rev")out.push(mk(fn,1,1,2,0));
-      else if(b.dir==="fwd")out.push(mk(fn,1,0,1,0));
-      else out.push(mk(fn,1,0,0,0));
-    }else out.push(mk(fn,1,2+(b.channel|0),b.dir==="rev"?2:0,0));
+    const fn=sourceFnOf(b.id)!=null?sourceFnOf(b.id):b.fn;
+    const ch=b.channel|0;
+    if(ch===0)out.push(mk(fn,1,0,0,0));
+    else out.push(mk(fn,1,2+(ch-1),0,0));
   }
   return out;
 }
-function auxConfigs(){return outputBlocks().filter(b=>BY_TYPE[b.type].kind==="output"&&b.type!=="headlight").map(b=>({ch:b.channel|0,level:b.level|0,effect:b.effect|0}));}
+function auxConfigs(){return outputBlocks().filter(b=>(b.channel|0)>=1).map(b=>({ch:(b.channel|0)-1,level:b.level|0,effect:b.effect|0}));}
 const bindKey=b=>b.fn+":"+b.type+":"+b.id+":"+(b.dir|0)+":"+(b.state|0);
 
 /* ---- client validation ---------------------------------------------- */
@@ -701,7 +834,7 @@ function validate(){
   payload.transitions.forEach(e=>{if(!ids.has(e.source))err(e.id,t("v_no_state_a")+e.source);if(!ids.has(e.target))err(e.id,t("v_no_state_a")+e.target);});
   files.forEach(f=>{if(!assets[f])warn("",t("v_no_wav_a")+f+t("v_no_wav_b"));});
   for(const b of outputBlocks()){
-    if(BY_TYPE[b.type].kind==="output"&&b.type!=="headlight"&&(b.channel|0)>6)err(b.id,t("v_bad_aux"));
+    if((b.channel|0)>7||(b.channel|0)<0)err(b.id,t("v_bad_aux"));
     if(sourceFnOf(b.id)==null&&!(b.fn>=0&&b.fn<=28))err(b.id,t("v_need_fn"));
   }
   const fnUse={};const addUse=(f,who)=>{if(f==null||f<0||f>28)return;(fnUse[f]=fnUse[f]||[]).push(who);};
@@ -720,6 +853,15 @@ function validate(){
       if(!project.links.some(l=>l.to===b.id&&l.kind==="after"))warn(b.id,t("v_no_link_in"));
     }
   }
+  const fxSeen={},chSeen={};
+  project.blocks.forEach(b=>{const c=BY_TYPE[b.type];if(!c)return;
+    if(c.kind==="input"){const k=b.fn;if(fxSeen[k]!==undefined)warn(b.id,t("v_dup_fx"));else fxSeen[k]=b.id;}
+    if(c.kind==="output"){const k=b.channel|0;if(chSeen[k]!==undefined)warn(b.id,t("v_dup_ch"));else chSeen[k]=b.id;}});
+  /* Parallel fan-out is supported only for Input (Fx): its links assign triggers
+     and every target becomes its own channel. Other blocks keep a single branch. */
+  project.blocks.forEach(b=>{const c=BY_TYPE[b.type];if(!c||c.kind==="input"||c.kind==="output"||c.kind==="setting"||c.kind==="engine")return;
+    const n=project.links.filter(l=>l.from===b.id&&l.kind==="after"&&BY_TYPE[l.to]&&BY_TYPE[l.to].kind!=="output").length;
+    if(n>1)warn(b.id,t("v_multi_branch"));});
   return {payload,files,diagnostics:out};
 }
 
@@ -784,7 +926,7 @@ async function applyOutputs(){
 
 /* ---- persistence ----------------------------------------------------- */
 function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId}));}catch(e){}historyPush();}
-const projectSig=()=>JSON.stringify({b:project.blocks,l:project.links,id:project.id,name:project.name});
+const projectSig=()=>JSON.stringify({b:project.blocks,l:project.links,x:project.texts,id:project.id,name:project.name});
 function historyReset(){history=[];hIndex=-1;lastSig=null;historyPush();}
 function historyPush(){const sig=projectSig();if(sig===lastSig)return;history=history.slice(0,hIndex+1);history.push(JSON.stringify(project));hIndex=history.length-1;lastSig=sig;if(history.length>100){history.shift();hIndex--;}}
 function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_undone"));}
@@ -796,12 +938,18 @@ function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-th
 
 /* ---- rendering ------------------------------------------------------- */
 function renderPalette(){
-  const groups={};CATALOG.forEach(c=>{(groups[c.group]=groups[c.group]||[]).push(c);});
-  const hasEngine=project.blocks.some(b=>b.type==="engine");const hasVolume=project.blocks.some(b=>b.type==="volume");let html="";
-  for(const g in groups){html+='<div class="pal-group"><header>'+esc(tr(GROUP_NAMES[g]))+"</header>";groups[g].forEach(c=>{
-    const dis=(c.type==="engine"&&hasEngine)||(c.type==="volume"&&hasVolume),col=GROUP_COLORS[c.group]||"#2b3547";
-    html+='<button data-add="'+c.type+'" style="border-left:3px solid '+col+'"'+(dis?" disabled":"")+'><b>'+esc(tr(c.name))+"</b><small>"+esc(tr(MODE_NAMES[c.mode])||"")+(c.fx?t("pal_fx"):"")+"</small></button>";
-  });html+="</div>";}
+  const hasEngine=project.blocks.some(b=>b.type==="engine"),hasVolume=project.blocks.some(b=>b.type==="volume");
+  let html="";
+  for(const sec of SECTION_ORDER){
+    const items=CATALOG.filter(c=>{const ss=c.sections||(c.section?[c.section]:[]);return ss.indexOf(sec[0])>=0;});
+    if(!items.length)continue;
+    html+='<div class="pal-group"><header>'+esc(tr(sec[1]))+"</header>";
+    items.forEach(c=>{
+      const dis=(c.type==="engine"&&hasEngine)||(c.type==="volume"&&hasVolume),col=GROUP_COLORS[c.group]||"#2b3547";
+      html+='<button data-add="'+c.type+'" style="border-left:3px solid '+col+'"'+(dis?" disabled":"")+'><b>'+esc(tr(c.name))+"</b><small>"+esc(tr(MODE_NAMES[c.mode])||"")+(c.fx?t("pal_fx"):"")+"</small></button>";
+    });
+    html+="</div>";
+  }
   $("palette").innerHTML=html;
   $("palette").querySelectorAll("[data-add]").forEach(btn=>btn.onclick=()=>{const b=addBlockTo(project,btn.getAttribute("data-add"));if(b){selected=b.id;selectedIds=new Set([b.id]);render();}});
 }
@@ -809,12 +957,12 @@ function nodeSummary(b){
   const kind=BY_TYPE[b.type].kind;
   if(kind==="setting")return t("vol_master")+" <span class='k'>"+(b.master|0)+"</span> · "+t("vol_engine")+" "+(b.engine|0)+" · "+t("vol_effects")+" "+(b.effects|0);
   if(b.type==="engine")return t("ns_steps")+"<span class='k'>"+((b.run||[]).filter(x=>x.file).length)+"</span>"+t("ns_prot")+(b.hyst==null?SPEED_HYST:b.hyst)+"% · F"+b.fn;
-  if(kind==="output"){
-    const src=sourceFnOf(b.id);
-    if(b.type==="headlight")return "F"+(src!=null?src:b.fn)+" · "+tr((DIRS.find(d=>d.v===b.dir)||{}).n)+" · "+b.level+"%";
-    return "F"+(src!=null?src:b.fn)+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+(tr((LIGHT_FX.find(f=>f.v===b.effect)||{}).n)||"")+" · "+b.level+"%";
-  }
-  if(kind==="logic"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+(tr((LOGIC_OPS.find(o=>o.v===b.logic)||{}).n)||"");}
+  if(kind==="output"){const src=sourceFnOf(b.id);return "F"+(src!=null?src:b.fn)+" · "+(tr((OUTPUT_CHANNELS.find(c=>c.v===(b.channel|0))||{}).n)||"")+" · "+(b.level|0)+"%";}
+  if(kind==="logicv"){return (b.join==="or"?"OR":"AND")+" · "+((b.conds||[]).length)+" "+esc(t("lc_cond"));}
+  if(kind==="input")return "F"+b.fn+" · "+esc(t(b.fxMode==="hold"?"fx_hold":b.fxMode==="strobe"?"fx_strobe":"fx_toggle"));
+  if(kind==="var")return esc(b.varName||"?")+" = "+esc((b.value|0));
+  if(kind==="delay")return esc(b.delayMs|0)+" ms";
+  if(kind==="cue")return t("ns_simple")+(b.files.sound?esc(b.files.sound):t("ns_file_none"));
   const cat=BY_TYPE[b.type],parts=[];
   if(cat.mode==="speed")return t("ns_speed")+((b.bands||[]).filter(x=>x.file).length)+t("ns_prot")+(b.hyst==null?SPEED_HYST:b.hyst)+"%";
   if(cat.mode==="start")return "F"+b.fn+" · "+esc(tr(TRIGGER_NAMES[b.trigger]||TRIGGER_NAMES.auto))+(b.trigger==="speed"?" ("+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+"%)":(b.trigger==="dir"?" / "+(b.dirTrigger==="rev"?t("dir_rev"):t("dir_fwd")):""))+" · "+esc(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(" "+b.outDelay+t("bd_delay_b")):""))+"<br>"+(b.files.sound?esc(b.files.sound):t("ns_file_none"));
@@ -837,15 +985,15 @@ function renderNodes(){
   const box=$("nodes");box.innerHTML="";
   for(const b of project.blocks){
     const cat=BY_TYPE[b.type],kind=cat.kind;
-    const hasIn=b.type!=="engine"&&kind!=="setting"&&cat.mode!=="start",hasOut=kind!=="output"&&kind!=="setting"&&cat.mode!=="end";
+    const hasIn=kind!=="input"&&b.type!=="engine"&&kind!=="setting"&&cat.mode!=="start",hasOut=kind!=="output"&&kind!=="setting"&&cat.mode!=="end";
     const el=document.createElement("div");
     const color=GROUP_COLORS[cat.group]||"#2b3547";
-    el.className="node"+(selectedIds.has(b.id)?" sel":"")+(kind==="output"?" output":"")+(kind==="logic"?" logic":"")+(b.type==="engine"?" engine":"");
+    el.className="node"+(selectedIds.has(b.id)?" sel":"")+(kind==="output"?" output":"")+(kind==="logicv"?" logic":"")+(b.type==="engine"?" engine":"");
     el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;el.style.borderColor=color;
     el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.30)+'"><b>'+esc(blockName(b))+'</b>'+(readyIds.has(b.id)?'<span class="okbadge" title="'+esc(t("tip_configured"))+'">✓</span>':'')+(primaryFile(b)?'<button class="chain" data-chain="'+b.id+'" title="'+esc(t("f_chain"))+'" aria-label="'+esc(t("f_chain"))+'">▶</button>':'')+'<button class="x" data-del="'+b.id+'" title="'+esc(t("tip_del_block"))+'" aria-label="'+esc(t("tip_del_block"))+'">'+TRASH+'</button></div>'+
       '<div class="bd">'+nodeSummary(b)+"</div>"+
       (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">'+esc(t("port_in"))+'</span></div>':'')+
-      (hasOut?'<div class="port out" data-out="'+b.id+'"><span class="lbl">'+esc(t("port_out"))+'</span></div>':'');
+      (hasOut?outPortsHtml(b):'');
     box.appendChild(el);
   }
   box.querySelectorAll("[data-drag]").forEach(h=>h.addEventListener("pointerdown",onNodeDown));
@@ -854,9 +1002,53 @@ function renderNodes(){
   box.querySelectorAll("[data-out]").forEach(p=>p.addEventListener("pointerdown",onPortDown));
   box.querySelectorAll(".node .bd").forEach(bd=>bd.addEventListener("pointerdown",ev=>{const id=bd.closest(".node").dataset.id;selectNode(id,ev.shiftKey||ev.ctrlKey||ev.metaKey);}));
 }
-function portPos(id,which){
+/* ---- free text labels (annotations) ---------------------------------- */
+function nextTextId(p){const ids=(p.texts||[]).map(x=>x.id);let i=1;while(ids.indexOf("txt"+i)>=0)i++;return "txt"+i;}
+function addTextAt(p,x,y,text){if(!Array.isArray(p.texts))p.texts=[];const item={id:nextTextId(p),text:(text==null?"":String(text)),x:snapTo(p,x),y:snapTo(p,y),size:16};p.texts.push(item);return item;}
+function removeText(id){project.texts=(project.texts||[]).filter(x=>x.id!==id);if(selected===id)selected="";if(editingText===id)editingText="";render();}
+function renderTexts(){
+  const box=$("texts");if(!box)return;box.innerHTML="";
+  for(const tx of (project.texts||[])){
+    const el=document.createElement("div");
+    el.className="textnode"+(selected===tx.id?" sel":"")+(editingText===tx.id?" editing":"");
+    el.style.left=tx.x+"px";el.style.top=tx.y+"px";el.style.fontSize=(tx.size||16)+"px";
+    if(tx.color)el.style.color=tx.color;
+    el.dataset.text=tx.id;el.textContent=tx.text;
+    box.appendChild(el);
+  }
+  box.querySelectorAll("[data-text]").forEach(el=>{el.addEventListener("pointerdown",onTextDown);el.addEventListener("dblclick",onTextDbl);});
+}
+function onTextDown(ev){
+  const id=ev.currentTarget.getAttribute("data-text");
+  if(editingText===id||ev.button!==0)return;
+  ev.stopPropagation();
+  if(ev.shiftKey||ev.ctrlKey||ev.metaKey){selected=(selected===id)?"":id;selectedIds=new Set();selectedLink="";render();return;}
+  if(selected!==id||selectedIds.size||selectedLink){selected=id;selectedIds=new Set();selectedLink="";render();}
+  const tx=(project.texts||[]).find(x=>x.id===id);if(!tx)return;
+  const p=worldPoint(ev);draggingText={id,dpx:p.x-tx.x,dpy:p.y-tx.y};
+}
+function onTextDbl(ev){
+  ev.stopPropagation();
+  const el=ev.currentTarget,id=el.getAttribute("data-text");
+  const tx=(project.texts||[]).find(x=>x.id===id);if(!tx)return;
+  editingText=id;selected=id;selectedIds=new Set();selectedLink="";
+  el.classList.add("editing");el.setAttribute("contenteditable","true");el.focus();
+  try{const r=document.createRange();r.selectNodeContents(el);const s=window.getSelection();s.removeAllRanges();s.addRange(r);}catch(e){}
+  el.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();el.blur();}else if(e.key==="Escape"){e.preventDefault();el.textContent=tx.text;el.blur();}});
+  el.addEventListener("blur",()=>{if(editingText!==id)return;editingText="";tx.text=el.textContent;el.removeAttribute("contenteditable");render();});
+}
+function portLabel(p){return ({on:t("lc_fx_on"),off:t("lc_fx_off"),hold:t("lc_fx_hold"),true:t("lc_true"),false:t("lc_false")})[p]||t("port_out");}
+function outPortsHtml(b){
+  const cat=BY_TYPE[b.type],ports=cat.outputs;
+  if(!ports||!ports.length)return '<div class="port out" data-out="'+b.id+'" data-port="out"><span class="lbl">'+esc(t("port_out"))+'</span></div>';
+  return ports.map((p,i)=>{const top=Math.round(12+i*(56/(ports.length-1||1)));return '<div class="port out" data-out="'+b.id+'" data-port="'+p+'" style="top:'+top+'px" title="'+esc(portLabel(p))+'"><span class="lbl">'+esc(portLabel(p))+'</span></div>';}).join("");
+}
+function outPortOf(l){const a=project.blocks.find(x=>x.id===l.from);const cat=a?BY_TYPE[a.type]:null;return (cat&&cat.outputs&&l.cond&&cat.outputs.indexOf(l.cond)>=0)?l.cond:"out";}
+function portPos(id,which,port){
   const el=$("nodes").querySelector('[data-id="'+id+'"]');
-  const p=el&&el.querySelector(which==="out"?".port.out":".port.in");
+  let sel=which==="out"?".port.out":".port.in";
+  if(which==="out"&&port&&port!=="out")sel='.port.out[data-port="'+port+'"]';
+  const p=el&&el.querySelector(sel);
   if(p){const r=p.getBoundingClientRect(),s=$("stage").getBoundingClientRect(),v=project.editor.viewport;
     return {x:(r.left+r.width/2-s.left-v.x)/v.zoom,y:(r.top+r.height/2-s.top-v.y)/v.zoom};}
   const b=project.blocks.find(x=>x.id===id)||{x:0,y:0};
@@ -866,7 +1058,7 @@ function curve(x1,y1,x2,y2){const dx=Math.max(40,Math.abs(x2-x1)/2);return "M"+x
 function renderLinks(){
   const byId={};project.blocks.forEach(b=>byId[b.id]=b);let html="";
   for(const l of project.links){const a=byId[l.from],c=byId[l.to];if(!a||!c||BY_TYPE[a.type].kind==="output")continue;
-    const p1=portPos(l.from,"out"),p2=portPos(l.to,"in");
+    const p1=portPos(l.from,"out",outPortOf(l)),p2=portPos(l.to,"in");
     html+='<path class="link'+(selectedLink===l.id?" sel":"")+'" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+curve(p1.x,p1.y,p2.x-10,p2.y)+'"></path>';}
   $("linkLayer").innerHTML=html;
   $("linkLayer").querySelectorAll("[data-link]").forEach(p=>p.onclick=ev=>{ev.stopPropagation();selectedLink=p.getAttribute("data-link");selected="";selectedIds=new Set();render();});
@@ -875,7 +1067,7 @@ function renderLinks(){
 function renderTempLink(){
   const tmp=$("tempLink");
   if(!linking){tmp.classList.add("hidden");return;}
-  const p1=portPos(linking.from,"out");
+  const p1=portPos(linking.from,"out",linking.port);
   tmp.classList.remove("hidden");
   tmp.setAttribute("d",curve(p1.x,p1.y,linking.x,linking.y));
 }
@@ -1004,17 +1196,23 @@ function renderInspector(){
     const a=project.blocks.find(x=>x.id===lk.from),c=project.blocks.find(x=>x.id===lk.to);
     const kindKey={gate:"link_kind_gate",bind:"link_kind_bind",after:"link_kind_after"}[lk.kind]||"link_kind";
     let h='<div class="hint">'+esc(t("li_link_a"))+esc(a?blockName(a):"?")+esc(t("li_link_b"))+esc(c?blockName(c):"?")+esc(t("li_link_c"))+'</div><label>'+esc(t("li_type"))+'</label><div class="hint">'+esc(t(kindKey))+'</div>';
+    const aport=a&&BY_TYPE[a.type].outputs;
+    if(aport&&aport.length)h+='<label>'+esc(t("li_output"))+'</label><select id="l_cond">'+aport.map(p=>'<option value="'+p+'"'+((lk.cond||aport[0])===p?" selected":"")+">"+esc(portLabel(p))+"</option>").join("")+"</select>";
     if(lk.kind==="after")h+='<div class="hint">'+esc(t("li_after_a"))+esc(a?blockName(a):"?")+esc(t("li_after_b"))+(a&&a.outEvent==="start"?esc(t("li_direct")):esc(t("li_after_event")))+esc(t("li_delay_mid"))+(a?(a.outDelay|0):0)+esc(t("li_delay_end"))+'</div>';
     h+='<div class="row" style="margin-top:10px"><button class="primary" id="l_close">'+esc(t("done"))+'</button><button id="l_del">'+esc(t("li_del"))+'</button></div>';
     insp.innerHTML=h;
     const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
+    on("l_cond","change",e=>{lk.cond=e.target.value;render();});
     on("l_close","click",()=>{selectedLink="";render();});
     on("l_del","click",()=>{project.links=project.links.filter(x=>x.id!==lk.id);selectedLink="";render();});
     return;
   }
+  const tx=(project.texts||[]).find(x=>x.id===selected);
+  if(tx){renderTextInspector(insp,tx);return;}
   const b=project.blocks.find(x=>x.id===selected);
   if(!b){insp.innerHTML='<p class="hint">'+esc(t("select_hint"))+'</p>';return;}
   const cat=BY_TYPE[b.type],kind=cat.kind,mode0=cat.mode;let h='<label>'+esc(t("f_name"))+'</label><input id="i_name" value="'+esc(blockName(b))+'">';
+  if(renderControlInspector(insp,b,mode0))return;
   if(mode0==="speed"){
     h+='<div class="row"><label>'+esc(t("f_hyst"))+'</label><label>'+esc(t("f_volume"))+'</label></div><div class="row">'+
        '<input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'">'+
@@ -1050,7 +1248,6 @@ function renderInspector(){
     if(b.trigger==="speed")h+='<div class="row"><label>'+esc(t("f_from"))+'</label><label>'+esc(t("f_to"))+'</label><label>'+esc(t("f_prot"))+'</label></div><div class="row"><input type="number" id="i_smin" min="0" max="100" value="'+(b.speedMin==null?0:b.speedMin)+'"><input type="number" id="i_smax" min="0" max="100" value="'+(b.speedMax==null?100:b.speedMax)+'"><input type="number" id="i_hyst" min="0" max="100" value="'+(b.hyst==null?SPEED_HYST:b.hyst)+'"></div>';
     if(b.trigger==="dir")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>'+esc(t("dir_fwd"))+'</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>'+esc(t("dir_rev"))+'</option></select>';
     h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
-    h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
     h+='<p class="hint">'+esc(t("f_start_hint"))+'</p>';
   }else if(mode0==="end"){
     h+='<label>'+esc(t("f_end_sound"))+'</label>'+fileField("sound",b);
@@ -1060,7 +1257,6 @@ function renderInspector(){
     h+='<label>'+esc(t("f_sound"))+'</label>'+fileField("sound",b);
     h+='<label>'+esc(t("f_volume"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'">';
     h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
-    h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
     h+='<p class="hint">'+esc(t("f_simple_hint"))+'</p>';
   }else if(mode0==="loop"){
     h+='<label>'+esc(t("f_sound"))+'</label>'+fileField("sound",b);
@@ -1071,10 +1267,9 @@ function renderInspector(){
     if((b.loopMode||"hold")==="event")h+='<label>'+esc(t("f_loop_event"))+'</label><select id="i_trig">'+["engine","dir","fn"].map(k=>'<option value="'+k+'"'+((b.trigger===k||((b.trigger==="auto"||b.trigger===undefined)&&k==="fn"))?" selected":"")+">"+esc(tr(TRIGGER_NAMES[k]))+"</option>").join("")+"</select>";
     if((b.loopMode||"hold")==="event"&&b.trigger==="dir")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dirtrig"><option value="fwd"'+(b.dirTrigger!=="rev"?" selected":"")+'>'+esc(t("dir_fwd"))+'</option><option value="rev"'+(b.dirTrigger==="rev"?" selected":"")+'>'+esc(t("dir_rev"))+'</option></select>';
     h+='<label>'+esc(t("f_out"))+'</label><select id="i_outev"><option value="start"'+(b.outEvent==="start"?" selected":"")+'>'+esc(t("out_direct"))+'</option><option value="finish"'+(b.outEvent!=="start"?" selected":"")+'>'+esc(t("out_after"))+'</option></select>';
-    h+='<label>'+esc(t("f_out_delay"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
     h+='<p class="hint">'+esc(t("f_loop_hint"))+'</p>';
   }else if(mode0==="mute"){
-    h+='<label>'+esc(t("f_duration"))+'</label><input type="number" id="i_outdelay" min="0" max="10000" step="50" value="'+(b.outDelay|0)+'"><div class="hint">'+esc(t("f_out_delay_hint"))+'</div>';
+    h+='<label style="margin:0;display:block"><input type="checkbox" id="i_stopnow"'+(b.stopNow?" checked":"")+'> '+esc(t("f_stop_now"))+'</label>';
     h+='<p class="hint">'+esc(t("f_mute_hint"))+'</p>';
   }else{
     h+='<div class="row"><label>'+esc(t("f_fn"))+'</label><label>'+(kind==="output"?esc(t("f_brightness")):esc(t("f_volume")))+'</label></div><div class="row">'+
@@ -1096,7 +1291,6 @@ function renderInspector(){
     if(b.type==="headlight")h+='<label>'+esc(t("f_direction"))+'</label><select id="i_dir">'+DIRS.map(d=>'<option value="'+d.v+'"'+(b.dir===d.v?" selected":"")+">"+esc(tr(d.n))+"</option>").join("")+"</select>";
     if(kind==="output"&&b.type!=="headlight")h+='<label>'+esc(t("f_channel"))+'</label><select id="i_ch">'+AUX_NAMES.map((n,i)=>'<option value="'+i+'"'+((b.channel|0)===i?" selected":"")+">"+n+"</option>").join("")+"</select>";
     if(kind==="output"&&b.type!=="headlight"&&cat.effect===undefined)h+='<label>'+esc(t("f_effect"))+'</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+esc(tr(f.n))+"</option>").join("")+"</select>";
-    if(kind==="logic")h+='<label>'+esc(t("f_logic"))+'</label><select id="i_logic">'+LOGIC_OPS.map(o=>'<option value="'+o.v+'"'+((b.logic|0)===o.v?" selected":"")+">"+esc(tr(o.n))+"</option>").join("")+"</select>";
     if(b.type==="engine"){
       h+='<label>'+esc(t("f_engine_start"))+'</label>'+fileField("start",b)+'<label>'+esc(t("f_engine_idle"))+'</label>'+fileField("idle",b);
       h+='<label>'+esc(t("f_steps"))+'</label>';
@@ -1112,7 +1306,8 @@ function renderInspector(){
   }
   if(kind==="output"||kind==="logic")h+='<p class="hint">'+esc(t("f_input_hint"))+'</p>';
   if(mode0==="speed")h+='<p class="hint">'+esc(t("f_speed_hint"))+'</p>';
-  h+='<div class="row" style="margin-top:10px">'+(kind==="setting"?"":'<button class="primary" id="i_test">'+esc(t("f_test"))+'</button>')+(kind==="sound"?'<button id="i_chain">'+esc(t("f_chain"))+'</button>':'')+'<button id="i_close">'+esc(t("done"))+'</button><button id="i_del">'+esc(t("f_delete"))+'</button></div>';
+  const acts=(kind==="setting"?"":'<button class="primary" id="i_test">'+esc(t("f_test"))+'</button>')+(kind==="sound"?'<button id="i_chain">'+esc(t("f_chain"))+'</button>':'');
+  if(acts)h+='<div class="row" style="margin-top:10px">'+acts+'</div>';
   insp.innerHTML=h;
   const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
   if(mode0==="volume"){["master","engine","effects"].forEach(function(k){on("i_vol_"+k,"input",function(e){b[k]=Number(e.target.value)|0;var s=$("i_vol_"+k+"_v");if(s)s.textContent=String(b[k]);});on("i_vol_"+k,"change",function(){render();});});}
@@ -1133,7 +1328,7 @@ function renderInspector(){
   on("i_shortms","change",e=>{b.shortMs=Math.max(50,Math.min(2000,Number(e.target.value)||400));render();});
   on("i_ch","change",e=>{b.channel=Number(e.target.value);render();});
   on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
-  on("i_logic","change",e=>{b.logic=Number(e.target.value);render();});
+
   on("i_steps","change",e=>{b.steps=Math.max(1,Math.min(10,Number(e.target.value)));const run=b.files.run||[],arr=[];for(let i=0;i<b.steps;i++)arr.push(run[i]||"");b.files.run=arr;render();});
   on("i_addrrun","click",()=>{if(!b.run)b.run=[];b.run.push({from:0,to:0,file:""});recalcRun(b);render();});
   insp.querySelectorAll("[data-rfrom]").forEach(el=>el.addEventListener("change",e=>{b.run[Number(el.getAttribute("data-rfrom"))].from=Math.max(0,Math.min(100,Number(e.target.value)||0));render();}));
@@ -1155,8 +1350,108 @@ function renderInspector(){
   insp.querySelectorAll("[data-randplay]").forEach(btn=>btn.onclick=()=>playFile((b.files.random||[])[Number(btn.getAttribute("data-randplay"))]));
   on("i_test","click",()=>testBlock(b));
   on("i_chain","click",()=>playChain(b));
-  on("i_close","click",()=>{selected="";selectedIds=new Set();render();});
-  on("i_del","click",()=>{if(selectedIds.size>1)deleteSelected();else removeBlock(b.id);});
+}
+/* ---- text-label inspector ------------------------------------------- */
+function renderTextInspector(insp,tx){
+  let h='<label>'+esc(t("text_label"))+'</label><textarea id="tx_val" rows="3" style="width:100%;padding:5px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;font:inherit;resize:vertical">'+esc(tx.text)+'</textarea>';
+  h+='<label>'+esc(t("text_size"))+'</label><div class="row"><input type="range" id="tx_size" min="10" max="72" value="'+(tx.size||16)+'"><span id="tx_size_v" style="flex:0 0 34px;text-align:right">'+(tx.size||16)+'</span></div>';
+  h+='<label>'+esc(t("text_color"))+'</label><input type="color" id="tx_color" value="'+(tx.color||"#e7ecf5")+'">';
+  h+='<p class="hint">'+esc(t("text_hint"))+'</p>';
+  insp.innerHTML=h;
+  const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
+  const live=fn=>{const el=$("texts").querySelector('[data-text="'+tx.id+'"]');if(el)fn(el);};
+  on("tx_val","input",e=>{tx.text=e.target.value;live(el=>{el.textContent=tx.text;});});
+  on("tx_val","change",()=>render());
+  on("tx_size","input",e=>{tx.size=Number(e.target.value)||16;const v=$("tx_size_v");if(v)v.textContent=String(tx.size);live(el=>{el.style.fontSize=tx.size+"px";});});
+  on("tx_size","change",()=>render());
+  on("tx_color","input",e=>{tx.color=e.target.value;live(el=>{el.style.color=tx.color;});});
+  on("tx_color","change",()=>render());
+}
+/* ---- Aura X control-block inspector (Mixes / scheme logic) ----------- */
+function varOptions(sel){return (project.vars||[]).filter(v=>v.kind==="user").map(v=>'<option value="'+esc(v.name)+'"'+(v.name===sel?" selected":"")+">"+esc(v.name)+"</option>").join("")+(project.vars||[]).filter(v=>v.kind!=="user").map(v=>'<option value="'+esc(v.name)+'"'+(v.name===sel?" selected":"")+">"+esc(v.name)+" ("+v.kind+")</option>").join("");}
+function userVarOptions(sel){const vs=(project.vars||[]).filter(v=>v.kind==="user");let h="";if(sel&&!vs.some(v=>v.name===sel))h+='<option value="'+esc(sel)+'" selected>'+esc(sel)+"</option>";h+=vs.map(v=>'<option value="'+esc(v.name)+'"'+(v.name===sel?" selected":"")+">"+esc(v.name)+"</option>").join("");return h;}
+function renderControlInspector(insp,b,mode0){
+  const nm='<label>'+esc(t("f_name"))+'</label><input id="i_name" value="'+esc(blockName(b))+'">';
+  let h=nm;
+  if(mode0==="fxin"){
+    h+='<label>'+esc(t("f_fn"))+'</label><select id="i_fn">'+Array.from({length:29},(_,i)=>'<option value="'+i+'"'+(b.fn===i?" selected":"")+">F"+i+"</option>").join("")+"</select>"+
+      '<label>'+esc(t("f_fx_mode"))+'</label><select id="i_fxmode">'+[["toggle",t("fx_toggle")],["hold",t("fx_hold")],["strobe",t("fx_strobe")]].map(m=>'<option value="'+m[0]+'"'+((b.fxMode||"toggle")===m[0]?" selected":"")+">"+esc(m[1])+"</option>").join("")+"</select>"+
+      '<p class="hint">'+esc(t("f_fxin_hint"))+'</p>';
+  }else if(mode0==="output"){
+    h+='<label>'+esc(t("f_channel"))+'</label><select id="i_ch">'+OUTPUT_CHANNELS.map(c=>'<option value="'+c.v+'"'+((b.channel|0)===c.v?" selected":"")+">"+esc(tr(c.n))+"</option>").join("")+"</select>";
+    if((b.channel|0)>=1)h+='<label>'+esc(t("f_effect"))+'</label><select id="i_fx">'+LIGHT_FX.map(f=>'<option value="'+f.v+'"'+((b.effect|0)===f.v?" selected":"")+">"+esc(tr(f.n))+"</option>").join("")+"</select>";
+    h+='<label>'+esc(t("f_brightness"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+(b.level|0)+'">'+
+      '<p class="hint">'+esc(t("f_input_hint"))+'</p>';
+  }else if(mode0==="cue"){
+    h+='<label>'+esc(t("f_sound"))+'</label>'+fileField("sound",b)+
+      '<label>'+esc(t("f_volume"))+'</label><input type="number" id="i_vol" min="0" max="100" value="'+b.volume+'">';
+  }else if(mode0==="logicv"){
+    h+='<label>'+esc(t("f_join"))+'</label><select id="i_join"><option value="and"'+((b.join||"and")==="and"?" selected":"")+'>AND</option><option value="or"'+(b.join==="or"?" selected":"")+'>OR</option></select>';
+    (b.conds||[]).forEach((c,i)=>{
+      h+='<div class="row" style="margin-top:6px"><select data-cvar="'+i+'">'+varOptions(c.var)+"</select>"+
+        '<select data-cop="'+i+'">'+CMP_OPS.map(o=>'<option value="'+o.v+'"'+((c.op|0)===o.v?" selected":"")+">"+esc(o.sym)+"</option>").join("")+"</select>"+
+        '<button class="sm" data-cnull="'+i+'" title="'+esc(t("f_clear"))+'">\u2715</button></div>'+
+        '<div class="row"><input data-cval="'+i+'" type="number" value="'+(c.value|0)+'" placeholder="'+esc(t("f_value"))+'"><label style="flex:0 0 auto;margin:0;white-space:nowrap"><input type="checkbox" data-cnot="'+i+'"'+(c.not?" checked":"")+'> '+esc(t("f_not"))+'</label></div>';
+    });
+    h+='<div class="row" style="margin-top:6px"><button id="i_addcond">'+esc(t("f_add_cond"))+'</button></div><p class="hint">'+esc(t("f_logicv_hint"))+'</p>';
+  }else if(mode0==="var"){
+    h+='<label>'+esc(t("f_var"))+'</label><select id="i_varname">'+userVarOptions(b.varName)+'</select>'+
+      '<label>'+esc(t("f_value"))+'</label><input type="number" id="i_varvalue" min="-32768" max="32767" value="'+(b.value|0)+'">'+
+      '<p class="hint">'+esc(t("f_setvar_hint"))+'</p>';
+  }else if(mode0==="delay"){
+    h+='<label>'+esc(t("f_delay_ms"))+'</label><input type="number" id="i_delayms" min="50" max="10000" step="50" value="'+(b.delayMs||500)+'"><div class="hint">'+esc(t("f_delay_hint"))+'</div>';
+  }else return false;
+  h+='<div class="row" style="margin-top:10px"><button id="i_test">'+esc(t("f_test"))+'</button></div>';
+  insp.innerHTML=h;
+  const on=(id,ev,fn)=>{const el=$(id);if(el)el.addEventListener(ev,fn);};
+  on("i_name","change",e=>{b.name=e.target.value;render();});
+  on("i_test","click",()=>testBlock(b));
+  if(mode0==="fxin"){on("i_fn","change",e=>{b.fn=Number(e.target.value);render();});on("i_fxmode","change",e=>{b.fxMode=e.target.value;render();});}
+  if(mode0==="output"){
+    on("i_ch","change",e=>{b.channel=Number(e.target.value);render();});
+    on("i_fx","change",e=>{b.effect=Number(e.target.value);render();});
+    on("i_vol","change",e=>{b.level=Math.max(0,Math.min(100,Number(e.target.value)));render();});
+  }
+  if(mode0==="cue"){
+    insp.querySelectorAll("[data-role]").forEach(el=>el.addEventListener("change",e=>{b.files[el.getAttribute("data-role")]=e.target.value;render();}));
+    insp.querySelectorAll("[data-play]").forEach(btn=>btn.onclick=()=>playFile(b.files[btn.getAttribute("data-play")]));
+    on("i_vol","change",e=>{b.volume=Math.max(0,Math.min(100,Number(e.target.value)));render();});
+  on("i_outdelay","change",e=>{b.outDelay=Math.max(0,Math.min(10000,Number(e.target.value)||0));render();});
+  on("i_stopnow","change",e=>{b.stopNow=e.target.checked;render();});
+  }
+  if(mode0==="logicv"){
+    on("i_join","change",e=>{b.join=e.target.value;render();});
+    on("i_addcond","click",()=>{const vs=userVars().concat((project.vars||[]).filter(v=>v.kind!=="user"));b.conds.push({var:(vs[0]||{name:""}).name,op:0,value:1});render();});
+    insp.querySelectorAll("[data-cvar]").forEach(el=>el.addEventListener("change",e=>{b.conds[Number(el.getAttribute("data-cvar"))].var=e.target.value;render();}));
+    insp.querySelectorAll("[data-cop]").forEach(el=>el.addEventListener("change",e=>{b.conds[Number(el.getAttribute("data-cop"))].op=Number(e.target.value);render();}));
+    insp.querySelectorAll("[data-cval]").forEach(el=>el.addEventListener("change",e=>{const c=b.conds[Number(el.getAttribute("data-cval"))];c.value=Math.max(-32768,Math.min(32767,Number(e.target.value)||0));delete c.rhsVar;render();}));
+    insp.querySelectorAll("[data-cnot]").forEach(el=>el.addEventListener("change",e=>{b.conds[Number(el.getAttribute("data-cnot"))].not=e.target.checked;render();}));
+    insp.querySelectorAll("[data-cnull]").forEach(btn=>btn.onclick=()=>{b.conds.splice(Number(btn.getAttribute("data-cnull")),1);render();});
+  }
+  if(mode0==="var"){
+    on("i_varname","change",e=>{b.varName=e.target.value;render();});
+    on("i_varvalue","change",e=>{b.value=Math.max(-32768,Math.min(32767,Number(e.target.value)||0));render();});
+  }
+  if(mode0==="delay")on("i_delayms","change",e=>{b.delayMs=Math.max(50,Math.min(10000,Number(e.target.value)||500));render();});
+  return true;
+}
+/* ---- global variables editor ---------------------------------------- */
+function renameVarRefs(oldName,newName){
+  if(!oldName||oldName===newName)return;
+  project.blocks.forEach(b=>{if(b.type==="set_var"&&b.varName===oldName)b.varName=newName;
+    if(b.type==="logic"&&Array.isArray(b.conds))b.conds.forEach(c=>{if(c.var===oldName)c.var=newName;if(c.rhsVar===oldName)c.rhsVar=newName;});});
+}
+function renderVars(){
+  const el=$("vars_editor");if(!el)return;
+  const builtins=(project.vars||[]).filter(v=>v.kind!=="user"),users=userVars();
+  let h='<div class="hint">'+esc(t("vars_builtins"))+": "+builtins.map(v=>esc(v.name)).join(", ")+"</div>";
+  users.forEach((v,i)=>{h+='<div class="row" style="margin-top:4px"><input data-vname="'+i+'" value="'+esc(v.name)+'"><input data-vinit="'+i+'" type="number" min="-32768" max="32767" value="'+(v.init|0)+'" style="flex:0 0 80px"><button class="sm" data-vdel="'+i+'">\u2715</button></div>';});
+  h+='<div class="row" style="margin-top:6px"><button id="i_addvar">'+esc(t("vars_add"))+'</button></div>';
+  el.innerHTML=h;
+  el.querySelectorAll("[data-vname]").forEach(inp=>inp.addEventListener("change",e=>{const i=Number(inp.getAttribute("data-vname"));const nv=(e.target.value||"").trim();if(!nv||project.vars.some(v=>v.name===nv)){render();return;}renameVarRefs(users[i].name,nv);users[i].name=nv;render();}));
+  el.querySelectorAll("[data-vinit]").forEach(inp=>inp.addEventListener("change",e=>{users[Number(inp.getAttribute("data-vinit"))].init=Math.max(-32768,Math.min(32767,Number(e.target.value)||0));render();}));
+  el.querySelectorAll("[data-vdel]").forEach(btn=>btn.onclick=()=>{project.vars=project.vars.filter(v=>v!==users[Number(btn.getAttribute("data-vdel"))]);render();});
+  const add=$("i_addvar");if(add)add.onclick=()=>{let n=1;while(project.vars.some(v=>v.name==="var"+n))n++;project.vars.push({name:"var"+n,kind:"user",init:0});render();};
 }
 function removeBlock(id){
   if(project.blocks.find(b=>b.id===id&&(b.type==="engine"||b.type==="volume")))return;
@@ -1174,7 +1469,7 @@ function deleteSelected(){
   project.links=project.links.filter(l=>!drop.has(l.from)&&!drop.has(l.to));
   selectedIds=new Set();selected="";render();
 }
-let clip=null;
+let clip=null,pasteCount=0;
 function recalcBands(b){const n=(b.bands||[]).length;if(!n)return;b.bands.forEach((x,i)=>{x.from=Math.round(i*100/n);x.to=Math.round((i+1)*100/n);});}
 function recalcRun(b){const n=(b.run||[]).length;if(!n)return;b.run.forEach((x,i)=>{x.from=Math.round(i*100/n);x.to=Math.round((i+1)*100/n);});}
 function cloneBlock(src,dx,dy){
@@ -1184,33 +1479,54 @@ function cloneBlock(src,dx,dy){
   b.x=snapTo(project,b.x+(dx==null?GRID*2:dx));b.y=snapTo(project,b.y+(dy==null?GRID*2:dy));
   project.blocks.push(b);return b;
 }
-function duplicateSelected(){const b=project.blocks.find(x=>x.id===selected);if(!b)return;if(b.type==="engine"||b.type==="volume"){setStatus(t("st_cant_dup"));return;}const c=cloneBlock(b);selected=c.id;selectedIds=new Set([c.id]);render();setStatus(t("st_duplicated"));}
+function cloneText(src,dx,dy){
+  const tx=JSON.parse(JSON.stringify(src));
+  tx.id=nextTextId(project);
+  tx.x=snapTo(project,tx.x+(dx==null?GRID*2:dx));tx.y=snapTo(project,tx.y+(dy==null?GRID*2:dy));
+  project.texts.push(tx);return tx;
+}
+function duplicateSelected(){
+  const tx=(project.texts||[]).find(x=>x.id===selected);
+  if(tx){const c=cloneText(tx);selected=c.id;selectedIds=new Set();render();setStatus(t("st_duplicated"));return;}
+  const b=project.blocks.find(x=>x.id===selected);if(!b)return;
+  if(b.type==="engine"||b.type==="volume"){setStatus(t("st_cant_dup"));return;}
+  const c=cloneBlock(b);selected=c.id;selectedIds=new Set([c.id]);render();setStatus(t("st_duplicated"));
+}
 function copySelected(){
-  const ids=selectedIds.size?[...selectedIds]:(selected?[selected]:[]);
-  const blocks=project.blocks.filter(b=>ids.indexOf(b.id)>=0&&b.type!=="engine"&&b.type!=="volume");
-  if(!blocks.length){setStatus(t("st_nothing_copy"));return;}
-  clip=blocks.map(b=>JSON.parse(JSON.stringify(b)));setStatus(t("st_copied"));
+  const blockIds=selectedIds.size?[...selectedIds]:[];
+  const blocks=project.blocks.filter(b=>blockIds.indexOf(b.id)>=0&&b.type!=="engine"&&b.type!=="volume");
+  const texts=blockIds.length?[]:(project.texts||[]).filter(tx=>tx.id===selected);
+  if(!blocks.length&&!texts.length){setStatus(t("st_nothing_copy"));return;}
+  clip={blocks:blocks.map(b=>JSON.parse(JSON.stringify(b))),texts:texts.map(tx=>JSON.parse(JSON.stringify(tx)))};
+  pasteCount=0;setStatus(t("st_copied"));
 }
 function pasteClip(){
-  if(!clip){setStatus(t("st_clip_empty"));return;}
-  const list=Array.isArray(clip)?clip:[clip];const pasted=[];
-  list.forEach(src=>{const c=cloneBlock(src);pasted.push(c.id);});
-  selectedIds=new Set(pasted);selected=pasted[pasted.length-1]||"";render();setStatus(t("st_pasted"));
+  if(!clip||(!(clip.blocks||[]).length&&!(clip.texts||[]).length)){setStatus(t("st_clip_empty"));return;}
+  pasteCount++;const off=GRID*2*pasteCount;
+  const pastedBlocks=[],pastedTexts=[];
+  (clip.blocks||[]).forEach(src=>{const c=cloneBlock(src,off,off);pastedBlocks.push(c.id);});
+  (clip.texts||[]).forEach(src=>{const c=cloneText(src,off,off);pastedTexts.push(c.id);});
+  if(pastedBlocks.length){selectedIds=new Set(pastedBlocks);selected=pastedBlocks[pastedBlocks.length-1];}
+  else{selectedIds=new Set();selected=pastedTexts[pastedTexts.length-1]||"";}
+  render();setStatus(t("st_pasted"));
 }
 function renderSummary(){
   const p=compile().payload;const dyn=(p.effects.length||0);
-  $("counts").textContent=t("sum_states")+p.states.length+"/"+LIMITS.states+t("sum_transitions")+p.transitions.length+"/"+LIMITS.transitions+t("sum_effects")+dyn+"/"+LIMITS.effects+t("sum_blocks")+project.blocks.length;
-  const e=diagnostics.filter(d=>d.severity!=="warning").length,w=diagnostics.filter(d=>d.severity==="warning").length;
-  $("summary").textContent=e+t("sum_errors_mid")+w+t("sum_warnings");
+  const c=$("counts");if(c)c.textContent=t("sum_states")+p.states.length+"/"+LIMITS.states+t("sum_transitions")+p.transitions.length+"/"+LIMITS.transitions+t("sum_effects")+dyn+"/"+LIMITS.effects+t("sum_blocks")+project.blocks.length;
+  const s=$("summary");if(s){const e=diagnostics.filter(d=>d.severity!=="warning").length,w=diagnostics.filter(d=>d.severity==="warning").length;s.textContent=e+t("sum_errors_mid")+w+t("sum_warnings");}
 }
 function renderDiag(){$("diag").innerHTML=diagnostics.map(d=>'<div class="'+(d.severity==="warning"?"w":d.severity==="ok"?"ok":"d")+'">'+esc(d.message)+"</div>").join("");}
-function render(){computeReady();renderPalette();renderNodes();renderLinks();renderInspector();renderSummary();saveDraft();}
+function render(){computeReady();renderPalette();renderNodes();renderTexts();renderLinks();renderInspector();renderVars();renderSummary();saveDraft();}
 function isReady(b){
   const cat=BY_TYPE[b.type];if(!cat)return false;
   if(cat.kind==="engine")return !!b.files.idle;
   if(cat.kind==="setting")return true;
-  if(cat.kind==="output")return b.type==="headlight"||((b.channel|0)>=0&&(b.channel|0)<=6);
-  if(cat.kind==="logic")return (b.logic|0)>=1&&(b.logic|0)<=8;
+  if(cat.kind==="output")return (b.channel|0)>=0&&(b.channel|0)<=7;
+  if(cat.kind==="input")return b.fn>=0&&b.fn<=28;
+  if(cat.kind==="logicv")return true;
+  if(cat.kind==="var")return !!b.varName;
+  if(cat.kind==="delay")return (b.delayMs|0)>0;
+  if(cat.kind==="cue")return !!b.files.sound;
   if(cat.mode==="speed")return (b.bands||[]).some(x=>x.file);
   if(cat.mode==="random")return (b.files.random||[]).some(Boolean);
   if(cat.mode==="decel")return !!b.files.sound;
@@ -1221,7 +1537,7 @@ function isReady(b){
 function computeReady(){let errIds=new Set();try{errIds=new Set(validate().diagnostics.filter(d=>d.severity!=="warning").map(d=>d.id));}catch(e){}
   readyIds=new Set(project.blocks.filter(b=>isReady(b)&&!errIds.has(b.id)).map(b=>b.id));}
 function setStatus(t){$("status_txt").textContent=t;}
-function refreshButtons(){$("b_save").disabled=!online||busy;$("b_validate").disabled=busy;}
+function refreshButtons(){$("b_save").disabled=!online||busy;const v=$("b_validate");if(v)v.disabled=busy;}
 function renderSnapBtn(){$("b_snap").textContent=t("snap_a")+(project.editor.snap?t("snap_on"):t("snap_off"));$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
@@ -1249,7 +1565,7 @@ function marqueeHits(m){const w=marqueeWorldRect(m);return new Set(project.block
 function renderMarquee(){const el=$("marquee");if(!marquee){el.style.display="none";return;}const r=$("stage").getBoundingClientRect();
   el.style.display="block";el.style.left=(Math.min(marquee.c0.x,marquee.c1.x)-r.left)+"px";el.style.top=(Math.min(marquee.c0.y,marquee.c1.y)-r.top)+"px";
   el.style.width=Math.abs(marquee.c1.x-marquee.c0.x)+"px";el.style.height=Math.abs(marquee.c1.y-marquee.c0.y)+"px";}
-function onPortDown(ev){ev.stopPropagation();const id=ev.currentTarget.getAttribute("data-out");const p=worldPoint(ev);linking={from:id,x:p.x,y:p.y};renderTempLink();}
+function onPortDown(ev){ev.stopPropagation();const id=ev.currentTarget.getAttribute("data-out");const port=ev.currentTarget.getAttribute("data-port")||"out";const p=worldPoint(ev);linking={from:id,port:port,x:p.x,y:p.y};renderTempLink();}
 function finishLink(ev){
   if(!linking)return;
   const prev=linking;linking=null;renderTempLink();
@@ -1259,18 +1575,27 @@ function finishLink(ev){
   if(target&&target!==prev.from&&!project.links.some(l=>l.from===prev.from&&l.to===target)){
     const a=project.blocks.find(x=>x.id===prev.from),c=project.blocks.find(x=>x.id===target);
     const ak=a?BY_TYPE[a.type].kind:"",ck=c?BY_TYPE[c.type].kind:"";
-    const kind=(ak==="engine")?"gate":((ck==="output"||ck==="logic")?"bind":"after");
-    project.links.push({id:"l"+Date.now().toString(36),from:prev.from,to:target,kind:kind,delay:0});
+    const kind=(ak==="engine")?"gate":(ck==="output"?"bind":"after");
+    const lk={id:"l"+Date.now().toString(36),from:prev.from,to:target,kind:kind,delay:0};
+    if(kind==="after"&&prev.port&&prev.port!=="out")lk.cond=prev.port;
+    else if(kind==="after"&&ak==="logicv")lk.cond="true";
+    project.links.push(lk);
   }
   render();
 }
 $("stage").addEventListener("contextmenu",ev=>ev.preventDefault());
-$("stage").addEventListener("pointerdown",ev=>{const t=ev.target;
-  if(!(t===$("stage")||t.id==="world"||t.id==="links"||t.id==="linkLayer"))return;
+$("stage").addEventListener("pointerdown",ev=>{const tgt=ev.target;
+  if(!(tgt===$("stage")||tgt.id==="world"||tgt.id==="links"||tgt.id==="linkLayer"))return;
+  if(textMode&&ev.button===0&&ev.pointerType!=="touch"){
+    const p=worldPoint(ev);const item=addTextAt(project,p.x,p.y,t("text_default"));
+    selected=item.id;selectedIds=new Set();selectedLink="";render();
+    const inp=$("tx_val");if(inp){inp.focus();try{inp.select();}catch(e){}}
+    return;
+  }
   if(ev.button===1||ev.button===2||ev.pointerType==="touch"){const v=project.editor.viewport;panning={px:ev.clientX,py:ev.clientY,x:v.x,y:v.y};return;}
   if(ev.button!==0)return;
   const mod=ev.shiftKey||ev.ctrlKey||ev.metaKey;
-  if(!mod&&(selectedIds.size||selectedLink)){selectedIds=new Set();selected="";selectedLink="";render();}
+  if(!mod&&(selectedIds.size||selectedLink||selected)){selectedIds=new Set();selected="";selectedLink="";render();}
   marquee={c0:{x:ev.clientX,y:ev.clientY},c1:{x:ev.clientX,y:ev.clientY},add:mod,base:mod?new Set(selectedIds):new Set()};
   renderMarquee();});
 window.addEventListener("pointermove",ev=>{
@@ -1278,12 +1603,14 @@ window.addEventListener("pointermove",ev=>{
   if(marquee){marquee.c1={x:ev.clientX,y:ev.clientY};renderMarquee();
     const hits=marqueeHits(marquee),sel=marquee.add?new Set([...marquee.base,...hits]):hits;marquee._sel=sel;
     project.blocks.forEach(b=>{const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el)el.classList.toggle("sel",sel.has(b.id));});return;}
+  if(draggingText){const p=worldPoint(ev);const tx=(project.texts||[]).find(x=>x.id===draggingText.id);if(tx){tx.x=snap(p.x-draggingText.dpx);tx.y=snap(p.y-draggingText.dpy);const el=$("texts").querySelector('[data-text="'+tx.id+'"]');if(el){el.style.left=tx.x+"px";el.style.top=tx.y+"px";}}return;}
   if(dragging){const p=worldPoint(ev);const dx=p.x-dragging.start.x,dy=p.y-dragging.start.y;
     dragging.items.forEach(it=>{const b=project.blocks.find(x=>x.id===it.id);if(!b)return;b.x=snap(it.x0+dx);b.y=snap(it.y0+dy);const el=$("nodes").querySelector('[data-id="'+b.id+'"]');if(el){el.style.left=b.x+"px";el.style.top=b.y+"px";}});
     renderLinks();}
   else if(panning){const v=project.editor.viewport;v.x=panning.x+(ev.clientX-panning.px);v.y=panning.y+(ev.clientY-panning.py);applyViewport();}
 });
 window.addEventListener("pointerup",ev=>{
+  if(draggingText){draggingText=null;saveDraft();}
   if(dragging){dragging=null;saveDraft();}
   if(panning)panning=null;
   if(marquee){const m=marquee;marquee=null;renderMarquee();
@@ -1315,9 +1642,13 @@ function graphLayers(){
   return {cols,layer};
 }
 function linkCondText(l){
-  const a=project.blocks.find(x=>x.id===l.from);
+  const a=project.blocks.find(x=>x.id===l.from),ak=a?BY_TYPE[a.type].kind:"";
   if(l.kind==="gate")return t("lc_gate");
   if(l.kind==="bind")return t("lc_bind");
+  if(ak==="input")return t("lc_fx_on");
+  if(ak==="logicv")return l.cond==="false"?t("lc_false"):t("lc_true");
+  if(ak==="var")return t("lc_var_set");
+  if(ak==="delay")return t("lc_delay_a")+(a.delayMs|0)+t("lc_delay_b");
   if(l.kind==="after"){const ev=(a&&a.outEvent==="start")?t("lc_direct"):t("lc_after_event");const d=(a&&a.outDelay)?(t("lc_delay_a")+a.outDelay+t("lc_delay_b")):"";return ev+d;}
   return t("lc_link");
 }
@@ -1330,12 +1661,12 @@ function blockDetailLines(b){
     L.push(t("bd_prot_a")+(b.hyst==null?SPEED_HYST:b.hyst)+"%"+t("bd_out_mid")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));
     return L;
   }
-  if(cat.kind==="output"){
-    if(b.type==="headlight")L.push("F"+b.fn+" · "+tr((DIRS.find(d=>d.v===b.dir)||{}).n||"")+" · "+(b.level|0)+"%");
-    else L.push("F"+b.fn+" · "+(AUX_NAMES[b.channel|0]||"AUX?")+" · "+tr((LIGHT_FX.find(f=>f.v===(b.effect|0))||{}).n||"")+" · "+(b.level|0)+"%");
-    return L;
-  }
-  if(cat.kind==="logic"){L.push("F"+b.fn+" · "+tr((LOGIC_OPS.find(o=>o.v===(b.logic|0))||{}).n||""));return L;}
+  if(cat.kind==="output"){const src=sourceFnOf(b.id);L.push("F"+(src!=null?src:b.fn)+" · "+tr((OUTPUT_CHANNELS.find(c=>c.v===(b.channel|0))||{}).n||"")+" · "+tr((LIGHT_FX.find(f=>f.v===(b.effect|0))||{}).n||"")+" · "+(b.level|0)+"%");return L;}
+  if(cat.kind==="input"){L.push("F"+b.fn+" · "+t(b.fxMode==="hold"?"fx_hold":b.fxMode==="strobe"?"fx_strobe":"fx_toggle"));return L;}
+  if(cat.kind==="logicv"){L.push((b.join==="or"?"OR":"AND"));const showVar=n=>{const v=(project.vars||[]).find(x=>x.name===n);return v?n:n;};const showRhs=c=>c.rhsVar?c.rhsVar:(c.value|0);(b.conds||[]).forEach(c=>L.push(showVar(c.var)+" "+(CMP_OPS.find(o=>o.v===(c.op|0))||{sym:"?"}).sym+" "+showRhs(c)));return L;}
+  if(cat.kind==="var"){L.push((b.varName||"?")+" = "+(b.value|0));return L;}
+  if(cat.kind==="delay"){L.push((b.delayMs|0)+" ms");return L;}
+  if(cat.kind==="cue"){L.push(b.files.sound||t("ns_file_none"));return L;}
   if(cat.mode==="speed"){L.push(t("bd_prot_a")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");(b.bands||[]).forEach(x=>{if(x.file)L.push(Math.round(x.from)+"–"+Math.round(x.to)+"%: "+x.file);});return L;}
   if(cat.mode==="random"){L.push("F"+b.fn+t("bd_random"));(b.files.random||[]).forEach(f=>{if(f)L.push(f);});return L;}
   if(cat.mode==="start"){L.push(b.files.sound||t("ns_file_none"));L.push("F"+b.fn+" · "+t("bd_trigger")+(tr(TRIGGER_NAMES[b.trigger])||t("tr_auto")));if(b.trigger==="speed")L.push(t("bd_speed_a")+(b.speedMin==null?0:b.speedMin)+"–"+(b.speedMax==null?100:b.speedMax)+t("bd_speed_b")+(b.hyst==null?SPEED_HYST:b.hyst)+"%");if(b.trigger==="dir")L.push(t("bd_dir")+(b.dirTrigger==="rev"?t("bd_dir_rev"):t("bd_dir_fwd")));L.push(t("bd_out_a")+(b.outEvent==="start"?t("li_direct"):t("li_after_event"))+(b.outDelay?(t("bd_delay_a")+b.outDelay+t("bd_delay_b")):""));return L;}
@@ -1389,6 +1720,7 @@ function buildText(){
   project.blocks.forEach(b=>{L.push("* "+blockName(b)+" ["+tr(BY_TYPE[b.type].name)+"]");blockDetailLines(b).forEach(x=>L.push("    "+x));});
   L.push("");L.push(t("bt_links"));
   project.links.forEach(l=>{const a=project.blocks.find(x=>x.id===l.from),c=project.blocks.find(x=>x.id===l.to);L.push("- "+(a?blockName(a):"?")+" -> "+(c?blockName(c):"?")+" : "+linkCondText(l));});
+  if((project.texts||[]).length){L.push("");L.push(t("bt_texts"));project.texts.forEach(tx=>L.push("- "+(tx.text||"")+" ("+Math.round(tx.x)+", "+Math.round(tx.y)+")"));}
   return L.join("\r\n");
 }
 function exportText(){const blob=new Blob([buildText()],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+"-logic.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setStatus(t("st_txt_saved"));}
@@ -1402,21 +1734,30 @@ $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn(
 $("b_theme").onclick=toggleTheme;
 $("b_pal").onclick=()=>document.body.classList.toggle("show-pal");
 $("b_insp").onclick=()=>document.body.classList.toggle("show-insp");
+$("b_text").onclick=()=>{textMode=!textMode;$("b_text").classList.toggle("on",textMode);$("stage").style.cursor=textMode?"crosshair":"";setStatus(textMode?t("text_adding"):t("ready"));};
 $("b_file_png").onclick=exportSchemePng;
 $("b_file_txt").onclick=exportText;
-$("b_undo").onclick=undo;$("b_redo").onclick=redo;$("b_copy").onclick=copySelected;$("b_paste").onclick=pasteClip;
+$("b_undo").onclick=undo;$("b_redo").onclick=redo;
 window.addEventListener("keydown",ev=>{
-  if(ev.target&&/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))return;
-  if((ev.key==="Delete"||ev.key==="Backspace")&&!ev.ctrlKey&&!ev.metaKey){if(selectedIds.size){ev.preventDefault();deleteSelected();}return;}
-  if(!(ev.ctrlKey||ev.metaKey))return;const k=(ev.key||"").toLowerCase();
-  if(k==="z"&&!ev.shiftKey){ev.preventDefault();undo();}
-  else if(k==="y"||(k==="z"&&ev.shiftKey)){ev.preventDefault();redo();}
-  else if(k==="d"){ev.preventDefault();duplicateSelected();}
-  else if(k==="c"){ev.preventDefault();copySelected();}
-  else if(k==="v"){ev.preventDefault();pasteClip();}
+  if(ev.target&&(ev.target.isContentEditable||/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)))return;
+  if((ev.key==="Delete"||ev.key==="Backspace")&&!ev.ctrlKey&&!ev.metaKey){
+    if(selected&&(project.texts||[]).some(x=>x.id===selected)){ev.preventDefault();removeText(selected);return;}
+    if(selectedIds.size){ev.preventDefault();deleteSelected();}
+    return;
+  }
+  /* Shortcuts use ev.code (physical key) so Ctrl+C/V/Z/Y/D work on any
+   * keyboard layout (on a Russian layout ev.key is "с"/"м"/... instead). */
+  if(ev.ctrlKey&&!ev.shiftKey&&ev.code==="Insert"){ev.preventDefault();copySelected();return;}
+  if(ev.shiftKey&&!ev.ctrlKey&&!ev.metaKey&&ev.code==="Insert"){ev.preventDefault();pasteClip();return;}
+  if(!(ev.ctrlKey||ev.metaKey))return;
+  const k=(ev.key||"").toLowerCase(),code=ev.code||"";
+  const is=ch=>code==="Key"+ch||k===ch.toLowerCase();
+  if(is("Z")&&!ev.shiftKey){ev.preventDefault();undo();}
+  else if(is("Y")||(is("Z")&&ev.shiftKey)){ev.preventDefault();redo();}
+  else if(is("D")){ev.preventDefault();duplicateSelected();}
+  else if(is("C")){ev.preventDefault();copySelected();}
+  else if(is("V")){ev.preventDefault();pasteClip();}
 });
-$("b_test").onclick=testScheme;
-$("b_validate").onclick=doValidate;
 $("b_save").onclick=doSave;
 
 /* ---- boot ------------------------------------------------------------ */
@@ -1442,7 +1783,7 @@ document.querySelectorAll("header.top .tm").forEach(tm=>{
   });
 });
 document.addEventListener("click",()=>document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open")));
-window.addEventListener("keydown",ev=>{if(ev.key==="Escape")document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));});
+window.addEventListener("keydown",ev=>{if(ev.key==="Escape"){document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));if(textMode){textMode=false;$("b_text").classList.remove("on");$("stage").style.cursor="";setStatus(t("ready"));}}});
 applyStatic();
 loadDraft();if(!project)project=newProject();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();historyReset();render();refreshStatus();setInterval(refreshStatus,3000);
 window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,blockDetailLines:blockDetailLines,project:()=>project,compile:compile,validate:validate};

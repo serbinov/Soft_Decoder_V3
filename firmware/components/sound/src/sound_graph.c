@@ -180,6 +180,18 @@ static bool sg_uint(const sg_parser_t *p, int t, uint32_t max, uint32_t *out)
     uint32_t n = (uint32_t)value; if (value != (double)n) { return false; }
     *out = n; return true;
 }
+/* Signed integer token within [min,max]; only used for variable literals. */
+static bool sg_int(const sg_parser_t *p, int t, int32_t min, int32_t max, int32_t *out)
+{
+    if (t < 0 || p->tokens[t].type != 'd') { return false; }
+    const sg_token_t *v = &p->tokens[t]; char text[128];
+    if (v->len >= sizeof(text)) { return false; }
+    memcpy(text,p->json + v->start,v->len); text[v->len] = 0;
+    double value = strtod(text,NULL);
+    if (!isfinite(value) || value < (double)min || value > (double)max) { return false; }
+    int32_t n = (int32_t)value; if ((double)n != value) { return false; }
+    *out = n; return true;
+}
 static bool sg_boolean(const sg_parser_t *p, int t, bool *out)
 {
     if (t < 0 || (p->tokens[t].type != 't' && p->tokens[t].type != 'f')) { return false; } *out = p->tokens[t].type == 't'; return true;
@@ -201,34 +213,65 @@ esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_
     memset(out, 0, sizeof(*out));
 #define SG_STR(o,k,d) do { if (!sg_decode(&p, sg_get(&p,o,k), d, sizeof(d))) { goto fail; } } while (0)
 #define SG_NUM(o,k,d,m) do { if (!sg_uint(&p, sg_get(&p,o,k), m, &n)) { goto fail; } d = n; } while (0)
-    if (!sg_keys(&p, 0, "|format||schemaVersion||id||name||engine||hysteresis||states||transitions||effects||assets||editor|")) { goto fail; }
+    if (!sg_keys(&p, 0, "|format||schemaVersion||id||name||engine||hysteresis||variables||states||transitions||effects||assets||editor|")) { goto fail; }
     SG_STR(0, "format", text); if (strcmp(text, "sound-graph")) { goto fail; }
     SG_NUM(0, "schemaVersion", n, 1); if (n != 1) { goto fail; }
     SG_STR(0,"id",out->id); SG_STR(0,"name",out->name); SG_NUM(0,"hysteresis",out->hysteresis,32);
     obj = sg_get(&p,0,"engine"); if (!sg_keys(&p,obj,"|entry||fn|")) { goto fail; }
     SG_STR(obj,"entry",out->engine_entry); SG_NUM(obj,"fn",out->engine_fn,28);
 #define SG_ARRAY(k,max,dest) do { arr = sg_get(&p,0,k); if (arr < 0 || p.tokens[arr].type != '[' || p.tokens[arr].count > max) { goto fail; } dest = (uint8_t)p.tokens[arr].count; } while (0)
+    /* The variables array is optional so pre-variable graphs keep parsing. */
+    arr = sg_get(&p,0,"variables");
+    if (arr < 0) { out->variable_count = 0; }
+    else {
+        if (p.tokens[arr].type != '[' || p.tokens[arr].count > SG_MAX_VARIABLES) { goto fail; }
+        out->variable_count = (uint8_t)p.tokens[arr].count; obj = arr + 1;
+        for (unsigned i = 0; i < out->variable_count; ++i, obj = p.tokens[obj].next) {
+            sg_variable_t *v = &out->variables[i]; if (!sg_keys(&p,obj,"|name||kind||init|")) { goto fail; }
+            SG_STR(obj,"name",v->name);
+            int kind = sg_get(&p,obj,"kind");
+            if (kind < 0) { v->kind = SG_VAR_USER; }
+            else { if (!sg_decode(&p,kind,text,sizeof(text))) { goto fail; }
+                const char *const kinds[] = {"user","speed","forward","moving","engine"};
+                int kv = sg_enum(text,kinds,5); if (kv < 0) { goto fail; } v->kind = (uint8_t)kv; }
+            int32_t ini; int iniTok = sg_get(&p,obj,"init");
+            if (iniTok < 0) { v->init = 0; }
+            else if (!sg_int(&p,iniTok,INT32_MIN,INT32_MAX,&ini)) { goto fail; } else { v->init = ini; }
+        }
+    }
     SG_ARRAY("states",SG_MAX_STATES,out->state_count); obj = arr + 1;
     for (unsigned i = 0; i < out->state_count; ++i, obj = p.tokens[obj].next) {
-        sg_state_t *s = &out->states[i]; if (!sg_keys(&p,obj,"|id||name||file||loop||volume||rate||loops|")) { goto fail; }
+        sg_state_t *s = &out->states[i]; if (!sg_keys(&p,obj,"|id||name||file||loop||volume||rate||loops||setVar||setValue|")) { goto fail; }
         SG_STR(obj,"id",s->id); SG_STR(obj,"name",s->name); SG_STR(obj,"file",s->file);
         if (!sg_boolean(&p,sg_get(&p,obj,"loop"),&s->loop)) { goto fail; }
         SG_NUM(obj,"volume",s->volume,100); SG_NUM(obj,"rate",s->rate,3000);
         int loops = sg_get(&p,obj,"loops"); if (loops >= 0) { SG_NUM(obj,"loops",s->loops,255); }
+        int setVar = sg_get(&p,obj,"setVar"), setValue = sg_get(&p,obj,"setValue");
+        s->has_set = setVar >= 0;
+        if (s->has_set) { SG_NUM(obj,"setVar",s->set_var,SG_MAX_VARIABLES-1); }
+        int32_t sv; if (setValue >= 0 && !sg_int(&p,setValue,INT16_MIN,INT16_MAX,&sv)) { goto fail; }
+        s->set_value = setValue >= 0 ? (int16_t)sv : 0;
     }
     SG_ARRAY("transitions",SG_MAX_TRANSITIONS,out->transition_count); obj = arr + 1;
     for (unsigned i = 0; i < out->transition_count; ++i, obj = p.tokens[obj].next) {
         sg_transition_t *e = &out->transitions[i]; if (!sg_keys(&p,obj,"|id||source||target||priority||timing||condition|")) { goto fail; }
         SG_STR(obj,"id",e->id); SG_STR(obj,"source",e->source); SG_STR(obj,"target",e->target); SG_NUM(obj,"priority",e->priority,255);
         SG_STR(obj,"timing",text); const char *const timing[] = {"immediate","after_sample"}; int v = sg_enum(text,timing,2); if (v < 0) { goto fail; } e->timing = (sg_timing_t)v;
-        int cond = sg_get(&p,obj,"condition"); if (!sg_keys(&p,cond,"|type||fn||min||max|")) { goto fail; }
-        SG_STR(cond,"type",text); const char *const types[] = {"fn_press","fn_release","fn_on","fn_off","engine_on","engine_off","speed","accel","decel","sample_done","dir_fwd","dir_rev","random","timeout"};
-        v = sg_enum(text,types,14); if (v < 0) { goto fail; } e->condition.type = (sg_condition_type_t)v;
+        int cond = sg_get(&p,obj,"condition"); if (!sg_keys(&p,cond,"|type||fn||min||max||var||var2||op||value|")) { goto fail; }
+        SG_STR(cond,"type",text); const char *const types[] = {"fn_press","fn_release","fn_on","fn_off","engine_on","engine_off","speed","accel","decel","sample_done","dir_fwd","dir_rev","random","timeout","var_cmp"};
+        v = sg_enum(text,types,15); if (v < 0) { goto fail; } e->condition.type = (sg_condition_type_t)v;
         int f = sg_get(&p,cond,"fn"), lo = sg_get(&p,cond,"min"), hi = sg_get(&p,cond,"max");
         e->condition.has_fn = f >= 0; e->condition.has_min = lo >= 0; e->condition.has_max = hi >= 0;
         if (f >= 0) { SG_NUM(cond,"fn",e->condition.fn,28); }
         if (lo >= 0) { SG_NUM(cond,"min",e->condition.min,255); }
         if (hi >= 0) { SG_NUM(cond,"max",e->condition.max,255); }
+        int var = sg_get(&p,cond,"var"), var2 = sg_get(&p,cond,"var2"), op = sg_get(&p,cond,"op"), val = sg_get(&p,cond,"value");
+        e->condition.has_var = var >= 0; e->condition.has_var2 = var2 >= 0;
+        if (var >= 0) { SG_NUM(cond,"var",e->condition.var,SG_MAX_VARIABLES-1); }
+        if (var2 >= 0) { SG_NUM(cond,"var2",e->condition.var2,SG_MAX_VARIABLES-1); }
+        if (op >= 0) { SG_NUM(cond,"op",e->condition.op,5); }
+        int32_t cv; if (val >= 0 && !sg_int(&p,val,INT16_MIN,INT16_MAX,&cv)) { goto fail; }
+        e->condition.value = val >= 0 ? (int16_t)cv : 0;
     }
     SG_ARRAY("effects",SG_MAX_EFFECTS,out->effect_count); obj = arr + 1;
     for (unsigned i = 0; i < out->effect_count; ++i, obj = p.tokens[obj].next) {
@@ -284,10 +327,20 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
     SG_CHECK(g,"null graph");
     SG_CHECK(g->state_count > 0 && g->state_count <= SG_MAX_STATES && g->transition_count <= SG_MAX_TRANSITIONS && g->effect_count <= SG_MAX_EFFECTS && g->asset_count <= SG_MAX_ASSETS,"graph capacity");
     SG_CHECK(sg_id_valid(g->id) && sg_name_valid(g->name) && g->engine_fn <= 28 && g->hysteresis <= 32,"invalid graph metadata");
+    SG_CHECK(g->variable_count <= SG_MAX_VARIABLES,"variable capacity");
+    for (unsigned i = 0; i < g->variable_count; ++i) {
+        if (diag) { diag->id[0] = 0; snprintf(diag->field,sizeof(diag->field),"variables"); }
+        sg_variable_t *v = &g->variables[i];
+        const char *nend = memchr(v->name,0,SG_VAR_NAME_CAP);
+        SG_CHECK(nend && nend != v->name && sg_utf8((const unsigned char *)v->name,(size_t)(nend - v->name)) && v->kind <= SG_VAR_ENGINE,"invalid variable");
+        SG_CHECK(v->kind == SG_VAR_USER || v->init == 0,"builtin variable cannot have an initial value");
+        for (unsigned j = 0; j < i; ++j) { SG_CHECK(strcmp(v->name,g->variables[j].name),"duplicate variable name"); }
+    }
     unsigned audible = 0, silent = 0;
     for (unsigned i = 0; i < g->state_count; ++i) {
         if (diag) { snprintf(diag->id,sizeof(diag->id),"%.31s",g->states[i].id); snprintf(diag->field,sizeof(diag->field),"states"); }
         sg_state_t *s = &g->states[i]; SG_CHECK(sg_id_valid(s->id) && sg_name_valid(s->name) && s->volume <= 100 && s->rate >= 500 && s->rate <= 3000,"invalid state");
+        SG_CHECK(!s->has_set || (s->set_var < g->variable_count && g->variables[s->set_var].kind == SG_VAR_USER),"invalid set variable");
         if (s->file[0]) { SG_CHECK(sg_filename_valid(s->file),"invalid WAV basename"); ++audible; } else { ++silent; }
         for (unsigned j = 0; j < i; ++j) { SG_CHECK(strcmp(s->id,g->states[j].id),"duplicate state ID"); }
     }
@@ -311,15 +364,19 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
         sg_transition_t *e = &g->transitions[i]; sg_condition_t *c = &e->condition;
         SG_CHECK(sg_id_valid(e->id) && (e->timing == SG_IMMEDIATE || e->timing == SG_AFTER_SAMPLE),"invalid transition");
         int src = sg_state_index(g,e->source), dst = sg_state_index(g,e->target); SG_CHECK(src >= 0 && dst >= 0,"dangling transition"); e->source_index = (uint8_t)src; e->target_index = (uint8_t)dst;
-        SG_CHECK(c->type >= SG_FN_PRESS && c->type <= SG_TIMEOUT,"unknown condition");
+        SG_CHECK(c->type >= SG_FN_PRESS && c->type <= SG_VAR_CMP,"unknown condition");
         bool fn = c->type <= SG_FN_OFF, range = c->type >= SG_SPEED && c->type <= SG_DECEL, rnd = c->type == SG_RANDOM;
-        bool tmo = c->type == SG_TIMEOUT;
+        bool tmo = c->type == SG_TIMEOUT, vcmp = c->type == SG_VAR_CMP;
         SG_CHECK(c->has_fn == fn && (!fn || c->fn <= 28),"condition fn mismatch");
-        SG_CHECK(range || rnd || tmo || (!c->has_min && !c->has_max),"unexpected condition range");
+        SG_CHECK(range || rnd || tmo || vcmp || (!c->has_min && !c->has_max),"unexpected condition range");
         SG_CHECK(!range || (c->has_min || c->has_max),"missing condition range");
         SG_CHECK(!rnd || (c->has_min && !c->has_max && c->min <= 100),"invalid random chance");
         SG_CHECK(!tmo || (c->has_min && !c->has_max),"invalid timeout");
         SG_CHECK(!c->has_min || !c->has_max || c->min <= c->max,"inverted condition range");
+        SG_CHECK(!vcmp || (c->has_var && c->var < g->variable_count),"invalid var_cmp variable");
+        SG_CHECK(!vcmp || (!c->has_var2 || c->var2 < g->variable_count),"invalid var_cmp second variable");
+        SG_CHECK(!vcmp || c->op <= SG_CMP_GE,"invalid var_cmp operator");
+        SG_CHECK(vcmp || (!c->has_var && !c->has_var2),"unexpected variable fields");
         for (unsigned j = 0; j < i; ++j) {
             SG_CHECK(strcmp(e->id,g->transitions[j].id),"duplicate transition ID");
             if (src == g->transitions[j].source_index && e->priority == g->transitions[j].priority) {
@@ -334,7 +391,7 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
         const sg_transition_t *e = &g->transitions[i];
         if (e->timing == SG_IMMEDIATE && e->condition.type >= SG_FN_ON &&
             e->condition.type != SG_SAMPLE_DONE && e->condition.type != SG_RANDOM &&
-            e->condition.type != SG_TIMEOUT &&
+            e->condition.type != SG_TIMEOUT && e->condition.type != SG_VAR_CMP &&
             !g->states[e->source_index].file[0] && !g->states[e->target_index].file[0]) {
             immediate[e->source_index] |= UINT64_C(1) << e->target_index;
         }

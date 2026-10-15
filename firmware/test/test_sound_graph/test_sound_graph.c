@@ -378,6 +378,163 @@ static void test_shared_frontend_fixture_verdicts(void)
     }
     TEST_ASSERT_TRUE(cases >= 7); free(p.tokens); free(registry);
 }
+static void test_parse_variables_var_cmp_and_set(void)
+{
+    const char *json =
+      "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"t\",\"name\":\"T\","
+      "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":2,"
+      "\"variables\":[{\"name\":\"flag\",\"init\":3},{\"name\":\"spd\",\"kind\":\"speed\"}],"
+      "\"states\":[{\"id\":\"off\",\"name\":\"off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+      "{\"id\":\"set\",\"name\":\"set\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000,\"setVar\":0,\"setValue\":7},"
+      "{\"id\":\"go\",\"name\":\"go\",\"file\":\"g.wav\",\"loop\":false,\"volume\":100,\"rate\":1000},"
+      "{\"id\":\"end\",\"name\":\"end\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+      "\"transitions\":["
+      "{\"id\":\"e1\",\"source\":\"off\",\"target\":\"set\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"var_cmp\",\"var\":1,\"op\":4,\"value\":10}},"
+      "{\"id\":\"e2\",\"source\":\"set\",\"target\":\"go\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"var_cmp\",\"var\":0,\"op\":0,\"var2\":1}},"
+      "{\"id\":\"e3\",\"source\":\"go\",\"target\":\"end\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"sample_done\"}}],"
+      "\"effects\":[],\"assets\":[],\"editor\":{\"positions\":{},\"viewport\":{\"x\":0,\"zoom\":1}}}";
+    TEST_ASSERT_EQUAL(ESP_OK,sg_parse(json,strlen(json),g,&diagnostic));
+    TEST_ASSERT_EQUAL_UINT8(2,g->variable_count);
+    TEST_ASSERT_EQUAL_UINT8(SG_VAR_USER,g->variables[0].kind);
+    TEST_ASSERT_EQUAL_INT32(3,g->variables[0].init);
+    TEST_ASSERT_EQUAL_UINT8(SG_VAR_SPEED,g->variables[1].kind);
+    TEST_ASSERT_EQUAL_INT32(0,g->variables[1].init);
+    TEST_ASSERT_TRUE(g->states[1].has_set);
+    TEST_ASSERT_EQUAL_UINT8(0,g->states[1].set_var);
+    TEST_ASSERT_EQUAL_INT16(7,g->states[1].set_value);
+    TEST_ASSERT_EQUAL_UINT8(SG_VAR_CMP,g->transitions[0].condition.type);
+    TEST_ASSERT_EQUAL_UINT8(4,g->transitions[0].condition.op);
+    TEST_ASSERT_EQUAL_INT16(10,g->transitions[0].condition.value);
+    TEST_ASSERT_TRUE(g->transitions[1].condition.has_var2);
+    TEST_ASSERT_EQUAL_UINT8(1,g->transitions[1].condition.var2);
+}
+static void test_parse_set_without_value_defaults(void)
+{
+    const char *json =
+      "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"t\",\"name\":\"T\","
+      "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":2,\"variables\":[{\"name\":\"v\"}],"
+      "\"states\":[{\"id\":\"off\",\"name\":\"off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000,\"setVar\":0}],"
+      "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"x\":1}}";
+    TEST_ASSERT_EQUAL(ESP_OK,sg_parse(json,strlen(json),g,&diagnostic));
+    TEST_ASSERT_TRUE(g->states[0].has_set);
+    TEST_ASSERT_EQUAL_INT16(0,g->states[0].set_value);
+}
+static void test_variable_model_validation(void)
+{
+    snprintf(g->variables[0].name,SG_VAR_NAME_CAP,"v"); g->variable_count = 1;
+    g->variables[0].kind = SG_VAR_SPEED; g->variables[0].init = 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* builtin with init */
+    g->variables[0].init = 0; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->variables[0].kind = 9; TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->variables[0].kind = SG_VAR_USER;
+    g->variable_count = 2; g->variables[1] = g->variables[0];
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* duplicate name */
+    g->variable_count = 1; g->variables[0].name[0] = 0;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* empty name */
+    g->variable_count = 0;
+}
+static void test_set_variable_validation(void)
+{
+    unsigned i = state("set","",false); edge("off","set",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
+    g->states[i].has_set = true; g->states[i].set_var = 0;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* no variables declared */
+    g->variable_count = 1; snprintf(g->variables[0].name,SG_VAR_NAME_CAP,"v");
+    g->variables[0].kind = SG_VAR_SPEED;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* builtin cannot be set */
+    g->variables[0].kind = SG_VAR_USER; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->states[i].set_var = 1; TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->states[i].has_set = false; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->variable_count = 0;
+}
+static void test_var_cmp_validation(void)
+{
+    g->variable_count = 1; snprintf(g->variables[0].name,SG_VAR_NAME_CAP,"v");
+    state("go","g.wav",false); unsigned e = edge("off","go",1,SG_VAR_CMP,0,SG_IMMEDIATE);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* missing variable */
+    g->transitions[e].condition.has_var = true; g->transitions[e].condition.var = 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* out-of-range variable */
+    g->transitions[e].condition.var = 0; g->transitions[e].condition.op = 6;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* bad operator */
+    g->transitions[e].condition.op = 0; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->transitions[e].condition.has_var2 = true; g->transitions[e].condition.var2 = 5;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* out-of-range second variable */
+    g->transitions[e].condition.var2 = 0; TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->transitions[e].condition.type = SG_ENGINE_ON;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));   /* stray variable fields */
+    g->transitions[e].condition.has_var = false; g->transitions[e].condition.has_var2 = false;
+    TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    g->variable_count = 0;
+}
+static unsigned var_tick(uint8_t var, uint8_t op, int32_t value, bool has2, uint8_t var2,
+                         uint8_t speed, bool fwd, bool power)
+{
+    sg_condition_t *c = &g->transitions[0].condition;
+    c->type = SG_VAR_CMP; c->has_fn = c->has_min = c->has_max = false;
+    c->has_var = true; c->var = var; c->op = op; c->value = (int16_t)value; c->has_var2 = has2; c->var2 = var2;
+    unsigned before = plays;
+    sg_runner_reset(r); r->armed = true; if (power) { sg_runner_power(r,true); }
+    sg_runner_tick(r,speed,0,fwd,20);
+    return plays - before;
+}
+static void test_runner_var_cmp_builtins_and_operators(void)
+{
+    g->variable_count = 5;
+    snprintf(g->variables[0].name,SG_VAR_NAME_CAP,"flag"); g->variables[0].kind = SG_VAR_USER;
+    snprintf(g->variables[1].name,SG_VAR_NAME_CAP,"spd"); g->variables[1].kind = SG_VAR_SPEED;
+    snprintf(g->variables[2].name,SG_VAR_NAME_CAP,"fwd"); g->variables[2].kind = SG_VAR_FORWARD;
+    snprintf(g->variables[3].name,SG_VAR_NAME_CAP,"mov"); g->variables[3].kind = SG_VAR_MOVING;
+    snprintf(g->variables[4].name,SG_VAR_NAME_CAP,"eng"); g->variables[4].kind = SG_VAR_ENGINE;
+    state("run","run.wav",false);
+    unsigned e = edge("off","run",1,SG_VAR_CMP,0,SG_IMMEDIATE);
+    g->transitions[e].condition.has_var = true; g->transitions[e].condition.var = 1;
+    init_runner();
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_GT,50,false,0,60,true,false));
+    TEST_ASSERT_EQUAL_UINT(0,var_tick(1,SG_CMP_GT,50,false,0,50,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_GE,50,false,0,50,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_LT,50,false,0,40,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_LE,50,false,0,50,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_EQ,50,false,0,50,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_NE,50,false,0,49,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(2,SG_CMP_EQ,1,false,0,0,true,false));   /* forward */
+    TEST_ASSERT_EQUAL_UINT(0,var_tick(2,SG_CMP_EQ,1,false,0,0,false,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(3,SG_CMP_EQ,1,false,0,10,true,false));  /* moving */
+    TEST_ASSERT_EQUAL_UINT(0,var_tick(3,SG_CMP_EQ,1,false,0,0,true,false));
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(4,SG_CMP_EQ,1,false,0,0,true,true));    /* engine */
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(0,SG_CMP_EQ,0,false,0,0,true,false));   /* user variable */
+    TEST_ASSERT_EQUAL_UINT(1,var_tick(1,SG_CMP_EQ,0,true,1,7,true,false));    /* variable vs variable */
+    TEST_ASSERT_EQUAL_UINT(0,var_tick(9,SG_CMP_EQ,1,false,0,0,true,false));   /* out of range */
+}
+static void test_variable_json_rejections(void)
+{
+    const char *head = "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"t\",\"name\":\"T\",\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":2,";
+    const char *states = "\"states\":[{\"id\":\"off\",\"name\":\"off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],";
+    const char *tail = "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"x\":1}}";
+    char buf[512];
+    #define REJ(frag) do { snprintf(buf,sizeof(buf),"%s" frag "%s%s",head,states,tail); TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_parse(buf,strlen(buf),g,&diagnostic)); } while(0)
+    REJ("\"variables\":{\"x\":1},");
+    REJ("\"variables\":[{\"name\":\"v\",\"kind\":\"bogus\"}],");
+    REJ("\"variables\":[{\"name\":\"v\",\"init\":1.5}],");
+    REJ("\"variables\":[{\"name\":\"v\",\"init\":1e10}],");
+    #undef REJ
+    int n = snprintf(buf,sizeof(buf),"%s\"variables\":[",head);
+    for (unsigned i = 0; i <= SG_MAX_VARIABLES; ++i) { n += snprintf(buf+n,sizeof(buf)-n,"%s{\"name\":\"v%u\"}", i ? "," : "", i); }
+    n += snprintf(buf+n,sizeof(buf)-n,"],%s%s",states,tail);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_parse(buf,strlen(buf),g,&diagnostic));
+}
+static void test_condition_json_rejections(void)
+{
+    const char *head = "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"t\",\"name\":\"T\",\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":2,\"variables\":[{\"name\":\"v\"}],";
+    const char *states = "\"states\":[{\"id\":\"off\",\"name\":\"off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000},{\"id\":\"go\",\"name\":\"go\",\"file\":\"g.wav\",\"loop\":false,\"volume\":100,\"rate\":1000}],";
+    char buf[768];
+    #define REJT(trans) do { snprintf(buf,sizeof(buf),"%s%s\"transitions\":[" trans "],\"effects\":[],\"assets\":[],\"editor\":{\"x\":1}}",head,states); TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_parse(buf,strlen(buf),g,&diagnostic)); } while(0)
+    REJT("{\"id\":\"e\",\"source\":\"off\",\"target\":\"go\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"var_cmp\",\"var\":0,\"op\":0,\"value\":40000}}");
+    REJT("{\"id\":\"e\",\"source\":\"off\",\"target\":\"go\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"var_cmp\",\"var\":16,\"op\":0}}");
+    REJT("{\"id\":\"e\",\"source\":\"off\",\"target\":\"go\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"var_cmp\",\"var\":0,\"op\":6}}");
+    REJT("{\"id\":\"e\",\"source\":\"off\",\"target\":\"go\",\"priority\":1,\"timing\":\"immediate\",\"condition\":{\"type\":\"var_cmp\",\"var\":0,\"op\":0,\"var2\":16}}");
+    #undef REJT
+    snprintf(buf,sizeof(buf),"%s\"states\":[{\"id\":\"off\",\"name\":\"off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000,\"setVar\":0,\"setValue\":40000},{\"id\":\"go\",\"name\":\"go\",\"file\":\"g.wav\",\"loop\":false,\"volume\":100,\"rate\":1000}],\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"x\":1}}",head);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_parse(buf,strlen(buf),g,&diagnostic));
+}
 int main(void)
 {
     UNITY_BEGIN(); RUN_TEST(test_parse_minimal_and_draft); RUN_TEST(test_duplicate_keys_and_malformed_json);
@@ -393,5 +550,10 @@ int main(void)
     RUN_TEST(test_reachability_union_and_shared_states); RUN_TEST(test_shared_frontend_fixture_verdicts);
     RUN_TEST(test_direction_condition); RUN_TEST(test_random_selects_among_equal_priority_options);
     RUN_TEST(test_random_requires_min_only); RUN_TEST(test_parse_direction_and_random_json);
-    RUN_TEST(test_timeout_delay); return UNITY_END();
+    RUN_TEST(test_timeout_delay);
+    RUN_TEST(test_parse_variables_var_cmp_and_set); RUN_TEST(test_parse_set_without_value_defaults);
+    RUN_TEST(test_variable_model_validation); RUN_TEST(test_set_variable_validation);
+    RUN_TEST(test_var_cmp_validation); RUN_TEST(test_runner_var_cmp_builtins_and_operators);
+    RUN_TEST(test_variable_json_rejections); RUN_TEST(test_condition_json_rejections);
+    return UNITY_END();
 }

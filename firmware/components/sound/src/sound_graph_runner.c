@@ -14,6 +14,7 @@ static void sgr_enter(sg_runner_t *r, unsigned channel, uint8_t state)
     c->state = state; c->pending = SG_NONE; c->done = false; c->elapsed_ms = 0; c->loops_done = 0;
     memset(c->speed_match,0,sizeof(c->speed_match));
     const sg_state_t *s = &r->graph->states[state];
+    if (s->has_set && s->set_var < r->graph->variable_count) { r->vars[s->set_var] = s->set_value; }
     if (!s->file[0]) { return; }
     if (!r->io.play || r->io.play(r->io.ctx,channel == 0,s,&c->handle) != ESP_OK) {
         c->failed = true; return;
@@ -36,6 +37,7 @@ void sg_runner_reset(sg_runner_t *r)
     if (r->graph) {
         r->channels[0].state = r->graph->engine_entry_index;
         for (unsigned i = 0; i < r->graph->effect_count; ++i) { r->channels[i+1].state = r->graph->effects[i].entry_index; }
+        for (unsigned i = 0; i < r->graph->variable_count && i < SG_MAX_VARIABLES; ++i) { r->vars[i] = r->graph->variables[i].init; }
     }
     r->engine_on = false; r->armed = false; r->fn_press = 0; r->fn_release = 0;
 }
@@ -53,6 +55,18 @@ void sg_runner_power(sg_runner_t *r, bool on)
     r->engine_on = on; r->armed = true;
 }
 static uint32_t sgr_rand(sg_runner_t *r){ r->rng = r->rng * 1664525u + 1013904223u; return r->rng; }
+/* Built-in status variables come from the current tick; user variables are stored. */
+static int32_t sgr_var(sg_runner_t *r, uint8_t idx, uint8_t speed)
+{
+    if (idx >= r->graph->variable_count) { return 0; }
+    switch (r->graph->variables[idx].kind) {
+        case SG_VAR_SPEED: return speed;
+        case SG_VAR_FORWARD: return r->forward ? 1 : 0;
+        case SG_VAR_MOVING: return speed > 0 ? 1 : 0;
+        case SG_VAR_ENGINE: return r->engine_on ? 1 : 0;
+        default: return r->vars[idx];
+    }
+}
 static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_t speed, int32_t accel)
 {
     const sg_condition_t *c = &r->graph->transitions[idx].condition;
@@ -69,6 +83,18 @@ static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_
         case SG_SAMPLE_DONE: return ch->done;
         case SG_RANDOM: return (sgr_rand(r) % 100u) < (c->has_min ? c->min : 100u);
         case SG_TIMEOUT: return c->has_min && ch->elapsed_ms >= (uint32_t)c->min * 50u;
+        case SG_VAR_CMP: {
+            int32_t lhs = sgr_var(r,c->var,speed);
+            int32_t rhs = c->has_var2 ? sgr_var(r,c->var2,speed) : c->value;
+            switch (c->op) {
+                case SG_CMP_EQ: return lhs == rhs;
+                case SG_CMP_NE: return lhs != rhs;
+                case SG_CMP_LT: return lhs < rhs;
+                case SG_CMP_LE: return lhs <= rhs;
+                case SG_CMP_GT: return lhs > rhs;
+                default: return lhs >= rhs;
+            }
+        }
         default: break;
     }
     int64_t value = c->type == SG_SPEED ? speed : c->type == SG_ACCEL ? accel : -(int64_t)accel;

@@ -1341,7 +1341,7 @@ static bool graph_revision(const char *query, const char *key, uint32_t *revisio
 
 static esp_err_t graph_capabilities_get(httpd_req_t *req)
 {
-    return send_json(req, "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,\"limits\":{\"states\":57,\"soundStates\":31,\"transitions\":128,\"effects\":24,\"assets\":31,\"jsonBytes\":131072},\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\",\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\",\"sample_done\"]}");
+    return send_json(req, "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,\"limits\":{\"states\":57,\"soundStates\":31,\"transitions\":128,\"effects\":24,\"assets\":31,\"variables\":16,\"jsonBytes\":131072},\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\",\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\",\"sample_done\",\"dir_fwd\",\"dir_rev\",\"random\",\"timeout\",\"var_cmp\"],\"variableKinds\":[\"speed\",\"forward\",\"moving\",\"engine\"],\"compareOps\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\"]}");
 }
 
 static esp_err_t graph_projects_get(httpd_req_t *req)

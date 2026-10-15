@@ -10,6 +10,8 @@
 #define SG_MAX_TRANSITIONS 128
 #define SG_MAX_EFFECTS 24
 #define SG_MAX_ASSETS 31
+#define SG_MAX_VARIABLES 16
+#define SG_VAR_NAME_CAP 24
 #define SG_ID_CAP 32
 #define SG_NAME_CAP 64
 #define SG_FILE_CAP 64
@@ -19,13 +21,24 @@
 typedef enum {
     SG_FN_PRESS, SG_FN_RELEASE, SG_FN_ON, SG_FN_OFF, SG_ENGINE_ON,
     SG_ENGINE_OFF, SG_SPEED, SG_ACCEL, SG_DECEL, SG_SAMPLE_DONE,
-    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM, SG_TIMEOUT
+    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM, SG_TIMEOUT, SG_VAR_CMP
 } sg_condition_type_t;
+/* Built-in status variables resolved by the runner; SG_VAR_USER is stored. */
+typedef enum { SG_VAR_USER, SG_VAR_SPEED, SG_VAR_FORWARD, SG_VAR_MOVING, SG_VAR_ENGINE } sg_var_kind_t;
+typedef enum { SG_CMP_EQ, SG_CMP_NE, SG_CMP_LT, SG_CMP_LE, SG_CMP_GT, SG_CMP_GE } sg_compare_t;
 typedef enum { SG_IMMEDIATE, SG_AFTER_SAMPLE } sg_timing_t;
+typedef struct {
+    char name[SG_VAR_NAME_CAP];
+    uint8_t kind;           /* sg_var_kind_t */
+    int32_t init;           /* user variables only; built-ins must use 0 */
+} sg_variable_t;
 typedef struct {
     sg_condition_type_t type;
     uint8_t fn, min, max;
     bool has_fn, has_min, has_max;
+    uint8_t var, var2, op;  /* SG_VAR_CMP: lhs variable, rhs operator (sg_compare_t) */
+    bool has_var, has_var2; /* var2 selects a second variable instead of the literal value */
+    int16_t value;          /* SG_VAR_CMP rhs literal when has_var2 is false */
 } sg_condition_t;
 typedef struct {
     char id[SG_ID_CAP], name[SG_NAME_CAP], file[SG_FILE_CAP];
@@ -33,6 +46,9 @@ typedef struct {
     uint8_t volume;
     uint16_t rate;
     uint8_t loops;          /* repeat count for a looping state; 0 = endless */
+    uint8_t set_var;        /* variable to assign when this state is entered */
+    int16_t set_value;
+    bool has_set;
 } sg_state_t;
 typedef struct {
     char id[SG_ID_CAP], source[SG_ID_CAP], target[SG_ID_CAP];
@@ -51,7 +67,8 @@ typedef struct {
 typedef struct {
     char id[SG_ID_CAP], name[SG_NAME_CAP], engine_entry[SG_ID_CAP];
     uint8_t engine_entry_index, engine_fn, hysteresis;
-    uint8_t state_count, transition_count, effect_count, asset_count;
+    uint8_t state_count, transition_count, effect_count, asset_count, variable_count;
+    sg_variable_t variables[SG_MAX_VARIABLES];
     sg_state_t states[SG_MAX_STATES];
     sg_transition_t transitions[SG_MAX_TRANSITIONS];
     sg_effect_t effects[SG_MAX_EFFECTS];
@@ -95,6 +112,7 @@ typedef struct {
     bool engine_on, armed;
     bool forward;   /* travel direction, from the motor/DCC input */
     uint32_t rng;   /* LCG state for SG_RANDOM conditions */
+    int32_t vars[SG_MAX_VARIABLES];   /* user-defined variable values */
 } sg_runner_t;
 void sg_runner_init(sg_runner_t *runner, const sg_graph_t *graph, const sg_io_t *io);
 void sg_runner_reset(sg_runner_t *runner);

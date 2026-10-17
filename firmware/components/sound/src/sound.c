@@ -19,25 +19,35 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "motor.h"
+#include "settings.h"
 #include "storage.h"
 
 static const char *TAG = "sound";
 
 #define SOUND_TICK_MS          20
-#define SOUND_VOICE_ENGINE     18
+#define SOUND_VOICE_ENGINE     19
 #define SOUND_FN_COUNT         29
 #define SOUND_PATH_MAX         192
 /* Engine gain while any effect voice is audible (ducking), percent. */
 #define SOUND_DUCK_PCT         40
 
 static SemaphoreHandle_t s_lock;
+static uint8_t s_engine_volume = 100;
+static uint8_t s_effects_volume = 100;
 
 /* Engine runtime. */
 static uint8_t s_speed;
 static bool s_forward = true;
-static uint8_t s_prev_speed;
+static uint8_t s_prev_effective;
 static int32_t s_accel;            /* EMA of d(speed)/tick */
 static int32_t s_accel_q;          /* Q10 retains fractional decay toward zero */
+static bool s_mute;
+static bool s_drive_hold;
+static bool s_coast;
+static bool s_dynamic_brake;
+static bool s_hold_valid;
+static uint8_t s_hold_speed;
+static int8_t s_notch_offset;
 static bool s_control_armed = true;
 static uint32_t s_task_iter_cap;   /* test hook: 0 = run forever */
 static bool s_fn_state[SOUND_FN_COUNT];
@@ -71,10 +81,12 @@ static esp_err_t graph_audio_play(void *ctx, bool engine, const sg_state_t *stat
     int path_len = snprintf(path,sizeof(path),"%s/audio/%s",storage_get_root(),state->file);
     if (path_len < 0 || (size_t)path_len >= sizeof(path)) { return ESP_ERR_INVALID_SIZE; }
     audio_voice_handle_t h = {AUDIO_VOICE_NONE,0}; esp_err_t err;
-    if (engine) { err = audio_voice_play_generation(SOUND_VOICE_ENGINE,path,false,state->volume,&h); }
+    uint8_t volume = (uint8_t)((uint16_t)state->volume *
+                               (engine ? s_engine_volume : s_effects_volume) / 100U);
+    if (engine) { err = audio_voice_play_generation(SOUND_VOICE_ENGINE,path,false,volume,&h); }
     else {
         err = audio_voice_alloc_owned(&h);
-        if (err == ESP_OK) { err = audio_voice_play_owned(&h,path,false,state->volume); }
+        if (err == ESP_OK) { err = audio_voice_play_owned(&h,path,false,volume); }
     }
     if (err == ESP_OK) { err = audio_voice_set_rate_owned(h,state->rate); }
     if (err != ESP_OK) { audio_voice_release_owned(h); return err; }
@@ -120,6 +132,29 @@ bool sound_engine_is_on(void)
     bool on = s_graph_runner ? s_graph_runner->engine_on : false;
     sound_unlock();
     return on;
+}
+
+bool sound_variable_get(uint8_t index, int32_t *out)
+{
+    if (out == NULL) { return false; }
+    sound_lock();
+    bool ok = false;
+    if (s_graph_runner != NULL && s_graph_runner->graph != NULL &&
+        index < s_graph_runner->graph->variable_count) {
+        const sg_variable_t *v = &s_graph_runner->graph->variables[index];
+        int32_t value = 0;
+        switch (v->kind) {
+            case SG_VAR_SPEED: value = s_speed; break;
+            case SG_VAR_FORWARD: value = s_forward ? 1 : 0; break;
+            case SG_VAR_MOVING: value = s_speed != 0U ? 1 : 0; break;
+            case SG_VAR_ENGINE: value = s_graph_runner->engine_on ? 1 : 0; break;
+            default: value = s_graph_runner->vars[index]; break;
+        }
+        *out = value;
+        ok = true;
+    }
+    sound_unlock();
+    return ok;
 }
 
 bool sound_enabled(void)
@@ -197,7 +232,7 @@ static void runtime_reset_locked(void)
     }
     s_accel = 0;
     s_accel_q = 0;
-    s_prev_speed = s_speed;
+    s_prev_effective = s_speed;
     s_control_armed = false;
 }
 
@@ -311,19 +346,29 @@ esp_err_t sound_set_inhibited(bool inhibited)
     return ESP_OK;
 }
 
-/* Duck the engine voice while any effect channel is audible. Called with the
- * sound lock held, right after the runner tick. */
+/* Duck the engine voice while any effect channel is audible and keep every
+ * active graph voice in sync with the current category volume/mute state.
+ * Called with the sound lock held, right after the runner tick. */
 static void sound_apply_duck_locked(void)
 {
     if (!s_graph_runner || !s_graph) { return; }
     bool duck = false;
     for (unsigned i = 1; i <= s_graph->effect_count; ++i) {
         const sg_channel_t *c = &s_graph_runner->channels[i];
-        if (c->playing && s_graph->states[c->state].file[0]) { duck = true; break; }
+        if (!c->playing) continue;
+        const sg_state_t *st = &s_graph->states[c->state];
+        if (st->file[0]) {
+            duck = true;
+            uint8_t vol = (uint8_t)((uint16_t)st->volume * s_effects_volume / 100U);
+            if (s_mute) vol = 0;
+            (void)audio_voice_set_volume_live(c->handle.voice, vol);
+        }
     }
     const sg_channel_t *eng = &s_graph_runner->channels[0];
     uint8_t base = s_graph->states[eng->state].file[0] ? s_graph->states[eng->state].volume : 100U;
+    base = (uint8_t)((uint16_t)base * s_engine_volume / 100U);
     uint8_t vol = duck ? (uint8_t)((uint16_t)base * SOUND_DUCK_PCT / 100U) : base;
+    if (s_mute) vol = 0;
     (void)audio_voice_set_volume_live(SOUND_VOICE_ENGINE, vol);
 }
 
@@ -338,10 +383,16 @@ static void sound_tick(void)
     if (s_graph_fault) { sound_unlock(); return; }
     if (s_graph_runner) {
         if (!s_inhibited && s_graph_runner->armed) {
-            int32_t delta = (int32_t)s_speed - s_prev_speed;
+            int16_t effective = (int16_t)(s_drive_hold && s_hold_valid ? s_hold_speed
+                                                                        : s_speed);
+            effective += s_notch_offset;
+            if (effective < 0) effective = 0;
+            if (effective > 255) effective = 255;
+            if (s_coast || s_dynamic_brake) effective = 0;
+            int32_t delta = (int32_t)effective - s_prev_effective;
             s_accel_q = (s_accel_q * 7 + delta * 1024 * 3) / 10;
-            s_accel = s_accel_q / 1024; s_prev_speed = s_speed;
-            sg_runner_tick(s_graph_runner,s_speed,s_accel,s_forward,SOUND_TICK_MS);
+            s_accel = s_accel_q / 1024; s_prev_effective = (uint8_t)effective;
+            sg_runner_tick(s_graph_runner,(uint8_t)effective,s_accel,s_forward,SOUND_TICK_MS);
             sound_apply_duck_locked();
         }
     }
@@ -376,12 +427,43 @@ static void sound_task(void *arg)
     }
 }
 
+void sound_set_volumes(uint8_t engine, uint8_t effects)
+{
+    sound_lock();
+    s_engine_volume = engine > 100 ? 100 : engine;
+    s_effects_volume = effects > 100 ? 100 : effects;
+    sound_unlock();
+}
+
+void sound_set_logic(bool mute, bool drive_hold, bool coast, bool dynamic_brake,
+                     int8_t notch_offset)
+{
+    sound_lock();
+    if (drive_hold && !s_drive_hold) {
+        s_hold_speed = s_speed;
+        s_hold_valid = true;
+    } else if (!drive_hold) {
+        s_hold_valid = false;
+    }
+    s_drive_hold = drive_hold;
+    s_coast = coast;
+    s_dynamic_brake = dynamic_brake;
+    s_mute = mute;
+    s_notch_offset = notch_offset;
+    sound_unlock();
+}
+
 esp_err_t sound_init(void)
 {
     if (s_lock != NULL) { return ESP_ERR_INVALID_STATE; }
     s_lock = xSemaphoreCreateMutex();
     if (s_lock == NULL) {
         return ESP_ERR_NO_MEM;
+    }
+    settings_config_t cfg;
+    if (settings_load(&cfg) == ESP_OK) {
+        s_engine_volume = cfg.engine_volume > 100 ? 100 : cfg.engine_volume;
+        s_effects_volume = cfg.effects_volume > 100 ? 100 : cfg.effects_volume;
     }
     memset(s_fn_state, 0, sizeof(s_fn_state));
     if (xTaskCreatePinnedToCore(sound_task, "sound", 4096, NULL, 6, NULL, 1) != pdPASS) {

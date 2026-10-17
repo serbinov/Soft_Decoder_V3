@@ -251,6 +251,55 @@ static esp_err_t next_revision(const char *id, uint32_t *next)
     *next = max + 1; return ESP_OK;
 }
 
+/* Best-effort retention: keep the newest revisions for one project and always
+ * keep the revision currently selected for boot/apply. Runs under the store
+ * lock; failures must never fail the successful save itself. */
+static void prune_locked(const char *id, uint32_t latest)
+{
+    if (latest <= SG_STORE_KEEP_REVISIONS) return;
+    char selection[96], selected_id[SG_ID_CAP] = { 0 };
+    uint32_t selected_rev = 0;
+    bool can_prune = true;
+    char path[SG_PATH_CAP];
+    if (path_make(path, "selection", 0, NULL) != ESP_OK) return;
+    esp_err_t sel_err = record_read(path, selection, sizeof(selection));
+    if (sel_err == ESP_OK && strcmp(selection, "legacy\n")) {
+        unsigned long rev = 0; int used = 0;
+        if (sscanf(selection, "graph %31s %lu\n%n", selected_id, &rev, &used) != 2 ||
+            selection[used] || !sg_id_valid(selected_id) || !rev || rev > UINT32_MAX) {
+            can_prune = false;
+        } else {
+            selected_rev = (uint32_t)rev;
+        }
+    } else if (sel_err != ESP_OK && sel_err != ESP_ERR_NOT_FOUND) {
+        can_prune = false;
+    }
+    if (!can_prune) return;
+    if (path_make(path, "", 0, NULL) != ESP_OK) return;
+    DIR *dir = opendir(path);
+    if (!dir) return;
+    size_t entries = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (++entries > SG_STORE_MAX_ENTRIES) break;
+        size_t n = strlen(id);
+        if (strncmp(entry->d_name, id, n) || entry->d_name[n] != '.') continue;
+        const char *p = entry->d_name + n + 1;
+        char *end = NULL; errno = 0;
+        unsigned long rev = strtoul(p, &end, 10);
+        if (errno || !rev || rev > UINT32_MAX ||
+            (strcmp(end, ".json") && strcmp(end, ".commit"))) continue;
+        if (latest <= (uint32_t)rev ||
+            latest - (uint32_t)rev < SG_STORE_KEEP_REVISIONS) continue;
+        if (!strcmp(selected_id, id) && selected_rev == (uint32_t)rev) continue;
+        char victim[SG_PATH_CAP];
+        if (path_make(victim, id, (uint32_t)rev, end[1] == 'j' ? "json" : "commit") == ESP_OK) {
+            (void)remove(victim);
+        }
+    }
+    closedir(dir);
+}
+
 esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, size_t len,
                         uint32_t *newrev, sg_diagnostic_t *diag)
 {
@@ -287,8 +336,10 @@ esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, siz
     snprintf(name, sizeof(name), "%s.latest", id);
     if (err == ESP_OK) { err = path_make(path, name, 0, NULL); }
     if (err == ESP_OK) { err = record_write(path, record); }
-    if (err == ESP_OK) { *newrev = revision; }
-    else if (diag && !diag->message[0]) {
+    if (err == ESP_OK) {
+        *newrev = revision;
+        prune_locked(id, revision);
+    } else if (diag && !diag->message[0]) {
         diagnostic(diag, err, "Graph storage write failed; previous latest preserved");
     }
     leave(); return err;
@@ -324,6 +375,68 @@ esp_err_t sg_store_select_legacy(void)
     if (err != ESP_OK) { return err; }
     err = selection_write("legacy\n");
     leave(); return err;
+}
+
+esp_err_t sg_store_delete(const char *id, bool *was_selected)
+{
+    if (was_selected) *was_selected = false;
+    if (!sg_id_valid(id)) return ESP_ERR_INVALID_ARG;
+    esp_err_t err = enter();
+    if (err != ESP_OK) return err;
+
+    char path[SG_PATH_CAP], selection[96];
+    bool selected = false;
+    err = path_make(path, "selection", 0, NULL);
+    if (err == ESP_OK) err = record_read(path, selection, sizeof(selection));
+    if (err == ESP_ERR_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err == ESP_OK && strcmp(selection, "legacy\n")) {
+        char project[SG_ID_CAP]; unsigned long rev = 0; int used = 0;
+        if (sscanf(selection, "graph %31s %lu\n%n", project, &rev, &used) != 2 ||
+            selection[used] || !sg_id_valid(project) || !rev || rev > UINT32_MAX) {
+            err = ESP_FAIL;
+        } else {
+            selected = !strcmp(project, id);
+        }
+    }
+    /* Switch selection away before deleting so a failure cannot leave boot
+     * pointing at a missing project. */
+    if (err == ESP_OK && selected) err = selection_write("legacy\n");
+
+    char graphs[SG_PATH_CAP];
+    if (err == ESP_OK) err = path_make(graphs, "", 0, NULL);
+    DIR *dir = err == ESP_OK ? opendir(graphs) : NULL;
+    if (err == ESP_OK && !dir) err = errno == ENOENT ? ESP_OK : ESP_FAIL;
+    if (dir != NULL) {
+        size_t entries = 0;
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (++entries > SG_STORE_MAX_ENTRIES) { err = ESP_ERR_INVALID_SIZE; break; }
+            size_t n = strlen(id);
+            if (strncmp(entry->d_name, id, n) || entry->d_name[n] != '.') continue;
+            const char *suffix = entry->d_name + n + 1;
+            if (strcmp(suffix, "latest") && strcmp(suffix, "json") &&
+                strcmp(suffix, "commit") && strcmp(suffix, "json.tmp") &&
+                strcmp(suffix, "commit.tmp")) {
+                char *end = NULL; errno = 0;
+                (void)strtoul(suffix, &end, 10);
+                if (errno || !end || (strcmp(end, ".json") && strcmp(end, ".commit") &&
+                                      strcmp(end, ".json.tmp") && strcmp(end, ".commit.tmp"))) {
+                    continue;
+                }
+            }
+            size_t glen = strlen(graphs), nlen = strlen(entry->d_name);
+            if (glen + nlen >= sizeof(path)) { err = ESP_FAIL; continue; }
+            char victim[SG_PATH_CAP];
+            memcpy(victim, graphs, glen);
+            memcpy(victim + glen, entry->d_name, nlen + 1U);
+            if (remove(victim) != 0 && errno != ENOENT) err = ESP_FAIL;
+        }
+        closedir(dir);
+    }
+    if (was_selected) *was_selected = selected;
+    leave();
+    return err;
 }
 
 esp_err_t sg_store_selection(char *id, size_t cap, uint32_t *rev, bool *selected)
@@ -528,6 +641,23 @@ esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag)
     leave(); return err;
 }
 
+static esp_err_t json_uses_file(const char *id, const char *json, size_t len,
+                                const char *file, bool *found)
+{
+    sg_graph_t *graph = malloc(sizeof(*graph));
+    if (!graph) return ESP_ERR_NO_MEM;
+    esp_err_t err = sg_parse(json, len, graph, NULL);
+    if (err == ESP_OK && strcmp(graph->id, id)) err = ESP_FAIL;
+    if (err == ESP_OK) {
+        *found = *found || sg_file_used(graph, file);
+        for (unsigned a = 0; a < graph->asset_count; ++a) {
+            *found = *found || !strcmp(graph->assets[a].file, file);
+        }
+    }
+    free(graph);
+    return err;
+}
+
 esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
 {
     if (!referenced) { return ESP_ERR_INVALID_ARG; }
@@ -549,64 +679,44 @@ esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
         if (!entry) { if (errno) { err = ESP_FAIL; } break; }
         if (++entries > SG_STORE_MAX_ENTRIES) { err = ESP_ERR_INVALID_SIZE; break; }
         size_t n = strlen(entry->d_name);
-        bool is_json = n > 5 && !strcmp(entry->d_name + n - 5, ".json");
-        bool is_commit = n > 7 && !strcmp(entry->d_name + n - 7, ".commit");
-        bool is_latest = n > 7 && !strcmp(entry->d_name + n - 7, ".latest");
-        if (!is_json && !is_commit && !is_latest) { continue; }
-        const char *dot = strchr(entry->d_name, '.');
-        if (!dot || (size_t)(dot - entry->d_name) >= SG_ID_CAP) { err = ESP_FAIL; break; }
-        char id[SG_ID_CAP]; size_t ilen = (size_t)(dot - entry->d_name);
-        memcpy(id, entry->d_name, ilen); id[ilen] = 0;
+        if (n <= 7 || strcmp(entry->d_name + n - 7, ".latest")) continue;
+        if (n - 7 >= SG_ID_CAP) { err = ESP_FAIL; break; }
+        char id[SG_ID_CAP]; memcpy(id, entry->d_name, n - 7); id[n - 7] = 0;
         if (!sg_id_valid(id)) { err = ESP_FAIL; break; }
-        char *end = NULL; unsigned long rev = 0;
-        if (!is_latest) {
-            errno = 0; rev = strtoul(dot + 1, &end, 10);
-            if (errno || !rev || rev > UINT32_MAX || strcmp(end, is_json ? ".json" : ".commit")) {
-                err = ESP_FAIL; break;
-            }
-        }
-        bool orphan = false;
-        if (is_json) {
-            /* The commit walk checks committed JSON once. Orphan JSON is not
-             * selectable, but conservatively protect its asset references. */
-            char commit[SG_PATH_CAP]; struct stat st;
-            err = path_make(commit, id, (uint32_t)rev, "commit");
-            if (err != ESP_OK) { break; }
-            if (stat(commit, &st) == 0) { continue; }
-            if (errno != ENOENT) { err = ESP_FAIL; break; }
-            orphan = true;
-        }
-        char *json = NULL; size_t len = 0;
-        if (is_latest) {
-            uint32_t actual;
-            err = read_locked(id, 0, &json, &len, &actual);
-        } else if (orphan) {
-            err = path_make(path, id, (uint32_t)rev, "json");
-            struct stat st;
-            if (err == ESP_OK && (stat(path, &st) || st.st_size <= 0 ||
-                (uint64_t)st.st_size > SG_MAX_JSON)) { err = ESP_FAIL; }
-            FILE *f = err == ESP_OK ? fopen(path, "rb") : NULL;
-            if (err == ESP_OK && !f) { err = ESP_FAIL; }
-            if (err == ESP_OK) {
-                len = (size_t)st.st_size; json = malloc(len + 1);
-                if (!json) { err = ESP_ERR_NO_MEM; }
-                else if (fread(json, 1, len, f) != len || fgetc(f) != EOF || ferror(f)) { err = ESP_FAIL; }
-                else { json[len] = 0; }
-            }
-            if (f && fclose(f)) { err = ESP_FAIL; }
-        } else { err = json_read(id, (uint32_t)rev, &json, &len); }
+        char *json = NULL; size_t len = 0; uint32_t actual;
+        err = read_locked(id, 0, &json, &len, &actual);
         if (err == ESP_OK && (bytes += len) > SG_SCAN_BYTES) { err = ESP_ERR_INVALID_SIZE; }
-        sg_graph_t *graph = err == ESP_OK ? malloc(sizeof(*graph)) : NULL;
-        if (err == ESP_OK && !graph) { err = ESP_ERR_NO_MEM; }
-        if (err == ESP_OK) { err = sg_parse(json, len, graph, NULL); }
-        if (err == ESP_OK && strcmp(graph->id, id)) { err = ESP_FAIL; }
-        if (err == ESP_OK) {
-            found = found || sg_file_used(graph, file);
-            for (unsigned a = 0; a < graph->asset_count; ++a) { found = found || !strcmp(graph->assets[a].file, file); }
-        }
-        free(graph); free(json);
+        if (err == ESP_OK) err = json_uses_file(id, json, len, file, &found);
+        free(json);
     }
     if (closedir(dir)) { err = ESP_FAIL; }
+
+    /* The selected revision may be older than the latest; it is the graph the
+     * device is actually running, so it must protect its own assets too. */
+    if (err == ESP_OK) {
+        char selection[96];
+        err = path_make(path, "selection", 0, NULL);
+        if (err == ESP_OK) err = record_read(path, selection, sizeof(selection));
+        if (err == ESP_ERR_NOT_FOUND) {
+            err = ESP_OK;
+        } else if (err == ESP_OK && strcmp(selection, "legacy\n")) {
+            char project[SG_ID_CAP]; unsigned long rev = 0; int used = 0;
+            if (sscanf(selection, "graph %31s %lu\n%n", project, &rev, &used) != 2 ||
+                selection[used] || !sg_id_valid(project) || !rev || rev > UINT32_MAX) {
+                err = ESP_FAIL;
+            } else {
+                char *json = NULL; size_t len = 0; uint32_t actual;
+                err = read_locked(project, (uint32_t)rev, &json, &len, &actual);
+                if (err == ESP_OK && (bytes += len) > SG_SCAN_BYTES) {
+                    err = ESP_ERR_INVALID_SIZE;
+                }
+                if (err == ESP_OK) {
+                    err = json_uses_file(project, json, len, file, &found);
+                }
+                free(json);
+            }
+        }
+    }
     if (err == ESP_OK) { *referenced = found; }
     leave(); return err;
 }

@@ -137,13 +137,18 @@ static void on_dcc_reset(void)
 
 static void on_dcc_emergency_stop(void)
 {
-    if (!web_control_rails_begin(NULL)) {
+    /* Safety actions must not depend on the control mutex: a REST handler can
+     * hold it across NVS work. Source isolation is still checked first. */
+    if (!web_control_source_is_rails()) {
         return;
     }
     motor_emergency_stop();
+    sound_request_stop();
+    if (!web_control_rails_begin(NULL)) {
+        return;
+    }
     track_note_dcc_motor_command();
     web_motion_changed(0, true);
-    sound_request_stop();
     web_control_rails_end();
 }
 

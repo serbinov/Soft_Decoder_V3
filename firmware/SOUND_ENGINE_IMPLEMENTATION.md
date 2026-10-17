@@ -550,7 +550,16 @@ F9                      Brenner           Brenner
 #define FUNC_STATE_STOPPED 2
 
 #define FUNC_FLAG_DUCK   (1u << 0)   /* приглушить двигатель, пока активен */
-#define FUNC_FLAG_INVERT (1u << 1)
+#define FUNC_FLAG_INVERT (1u << 1)   /* инвертировать условие (Logic False) */
+/* Компактное условие графовых выходов/логики. Размер записи не меняется:
+ *   short_table = переменная 1 (0..15)
+ *   short_ms    = op1 (bits 0..2), op2 (bits 3..5), переменная 2 (bits 12..15)
+ *   min_ms      = значение 1 (int16)
+ *   fade_ms     = значение 2 (int16)
+ * COND2/OR включают второе сравнение и объединение; rhsVar не поддерживается. */
+#define FUNC_FLAG_COND   (1u << 2)
+#define FUNC_FLAG_COND2  (1u << 3)
+#define FUNC_FLAG_COND_OR (1u << 4)
 
 #define FUNC_BIND_MAX 64
 typedef struct {
@@ -562,11 +571,11 @@ typedef struct {
     uint8_t state;        /* FUNC_STATE_*                                     */
     uint8_t mode;         /* SOUND_MODE_* (для SOUND/SLOT) */
     uint8_t flags;        /* FUNC_FLAG_*                                      */
-    uint8_t short_table;  /* «короткий» звук при быстром нажатии (0 = нет)    */
+    uint8_t short_table;  /* legacy short sound; для OUTPUT/LOGIC = var1       */
     uint8_t reserved;
-    uint16_t short_ms;    /* порог короткого нажатия, напр. 400 мс            */
-    uint16_t min_ms;      /* минимальная длительность звучания, напр. 150 мс  */
-    uint16_t fade_ms;     /* затухание при отпускании, напр. 80 мс            */
+    uint16_t short_ms;    /* legacy threshold; для OUTPUT/LOGIC = packed ops    */
+    uint16_t min_ms;      /* legacy min; для OUTPUT/LOGIC = value1 (int16)      */
+    uint16_t fade_ms;     /* legacy fade; для OUTPUT/LOGIC = value2 (int16)     */
 } func_binding_t;
 ```
 
@@ -576,12 +585,21 @@ typedef struct {
 
 ### 8.5. Алгоритм оценки привязок
 ```
-func_eval(fn, state, dir) -> out_mask (+ запуск/стоп звуков)
+func_eval_ex(fn, state, dir, var_get) -> out_mask (+ запуск/стоп звуков)
   out_mask = 0
   для каждой привязки b:
      если !b.used или b.fn != fn:            continue
      если b.dir  != ANY и b.dir  != dir:     continue
      если b.state!= ANY и b.state!= state:   continue
+     если b.flags & COND:
+        v1 = var_get(b.short_table & 0x0F); если нет — continue
+        ok = cmp(v1, b.short_ms & 7, (int16)b.min_ms)
+        если b.flags & COND2:
+           v2 = var_get((b.short_ms >> 12) & 0x0F); если нет — continue
+           ok2 = cmp(v2, (b.short_ms >> 3) & 7, (int16)b.fade_ms)
+           ok = (b.flags & COND_OR) ? (ok || ok2) : (ok && ok2)
+        если b.flags & INVERT: ok = !ok
+        если !ok: continue
      switch b.target_type:
        OUTPUT: out_mask |= (1u << b.target_id)
        SOUND:  sound_binding_apply(b.target_id, b.mode, active, b.flags)
@@ -589,8 +607,11 @@ func_eval(fn, state, dir) -> out_mask (+ запуск/стоп звуков)
        LOGIC:  logic_apply(b.target_id, active)
   return out_mask
 ```
-`active` = «клавиша нажата И условия совпали». Дельта-логика `s_func_last_mask[fn]`
-(гашение снятых выходов) переиспользуется без изменений.
+`active` = «клавиша нажата И условия совпали». Переменные разрешает
+`sound_variable_get()` из активного графа; если граф/переменная недоступны,
+условная привязка не срабатывает (fail closed). `func_eval()` — совместимая
+обёртка без условий. Дельта-логика `s_func_last_mask[fn]` (гашение снятых
+выходов) переиспользуется без изменений.
 
 Поведение по `mode`:
 - output: steady/эффект (уже в `aux_cfg`);
@@ -808,11 +829,13 @@ F3          Pfiff         —
 В `settings`: `settings_func_bind_add/remove/find`, ограничение `FUNC_BIND_MAX`.
 Проверка: `test_settings`.
 
-**2.2. Оценщик `func_eval()`.**
+**2.2. Оценщик `func_eval_ex()`.**
 Вынести в `components/web/src/web_util.c` чистую функцию
-`uint16_t func_eval(const func_binding_t *b, size_t n, uint8_t fn, uint8_t state,
-uint8_t dir, sound_cb_t cb, void *ctx)` (алгоритм §8.5). Проверка: `test_web_util`.
-`func_eval` должен отдавать маску выходов и вызывать колбэк на звуковые привязки.
+`uint16_t func_eval_ex(const func_binding_t *b, size_t n, uint8_t fn, uint8_t state,
+uint8_t dir, sound_cb_t cb, void *ctx, func_var_get_t vars, void *var_ctx)`
+(алгоритм §8.5). `func_eval()` остаётся обёрткой без условий. Проверка:
+`test_web_util`. Оценщик отдаёт маску выходов и вызывает колбэк на звуковые
+привязки; условные привязки при отсутствии резолвера не срабатывают.
 
 **2.3. Замена прежнего пути.**
 `web.c`: `func_apply_output_locked()` и `web_apply_function()` перевести с
@@ -1418,8 +1441,10 @@ on_fn(fn, down):
   на нажатие (это `ONE_SHOT`); по умолчанию — непрерывный по состоянию.
 
 **Данные.** `func_binding_t` расширен полями `short_table`, `short_ms`, `min_ms`, `fade_ms`
-(§8.4). Пример пресета: **F2 гудок** — `SHORT_LONG`, `short_ms=400`, `min_ms=150`,
-`fade_ms=80`, `flags=DUCK`; **F1 звонок** — `LATCHED`; **F3 короткий сигнал** — `ONE_SHOT`.
+(§8.4). Для графовых `OUTPUT`/`LOGIC` эти же поля переиспользуются под компактное
+условие (`FUNC_FLAG_COND*`), поэтому размер NVS-записи не меняется. Пример пресета:
+**F2 гудок** — `SHORT_LONG`, `short_ms=400`, `min_ms=150`, `fade_ms=80`,
+`flags=DUCK`; **F1 звонок** — `LATCHED`; **F3 короткий сигнал** — `ONE_SHOT`.
 
 Подтверждено open-source: JMRI `MomentarySoundEvent` + `ConfigurableSound.short_file`
 (отдельный короткий сэмпл); ESU «momentary» — играть, пока нажата (§19).
@@ -1443,7 +1468,7 @@ on_fn(fn, down):
 | Хранение схемы | NVS blob | `.mds` текст | **`.mds` бинарный + NVS-указатель** | много места, OTA, **без парсера** |
 | Модель двигателя | фикс. D/A/CX | generic-граф/VM-DSL | **фикс. 5 ступеней + пороги** | малый код, совпадает с UI-карточками |
 | Rate | per-voice | внешний DSP | **per-voice** | ~60 строк, уже есть ресемплер |
-| Голоса | пул | резерв под двигатель | **резерв 18/19** | нет кода пула, нет конфликта с F1 |
+| Голоса | пул | резерв под двигатель | **резерв 19** | нет кода пула, нет конфликта с F1 |
 | UI/API | 3 панели+матрицы | JSON-редактор | **3 панели, матрицы из привязок** | привычный UX, мало JS |
 | Доп. звуки | таблицы+привязки | только F-слоты | **таблицы+привязки** | покрывает SoundGT «доп. звуки» |
 | Объём v1 | всё сразу | MVP | **MVP + P1 в отложку** | быстрее ценность, меньше риска |

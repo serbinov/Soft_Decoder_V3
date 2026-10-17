@@ -37,7 +37,7 @@ first-party **100 %** (включая новый набор `test_sound`). `pio 
 - **R4** — `sound_init()` в `app_main` (после `audio_init`), `motor_get_applied_speed`
   и опрос применённой скорости в задаче `sound`, вызов `sound_function` из
   `web_apply_function` с отключением legacy-слотов при активной схеме,
-  резерв голосов 18/19, HIL-команды `HIL-ENGINE`, `HIL-SCHEME-SPEED`.
+  резерв голоса 19, HIL-команды `HIL-ENGINE`, `HIL-SCHEME-SPEED`.
 - **R5** — `max_uri_handlers=64`, маршруты `/api/sound/{state,scheme,table,extra,lint}`,
   панели «Звук: Схема/Функции/Доп. звуки/Параметры» и модальный редактор таблицы
   в `web_ui.html`.
@@ -48,12 +48,16 @@ first-party **100 %** (включая новый набор `test_sound`). `pio 
   `sync_motion`, имена CV в UI, версия 0.9. Документация: `docs/sound_scheme.md`,
   `docs/cv_sound.md`, `CHANGELOG.md`.
 
+> Примечание (0.10): legacy-таблицы/MDS удалены, движок графа — единственная
+> модель звука. CV30/114/115/116 остаются в NVS и CV-редакторе только для
+> совместимости и не влияют на воспроизведение (см. `docs/cv_sound.md`).
+
 Упрощения/остаток относительно §5/§20:
 - Loop-треки воспроизводятся как one-shot с перезапуском (секвенсер считает
   проигрыши для `min/max_plays`); бесшовность — задача предзагрузки P2.
 - Расчётный chuff-интервал (формула JMRI) и фазировка цилиндров не реализованы:
-  скорость chuff — через CV114 и `rate_scale` таблицы; 4 Init-группы играются
-  последовательно.
+  в 0.10 скорость задаётся `rate` состояния/блока, CV114 больше не читается;
+  4 Init-группы играются последовательно.
 - Модель таблиц хранит имена файлов (R1.1), из-за чего `sizeof(sound_scheme_t)`
   ≈ 26 КБ; при нехватке DRAM структуру можно вынести в PSRAM.
 - Тормозной скрипт использует Stop-таблицу; «переход на End заранее» и явная
@@ -155,7 +159,7 @@ python tools\gen_web_html.py
 | Управляемая частота воспроизведения | `voice_fill()` считает `step = sample_rate/MIX_RATE` заново каждый блок (`audio.c:222-240`) | ✅ умножаем на `rate_cur` |
 | Детект конца one-shot (Init/End) | `voice_next_sample()` → false ⇒ `st->active=false` (`audio.c:244-252`) | ✅ `audio_voice_is_active` |
 | Бесшовный loop | `voice_next_sample()` делает `fseek(data_start)` и продолжает (`audio.c:196-199`) | ✅ loop не кончается |
-| Резерв голосов | `audio_voice_play(voice,…)` принимает любой `< AUDIO_MAX_VOICES` (`audio.c:408-412`) | ✅ двигатель 18/19 |
+| Резерв голосов | `audio_voice_play(voice,…)` принимает любой `< AUDIO_MAX_VOICES` (`audio.c:408-412`) | ✅ двигатель 19 |
 | Фактическая (ramped) скорость мотора | `s_applied_speed`/`s_applied_forward` существуют, `motor_tick()` рампит всегда по CV3/CV4 (`motor.c:40-44,339-393`) | ⚠️ нужно API |
 | Разгон/замедление при BEMF off | рампа не зависит от BEMF (только PID/нагрузка) | ✅ accel работать будет |
 | Хранилище | `storage_get_root()` = `/userdata`, монтируется извне (`storage.h:21`, `storage.c:159`) | ✅ `.mds` в `sound` |
@@ -164,7 +168,7 @@ python tools\gen_web_html.py
 
 Обязательные правки (иначе не заработает корректно):
 1. **Конфликт голоса 0** — сегодня `voice = fn-1` (F1→0) и ручной play/HIL тоже пишут в 0
-   (`web.c:384,1208`, `selftest.c`). Ввести резерв 18/19 под двигатель и в scheme-режиме
+   (`web.c:384,1208`, `selftest.c`). Ввести резерв 19 под двигатель и в scheme-режиме
    **не использовать legacy-путь** слотов для этих голосов.
 2. **`audio_is_playing()` глобальный** (`audio.c:466`) — зацикленный двигатель сделает
    `playing=true` навсегда → `/api/audio/status` (web.c:1146) и подсветка слотов сломаются.

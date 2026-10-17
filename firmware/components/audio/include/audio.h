@@ -10,7 +10,7 @@
 
 /* "No free voice" result of audio_voice_alloc(). */
 #define AUDIO_VOICE_NONE 0xFF
-#define AUDIO_DYNAMIC_VOICES 18 /* 18/19 belong exclusively to the sound engine */
+#define AUDIO_DYNAMIC_VOICES 19 /* voice 19 belongs exclusively to the sound engine */
 
 typedef struct {
     uint8_t voice;

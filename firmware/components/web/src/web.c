@@ -1,5 +1,6 @@
 #include "web.h"
 #include "web_html.h"
+#include "web_internal.h"
 #include "web_util.h"
 #include "audio_pack.h"
 #include "ima_adpcm.h"
@@ -69,13 +70,18 @@ static const char *TAG = "web";
 #define WEB_FCLOSE(f) fclose(f)
 #endif
 
+#ifdef _WIN32
+#define WEB_MKDIR(p) _mkdir(p)
+#define WEB_RMDIR(p) _rmdir(p)
+#else
+#define WEB_MKDIR(p) mkdir((p), 0755)
+#define WEB_RMDIR(p) rmdir(p)
+#endif
+
 static httpd_handle_t s_server;
 static httpd_handle_t s_progress_server;
 static esp_err_t (*s_route_handlers[64])(httpd_req_t *);
 static size_t s_route_count;
-static bool s_wifi_started;
-static char s_ap_ip[16];
-static uint8_t s_ap_ip_bytes[4];
 static char s_sta_ip[16];
 
 /* In-flight progress for the single asynchronous transfer worker. Port 81
@@ -89,11 +95,6 @@ static volatile uint8_t s_up_slot;
 /* Test hooks for the otherwise unbounded background loops: 0 runs forever
  * (production); the host tests set a small cap so the loop body can be
  * exercised deterministically. */
-static uint32_t s_autooff_iter_cap;
-static uint32_t s_dns_iter_cap;
-/* Set false when the AP is auto-stopped so the DNS task exits and frees its
- * socket instead of blocking forever on a dead interface. */
-static volatile bool s_dns_run;
 static uint32_t s_pipe_iter_cap;
 /* Test hook: make pipe_upload observe a writer write error. */
 static bool s_pipe_write_err_inject;
@@ -130,6 +131,8 @@ static uint16_t s_outputs_applied;
 static audio_voice_handle_t s_legacy_voice[SETTINGS_FUNC_MAP_COUNT][2];
 static audio_voice_handle_t s_preview_voice;
 static settings_track_t s_func_tracks[SETTINGS_MAX_TRACKS];
+static size_t s_func_tracks_count;
+static bool s_func_tracks_valid;
 static bool s_motion_forward = true;
 static uint8_t s_motion_speed;
 static bool s_motion_initialized;
@@ -358,6 +361,17 @@ bool web_control_is_rails(void)
         rails = s_cfg.control_source == 0 && actuation_ready() && !web_maintenance_active();
         xSemaphoreGive(s_control_mutex);
     }
+    return rails;
+}
+
+bool web_control_source_is_rails(void)
+{
+    /* Deliberately lock-free: DCC emergency/reset must be able to stop motion
+     * even while an HTTP handler holds the control mutex across NVS work. */
+    bool rails;
+    portENTER_CRITICAL(&s_control_state_mux);
+    rails = s_cfg.control_source == 0 && s_actuation_ready;
+    portEXIT_CRITICAL(&s_control_state_mux);
     return rails;
 }
 
@@ -623,6 +637,12 @@ static esp_err_t func_bind_load(void)
     return err;
 }
 
+static bool func_var_resolve(void *ctx, uint8_t index, int32_t *out)
+{
+    (void)ctx;
+    return sound_variable_get(index, out);
+}
+
 /* Desired output mask for one function: canonical bindings when present,
  * otherwise the legacy per-function map (verbatim old behaviour). */
 static uint16_t func_desired_locked(uint8_t fn, bool fn_on)
@@ -630,21 +650,72 @@ static uint16_t func_desired_locked(uint8_t fn, bool fn_on)
     if (s_func_bind_present || s_func_bind_count > 0U) {
         uint8_t dir = s_motion_forward ? FUNC_DIR_FWD : FUNC_DIR_REV;
         uint8_t st = (s_motion_speed != 0U) ? FUNC_STATE_MOVING : FUNC_STATE_STOPPED;
-        return fn_on ? func_eval(s_func_bind, s_func_bind_count, fn, st, dir, NULL, NULL) : 0U;
+        return fn_on ? func_eval_ex(s_func_bind, s_func_bind_count, fn, st, dir, NULL, NULL,
+                                    func_var_resolve, NULL) : 0U;
     }
     return web_util_func_desired(&s_func_map[fn], fn_on, s_motion_forward, s_motion_speed);
 }
 
-/* Caller must hold s_func_mutex (or be single-threaded at init). */
-static void func_apply_output_locked(uint8_t fn)
+static uint16_t s_logic_active;
+static int8_t s_logic_notch;
+
+static void logic_collect_cb(void *ctx, uint8_t target_type, uint8_t target_id, bool active)
 {
-    if (!actuation_ready() || web_maintenance_active()) return;
-    if (fn >= SETTINGS_FUNC_MAP_COUNT) {
+    if (target_type != FUNC_TARGET_LOGIC || !active ||
+        target_id < FUNC_LOGIC_MUTE_STOP || target_id > FUNC_LOGIC_NOTCH_DOWN) {
         return;
     }
+    *(uint16_t *)ctx |= (uint16_t)(1U << (target_id - 1U));
+}
+
+/* Apply FUNC_TARGET_LOGIC actions. Mutes are evaluated against the current
+ * motion/light state; notch up/down are edge-triggered; drive hold/coast/brake
+ * are passed to the sound engine, which owns the runtime speed transform. */
+static void logic_apply_locked(uint16_t mask)
+{
+    const uint16_t up = (uint16_t)(1U << (FUNC_LOGIC_NOTCH_UP - 1U));
+    const uint16_t down = (uint16_t)(1U << (FUNC_LOGIC_NOTCH_DOWN - 1U));
+    if ((mask & up) != 0U && (s_logic_active & up) == 0U && s_logic_notch < 24) {
+        ++s_logic_notch;
+    }
+    if ((mask & down) != 0U && (s_logic_active & down) == 0U && s_logic_notch > -24) {
+        --s_logic_notch;
+    }
+    bool light_fwd = false, light_rev = false;
+    (void)auxio_get_enabled(func_out_channel(0), &light_fwd);
+    (void)auxio_get_enabled(func_out_channel(1), &light_rev);
+    bool light_on = light_fwd || light_rev;
+    bool mute = ((mask & (1U << (FUNC_LOGIC_MUTE_STOP - 1U))) != 0U &&
+                 s_motion_speed == 0U) ||
+                ((mask & (1U << (FUNC_LOGIC_MUTE_MOVE - 1U))) != 0U &&
+                 s_motion_speed != 0U) ||
+                ((mask & (1U << (FUNC_LOGIC_MUTE_LIGHT - 1U))) != 0U && light_on);
+    sound_set_logic(mute,
+                    (mask & (1U << (FUNC_LOGIC_DRIVE_HOLD - 1U))) != 0U,
+                    (mask & (1U << (FUNC_LOGIC_COAST - 1U))) != 0U,
+                    (mask & (1U << (FUNC_LOGIC_DYNAMIC_BRAKE - 1U))) != 0U,
+                    s_logic_notch);
+    s_logic_active = mask;
+}
+
+/* Caller must hold s_func_mutex (or be single-threaded at init). */
+static void func_apply_all_locked(void)
+{
+    if (!actuation_ready() || web_maintenance_active()) return;
     uint16_t desired = 0U;
+    uint16_t logic = 0U;
+    uint8_t dir = s_motion_forward ? FUNC_DIR_FWD : FUNC_DIR_REV;
+    uint8_t st = (s_motion_speed != 0U) ? FUNC_STATE_MOVING : FUNC_STATE_STOPPED;
     for (uint8_t f = 0; f < SETTINGS_FUNC_MAP_COUNT; ++f) {
-        s_func_last_mask[f] = func_desired_locked(f, s_fn[f]);
+        if (s_func_bind_present || s_func_bind_count > 0U) {
+            s_func_last_mask[f] = s_fn[f]
+                ? func_eval_ex(s_func_bind, s_func_bind_count, f, st, dir,
+                               logic_collect_cb, &logic, func_var_resolve, NULL)
+                : 0U;
+        } else {
+            s_func_last_mask[f] = web_util_func_desired(&s_func_map[f], s_fn[f],
+                                                        s_motion_forward, s_motion_speed);
+        }
         desired |= s_func_last_mask[f];
     }
     uint16_t prev = s_outputs_applied;
@@ -658,6 +729,15 @@ static void func_apply_output_locked(uint8_t fn)
             if (auxio_set_enabled(func_out_channel(bit), true) == ESP_OK) s_outputs_applied |= b;
         }
     }
+    logic_apply_locked(logic);
+}
+
+/* Per-function entry point used by the REST/DCC paths. All bindings are
+ * evaluated because direction/motion conditions can affect several F-keys. */
+static void func_apply_output_locked(uint8_t fn)
+{
+    if (fn >= SETTINGS_FUNC_MAP_COUNT) return;
+    func_apply_all_locked();
 }
 
 void web_motion_changed(uint8_t speed, bool forward)
@@ -672,9 +752,7 @@ void web_motion_changed(uint8_t speed, bool forward)
     s_motion_initialized = true;
     s_motion_speed = speed;
     s_motion_forward = forward;
-    for (uint8_t f = 0; f < SETTINGS_FUNC_MAP_COUNT; ++f) {
-        func_apply_output_locked(f);
-    }
+    func_apply_all_locked();
     if (s_func_mutex != NULL) {
         xSemaphoreGive(s_func_mutex);
     }
@@ -699,6 +777,28 @@ void web_func_audio_slots(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b)
     if (slot_b != NULL) {
         *slot_b = s_func_map[fn].slot_b;
     }
+}
+
+/* Refresh the RAM snapshot used by the DCC/function hot path. NVS is read here
+ * (init / upload / delete), never from web_apply_function(). */
+static void func_tracks_cache_refresh(void)
+{
+    bool locked = s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, portMAX_DELAY) == pdTRUE;
+    size_t count = 0;
+    esp_err_t err = settings_tracks_load(s_func_tracks, &count);
+    if (err == ESP_OK) {
+        if (count > SETTINGS_MAX_TRACKS) count = SETTINGS_MAX_TRACKS;
+        s_func_tracks_count = count;
+        s_func_tracks_valid = true;
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        s_func_tracks_count = 0;
+        s_func_tracks_valid = true;
+    } else {
+        s_func_tracks_count = 0;
+        s_func_tracks_valid = false;
+    }
+    if (locked) xSemaphoreGive(s_func_mutex);
 }
 
 /* Apply a function state exactly like the DCC decoder does: drive the mapped
@@ -741,10 +841,10 @@ void web_apply_function(uint8_t fn, bool state)
             audio_voice_release_owned(s_legacy_voice[fn][1]);
             memset(s_legacy_voice[fn], 0, sizeof(s_legacy_voice[fn]));
         } else {
-            /* Track lookup buffer is static: the DCC task stack is small and
-             * the httpd task must not carry ~4 KB of tracks either. */
-            size_t count = 0;
-            if (settings_tracks_load(s_func_tracks, &count) == ESP_OK) {
+            /* RAM snapshot only: web_apply_function() runs on the DCC task and
+             * must never touch NVS or the filesystem. */
+            size_t count = s_func_tracks_count;
+            if (s_func_tracks_valid) {
                 const uint8_t want[2] = { slot_a, use_b ? slot_b : 0U };
                 for (uint8_t k = 0; k < 2U; ++k) {
                     bool started = false;
@@ -883,367 +983,6 @@ static esp_err_t outputs_init(void)
         ESP_LOGE(TAG, "auxio init failed");
     }
     return err;
-}
-
-/* ---------- WiFi ---------- */
-
-#define AP_IP_DEFAULT "192.168.100.1"
-
-static volatile uint8_t s_ap_sta_count;
-static int64_t s_ap_started_us;
-static int64_t s_last_client_us; /* last connect/disconnect; auto-off base */
-
-/* Parse a dotted-quad IPv4 address. 0.0.0.0 is rejected (not usable as an AP
- * address). Returns false when the text cannot be parsed. */
-static bool parse_ip4(const char *s, esp_ip4_addr_t *out)
-{
-    if (s == NULL || s[0] == '\0' || out == NULL) {
-        return false;
-    }
-    unsigned octets[4] = {0};
-    const char *p = s;
-    for (size_t i = 0; i < 4U; ++i) {
-        const char *start = p;
-        unsigned digits = 0;
-        while (isdigit((unsigned char)*p)) {
-            if (++digits > 3U) return false;
-            octets[i] = octets[i] * 10U + (unsigned)(*p++ - '0');
-        }
-        if (digits == 0U || octets[i] > 255U || (digits > 1U && start[0] == '0')) return false;
-        if (i < 3U) { if (*p++ != '.') return false; }
-        else if (*p != '\0') return false;
-    }
-    if (octets[0] == 0U || octets[0] == 127U || octets[0] >= 224U ||
-        octets[3] == 0U || octets[3] == 255U) return false;
-    out->addr = ESP_IP4TOADDR(octets[0], octets[1], octets[2], octets[3]);
-    return true;
-}
-
-/* Wi-Fi event log: without it a dropped/deauthenticated client is invisible,
- * which makes a link problem indistinguishable from an HTTP problem. */
-static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
-{
-    (void)arg;
-    if (base == WIFI_EVENT) {
-        switch (id) {
-            case WIFI_EVENT_AP_START:
-                ESP_LOGI(TAG, "AP started");
-                break;
-            case WIFI_EVENT_AP_STOP:
-                ESP_LOGI(TAG, "AP stopped");
-                break;
-            case WIFI_EVENT_AP_STACONNECTED: {
-                const wifi_event_ap_staconnected_t *e = data;
-                if (s_ap_sta_count < 255U) {
-                    s_ap_sta_count++;
-                }
-                s_last_client_us = esp_timer_get_time();
-                ESP_LOGI(TAG, "STA %02x:%02x:%02x:%02x:%02x:%02x connected (aid=%d), clients=%u",
-                         e->mac[0], e->mac[1], e->mac[2], e->mac[3], e->mac[4], e->mac[5],
-                         (int)e->aid, (unsigned)s_ap_sta_count);
-                break;
-            }
-            case WIFI_EVENT_AP_STADISCONNECTED: {
-                const wifi_event_ap_stadisconnected_t *e = data;
-                if (s_ap_sta_count > 0U) {
-                    s_ap_sta_count--;
-                }
-                s_last_client_us = esp_timer_get_time();
-                ESP_LOGW(TAG, "STA disconnected (aid=%d, reason=%d), clients=%u",
-                         (int)e->aid, (int)e->reason, (unsigned)s_ap_sta_count);
-                break;
-            }
-            default:
-                break;
-        }
-    } else if (base == IP_EVENT && id == IP_EVENT_ASSIGNED_IP_TO_CLIENT) {
-        const ip_event_assigned_ip_to_client_t *e = data;
-        ESP_LOGI(TAG, "Client got IP " IPSTR, IP2STR(&e->ip));
-    }
-}
-
-/* Pick the least-used of the three non-overlapping 2.4 GHz channels (1/6/11)
- * so the AP does not have to share the crowded default channel 1. Returns 1
- * (the historical default) on any scan problem. */
-static uint8_t wifi_pick_channel(void)
-{
-    wifi_scan_config_t sc = { 0 };
-    sc.show_hidden = true;
-    sc.scan_time.active.min = 80;
-    sc.scan_time.active.max = 200;
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
-        return 1;
-    }
-    uint16_t num = 0;
-    if (esp_wifi_scan_get_ap_num(&num) != ESP_OK || num == 0) {
-        (void)esp_wifi_clear_ap_list(); /* free the scan result set */
-        return 1;
-    }
-    if (num > 16U) {
-        num = 16U;
-    }
-    wifi_ap_record_t recs[16];
-    uint16_t got = num;
-    if (esp_wifi_scan_get_ap_records(&got, recs) != ESP_OK) {
-        (void)esp_wifi_clear_ap_list();
-        return 1;
-    }
-    static const uint8_t chans[3] = { 1, 6, 11 };
-    int score[3] = { 0, 0, 0 };
-    for (uint16_t i = 0; i < got; ++i) {
-        if (recs[i].rssi < -80) {
-            continue; /* far away: barely contributes to channel load */
-        }
-        for (int k = 0; k < 3; ++k) {
-            if (recs[i].primary == chans[k]) {
-                score[k]++;
-            }
-        }
-    }
-    int best = 0;
-    for (int k = 1; k < 3; ++k) {
-        if (score[k] < score[best]) {
-            best = k;
-        }
-    }
-    return chans[best];
-}
-
-/* Power save: stop the AP when no client has been connected for the configured
- * time (auto_off_min, 0 = disabled). */
-static void wifi_auto_off_task(void *arg)
-{
-    (void)arg;
-    uint32_t iters = 0;
-    while (s_autooff_iter_cap == 0U || iters < s_autooff_iter_cap) {
-        iters++;
-        vTaskDelay(pdMS_TO_TICKS(10000));
-        uint8_t minutes = s_cfg.auto_off_min;
-        if (!s_wifi_started || minutes == 0U || s_ap_sta_count != 0U) {
-            continue;
-        }
-        /* Time since the last client was seen (or since AP start when no one
-         * ever connected), not since boot, so a client that was connected for
-         * a long time does not cause an immediate off right after leaving. */
-        if (esp_timer_get_time() - s_last_client_us <
-            (int64_t)minutes * 60LL * 1000000LL) {
-            continue;
-        }
-        ESP_LOGW(TAG, "WiFi auto-off: no client for %u min, stopping AP",
-                 (unsigned)minutes);
-        (void)esp_wifi_stop();
-        s_wifi_started = false;
-        s_dns_run = false; /* let the DNS hijack task exit and free its socket */
-        vTaskDelete(NULL);
-    }
-}
-
-static esp_err_t wifi_start(const settings_config_t *cfg)
-{
-    if (cfg->wifi_mode == 0) {
-        return ESP_OK;
-    }
-
-    (void)nvs_flash_init();
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
-    /* Temporary station interface: used only to scan for the quietest channel
-     * at boot. It stays unused afterwards (AP-only design). */
-    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    if (ap_netif == NULL) return ESP_ERR_NO_MEM;
-
-    wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_err_t err = esp_wifi_init(&wcfg);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        return err;
-    }
-    /* The config lives in our own NVS store; keep the driver from writing. */
-    (void)esp_wifi_set_storage(WIFI_STORAGE_RAM);
-
-    (void)esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                              &wifi_event_handler, NULL, NULL);
-    (void)esp_event_handler_instance_register(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT,
-                                              &wifi_event_handler, NULL, NULL);
-
-    wifi_config_t ap = { 0 };
-    const char *ssid = cfg->ap_ssid[0] ? cfg->ap_ssid : "ADDITIPUS AURA-X";
-    size_t ssid_len = strlen(ssid);
-    if (ssid_len > sizeof(ap.ap.ssid)) return ESP_ERR_INVALID_ARG;
-    memcpy(ap.ap.ssid, ssid, ssid_len);
-    ap.ap.ssid_len = (uint8_t)ssid_len;
-    ap.ap.channel = 1;
-    ap.ap.max_connection = 4;
-    ap.ap.beacon_interval = 100;
-    ap.ap.authmode = WIFI_AUTH_OPEN;
-    if (cfg->ap_password[0] != '\0' && strlen(cfg->ap_password) >= 8U) {
-        size_t password_len = strlen(cfg->ap_password);
-        if (password_len > sizeof(ap.ap.password)) return ESP_ERR_INVALID_ARG;
-        if (password_len == 64U) {
-            for (size_t i = 0; i < password_len; ++i)
-                if (!isxdigit((unsigned char)cfg->ap_password[i])) return ESP_ERR_INVALID_ARG;
-        }
-        memcpy(ap.ap.password, cfg->ap_password, password_len);
-        ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    } else if (cfg->ap_password[0] != '\0') {
-        /* A short password would leave the AP open without the user noticing. */
-        ESP_LOGW(TAG, "AP password ignored (<8 chars): access point stays open");
-    }
-
-    /* Choose the AP channel BEFORE the AP is started. Scanning needs the radio
-     * up, so bring the station up briefly, scan, then stop it. Doing this
-     * before the AP starts avoids switching the AP channel right after it came
-     * up (which dropped clients that were already associating and delayed
-     * their DHCP/IP). */
-    if (sta_netif != NULL) {
-        if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK && esp_wifi_start() == ESP_OK) {
-            uint8_t ch = wifi_pick_channel();
-            (void)esp_wifi_stop();
-            if (ch != ap.ap.channel) {
-                ap.ap.channel = ch;
-                ESP_LOGI(TAG, "AP channel set to %u (least used of 1/6/11)", (unsigned)ch);
-            }
-        }
-    }
-
-    /* AP-only: a stored STA/APSTA mode is ignored. */
-    err = esp_wifi_set_mode(WIFI_MODE_AP);
-    if (err != ESP_OK) return err;
-    err = esp_wifi_set_config(WIFI_IF_AP, &ap);
-    if (err != ESP_OK) return err;
-
-    /* Access point address: configurable (default 192.168.100.1). */
-    esp_ip4_addr_t ap_addr = { 0 };
-    if (!parse_ip4(cfg->ap_ip, &ap_addr)) {
-        (void)esp_netif_str_to_ip4(AP_IP_DEFAULT, &ap_addr);
-    }
-    memcpy(s_ap_ip_bytes, &ap_addr.addr, sizeof(s_ap_ip_bytes));
-
-    if (ap_netif != NULL) {
-        esp_netif_ip_info_t ip = { 0 };
-        ip.ip.addr = ap_addr.addr;
-        ip.gw.addr = ap_addr.addr;
-        ip.netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0);
-        err = esp_netif_dhcps_stop(ap_netif);
-        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) return err;
-        err = esp_netif_set_ip_info(ap_netif, &ip);
-        if (err != ESP_OK) return err;
-
-        /* Hand the AP IP to DHCP clients as their DNS server: every name
-         * resolves to the board so connectivity probes land on the HTTP
-         * server (captive portal opens the page automatically). */
-        esp_netif_dns_info_t dns = { 0 };
-        dns.ip.type = ESP_IPADDR_TYPE_V4;
-        dns.ip.u_addr.ip4.addr = ap_addr.addr;
-        err = esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns);
-        if (err != ESP_OK) return err;
-    }
-
-    err = esp_wifi_start();
-    if (err != ESP_OK) return err;
-    err = esp_netif_dhcps_start(ap_netif);
-    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-        (void)esp_wifi_stop();
-        return err;
-    }
-
-    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
-
-    /* No radio power-save: a sleeping AP radio throttles uploads to ~2 KB/s. */
-    esp_wifi_set_ps(WIFI_PS_NONE);
-
-    s_ap_sta_count = 0;
-    s_ap_started_us = esp_timer_get_time();
-    s_last_client_us = s_ap_started_us;
-    s_wifi_started = true;
-
-    snprintf(s_ap_ip, sizeof(s_ap_ip), IPSTR, IP2STR(&ap_addr));
-    if (ap_netif != NULL) {
-        esp_netif_ip_info_t actual = { 0 };
-        if (esp_netif_get_ip_info(ap_netif, &actual) == ESP_OK) {
-            snprintf(s_ap_ip, sizeof(s_ap_ip), IPSTR, IP2STR(&actual.ip));
-            memcpy(s_ap_ip_bytes, &actual.ip.addr, sizeof(s_ap_ip_bytes));
-        }
-    }
-    ESP_LOGI(TAG, "Wi-Fi started (AP-only, channel %u, ip=%s)",
-             (unsigned)ap.ap.channel, s_ap_ip);
-    return ESP_OK;
-}
-
-/* ---------- captive portal ---------- */
-
-static esp_err_t captive_handler(httpd_req_t *req, httpd_err_code_t err)
-{
-    (void)err;
-    if (strncmp(req->uri, "/sound-editor", 13) == 0 ||
-        strncmp(req->uri, "/api/", 5) == 0) {
-        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
-    }
-    /* Captive portal: redirect every unknown path to the page so the phone's
-     * connectivity probe opens it automatically (the DNS hijack routes those
-     * probes here). Targets the configured AP address. */
-    char loc[40];
-    snprintf(loc, sizeof(loc), "http://%s/", s_ap_ip);
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", loc);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    return httpd_resp_send(req, NULL, 0);
-}
-
-static void dns_server_task(void *arg)
-{
-    (void)arg;
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "dns: socket failed");
-        vTaskDelete(NULL);
-        return;
-    }
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(53),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-    };
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        ESP_LOGE(TAG, "dns: bind failed");
-        close(sock);
-        vTaskDelete(NULL);
-        return;
-    }
-    ESP_LOGI(TAG, "DNS hijack running on :53");
-
-    /* Receive timeout so the loop can observe s_dns_run after the AP is
-     * stopped instead of blocking forever on recvfrom. */
-    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
-    (void)setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    s_dns_run = true;
-    uint8_t q[DNS_MSG_MAX];
-    uint8_t r[DNS_MSG_MAX];
-    uint32_t iters = 0;
-    while ((s_dns_iter_cap == 0U || iters < s_dns_iter_cap) && s_dns_run) {
-        iters++;
-        struct sockaddr_in from = { 0 };
-        socklen_t flen = sizeof(from);
-        int n = recvfrom(sock, q, sizeof(q), 0, (struct sockaddr *)&from, &flen);
-        if (n <= 12) {
-            continue;
-        }
-        size_t rlen = dns_build_response(q, n, r, s_ap_ip_bytes);
-        if (rlen > 0) {
-            (void)sendto(sock, r, rlen, 0, (struct sockaddr *)&from, flen);
-        }
-    }
-    close(sock);
-    vTaskDelete(NULL);
-}
-
-static void start_dns_hijack(void)
-{
-    if (xTaskCreate(dns_server_task, "dns_hijack", 4096, NULL, 9, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "dns: task create failed");
-    }
 }
 
 /* ---------- handlers ---------- */
@@ -1515,6 +1254,21 @@ static esp_err_t graph_apply_post(httpd_req_t *req)
     if (maintenance) web_maintenance_end();
     if (err != ESP_OK && diag.message[0] && err != ESP_ERR_NO_MEM && err != ESP_ERR_TIMEOUT) return graph_diagnostic_response(req, &diag, false);
     if (err != ESP_OK) return graph_result_error(req, err);
+    return send_json(req, "{\"ok\":true}");
+}
+
+static esp_err_t graph_project_delete_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = {0}, id[SG_ID_CAP];
+    if (req->content_len != 0U) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
+    if (!graph_query(req, query, sizeof(query)) || !graph_param(query, "id", id, sizeof(id)) ||
+        !sg_id_valid(id)) {
+        return graph_result_error(req, ESP_ERR_INVALID_ARG);
+    }
+    bool was_selected = false;
+    esp_err_t err = sg_store_delete(id, &was_selected);
+    if (err != ESP_OK) return graph_result_error(req, err);
+    if (was_selected) sound_graph_deactivate();
     return send_json(req, "{\"ok\":true}");
 }
 
@@ -1844,16 +1598,26 @@ static esp_err_t motor_post(httpd_req_t *req)
  * always available while the board is responsive. */
 static esp_err_t emergency_post(httpd_req_t *req)
 {
-    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE)
-        return send_json(req, "{\"ok\":false,\"error\":\"control busy\"}");
+    /* Cut motion and sound first. The control mutex is only for invalidating a
+     * concurrent source lease; an emergency action must never be refused just
+     * because a REST handler is doing NVS work under that mutex. */
     motor_emergency_stop();
     audio_stop_all();
     sound_stop_all();
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
-    memset(s_fn, 0, sizeof(s_fn));
-    if (s_func_mutex != NULL) (void)xSemaphoreGive(s_func_mutex);
-    ++s_control_generation;
-    xSemaphoreGive(s_control_mutex);
+    if (s_control_mutex != NULL &&
+        xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        ++s_control_generation;
+        xSemaphoreGive(s_control_mutex);
+    } else {
+        portENTER_CRITICAL(&s_control_state_mux);
+        ++s_control_generation;
+        portEXIT_CRITICAL(&s_control_state_mux);
+    }
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        memset(s_fn, 0, sizeof(s_fn));
+        xSemaphoreGive(s_func_mutex);
+    }
     web_log_event("Стоп", "ЭКСТРЕННЫЙ СТОП");
     return send_json(req, "{\"ok\":true}");
 }
@@ -2111,43 +1875,6 @@ static esp_err_t audio_library_volume_set(const char *name, uint8_t vol)
     storage_access_end();
     free(v);
     return err;
-}
-
-/* Sum of the installed WAV sizes (used to size a replacing pack upload). */
-static uint64_t audio_library_bytes(void)
-{
-    uint64_t total = 0;
-    DIR *d = opendir(WEB_AUDIO_DIR);
-    if (d == NULL) return 0;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (!web_name_is_wav(ent->d_name)) continue;
-        char path[320];
-        snprintf(path, sizeof(path), "%s/%s", WEB_AUDIO_DIR, ent->d_name);
-        uint32_t sz = web_file_size(path);
-        if (sz > 0) total += (uint64_t)sz;
-    }
-    closedir(d);
-    return total;
-}
-
-/* Delete the whole installed library (files + volume sidecar). Caller must
- * hold a storage lease and have stopped playback. */
-static void audio_library_clear(void)
-{
-    DIR *d = opendir(WEB_AUDIO_DIR);
-    if (d != NULL) {
-        struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
-            if (!web_name_is_wav(ent->d_name)) continue;
-            char path[320];
-            snprintf(path, sizeof(path), "%s/%s", WEB_AUDIO_DIR, ent->d_name);
-            (void)remove(path);
-        }
-        closedir(d);
-    }
-    (void)remove(AUDIO_VOL_FILE);
-    s_preview_name[0] = '\0';
 }
 
 /* ---------- browser playback over HTTP (play a sound on the PC) -----------
@@ -2458,6 +2185,7 @@ static esp_err_t audio_volume_post(httpd_req_t *req)
     /* Deferred: a slider drag must not trigger one flash write per move. */
     (void)settings_save_deferred(&s_cfg);
     (void)audio_set_volume(m);
+    sound_set_volumes(e, f);
     if (vol_changed) {
         web_log_event("Звук", "громкость: общ %u, двиг %u, эфф %u",
                       (unsigned)m, (unsigned)e, (unsigned)f);
@@ -2804,9 +2532,12 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
     uint8_t slot = 0;
+    bool asset_only = parse_bool(query, "asset", false);
     if ((strstr(query, "slot=") != NULL && !parse_u8(query, "slot", &slot)) ||
         slot > SETTINGS_MAX_TRACKS)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid slot");
+    if (asset_only && slot != 0U)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "asset upload cannot bind a slot");
 
     char hdr[160] = { 0 };
     esp_err_t header_err = httpd_req_get_hdr_value_str(req, "X-File-Name", hdr, sizeof(hdr));
@@ -2826,20 +2557,27 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
         sanitize_name(decoded, name, sizeof(name));
     }
 
+    if (asset_only && (name[0] == '\0' || !web_name_is_wav(name)))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "wav filename required for asset upload");
+
     /* Load the track list first: it is also used to auto-assign a slot when the
-     * request did not carry a valid one (slot 0 is not displayable/deletable). */
+     * request did not carry a valid one (slot 0 is not displayable/deletable).
+     * Asset-only uploads bypass the 20 legacy slots entirely. */
     wav_tx_t *tx = calloc(1, sizeof(*tx));
     if (tx == NULL) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no transaction memory");
     settings_track_t *tracks = tx->tracks;
     size_t count = 0;
-    esp_err_t load_err = settings_tracks_load(tracks, &count);
-    if (load_err != ESP_OK && load_err != ESP_ERR_NOT_FOUND) {
-        free(tx);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "tracks load failed");
+    bool have_tracks = false;
+    if (!asset_only) {
+        esp_err_t load_err = settings_tracks_load(tracks, &count);
+        if (load_err != ESP_OK && load_err != ESP_ERR_NOT_FOUND) {
+            free(tx);
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "tracks load failed");
+        }
+        have_tracks = load_err == ESP_OK;
+        if (!have_tracks) count = 0;
     }
-    bool have_tracks = load_err == ESP_OK;
-    if (!have_tracks) count = 0;
-    if (slot == 0U) {
+    if (!asset_only && slot == 0U) {
         for (uint16_t cand = 1U; cand <= SETTINGS_MAX_TRACKS && slot == 0U; ++cand) {
             bool used = false;
             for (size_t i = 0; have_tracks && i < count; ++i) {
@@ -2852,12 +2590,12 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
             return send_json(req, "{\"ok\":false,\"error\":\"track slots full\"}");
         }
     }
-    if (name[0] == '\0') {
+    if (!asset_only && name[0] == '\0') {
         snprintf(name, sizeof(name), "slot%u.wav", (unsigned)slot);
     }
 
     tx->file_count = 1;
-    tx->previous_count = count;
+    tx->previous_count = asset_only ? 0U : count;
     memcpy(tx->previous, tracks, sizeof(tx->previous));
     tx->previous_cfg = s_cfg;
     char *path = tx->files[0].staged;
@@ -2906,7 +2644,10 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     }
     ESP_LOGI(TAG, "UP: done total=%d", total);
 
-    if (audio_validate_wav(path) != ESP_OK || transfer_expired()) {
+    /* Uploads run under maintenance, which inhibits playback. Inspection is
+     * read-only and explicitly allowed while inhibited; audio_validate_wav()
+     * is for callers that must not touch the filesystem during maintenance. */
+    if (audio_inspect_wav(path) != ESP_OK || transfer_expired()) {
         (void)remove(path);
         free(tx);
         return send_json(req, "{\"ok\":false,\"error\":\"invalid wav\"}");
@@ -2915,43 +2656,47 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     /* Bind the track to the slot, replacing any previous entry for it (also
      * compacts duplicate slot entries left over from earlier uploads so a
      * stale copy can never win the display / playback lookup). */
-    size_t w = 0;
-    bool replaced = false;
-    for (size_t i = 0; i < count; ++i) {
-        if (tracks[i].slot == slot) {
-            if (replaced) {
-                continue; /* drop duplicate entry for this slot */
+    size_t w = count;
+    bool bind_track = !asset_only;
+    if (bind_track) {
+        bool replaced = false;
+        w = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (tracks[i].slot == slot) {
+                if (replaced) {
+                    continue; /* drop duplicate entry for this slot */
+                }
+                strncpy(tracks[i].file, rel_file, sizeof(tracks[i].file) - 1);
+                tracks[i].file[sizeof(tracks[i].file) - 1] = '\0';
+                strncpy(tracks[i].label, name, sizeof(tracks[i].label) - 1);
+                tracks[i].label[sizeof(tracks[i].label) - 1] = '\0';
+                tracks[i].enabled = true;
+                replaced = true;
             }
-            strncpy(tracks[i].file, rel_file, sizeof(tracks[i].file) - 1);
-            tracks[i].file[sizeof(tracks[i].file) - 1] = '\0';
-            strncpy(tracks[i].label, name, sizeof(tracks[i].label) - 1);
-            tracks[i].label[sizeof(tracks[i].label) - 1] = '\0';
-            tracks[i].enabled = true;
+            if (w != i) {
+                tracks[w] = tracks[i];
+            }
+            w++;
+        }
+        if (!replaced && w < SETTINGS_MAX_TRACKS) {
+            tracks[w].slot = slot;
+            strncpy(tracks[w].file, rel_file, sizeof(tracks[w].file) - 1);
+            tracks[w].file[sizeof(tracks[w].file) - 1] = '\0';
+            strncpy(tracks[w].label, name, sizeof(tracks[w].label) - 1);
+            tracks[w].label[sizeof(tracks[w].label) - 1] = '\0';
+            tracks[w].enabled = true;
+            w++;
             replaced = true;
         }
-        if (w != i) {
-            tracks[w] = tracks[i];
+        if (!replaced) {
+            ESP_LOGE(TAG, "UP: no free track slot for slot=%u", (unsigned)slot);
+            (void)remove(path);
+            free(tx);
+            return send_json(req, "{\"ok\":false,\"error\":\"track slots full\"}");
         }
-        w++;
+        count = w;
     }
-    if (!replaced && w < SETTINGS_MAX_TRACKS) {
-        tracks[w].slot = slot;
-        strncpy(tracks[w].file, rel_file, sizeof(tracks[w].file) - 1);
-        tracks[w].file[sizeof(tracks[w].file) - 1] = '\0';
-        strncpy(tracks[w].label, name, sizeof(tracks[w].label) - 1);
-        tracks[w].label[sizeof(tracks[w].label) - 1] = '\0';
-        tracks[w].enabled = true;
-        w++;
-        replaced = true;
-    }
-    if (!replaced) {
-        ESP_LOGE(TAG, "UP: no free track slot for slot=%u", (unsigned)slot);
-        (void)remove(path);
-        free(tx);
-        return send_json(req, "{\"ok\":false,\"error\":\"track slots full\"}");
-    }
-    count = w;
-    tx->count = count;
+    tx->count = bind_track ? count : 0U;
 
     esp_err_t file_err = wav_files_prepare(tx);
     if (file_err != ESP_OK)
@@ -2960,15 +2705,18 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     if (file_err != ESP_OK)
         return wav_tx_abort(req, tx, false, false, tx->graph_asset_conflict ? "graph asset referenced by saved project" : "canonical publication failed");
 
-    esp_err_t save_err = settings_tracks_save(tracks, count);
-    ESP_LOGI(TAG, "UP: track bound slot=%u count=%u save=%s",
-             (unsigned)slot, (unsigned)count, esp_err_to_name(save_err));
-    if (save_err != ESP_OK || transfer_expired()) {
-        ESP_LOGE(TAG, "UP: tracks save failed, keeping old track");
-        return wav_tx_abort(req, tx, true, false, "tracks save failed");
+    if (bind_track) {
+        esp_err_t save_err = settings_tracks_save(tracks, count);
+        ESP_LOGI(TAG, "UP: track bound slot=%u count=%u save=%s",
+                 (unsigned)slot, (unsigned)count, esp_err_to_name(save_err));
+        if (save_err != ESP_OK || transfer_expired()) {
+            ESP_LOGE(TAG, "UP: tracks save failed, keeping old track");
+            return wav_tx_abort(req, tx, true, false, "tracks save failed");
+        }
+        if (settings_manifest_sync() != ESP_OK || transfer_expired())
+            return wav_tx_abort(req, tx, true, false, "manifest save failed");
+        func_tracks_cache_refresh();
     }
-    if (settings_manifest_sync() != ESP_OK || transfer_expired())
-        return wav_tx_abort(req, tx, true, false, "manifest save failed");
     bool cleanup_pending = !wav_artifacts_clean(tx);
     char recovery[160];
     snprintf(recovery, sizeof(recovery), "%s", tx->journal);
@@ -2983,8 +2731,9 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     json_escape(name, esc_label, sizeof(esc_label));
     char json[768];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"slot\":%u,\"file\":\"%s\",\"label\":\"%s\",\"enabled\":true,\"bytes\":%d,\"recovery_cleanup_pending\":%s,\"recovery\":\"%s\"}",
-             (unsigned)slot, esc_file, esc_label, (int)req->content_len, cleanup_pending ? "true" : "false", recovery);
+             "{\"ok\":true,\"asset\":%s,\"slot\":%u,\"file\":\"%s\",\"label\":\"%s\",\"enabled\":true,\"bytes\":%d,\"recovery_cleanup_pending\":%s,\"recovery\":\"%s\"}",
+             asset_only ? "true" : "false", (unsigned)(asset_only ? 0U : slot), esc_file,
+             esc_label, (int)req->content_len, cleanup_pending ? "true" : "false", recovery);
     return send_json(req, json);
 }
 
@@ -3019,6 +2768,7 @@ static esp_err_t audio_track_delete_post(httpd_req_t *req)
     if (save_err != ESP_OK) {
         return send_json(req, "{\"ok\":false,\"error\":\"tracks save failed\"}");
     }
+    func_tracks_cache_refresh();
 
     /* Unbind, do not unlink a path potentially owned by a sound project. */
 
@@ -3358,7 +3108,13 @@ static esp_err_t cv_write_post(httpd_req_t *req)
         return send_json(req, json);
     }
     if (parse_bool(query, "commit", false)) {
-        (void)settings_cv_commit();
+        esp_err_t cerr = settings_cv_commit();
+        if (cerr != ESP_OK) {
+            char json[96];
+            snprintf(json, sizeof(json), "{\"ok\":false,\"error\":\"%s\"}",
+                     esp_err_to_name(cerr));
+            return send_json(req, json);
+        }
     }
     /* CV63 aliases the master volume: apply it live and keep the cached config
      * in sync so a later settings_save cannot revert it. */
@@ -3395,7 +3151,7 @@ static esp_err_t wifi_get(httpd_req_t *req)
              sta_ssid, s_cfg.sta_password[0] ? "********" : "",
              (unsigned)s_cfg.port,
              (unsigned)s_cfg.auto_off_min, (unsigned)s_cfg.hold,
-             s_wifi_started ? "ap_running" : "off", s_cfg.ap_ip, s_sta_ip);
+             web_wifi_is_started() ? "ap_running" : "off", s_cfg.ap_ip, s_sta_ip);
     return send_json(req, json);
 }
 
@@ -3685,12 +3441,223 @@ static int ota_slot_from_name(const char *name)
     return (int)s;
 }
 
+typedef struct {
+    char staged[160];
+    char canonical[160];
+    bool published;
+} pack_file_t;
+
+typedef struct {
+    char backup_dir[96];
+    char (*old_names)[WEB_LIB_NAME_MAX];
+    bool *old_moved;
+    size_t old_count;
+    pack_file_t *files;
+    size_t file_count;
+} pack_tx_t;
+
+static bool pack_name_in_index(const audio_pack_entry_t *idx, size_t count,
+                               const char *name)
+{
+    char base[WEB_LIB_NAME_MAX];
+    if (!web_lib_base_name(name, base, sizeof(base))) return false;
+    for (size_t i = 0; i < count; ++i) {
+        if (strcmp(idx[i].name, base) == 0) return true;
+    }
+    return false;
+}
+
+static esp_err_t pack_collect_old(pack_tx_t *tx)
+{
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d == NULL) return errno == ENOENT ? ESP_OK : ESP_FAIL;
+    size_t cap = 0;
+    while (true) {
+        struct dirent *ent = readdir(d);
+        if (ent == NULL) break;
+        size_t name_len = strlen(ent->d_name);
+        if (!web_name_is_wav(ent->d_name) || name_len >= WEB_LIB_NAME_MAX) continue;
+        if (tx->old_count >= 512U) {
+            closedir(d);
+            return ESP_ERR_INVALID_SIZE;
+        }
+        if (tx->old_count == cap) {
+            size_t next = cap ? cap * 2U : 32U;
+            char (*grown)[WEB_LIB_NAME_MAX] =
+                realloc(tx->old_names, next * sizeof(*grown));
+            if (grown == NULL) {
+                closedir(d);
+                return ESP_ERR_NO_MEM;
+            }
+            tx->old_names = grown;
+            cap = next;
+        }
+        memcpy(tx->old_names[tx->old_count], ent->d_name, name_len + 1U);
+        ++tx->old_count;
+    }
+    closedir(d);
+    return ESP_OK;
+}
+
+/* Undo a partially applied pack: remove new canonical files, remove staged
+ * files, and move every original file back from the backup directory. */
+static void pack_tx_rollback(pack_tx_t *tx)
+{
+    if (tx == NULL) return;
+    if (tx->files != NULL) {
+        for (size_t i = 0; i < tx->file_count; ++i) {
+            if (tx->files[i].published) {
+                (void)remove(tx->files[i].canonical);
+                tx->files[i].published = false;
+            }
+            if (tx->files[i].staged[0]) {
+                (void)remove(tx->files[i].staged);
+                tx->files[i].staged[0] = '\0';
+            }
+        }
+    }
+    if (tx->old_names != NULL && tx->old_moved != NULL && tx->backup_dir[0]) {
+        char old_path[192], backup_path[224];
+        for (size_t i = 0; i < tx->old_count; ++i) {
+            if (!tx->old_moved[i]) continue;
+            snprintf(old_path, sizeof(old_path), WEB_AUDIO_DIR "/%s", tx->old_names[i]);
+            snprintf(backup_path, sizeof(backup_path), "%s/%s",
+                     tx->backup_dir, tx->old_names[i]);
+            if (rename(backup_path, old_path) != 0) {
+                ESP_LOGE(TAG, "PACK: cannot restore %s", tx->old_names[i]);
+            } else {
+                tx->old_moved[i] = false;
+            }
+        }
+    }
+    if (tx->backup_dir[0] && WEB_RMDIR(tx->backup_dir) != 0 && errno != ENOENT) {
+        ESP_LOGW(TAG, "PACK: backup dir retained: %s", tx->backup_dir);
+    }
+}
+
+static void pack_tx_free(pack_tx_t *tx)
+{
+    if (tx == NULL) return;
+    free(tx->old_names);
+    free(tx->old_moved);
+    free(tx->files);
+    free(tx);
+}
+
+static void pack_tx_commit_cleanup(pack_tx_t *tx)
+{
+    if (tx == NULL) return;
+    char backup_path[224];
+    for (size_t i = 0; i < tx->old_count; ++i) {
+        if (!tx->old_moved[i]) continue;
+        snprintf(backup_path, sizeof(backup_path), "%s/%s",
+                 tx->backup_dir, tx->old_names[i]);
+        (void)remove(backup_path);
+        tx->old_moved[i] = false;
+    }
+    if (tx->backup_dir[0] && WEB_RMDIR(tx->backup_dir) != 0 && errno != ENOENT) {
+        ESP_LOGW(TAG, "PACK: backup cleanup pending: %s", tx->backup_dir);
+    }
+}
+
+/* A pack replaces every file. Drop track/binding references to sounds that no
+ * longer exist instead of leaving slots pointing at deleted paths. */
+static void pack_reconcile_metadata(void)
+{
+    settings_track_t *tracks = calloc(SETTINGS_MAX_TRACKS, sizeof(*tracks));
+    if (tracks == NULL) return;
+    size_t count = 0;
+    esp_err_t load_err = settings_tracks_load(tracks, &count);
+    if (load_err == ESP_ERR_NOT_FOUND) {
+        count = 0;
+    } else if (load_err != ESP_OK) {
+        free(tracks);
+        return;
+    }
+    if (count > SETTINGS_MAX_TRACKS) count = SETTINGS_MAX_TRACKS;
+    bool slots[SETTINGS_MAX_TRACKS + 1] = { false };
+    size_t kept = 0;
+    bool tracks_changed = false;
+    for (size_t i = 0; i < count; ++i) {
+        const char *file = tracks[i].file;
+        if (file[0] == '\0' || file[0] == '/' || strstr(file, "..") != NULL) {
+            tracks_changed = true;
+            continue;
+        }
+        char path[192];
+        snprintf(path, sizeof(path), "%s/%s", storage_get_root(), file);
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+            if (kept != i) tracks[kept] = tracks[i];
+            if (tracks[kept].slot <= SETTINGS_MAX_TRACKS) {
+                slots[tracks[kept].slot] = true;
+            }
+            ++kept;
+        } else {
+            tracks_changed = true;
+        }
+    }
+    if (tracks_changed) (void)settings_tracks_save(tracks, kept);
+
+    if (s_cfg.active_slot > SETTINGS_MAX_TRACKS ||
+        (s_cfg.active_slot != 0U && !slots[s_cfg.active_slot])) {
+        s_cfg.active_slot = 0;
+        (void)settings_save_deferred(&s_cfg);
+    }
+
+    bool func_locked = s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, portMAX_DELAY) == pdTRUE;
+    bool map_changed = false;
+    for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
+        if (s_func_map[fn].slot_a != 0U &&
+            (s_func_map[fn].slot_a > SETTINGS_MAX_TRACKS ||
+             !slots[s_func_map[fn].slot_a])) {
+            s_func_map[fn].slot_a = 0;
+            map_changed = true;
+        }
+        if (s_func_map[fn].slot_b != 0U &&
+            (s_func_map[fn].slot_b > SETTINGS_MAX_TRACKS ||
+             !slots[s_func_map[fn].slot_b])) {
+            s_func_map[fn].slot_b = 0;
+            map_changed = true;
+        }
+    }
+    if (map_changed) {
+        (void)settings_func_map_save(s_func_map, SETTINGS_FUNC_MAP_COUNT);
+    }
+
+    bool bind_changed = false;
+    size_t kept_bind = 0;
+    for (size_t i = 0; i < s_func_bind_count; ++i) {
+        const func_binding_t *b = &s_func_bind[i];
+        if (b->used && b->target_type == FUNC_TARGET_SLOT &&
+            (b->target_id == 0U || b->target_id > SETTINGS_MAX_TRACKS ||
+             !slots[b->target_id])) {
+            bind_changed = true;
+            continue;
+        }
+        if (kept_bind != i) s_func_bind[kept_bind] = *b;
+        ++kept_bind;
+    }
+    if (bind_changed) {
+        s_func_bind_count = kept_bind;
+        (void)settings_func_bind_save(s_func_bind, s_func_bind_count);
+    }
+    if (func_locked) xSemaphoreGive(s_func_mutex);
+
+    (void)settings_manifest_sync();
+    free(tracks);
+    func_tracks_cache_refresh();
+}
+
 /* POST /api/audio/pack — unpack an AURA Sound Pack straight from the request
- * body: validate the index, delete the whole old library and stream every PCM16
- * payload into /userdata/audio/<name>.wav with a generated WAV header. */
+ * body. New files are staged first, old files are moved to a private backup
+ * directory, and only then are the new files published. Any error restores the
+ * old library; a failed upload must never leave the decoder soundless. */
 static esp_err_t audio_pack_upload_post(httpd_req_t *req)
 {
     const char *errmsg = "invalid sound pack";
+    int errstatus = 500;
     if (!storage_is_mounted())
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage unavailable");
     if (req->content_len < AUDIO_PACK_HDR_LEN || req->content_len > AUDIO_PACK_MAX_BYTES)
@@ -3702,6 +3669,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     ota_stream_t *st = calloc(1, sizeof(*st));
     uint8_t *buf = malloc(8192);
     audio_pack_entry_t *idx = NULL;
+    pack_tx_t *ptx = NULL;
     if (st == NULL || buf == NULL) {
         free(st); free(buf);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
@@ -3752,30 +3720,73 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     uint64_t freeb = 0;
     (void)storage_get_free_bytes(&freeb);
     uint64_t need = total_data + (uint64_t)ph.count * 4096ULL + 262144ULL;
-    if (freeb + audio_library_bytes() < need) {
+    /* Old files are kept intact while the new library is staged, so the peak
+     * requirement is new data + overhead, not the post-delete free space. */
+    if (freeb < need) {
         free(idx);
         free(st); free(buf);
         return send_json(req, "{\"ok\":false,\"error\":\"not enough space\"}");
     }
 
-    /* A pack replaces the whole library: stop the preview, delete every old
-     * file, then stream the new ones in. */
+    ptx = calloc(1, sizeof(*ptx));
+    if (ptx == NULL) {
+        errmsg = "no transaction memory";
+        goto fail_tx;
+    }
+    ptx->file_count = ph.count;
+    ptx->files = calloc(ph.count, sizeof(*ptx->files));
+    if (ptx->files == NULL) {
+        errmsg = "no transaction memory";
+        goto fail_tx;
+    }
+    ptx->old_count = 0;
+    if (pack_collect_old(ptx) != ESP_OK) {
+        errmsg = "cannot enumerate library";
+        goto fail_tx;
+    }
+    if (ptx->old_count != 0U) {
+        ptx->old_moved = calloc(ptx->old_count, sizeof(*ptx->old_moved));
+        if (ptx->old_moved == NULL) {
+            errmsg = "no transaction memory";
+            goto fail_tx;
+        }
+    }
+
+    /* Reject only files that a saved graph needs but the pack does not carry.
+     * Replacing a referenced file with a new version of the same name is OK. */
+    for (size_t i = 0; i < ptx->old_count; ++i) {
+        if (pack_name_in_index(idx, ph.count, ptx->old_names[i])) continue;
+        bool referenced = false;
+        if (sg_store_file_referenced(ptx->old_names[i], &referenced) != ESP_OK) {
+            errmsg = "graph reference check failed";
+            goto fail_tx;
+        }
+        if (referenced) {
+            errmsg = "graph asset referenced by saved project";
+            errstatus = 409;
+            goto fail_tx;
+        }
+    }
+
     audio_voice_release_owned(s_preview_voice);
     memset(&s_preview_voice, 0, sizeof(s_preview_voice));
-    audio_library_clear();
-
+    s_preview_name[0] = '\0';
     s_up_slot = 0;
-    size_t done = 0;
+
+    /* Stage all new files while the old library is still intact. */
     for (uint32_t i = 0; i < ph.count; ++i) {
-        char path[192];
-        snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", idx[i].name);
-        FILE *f = fopen(path, "wb");
-        bool ok = f != NULL;
-        if (ok) (void)setvbuf(f, NULL, _IOFBF, 8192);
+        char rel[128];
+        FILE *f = create_private_file(ptx->files[i].staged,
+                                      sizeof(ptx->files[i].staged),
+                                      rel, sizeof(rel), "tmp");
+        if (f == NULL) { errmsg = "staging failed"; goto fail_tx; }
+        snprintf(ptx->files[i].canonical, sizeof(ptx->files[i].canonical),
+                 WEB_AUDIO_DIR "/%s.wav", idx[i].name);
+        (void)setvbuf(f, NULL, _IOFBF, 8192);
         uint8_t wh[AUDIO_PACK_WAV_HDR_MAX];
         size_t whl = audio_pack_wav_header(wh, sizeof(wh), idx[i].data_len,
                                            idx[i].sample_rate, idx[i].channels, idx[i].bits);
-        if (ok) ok = whl > 0U && fwrite(wh, 1, whl, f) == whl;
+        bool ok = whl > 0U && fwrite(wh, 1, whl, f) == whl;
         uint32_t left = idx[i].data_len;
         while (ok && left > 0U) {
             size_t want = left > 8192U ? 8192U : (size_t)left;
@@ -3786,33 +3797,78 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
             s_up_received = (int)req->content_len - st->remaining - (int)(st->len - st->pos);
         }
         if (ok && fflush(f) != 0) ok = false;
-        if (f != NULL && fsync(fileno(f)) != 0) ok = false;
-        if (f != NULL && fclose(f) != 0) ok = false;
-        if (!ok) { (void)remove(path); errmsg = "write failed"; break; }
-        done++;
-    }
-
-    if (done != ph.count || st->remaining != 0 || st->pos != st->len ||
-        (s_transfer_deadline != 0 && esp_timer_get_time() >= s_transfer_deadline)) {
-        for (uint32_t i = 0; i < done; ++i) {
-            char path[192];
-            snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", idx[i].name);
-            (void)remove(path);
+        if (fsync(fileno(f)) != 0) ok = false;
+        if (fclose(f) != 0) ok = false;
+        if (!ok || transfer_expired() || audio_inspect_wav(ptx->files[i].staged) != ESP_OK) {
+            errmsg = "write failed";
+            goto fail_tx;
         }
-        goto fail;
+    }
+    if (st->remaining != 0 || st->pos != st->len) {
+        errmsg = "truncated pack payload";
+        goto fail_tx;
     }
 
+    /* Move the old library aside. Nothing is deleted yet. */
+    if (ptx->old_count != 0U) {
+        snprintf(ptx->backup_dir, sizeof(ptx->backup_dir), WEB_AUDIO_DIR "/.pb%08lx_%08lx",
+                 (unsigned long)(uint32_t)esp_timer_get_time(),
+                 (unsigned long)++s_file_sequence);
+        if (WEB_MKDIR(ptx->backup_dir) != 0) {
+            errmsg = "backup directory failed";
+            goto fail_tx;
+        }
+        char old_path[192], backup_path[224];
+        for (size_t i = 0; i < ptx->old_count; ++i) {
+            snprintf(old_path, sizeof(old_path), WEB_AUDIO_DIR "/%s", ptx->old_names[i]);
+            snprintf(backup_path, sizeof(backup_path), "%s/%s",
+                     ptx->backup_dir, ptx->old_names[i]);
+            if (rename(old_path, backup_path) != 0) {
+                errmsg = "backup move failed";
+                goto fail_tx;
+            }
+            ptx->old_moved[i] = true;
+        }
+    }
+
+    /* Publish staged files. A failure here rolls every old file back. */
+    for (uint32_t i = 0; i < ph.count; ++i) {
+        if (rename(ptx->files[i].staged, ptx->files[i].canonical) != 0) {
+            errmsg = "canonical publication failed";
+            goto fail_tx;
+        }
+        ptx->files[i].staged[0] = '\0';
+        ptx->files[i].published = true;
+    }
+
+    /* The volume sidecar is the commit point: it is replaced atomically and
+     * only after every new WAV is in place. Check the deadline before it so a
+     * timeout cannot roll files back after the sidecar was already replaced. */
+    if (transfer_expired()) {
+        errmsg = "transfer timeout";
+        goto fail_tx;
+    }
     {
         web_vol_t *v = malloc(sizeof(*v) * ph.count);
-        if (v != NULL) {
+        bool ok = v != NULL;
+        if (ok) {
             for (uint32_t i = 0; i < ph.count; ++i) {
                 snprintf(v[i].name, sizeof(v[i].name), "%s", idx[i].name);
                 v[i].vol = idx[i].volume;
             }
-            (void)web_vol_save(v, ph.count);
+            ok = web_vol_save(v, ph.count) == ESP_OK;
             free(v);
         }
+        if (!ok) {
+            errmsg = "volume save failed";
+            goto fail_tx;
+        }
     }
+
+    pack_reconcile_metadata();
+    pack_tx_commit_cleanup(ptx);
+    pack_tx_free(ptx);
+    ptx = NULL;
 
     ESP_LOGI(TAG, "PACK: %lu file(s), %lu bytes",
              (unsigned long)ph.count, (unsigned long)total_data);
@@ -3824,6 +3880,20 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     free(st);
     free(buf);
     return send_json(req, json);
+
+fail_tx:
+    pack_tx_rollback(ptx);
+    pack_tx_free(ptx);
+    free(idx);
+    free(st);
+    free(buf);
+    if (errstatus == 409) {
+        char json[128];
+        snprintf(json, sizeof(json), "{\"ok\":false,\"error\":\"%s\"}", errmsg);
+        httpd_resp_set_status(req, "409 Conflict");
+        return send_json(req, json);
+    }
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, errmsg);
 
 fail:
     free(idx);
@@ -4064,7 +4134,7 @@ static esp_err_t ota_update_post(httpd_req_t *req)
                 (void)remove(path);
                 break;
             }
-            if (audio_validate_wav(path) != ESP_OK) {
+            if (audio_inspect_wav(path) != ESP_OK) {
                 ESP_LOGW(TAG, "OTA: file '%s' invalid wav", safe);
                 (void)remove(path);
                 break;
@@ -4445,6 +4515,7 @@ static esp_err_t start_http_server(void)
     register_route("/api/sound/graph/validate", HTTP_POST, graph_validate_post);
     register_route("/api/sound/graph/save", HTTP_POST, graph_save_post);
     register_route("/api/sound/graph/apply", HTTP_POST, graph_apply_post);
+    register_route("/api/sound/graph/delete", HTTP_POST, graph_project_delete_post);
     register_route("/api/control/source", HTTP_GET, control_source_get);
     register_route("/api/control/source", HTTP_POST, control_source_post);
     register_route("/api/mode", HTTP_GET, mode_get);
@@ -4524,6 +4595,7 @@ esp_err_t web_init(void)
     s_func_bind_count = 0;
     load_err = func_bind_load();
     if (load_err != ESP_OK) return load_err;
+    func_tracks_cache_refresh();
 
     /* Bring up the AUX outputs before restoring the saved per-channel level/
      * effect: auxio_config() only programmes channels that auxio_init() has
@@ -4563,9 +4635,7 @@ esp_err_t web_init(void)
             (void)start_progress_server();
         }
         if (s_cfg.auto_off_min != 0U) {
-            if (xTaskCreate(wifi_auto_off_task, "wifi_off", 3072, NULL, 4, NULL) != pdPASS) {
-                ESP_LOGW(TAG, "wifi auto-off task create failed");
-            }
+            wifi_start_auto_off();
         }
         return err;
     }

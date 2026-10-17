@@ -349,12 +349,68 @@ static void test_historical_references_and_fail_closed(void)
     char *json = fixture("a", "loop.wav", &asset); save_json("a", 0, json);
     char *silent = fixture("a", "", NULL); save_json("a", 1, silent);
     bool referenced = false;
-    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced("loop.wav", &referenced)); TEST_ASSERT_TRUE(referenced);
-    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced("other.wav", &referenced)); TEST_ASSERT_FALSE(referenced);
-    write_bytes("graphs/a.1.json", "{}", 2);
+    /* Only the latest revision protects assets: history must not make a file
+     * permanently immutable. */
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced("loop.wav", &referenced));
+    TEST_ASSERT_FALSE(referenced);
+    /* The selected revision is the graph actually running, so it still does. */
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_select("a", 1));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced("loop.wav", &referenced));
+    TEST_ASSERT_TRUE(referenced);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_select("a", 2));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced("loop.wav", &referenced));
+    TEST_ASSERT_FALSE(referenced);
+    write_bytes("graphs/a.2.json", "{}", 2);
     TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_store_file_referenced("other.wav", &referenced)); TEST_ASSERT_TRUE(referenced);
     blocked = true; TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_store_file_referenced("other.wav", &referenced)); TEST_ASSERT_TRUE(referenced);
     free(json); free(silent);
+}
+
+static void test_retention_keeps_latest_and_selected(void)
+{
+    char *json = fixture("a", "", NULL);
+    uint32_t current = 0;
+    for (unsigned i = 0; i < SG_STORE_KEEP_REVISIONS + 3U; ++i) {
+        current = save_json("a", current, json);
+    }
+    assert_read("a", 0, current, json);
+    char *out = NULL; size_t len = 0; uint32_t actual = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_NOT_FOUND, sg_store_read("a", 1, &out, &len, &actual));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_read("a", 4, &out, &len, &actual));
+    free(out);
+    /* Keep the selected old revision even when it falls out of the window. */
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_select("a", 4));
+    current = save_json("a", current, json);
+    out = NULL; len = 0; actual = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_read("a", 4, &out, &len, &actual));
+    free(out);
+    free(json);
+}
+
+static void test_delete_project_and_selection(void)
+{
+    char *a = fixture("a", "", NULL), *b = fixture("b", "", NULL);
+    save_json("a", 0, a);
+    save_json("b", 0, b);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_select("a", 1));
+    bool was_selected = false;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_delete("a", &was_selected));
+    TEST_ASSERT_TRUE(was_selected);
+    char id[SG_ID_CAP]; uint32_t rev = 0; bool selected = true;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &rev, &selected));
+    TEST_ASSERT_FALSE(selected);
+    char *out = NULL; size_t len = 0; uint32_t actual = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_NOT_FOUND, sg_store_read("a", 0, &out, &len, &actual));
+    sg_store_descriptor_t list[2]; size_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_list(list, 2, &count));
+    TEST_ASSERT_EQUAL_UINT(1, count);
+    TEST_ASSERT_EQUAL_STRING("b", list[0].id);
+    was_selected = true;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_delete("b", &was_selected));
+    TEST_ASSERT_FALSE(was_selected);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_list(list, 2, &count));
+    TEST_ASSERT_EQUAL_UINT(0, count);
+    free(a); free(b);
 }
 static void test_missing_revision_fails_reference_scan(void)
 {
@@ -442,6 +498,8 @@ int main(void)
     RUN_TEST(test_missing_assets_and_missing_manifest_drafts);
     RUN_TEST(test_invalid_wav_and_paths);
     RUN_TEST(test_historical_references_and_fail_closed);
+    RUN_TEST(test_retention_keeps_latest_and_selected);
+    RUN_TEST(test_delete_project_and_selection);
     RUN_TEST(test_missing_revision_fails_reference_scan);
     RUN_TEST(test_zero_duration_and_malformed_wav_chunks);
     RUN_TEST(test_reference_and_revision_scan_bounds);

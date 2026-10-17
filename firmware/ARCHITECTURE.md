@@ -5,7 +5,7 @@
 периферии и памяти, список задач, компоненты и их взаимодействие, настройки,
 REST API и ресурсы.
 
-Версия прошивки: **0.9** (`version.txt` — единственный источник; попадает в
+Версия прошивки: **0.10** (`version.txt` — единственный источник; попадает в
 веб-страницу, CV7 и OTA-образ).
 Целевой чип: `esp32-s3` (плата ESP32-S3-DevKitC-1), фреймворк ESP-IDF
 `6.0`. Язык: C (C11), без C++.
@@ -222,7 +222,7 @@ idf.py size                         # размер образа
 делает первую сборку. В VS Code доступны задачи `ESP-IDF: build / flash /
 flash + monitor / erase + flash / fullclean` и `Host tests`.
 
-### 4.3 Генерация веб-страницы
+### 4.3 Генерация веб-страницы и ассетов редактора
 
 `tools/gen_web_html.py` вызывается из CMake (`components/web/CMakeLists.txt`)
 до сборки `web.c`:
@@ -237,6 +237,19 @@ flash + monitor / erase + flash / fullclean` и `Host tests`.
 
 > Правите веб-интерфейс **только** в `web_ui.html`, не в `web_html.h`.
 
+Офлайн-редактор блоков (`/sound-editor/`) собирается отдельно и попадает в
+прошивку как gzip-ассеты. `tools/gen_sound_editor.py` на каждом шаге сборки:
+
+- сверяет `sound_editor/public/` и `sound_editor/scripts/` с хэшами в
+  `sound_editor/dist/build-inputs.json` и останавливает сборку, если исходник
+  изменился без пересборки бандла (`npm run build` в `sound_editor/`);
+- читает `sound_editor/dist/blocks.html` и остальные ассеты, сжимает их gzip
+  и пишет `sound_editor_assets.c` в build-каталог (лимит 512 КБ gzip);
+- перезаписывает файл только при изменении, чтобы не пересобирать `web.c`.
+
+Сам бандл (`dist/`) коммитится, поэтому чистая сборка не требует Node.js.
+Подробности — `docs/sound_blocks_editor.md`.
+
 ### 4.4 Нативные тесты (без железа)
 
 `test/run_tests.ps1` собирает тест-наборы обычным `gcc` (или TCC) вместе с
@@ -250,20 +263,23 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1            # gcov, un
 powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 ```
 
-Наборы (16): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
+Наборы (18 C + Node): `test_dcc`, `test_settings`, `test_motor`, `test_auxio`,
 `test_web_util`, `test_track`, `test_audio`, `test_pinmap`,
 `test_track_manifest`, `test_storage`, `test_track_recover`, `test_provision`,
-`test_selftest`, `test_web`, `test_sound`, `test_main`. Итог исправлений
-2026-10-02: **705 C-тестов, 16 наборов PASSED**, плюс **13 JS-тестов PASS**.
+`test_selftest`, `test_web`, `test_sound_graph`, `test_sound_graph_store`,
+`test_audio_pack`, `test_main`, `test_web_ui`. Итог
+2026-10-17: **790 C-тестов, 18 наборов PASSED**, плюс **27 JS-тестов PASS**.
 Исходная проверка до правок: 534 теста в 15 наборах, включая 52 motor-теста.
 
-Ранее сообщалось **100 % покрытия 5601 строки**: это union исполняемых
-строк first-party исходников, попавших в gcov из host-сборок. Исходники,
+Покрытие 2026-10-17 (`test\coverage.ps1`): **92,8 % — union 8237 из 8875
+исполняемых строк** first-party исходников, попавших в gcov из host-сборок
+(`web.c` 83,8 %, `web_wifi.c` 100 %, `sound_graph_store.c` 96,0 %; `sound.c` —
+RTOS-обвязка — в host-gcov не входит). Исходники,
 не включённые в эти сборки, отсутствуют в отчёте; показатель не означает
-покрытия всех ветвей, всего текущего кода или аппаратного поведения.
-В проверке 2026-10-02 покрытие повторно не измерялось. Дополнительные
-временные тесты выявили ошибки BEMF и позднее включены в постоянные регрессии:
-см. [отчёт BEMF](BEMF_DIAGNOSTICS.md).
+покрытия всех ветвей, всего текущего кода или аппаратного поведения. Ранее
+сообщавшиеся 100 % (5601 строка) — другой, меньший набор и историческая цифра.
+Дополнительные временные тесты выявили ошибки BEMF и позднее включены в
+постоянные регрессии: см. [отчёт BEMF](BEMF_DIAGNOSTICS.md).
 
 При добавлении нового набора обновляйте `$inc` (include-пути) и `$suites` в
 ОБОИХ скриптах (`run_tests.ps1`, `coverage.ps1`). Частично исполненные строки
@@ -325,15 +341,22 @@ firmware/
 │  ├─ motor/                 DRV8870 ШИМ + BEMF-PID + калибровка
 │  ├─ track/                 рельсовый ADC, DC-режим
 │  ├─ audio/                 20-голосый микшер → I2S, управляемый rate/фейд
-│  ├─ sound/                 звуковой движок схемы (.mds, автомат, секвенсер)
+│  ├─ sound/                 графовый звуковой движок (JSON-схема, раннер, store)
 │  ├─ auxio/                 9 световых выходов + эффекты
 │  ├─ web/                   Wi-Fi AP, HTTP, REST API, журнал, веб-контент
 │  ├─ provision/             UART-провижининг звуков, BEMF/HIL-консоль
 │  ├─ selftest/              встроенный SELFTEST (консоль) для HIL по USB
 │  └─ esp_littlefs/          сторонний компонент LittleFS
-├─ docs/                     sound_scheme.md, cv_sound.md
-├─ tools/                    gen_web_html.py, bump_version.ps1, gen_flash_readme.ps1
-├─ test/                     нативные тесты: run_tests.ps1, coverage.ps1
+├─ docs/                     sound_scheme.md, sound_pack.md,
+│                            sound_blocks_editor.md, cv_sound.md
+├─ sound_editor/             офлайн-редактор блоков: public/ + scripts/,
+│                            dist/ (собранный бандл коммитится)
+├─ tools/                    gen_web_html.py, gen_sound_editor.py,
+│                            pack_sounds.py, release_artifacts.py,
+│                            bump_version.ps1, gen_flash_readme.ps1
+├─ test/                     нативные тесты: run_tests.ps1, coverage.ps1,
+│                            test_web_ui.js, test_release_artifacts.py,
+│                            test_sound_editor_assets.py, hil/
 ├─ test_libs/teststubs/      заглушки ESP-IDF для тестов
 └─ *.bat / *.ps1             скрипты сборки/прошивки/провижининга/звуков
 ```
@@ -341,7 +364,9 @@ firmware/
 В **корне репозитория** (`Soft_Decoder_V3/`): `setup.ps1` (автонастройка
 окружения), `.vscode/` (задачи и IntelliSense VS Code), `CHANGELOG.md`
 (хронология; строка за коммит добавляется автоматически хуком), `.githooks/` +
-`setup_git_hooks.bat` (git-хуки), `README.md`, `release/`, `web_flasher/`.
+`setup_git_hooks.bat` (git-хуки), `README.md`, `release/`,
+`release/flash_download_tool/`, `SOUND/` (исходные WAV), `web_flasher/`
+(веб-панель прошивки), `web_preview/` (mock-сервер для `web_ui.html`).
 
 ---
 
@@ -430,30 +455,33 @@ firmware/
 - API: `audio_init`, `audio_voice_play/stop`, `audio_stop_all`,
   `audio_set/get_volume`, `audio_is_playing`, `audio_validate_wav`,
   `audio_voice_set_rate` (permille 500..3000), `audio_voice_is_active/position`,
-  `audio_voice_alloc/release`. Голоса 18/19 зарезервированы под звуковой движок.
+  `audio_voice_alloc/release`. Голос 19 зарезервирован под звуковой движок; эффектам доступны голоса 0..18.
 - Анти-щёлчок: линейный фейд 2 блока на старте/стопе (`s_fade_blocks`).
 - Зависимости: `esp_driver_gpio esp_driver_i2s pinmap esp_timer`.
 - Задачи: **`audio_mix`**, стек 4096, prio 7, ядро 1 (блок 256 сэмплов ≈ 11.6 мс).
 
 ### sound (`components/sound`)
-- Файлы: `src/sound.c`, `src/sound_store.c`, `include/sound.h`,
-  `include/sound_store.h`.
-- Роль: звуковой движок схемы «ADDITIPUS AURA-X». Держит активную схему,
-  автомат 5 ступеней (drive/accel/coast, гистерезис), секвенсер Init/Loop/End
-  (до 4 цилиндров), режимы F-клавиш (one-shot/trigger/loop-held/short-long/
-  latched), логики mute (`MUTE_STOP/MOVE/LIGHT`), `sync_motion`, тормозной
-  скрип, случайные/состояний-звуки, линт схемы. Хранит схему в бинарном `.mds`
-  (`sound_store`, атомарная запись), активное имя — в NVS `active_scheme`.
-  Пока активен `SOUND_SCHEME_NONE/LEGACY`, движок полностью инертен.
-- API: `sound_init`, `sound_stop_all`, `sound_set_speed`, `sound_function`,
-  `sound_scheme_get/set`, `sound_table_get/set`, `sound_extra_get/set`,
-  `sound_type_get/set`, `sound_engine_get/set`, `sound_load_scheme`,
-  `sound_scheme_save`, `sound_status_get`, `sound_lint`, `sound_reload_bindings`,
-  `sound_engine_power`.
+- Файлы: `src/sound.c`, `src/sound_graph.c`, `src/sound_graph_runner.c`,
+  `src/sound_graph_store.c`; заголовки `sound.h`, `sound_graph.h`,
+  `sound_graph_store.h`.
+- Роль: графовый звуковой движок «ADDITIPUS AURA-X». JSON-схема v1
+  (`states/transitions/effects/variables/assets/engine`) хранится ревизиями,
+  парсится и валидируется `sound_graph.c`, исполняется поканальным раннером
+  `sound_graph_runner.c`; выбор активного проекта — файл `selection` на внешней
+  NOR. Двигатель, Fx-триггеры, скорость/направление и переменные — входы раннера;
+  выходы/AUX остаются в `func_binding_t` и `/api/aux/cfg`. Прямая связь
+  `Логика → Выход/Логический выход` переносит компактное условие в привязку
+  (`FUNC_FLAG_COND`, до двух сравнений), значения переменных читает
+  `func_eval_ex()` через `sound_variable_get()`.
+- API: `sound_init`, `sound_stop_all`, `sound_request_stop`, `sound_set_inhibited`,
+  `sound_set_speed`, `sound_function`, `sound_engine_power`,
+  `sound_set_volumes`, `sound_graph_active/fail_closed/prepare/commit/install/
+  deactivate/status_get`, `sound_graph_prime_functions`, `sound_graph_file_used`.
 - Зависимости: `settings storage audio motor esp_timer`.
 - Задачи: **`sound`**, стек 4096, prio 6, ядро 1, период 20 мс (опрос
-  `motor_get_applied_speed` → автомат/секвенсер → `audio_*`).
-- Подробности и модель данных — `docs/sound_scheme.md`, CV — `docs/cv_sound.md`.
+  `motor_get_applied_speed` → раннер → `audio_*`).
+- Подробности и модель данных — `docs/sound_scheme.md`, редактор —
+  `docs/sound_blocks_editor.md`, CV — `docs/cv_sound.md`.
 
 ### auxio (`components/auxio`)
 - Файлы: `src/auxio.c`, `include/auxio.h`.
@@ -465,18 +493,19 @@ firmware/
 - Задачи: **`aux_fx`**, стек 3072, prio 6, период 20 мс.
 
 ### web (`components/web`)
-- Файлы: `src/web.c`, `src/web_util.c`, `include/web.h`, `include/web_util.h`,
-  `include/web_html.h` (генерируется).
+- Файлы: `src/web.c`, `src/web_wifi.c`, `src/web_util.c`, `include/web.h`,
+  `include/web_util.h`, `include/web_html.h` (генерируется),
+  `src/web_internal.h` (Wi-Fi/DNS-интерфейс между модулями).
 - Роль: Wi-Fi SoftAP (скан канала 1/6/11, авто-выключение), два HTTP-сервера
   (80 — страница+API, 81 — прогресс загрузки), DNS-хайджек для captive portal,
   REST API, журнал событий (`/api/log`), OTA, аплоад/удаление звуков,
   применение функций/AUX/звуков, громкости.
 - Зависимости: `esp_http_server esp_wifi esp_netif esp_event esp_timer app_update
   nvs_flash esp_driver_gpio audio auxio motor settings storage pinmap dcc sound`.
-- Задачи (создаются в `web.c`/`httpd`):
-  - **`dns_hijack`** (стек 4096, prio 9),
-  - **`wifi_off`** (стек 3072, prio 4) — при `auto_off_min ≠ 0`,
-  - **`web_transfer`** (стек 16384, prio 6) — async upload/OTA/MDS,
+- Задачи (создаются в `web_wifi.c`/`web.c`/`httpd`):
+  - **`dns_hijack`** (стек 4096, prio 9) — `web_wifi.c`,
+  - **`wifi_off`** (стек 3072, prio 4) — `web_wifi.c`, при `auto_off_min ≠ 0`,
+  - **`web_transfer`** (стек 16384, prio 6) — async upload/OTA,
   - HTTP-задачи создаёт `esp_http_server`: основной сервер (стек 16384) и
     progress-сервер (стек 4096).
 
@@ -543,7 +572,7 @@ firmware/
 | `dcc` | 8192 | 10 | 1 | очередь полупериодов | dcc.c |
 | `dcc_ack` | 2048 | 5 | — | запрос на ACK (service mode) | dcc.c |
 | `web_transfer` | 16384 | 6 | — | async upload/OTA (по запросу) | web.c |
-| `dns_hijack` | 4096 | 9 | — | UDP :53 | web.c |
+| `dns_hijack` | 4096 | 9 | — | UDP :53 | web_wifi.c |
 | `motor` | 3072 | 7 | — | 10 мс | motor.c |
 | `track_adc` | 3072 | 7 | — | 50 мс | track.c |
 | `audio_mix` | 4096 | 7 | 1 | блок 256 сэмплов | audio.c |
@@ -553,7 +582,7 @@ firmware/
 | `aux_fx` | 3072 | 6 | — | 20 мс | auxio.c |
 | `bemf_cal` | 3072 | 6 | — | по запросу | motor.c |
 | `prov_listen` | 8192 | 4 | — | UART | provision.c |
-| `wifi_off` | 3072 | 4 | — | 10 с (опц.) | web.c |
+| `wifi_off` | 3072 | 4 | — | 10 с (опц.) | web_wifi.c |
 | httpd (80) | 16384 | IDF | — | запросы | esp_http_server |
 | httpd (81) | 4096 | IDF | — | запросы | esp_http_server |
 | `main` | 16384 | 1 | — | — | IDF |
@@ -629,7 +658,6 @@ flowchart TD
 | `track_cat` | blob | категории слотов (двигатель/эффекты) |
 | `func_map` | blob | карта F0..F28 (`settings_func_map_t`) |
 | `func_bind` | blob | канонические привязки F→цель (`func_binding_t[64]`) |
-| `active_scheme` | str | имя активной схемы звука (`.mds` в `projects/`) |
 | `aux_cfg` | blob | уровни/эффекты 9 AUX |
 | `bemf_cal` | blob | калибровочная кривая BEMF |
 | `bemf_use` | u8 | 1=замкнутый контур BEMF, 0=только ШИМ |
@@ -646,10 +674,10 @@ flowchart TD
 | 3 / 4 | 0 | разгон / торможение (0 = мгновенно) |
 | 5 | 255 | Vhigh (~100 % ШИМ на 126) |
 | 6 | 128 | Vmid (50 % на 63) |
-| 7 | 9 | версия декодера (совпадает с `version.txt`; при OTA мигрируется) |
+| 7 | 10 | версия декодера (совпадает с `version.txt`; при OTA мигрируется) |
 | 8 | 0 | производитель; запись 8 = CV factory reset |
 | 11 | 0 | таймаут DCC-пакетов (×20 мс, 0=выкл) |
-| 30 | 0 | опции звука: бит0 `Skip StoD1`, бит1 `Skip D1toS` |
+| 30 | 0 | резерв (legacy `Skip StoD1`/`Skip D1toS`; графовый движок не читает) |
 | 63 | 20 | алиас общей громкости (`mvol`), чтение/запись через CV |
 | 17/18 | 0 | длинный адрес |
 | 19 | 0 | consist (бит 7 = реверс) |
@@ -657,9 +685,9 @@ flowchart TD
 | 54/55/56 | 128/60/32 | BEMF PID Kp/Ki/Kd |
 | 65 | 0 | кикстарт при трогании (0=выкл) |
 | 67..94 | линейно 0..255 | 28-точечная таблица скорости |
-| 114 | 57 | chuff/exhaust rate двигателя (0→0.5×, 51→1.0×, 255→3.0×) |
-| 115 | 5 | bell rate — скорость случайных/авто-звуков |
-| 116 | 30 | dynamic brake rate — скорость тормозного скрипа |
+| 114 | 57 | резерв (legacy chuff/exhaust rate; не читается в 0.10) |
+| 115 | 5 | резерв (legacy bell rate; не читается в 0.10) |
+| 116 | 30 | резерв (legacy dynamic-brake rate; не читается в 0.10) |
 
 Каждый `settings_cv_read()` — это чтение из RAM-массива `s_cv` (не NVS), поэтому
 горячие пути (мотор каждые 10 мс) дешёвы. Запись CV не пишет flash до
@@ -674,9 +702,18 @@ flowchart TD
 - SoftAP: SSID/пароль/адрес настраиваются, канал выбирается сканом, captive
   portal через DNS-хайджек (все имена → адрес AP) и 404→302.
 - Опрос статуса страницей — раз в 3 с; журнал событий — `GET /api/log`.
-- Панели звука: «Звук: Схема» (тип, клавиша старта, таблицы + модальный
-  редактор), «Звук: Функции» (матрица привязок), «Звук: Доп. звуки»,
-  «Звук: Параметры» (CV30/63/114/115/116). Живой статус — `GET /api/sound/state`.
+- Звук: два пункта меню (`Миксы`, `Звуковые схемы`) открывают один редактор
+  `sound-editor/blocks.html?mode=mix|scheme`; в каждом режиме видны только блоки
+  своего раздела. В Mixes — входы/выходы/логика и блоки `Звук` со ссылкой на
+  схему; в Sound schemes — `Старт/Простой/Цикл/Конец/Пауза` и общие
+  `Логика/Переменная/Задержка`. Двигатель всегда активен и отдаёт только выходы
+  ступеней; `Старт` имеет вход, поэтому схема может начинаться с `Паузы`.
+  F-клавиши есть только у `Вход (Fx)`; матрица привязок и CV63 (общая
+  громкость); CV30/114/115/116 — legacy-резерв без влияния на движок.
+  Живой статус графа — `GET /api/sound/graph/state`. При сохранении хранятся
+  последние `SG_STORE_KEEP_REVISIONS` ревизий проекта; выбранная ревизия не
+  удаляется. Проверка ссылок на WAV смотрит latest и выбранную ревизию, а не всю
+  историю, поэтому старые ревизии больше не блокируют замену ассетов.
 
 Маршруты (`start_http_server`, `web.c`):
 
@@ -697,7 +734,7 @@ flowchart TD
 | GET | `/api/audio/tracks` | список слотов |
 | POST | `/api/audio/play` / `/api/audio/stop` | проиграть слот / стоп |
 | POST | `/api/audio/volume` | громкости |
-| POST | `/api/audio/upload` | async WAV upload через `web_transfer`, validated staging и canonical rename |
+| POST | `/api/audio/upload` | async WAV upload через `web_transfer`, validated staging и canonical rename; `asset=1` — без привязки к legacy-слоту |
 | POST | `/api/audio/delete` | удалить слот |
 | GET | `/api/audio/library` | список установленных звуков + пофайловая громкость |
 | POST | `/api/audio/library/volume` | пофайловая громкость (`name`,`vol`) |
@@ -706,15 +743,15 @@ flowchart TD
 | GET | `/sound-files/<name>` | отдать звук браузеру (ADPCM→PCM16) |
 | POST | `/api/track/category` | категория слота (двигатель/эффект) |
 | GET/POST | `/api/func-map` | карта функций; `?view=bind\|matrix` — канонические привязки, `POST ?bind=1[&remove=1&idx=N]` — добавить/удалить привязку |
-| GET | `/api/sound/state` | живой статус движка (тип, двигатель, таблица, скорость) |
-| GET/POST | `/api/sound/scheme` | схема (тип, engine, таблицы, extras) |
-| POST | `/api/sound/table` | правка одной таблицы |
-| POST | `/api/sound/extra` | правка одного доп. звука |
-| GET | `/api/sound/lint` | проверка графа схемы |
-| GET | `/api/sound/projects` | список схем `.mds` (+ активная) |
-| POST | `/api/sound/project` | создать (`create=NAME[&type=N]`), выбрать (`activate=NAME`) или удалить (`delete=NAME`) схему |
-| GET | `/api/sound/download` | скачать схему файлом `.mds` (`name=NAME`) |
-| POST | `/api/sound/upload` | загрузить схему файлом `.mds` (`name=NAME[&activate=0]`) |
+| GET | `/api/sound/graph/state` | статус активного графа (id, revision, armed, fault) |
+| GET | `/api/sound/graph/projects` | список сохранённых проектов + ревизии |
+| GET | `/api/sound/graph/project` | JSON проекта (`id`, `revision`); содержит `editor.project` |
+| POST | `/api/sound/graph/validate` | проверка схемы v1 без применения |
+| POST | `/api/sound/graph/save` | сохранить ревизию (`id`, `expectedRevision`) |
+| POST | `/api/sound/graph/apply` | применить ревизию (`id`, `revision`; мотор должен стоять) |
+| POST | `/api/sound/graph/delete` | удалить проект и все ревизии (`id`); выбор сбрасывается в legacy |
+| GET | `/api/sound/graph/asset` | метаданные WAV (`file`) для манифеста |
+| GET | `/api/sound/graph/capabilities` | лимиты/возможности графа |
 | GET/POST | `/api/aux/cfg` | уровни/эффекты AUX |
 | GET | `/api/cv/read` / `/api/cv/all` | чтение CV |
 | POST | `/api/cv/write` | запись CV (commit) |
@@ -788,7 +825,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 ## 12. Аудио
 
 - Один I2S-канал, 22050 Гц, моно, 16 бит, DMA 6×512 кадров.
-- 20 голосов (`AUDIO_MAX_VOICES`), из них 18 dynamic FX и 2 reserved engine.
+- 20 голосов (`AUDIO_MAX_VOICES`): голоса 0..18 динамические (до 19 FX),
+  голос 19 зарезервирован под двигатель.
   PCM16 WAV, 1–2 канала, sample rate 1..192000 Гц → линейный ресемплинг →
   сумма с громкостями → клиппинг. Максимальная комбинация требует замера throughput.
 - `MIX_BLOCK = 256` сэмплов на блок.
@@ -918,6 +956,7 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 (`0x655E` = 26 206 Б, `components/sound`); остальное — `s_binds` привязок,
 `web`-массивы. Flash-прирост: код `sound`/REST + встроенная страница
 (`web_ui.html` выросла). `firmware.bin`: 826 176 → 850 640 Б.
+`s_scheme`/`s_binds` и legacy-таблицы удалены в 0.10; это исторический снимок.
 
 > В историческом снимке запас составлял ~1.1 МБ. Дополнительно
 > доступна **PSRAM 2 МБ** как heap. Веб-страница (`web_ui.html`) лежит в rodata и
@@ -947,7 +986,7 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 | **provision** | 6 444 | протокол провижининга + BEMF-консоль |
 | **motor** | 4 496 | ШИМ + PID + калибровка |
 | **settings** | 3 835 | NVS-обвязка |
-| **sound** | ~8–10 КБ | новый компонент: движок схемы + `.mds`-хранилище (0.9) |
+| **sound** | ~8–10 КБ | графовый движок: JSON-парсер/валидатор, раннер, store ревизий |
 | **main** | 3 803 | app_main + safety + колбэки |
 | **dcc** | 2 730 | разбор DCC |
 | **audio** | 2 326 | микшер |
@@ -963,14 +1002,13 @@ storage, auxio, track, pinmap) занимает примерно **150 КБ** fl
 
 ### 17.3 RAM
 
-Статический `.bss` (из `.map`) — крупнейшие: **`sound.s_scheme` (~25.6 КБ,
-активная схема, `0x655E`)**, `esp_wifi` (~5.2 КБ), `web` (~4.2 КБ: буферы
-API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~2.5 КБ),
-`lwip` (~2.3 КБ), `sound.s_binds` (~1 КБ), далее — `freertos`, `esp_hw_support`,
-`hal`, `motor` (~0.37 КБ), `vfs`. Плюс загружаемые `.data`/IRAM и динамические
-буферы Wi-Fi/lwIP/HTTP — итого ~79.5 КБ DRAM по отчёту сборки (было ~50 КБ до
-0.9; рост ≈ +28 КБ, в основном `s_scheme`). При нехватке DRAM `s_scheme` —
-первый кандидат на вынос в PSRAM.
+Сборка 2026-10-17 (`idf.py size`): **DIRAM 145 678 Б (42,6 % из 341 760)**,
+в том числе `.bss` 57 176 Б и `.data` 22 391 Б; **IRAM 16 384 Б (100 %)**.
+Крупнейшие `.bss`-потребители — `esp_wifi`, `web` (буферы API/JSON, журнал; HTML
+остаётся в rodata), `esp_phy`, `spi_flash`, `lwip`, `sound` (граф, раннер и
+store ревизий), `freertos`, `esp_hw_support`, `hal`, `motor`, `vfs`. Плюс
+динамические буферы Wi-Fi/lwIP/HTTP; при нехватке DRAM первые кандидаты на
+вынос в PSRAM — JSON/store-буферы звука и крупные буферы web.
 
 Текущие основные стеки: `main` 16 КБ, HTTP 16 КБ, `web_transfer` 16 КБ,
 `dcc` 8 КБ, `prov_listen` 8 КБ, HTTP-progress 4 КБ, `settings` 4 КБ.
@@ -993,7 +1031,7 @@ API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~
 **Легко добавить:**
 
 - Новая команда/маршрут REST — `register_route()` в `web.c` (лимит поднят до
-  `max_uri_handlers = 64`, сейчас занято ~47 — при новых следите за лимитом).
+  `max_uri_handlers = 64`, сейчас занято 58 — при новых следите за лимитом).
 - Новый эффект света — `auxio_effect_t` + `ch_duty()`/`ch_step()`.
 - Новый CV — прочитать в нужном месте через `settings_cv_read()` (массив
   `s_cv` уже 512 записей).
@@ -1003,7 +1041,8 @@ API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~
 
 **Ограничения/риски:**
 
-- Итоговый binary занимает 49.9% OTA-слота (запас около 962 КиБ);
+- Release-образ v0.10 — 1 128 272 Б (57,4 % OTA-слота `0x1e0000`, свободно
+  ≈818 КиБ). Локальная сборка 2026-10-17 — ≈1,109 МБ, свободно 44 % OTA-слота;
   рост кода и рабочих буферов требует повторного size/heap контроля.
 - **PSRAM включена** (2 МБ heap); крупные буферы могут уходить в неё, но не все
   (DMA-совместимость, `SPIRAM_MALLOC_ALWAYSINTERNAL`).
@@ -1017,10 +1056,10 @@ API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~
 - DCC ISR level-3 на CPU1 — при переносе задач с ядра 1 возможны конфликты по
   приоритету/латентности.
 - Изменение веб-страницы только через `web_ui.html` (иначе перезапишется).
-- `sound_scheme_t` ≈ 26 КБ (имена файлов 4×3×32 таблиц): не размещать на стеке
-  задач (главный стек — 16 КБ), использовать heap/модульную статику; при
-  нехватке DRAM — вынести в PSRAM. Loop-треки пока играются с перезапуском
-  (бесшовность — задача предзагрузки P2).
+- Графовый движок: до 57 `states`, 128 `transitions`, 24 `effects`; JSON-проект
+  (до 128 КиБ) разбирается в heap, а не на стеке задач (главный стек — 16 КБ).
+  При нехватке DRAM крупные буферы можно вынести в PSRAM. Loop-треки пока
+  играются с перезапуском (бесшовность — задача предзагрузки P2).
 - `sdkconfig` генерируется; править надо `sdkconfig.defaults`.
 
 ---
@@ -1028,14 +1067,25 @@ API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~
 ### 18.1 История исправлений
 
 Изменения по итогам код-ревью и батчей правок — в `FIXES_LOG.md`; сводный
-отчёт по дефектам и их статусам — в `CODE_REVIEW_REPORT.md`.
+отчёт по дефектам и их статусам — в `CODE_REVIEW_REPORT.md` (новейшее ревью —
+2026-10-17, §6).
+
+**0.10 — звуковой редактор и условные привязки.** Завершённые звуковые цепочки
+re-arm возвращаются во вход корня; таймер `Цикл «По времени»` не сбрасывается
+при повторе WAV; toggle/hold-семантика исправлена для циклов/звонка/компрессора.
+`func_binding_t` получил компактное условие (`FUNC_FLAG_COND/COND2/COND_OR`,
+`rhsVar` не поддерживается), `func_eval_ex()` разрешает переменные через
+`sound_variable_get()`. Двигатель переведён на голос 19, эффектам доступны
+0..18 (19 одновременных). Симулятор подтягивает длительности WAV и показывает
+активные выходы/AUX и логические действия. Версия 0.10.
 
 **0.9 — звуковой движок (roadmap R0–R6).** Добавлен компонент `sound`
-(`.mds`-хранилище, автомат, секвенсер, режимы F-клавиш, логики mute,
-`sync_motion`, random/state-звуки, тормозной скрип, линт). `audio` получил
-управление скоростью/фейд и аллокатор голосов (18/19 — под движок).
-`settings` — модель `sound_types.h`, канонические привязки `func_bind`
-(+миграция), `active_scheme`, манифест v2 (`B;`), CV30/63/114/115/116.
+(исторически `.mds`; сейчас JSON-граф, раннер, store ревизий; F-клавиши только у
+Input, логики/выходы — `func_binding_t`). `audio` получил
+управление скоростью/фейд и аллокатор голосов (19 — под движок).
+`settings` — модель `func_types.h`, канонические привязки `func_bind`
+(+миграция), манифест v2 (`B;`), CV30/63/114/115/116; выбор звукового проекта —
+файл `selection` на внешней NOR.
 `motor` — `motor_get_applied_speed()`. `web` — маршруты `/api/sound/*`,
 привязки `/api/func-map?view=bind`, панели «Звук» и `max_uri_handlers=64`.
 `provision` — `HIL-ENGINE`/`HIL-SCHEME-SPEED`. Версия 0.9 (CV7=9 с миграцией).
@@ -1048,11 +1098,14 @@ API/JSON, журнал, HTML не в RAM), `esp_phy` (~2.8 КБ), `spi_flash` (~
 1. Правки кода — в `components/<модуль>/`, публичный API — в `include/`.
 2. Новые зависимости модуля — в его `CMakeLists.txt` (`REQUIRES`).
 3. Веб — в `web_ui.html`, затем обычная сборка (заголовок сгенерируется).
-4. Настройки/CV — через `settings_*`, не писать в NVS напрямую.
-5. Прогнать `test\run_tests.ps1` и `idf_build.ps1`.
-6. Проверить `idf.py size` (RAM/Flash) перед коммитом.
-7. На железе — серийный лог 115200 и, для мотора, `BEMF-RAW`.
-8. Версия проекта — в `firmware/version.txt` (единственный источник); инкремент — `bump_version.bat`.
-9. Коммит — `CHANGELOG.md` пополняется автоматически (хук `.githooks/post-commit`).
-   После клона включить хуки один раз: `setup_git_hooks.bat` (или
-   `git config core.hooksPath .githooks`).
+4. Редактор блоков — в `sound_editor/public/blocks.html`; пересоберите
+   `npm run build` в `sound_editor/` и закоммитьте `dist/` (иначе сборка
+   отклонит устаревшие ассеты). Сам `dist/` вручную не редактируется.
+5. Настройки/CV — через `settings_*`, не писать в NVS напрямую.
+6. Прогнать `test\run_tests.ps1` (включая JS) и `idf_build.ps1`.
+7. Проверить `idf.py size` (RAM/Flash) перед коммитом.
+8. На железе — серийный лог 115200 и, для мотора, `BEMF-RAW`.
+9. Версия проекта — в `firmware/version.txt` (единственный источник); инкремент — `bump_version.bat`.
+10. Коммит — `CHANGELOG.md` пополняется автоматически (хук `.githooks/post-commit`).
+    После клона включить хуки один раз: `setup_git_hooks.bat` (или
+    `git config core.hooksPath .githooks`).

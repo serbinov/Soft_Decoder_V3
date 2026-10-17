@@ -21,7 +21,8 @@
 typedef enum {
     SG_FN_PRESS, SG_FN_RELEASE, SG_FN_ON, SG_FN_OFF, SG_ENGINE_ON,
     SG_ENGINE_OFF, SG_SPEED, SG_ACCEL, SG_DECEL, SG_SAMPLE_DONE,
-    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM, SG_TIMEOUT, SG_VAR_CMP
+    SG_DIR_FWD, SG_DIR_REV, SG_RANDOM, SG_TIMEOUT, SG_VAR_CMP,
+    SG_STATE_ENTER     /* true for the tick after a channel enters a state */
 } sg_condition_type_t;
 /* Built-in status variables resolved by the runner; SG_VAR_USER is stored. */
 typedef enum { SG_VAR_USER, SG_VAR_SPEED, SG_VAR_FORWARD, SG_VAR_MOVING, SG_VAR_ENGINE } sg_var_kind_t;
@@ -67,6 +68,8 @@ typedef struct {
 typedef struct {
     char id[SG_ID_CAP], name[SG_NAME_CAP], engine_entry[SG_ID_CAP];
     uint8_t engine_entry_index, engine_fn, hysteresis;
+    bool engine_hold;       /* input-linked F behaves as hold instead of toggle */
+    bool observers;         /* global logic/var/delay blocks exist; tick from boot */
     uint8_t state_count, transition_count, effect_count, asset_count, variable_count;
     sg_variable_t variables[SG_MAX_VARIABLES];
     sg_state_t states[SG_MAX_STATES];
@@ -99,6 +102,8 @@ typedef struct {
 typedef struct {
     uint8_t state, pending;
     bool playing, done, failed;
+    bool retry_play;        /* a voice was unavailable; retry playback next tick */
+    bool entered, started; /* for SG_STATE_ENTER and first-tick setVar/timeout */
     sg_handle_t handle;
     uint32_t elapsed_ms;   /* time in the current state, for SG_TIMEOUT */
     uint16_t loops_done;   /* completed repeats of a finite looping state */

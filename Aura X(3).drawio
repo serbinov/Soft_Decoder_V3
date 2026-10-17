@@ -1,0 +1,394 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="T-kP_FU40ecm4vQCInGt">
+    <mxGraphModel dx="4279" dy="3415" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="FBUvYmeX4BE18ETgzBH1-4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillStyle=solid;fillColor=light-dark(#FFFFFF,#006600);" value="" vertex="1">
+          <mxGeometry height="60" width="2530" x="20" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="FBUvYmeX4BE18ETgzBH1-3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillStyle=solid;fillColor=light-dark(#FFFFFF,#006600);" value="" vertex="1">
+          <mxGeometry height="60" width="2530" x="10" y="15" as="geometry" />
+        </mxCell>
+        <mxCell id="FBUvYmeX4BE18ETgzBH1-1" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;div&gt;&lt;b&gt;&lt;span class=&quot;HwtZe&quot; lang=&quot;en&quot;&gt;&lt;span class=&quot;jCAhz ChMk0b&quot;&gt;&lt;span class=&quot;ryNqvb&quot;&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;Раздел&amp;nbsp;Mixes&lt;/font&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/b&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="100" x="30" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="FBUvYmeX4BE18ETgzBH1-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;div&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;&lt;span class=&quot;HwtZe&quot; lang=&quot;en&quot;&gt;&lt;span class=&quot;jCAhz ChMk0b&quot;&gt;&lt;span class=&quot;ryNqvb&quot;&gt;&lt;b&gt;Раздел Sound Schemes&lt;/b&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/font&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="220" x="40" y="745" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-1" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="&lt;div&gt;Готовые блоки&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="100" x="10" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="&lt;div&gt;Готовые блоки&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="100" x="20" y="805" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF9933);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Input (Fx)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="10" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(2)&lt;/div&gt;&lt;div&gt;Output (AUX, Light)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="10" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66FF);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Sound&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="10" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(4)&lt;/div&gt;&lt;div&gt;Logic&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="10" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#00CC00);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Start&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="845" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66B3);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(2)&lt;/div&gt;&lt;div&gt;Simple&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="915" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66B3);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Loop&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="985" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF0000);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(4)&lt;/div&gt;&lt;div&gt;End&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="1055" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(5)&lt;/div&gt;&lt;div&gt;Logic&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1810" y="1055" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(5)&lt;/div&gt;&lt;div&gt;Set Variable&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="10" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-13" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(6)&lt;/div&gt;&lt;div&gt;Set Variable&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="1195" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-14" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="&lt;div&gt;Учитывая специфику задачи, я себе вижу разделение глобально на два отдельных раздела:&lt;/div&gt;&lt;div&gt;&amp;nbsp; &amp;nbsp;- миксы (в виде блок-схемы, где настраиваются связи между входами и выходами, логика, проигрывание звуковых схем)&lt;/div&gt;&lt;div&gt;&amp;nbsp; &amp;nbsp;- звуковые схемы (в виде блок-схемы, где настраиваются сами звуковые схемы, то есть правила и условия проигрывания определенного набора звуковых файлов)&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Пытаясь закрыть все возможные задачи, которые могут возникнуть при настройке декодера, думаю, что разумно заложить глобальные переменные, часть из которых является просто переменными статуса: движение вперед или назад, текущая скорость движения, есть движение или нет, кажется логичным в этих глобальных переменных отобразить также состояние вывода Fx, чтобы его можно было использовать в операторах Логики (5). Состояние выхода Fx, если я все правильно понимаю, может иметь три состояния: Включено, Выключено, Удержание. Можно добавить любые другие, которые могут быть полезны. На данный момент эти переменные уже присутствуют в проекте, остальные я бы оставил на усмотрение пользователя, чтобы можно было настроить полностью кастомную логику, пользователь имеет возможность задания значения переменной по имени, которая также будет являться глобальной для всего проекта, то есть будет видимой как в Миксах, так и в Звуковых схемах. Это позволить закрыть сценарии, которые мы не смогли предусмотреть на данный момент.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="840" x="20" y="-140" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-15" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=26;fontStyle=1" value="ADDITIPUS AURA X" vertex="1">
+          <mxGeometry height="30" width="280" x="10" y="-280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-16" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Устанавливает переменную пользователя по имени или номеру, смотря что будет удобнее в плане кода. Значение переменной является глобальной и может быть использовать в операторе (4) Logic. Имеет Вход и Выход, Если имеют связи, то выполняются последовательно, если не подключен Вход, то выполняется при запуске, если не подключен Выход, то просто устанавливает значение переменной и все" vertex="1">
+          <mxGeometry height="30" width="1120" x="150" y="415" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-17" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок проигрывает звуковую схему по имени. Имеет Вход и Выход, которые могут быть не подключены. Если подключены, то выполняются последовательно, если нет, то при запуске. По большому счету, если я правильно понимаю, то обычно блок следует после блока (4) Logic или (1) Input." vertex="1">
+          <mxGeometry height="30" width="950" x="150" y="275" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-18" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок переводить соответствующий вывод в установленное в настройках состояние. Соответствует текущему блоку AUX, для простоты и понятности, я предлагаю объединить AUX и Lights в один блок, в настройках выбирается режим работы, точно так, как сделано сейчас, без изменений. Имеет только Вход. В теории можно пытаться сделать и Выход, но я не вижу в этом необходимости. Блок для каждого выхода может быть только один в блок схеме. Смотря как проще сделать, но в настройках блока, должен быть список для выбора канала, если блок данного канала уже присутствует, то выбрать его нельзя." vertex="1">
+          <mxGeometry height="30" width="1550" x="150" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-19" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок логики или условия, позволяется получить значение глобальной переменной и вернуть True или False, соответственно Имеет Вход и Выходы: True или False. Внутри блока настраивается условия, где можно выбрать по имени глобальную переменную, задать условие сравнения (&amp;gt;, &amp;lt;, =, &amp;gt;=, &amp;lt;=) и значение, с которым сравниванием, это может быть фиксированное значение или также глобальная переменная. В идеале хорошо бы иметь возможность добавления нескольких условий в один блок и указать условия между ними (AND, OR, NOT). Один из выходов может быть соединен через стрелки блоков с Входов данного блока. Что даст блок ожидания какого-то события." vertex="1">
+          <mxGeometry height="30" width="1610" x="150" y="345" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-20" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="&lt;div&gt;Блок входов. Тут только Fx. Блок имеет только 3 выхода, соответствующие возможных значениям Fx, то есть включено, выключено и удержание. Остальное логику я себе вижу через блок (4) Logic (в частности условия скорости движения, направления и тп). В настройках выбирается номер F. Блок для каждого F может быть только один в блоке схеме&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="1190" x="150" y="135" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-21" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок начала звуковой сцены, обязательный для каждой звуковой схемы. Имеет Вход и Выход. Вход может быть не подключен или подключен к выходу блока (5) Logic, для получения произвольного сценария и последовательности выполнения. В настройках выбирается звуковой файл и указывается громкость." vertex="1">
+          <mxGeometry height="30" width="1190" x="160" y="860" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-22" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(6)&lt;/div&gt;&lt;div&gt;Delay&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="10" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-23" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок задержки, позволяет добавить паузу или задержку перед выполнением следующего блока" vertex="1">
+          <mxGeometry height="30" width="1120" x="150" y="485" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-24" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(7)&lt;/div&gt;&lt;div&gt;Delay&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="1265" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-25" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок задержки, позволяет добавить паузу или задержку перед выполнением следующего блока" vertex="1">
+          <mxGeometry height="30" width="1120" x="160" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-26" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Аналогично блоку (5) Set Variable из раздела Mixes" vertex="1">
+          <mxGeometry height="30" width="1120" x="160" y="1210" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-27" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Аналогично блоку (4) Logic из раздела Mixes" vertex="1">
+          <mxGeometry height="30" width="1120" x="160" y="1140" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-28" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок завершения звуковой сцены, обязательный для каждой звуковой схемы. Имеет только вход, после чего звуковая схема завершается. В настройках выбирается звуковой файл и громкость" vertex="1">
+          <mxGeometry height="30" width="1190" x="160" y="1070" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-29" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок цикличного повторения звукового файла, аналогичен существующему у нас блоку Loop. В настройках указывается звуковой файл, громкость, условия повторения (по количеству раз, по времени, по условию). В теории можно выстроить блок из Simple и Logic, но тут просто пользователям будет проще иметь именно блок Loop, чем каждый раз изобретать его самостоятельно." vertex="1">
+          <mxGeometry height="30" width="1190" x="160" y="995" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-30" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок простого проигрывания звукового файла." vertex="1">
+          <mxGeometry height="30" width="1190" x="160" y="927" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-31" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="&lt;div&gt;На данный момент во многих звуковых блоках присутствует возможность добавления задержки. В итоговых блоках не особо удобно ее контролировать, легко упустить. Мне кажется, что проще будет использовать блок (7) Delay для добавления паузы.&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;На мой взгляд, такой набор блоков в разделе Звуковые Схемы позволяет реализовать пользователю любой сценарий проигрывания звука. Причем по его усмотрению. То есть он позволяет самостоятельно реализовать Whistle, Horn, Compressor, Brake и все остальные, без использования жесткой логики, которую мы заложим в готовые блоки каких-то базовых звуков. То есть полная гибкость, плюс нет необходимости делать программную реализацию и жестко зашивать правила проигрывания того же Compressor. Один пользователь захочет так, другой так. С помощью данных блоков сами соберут что им надо и как. Плюс меньше кодить, меньше условий, все становится проще.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="1120" x="30" y="1475" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-32" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(8)&lt;/div&gt;&lt;div&gt;Mute&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="1337" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-33" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=14;" value="Блок выключения звука. В параметрах имеет возможность поставить чекбокс для прекращения воспроизведения, если оно производится на данный момент. По логике работы просто устанавливает громкость на 0." vertex="1">
+          <mxGeometry height="30" width="1120" x="160" y="1352" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-34" edge="1" parent="1" style="endArrow=none;dashed=1;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1400" y="1585" as="sourcePoint" />
+            <mxPoint x="1400" y="795" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-35" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Примеры" vertex="1">
+          <mxGeometry height="30" width="100" x="1420" y="805" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-36" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#00CC00);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Start&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1440" y="867" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-37" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66B3);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Loop&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1620" y="867" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-38" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF0000);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(4)&lt;/div&gt;&lt;div&gt;End&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1810" y="867" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-39" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1570" y="897" as="sourcePoint" />
+            <mxPoint x="1610" y="897" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-40" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1755" y="896.5" as="sourcePoint" />
+            <mxPoint x="1795" y="896.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-41" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#00CC00);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Start&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1440" y="1055" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-42" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66B3);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Loop&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1620" y="1055" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-43" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF0000);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(4)&lt;/div&gt;&lt;div&gt;End&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1990" y="1055" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-44" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1570" y="1084.5" as="sourcePoint" />
+            <mxPoint x="1610" y="1084.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-45" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1755" y="1084.5" as="sourcePoint" />
+            <mxPoint x="1795" y="1084.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-47" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1940" y="1065" as="sourcePoint" />
+            <mxPoint x="1980" y="1065" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-48" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" x="-0.7278" as="geometry">
+            <Array as="points">
+              <mxPoint x="1960" y="1105" />
+              <mxPoint x="1960" y="1145" />
+              <mxPoint x="1680" y="1145" />
+            </Array>
+            <mxPoint x="1940" y="1105" as="sourcePoint" />
+            <mxPoint x="1680" y="1125" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-49" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(5)&lt;/div&gt;&lt;div&gt;Logic&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2190" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-50" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#00CC00);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Start&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1620" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-51" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66B3);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Loop&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2000" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-52" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF0000);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(4)&lt;/div&gt;&lt;div&gt;End&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2370" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-53" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1750" y="1310" as="sourcePoint" />
+            <mxPoint x="1790" y="1310" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-54" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="2135" y="1309.5" as="sourcePoint" />
+            <mxPoint x="2175" y="1309.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-55" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="2320" y="1290" as="sourcePoint" />
+            <mxPoint x="2360" y="1290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-56" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" x="-0.7278" as="geometry">
+            <Array as="points">
+              <mxPoint x="2340" y="1330" />
+              <mxPoint x="2340" y="1370" />
+              <mxPoint x="2060" y="1370" />
+            </Array>
+            <mxPoint x="2320" y="1330" as="sourcePoint" />
+            <mxPoint x="2060" y="1350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-57" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(5)&lt;/div&gt;&lt;div&gt;Logic&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="20" y="1125" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-58" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(8)&lt;/div&gt;&lt;div&gt;Mute&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1440" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-59" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1570" y="1309.5" as="sourcePoint" />
+            <mxPoint x="1610" y="1309.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-60" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(7)&lt;/div&gt;&lt;div&gt;Delay&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1810" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-61" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1940" y="1309.5" as="sourcePoint" />
+            <mxPoint x="1980" y="1309.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-62" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Звуковая схема 1" vertex="1">
+          <mxGeometry height="30" width="150" x="1420" y="835" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-64" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Звуковая схема 2" vertex="1">
+          <mxGeometry height="30" width="150" x="1425" y="1005" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-65" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Звуковая схема 3" vertex="1">
+          <mxGeometry height="30" width="150" x="1430" y="1225" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-66" edge="1" parent="1" style="endArrow=none;dashed=1;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1790" y="710" as="sourcePoint" />
+            <mxPoint x="1790" y="90" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-67" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Примеры" vertex="1">
+          <mxGeometry height="30" width="100" x="1790" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-68" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Пример 1" vertex="1">
+          <mxGeometry height="30" width="150" x="1765" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-69" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF9933);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Input (F1)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1810" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-70" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(2)&lt;/div&gt;&lt;div&gt;Output (Light)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2005" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-72" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1948" y="179.5" as="sourcePoint" />
+            <mxPoint x="1988" y="179.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-73" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-72" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;On&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.66" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-74" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Пример 2" vertex="1">
+          <mxGeometry height="30" width="150" x="1765" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-75" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF9933);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Input (F1)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1810" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-76" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(2)&lt;/div&gt;&lt;div&gt;Output (Light)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2005" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-77" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1948" y="289.5" as="sourcePoint" />
+            <mxPoint x="1988" y="289.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-78" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-77" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;On&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.66" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-79" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66FF);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Sound&lt;/div&gt;&amp;nbsp;(Horn)" vertex="1">
+          <mxGeometry height="60" width="120" x="2005" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-80" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" x="0.5316" as="geometry">
+            <Array as="points">
+              <mxPoint x="1950" y="370" />
+            </Array>
+            <mxPoint x="1950" y="290" as="sourcePoint" />
+            <mxPoint x="1990" y="369.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-81" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-80" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;On&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.8466" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-82" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;fontSize=14;" value="Пример 3" vertex="1">
+          <mxGeometry height="30" width="150" x="1765" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-83" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF9933);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(1)&lt;/div&gt;&lt;div&gt;Input (F1)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="1810" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-84" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(2)&lt;/div&gt;&lt;div&gt;Output (Light)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2005" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-85" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1948" y="459.5" as="sourcePoint" />
+            <mxPoint x="1988" y="459.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-86" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-85" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;On&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.66" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-87" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FF66FF);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(3)&lt;/div&gt;&lt;div&gt;Sound&lt;/div&gt;&amp;nbsp;(Horn)" vertex="1">
+          <mxGeometry height="60" width="120" x="2005" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-88" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" x="0.5316" as="geometry">
+            <Array as="points">
+              <mxPoint x="1950" y="540" />
+            </Array>
+            <mxPoint x="1950" y="460" as="sourcePoint" />
+            <mxPoint x="1990" y="539.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-89" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-88" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;On&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.8466" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-90" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=light-dark(#1BA1E2,#FFFF66);fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(4)&lt;/div&gt;&lt;div&gt;Logic&lt;/div&gt;&amp;nbsp;(Direction Front)" vertex="1">
+          <mxGeometry height="60" width="120" x="2005" y="590" as="geometry" />
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-91" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" x="0.5692" as="geometry">
+            <Array as="points">
+              <mxPoint x="1950" y="630" />
+            </Array>
+            <mxPoint x="1950" y="540" as="sourcePoint" />
+            <mxPoint x="1990" y="629.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-92" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-91" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;div&gt;On&lt;/div&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.8615" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-93" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="2133" y="600" as="sourcePoint" />
+            <mxPoint x="2173" y="600" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-94" connectable="0" parent="jZZxc91wZ2d6JWRdRUgt-93" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="True" vertex="1">
+          <mxGeometry relative="1" x="0.66" y="1" as="geometry">
+            <mxPoint x="-13" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="jZZxc91wZ2d6JWRdRUgt-95" parent="1" style="rounded=1;whiteSpace=wrap;html=1;perimeterSpacing=3;roundedPerimeter=1;fillColor=#1ba1e2;fontColor=#ffffff;strokeColor=#006EAF;glass=0;shadow=0;" value="&lt;div&gt;(2)&lt;/div&gt;&lt;div&gt;Output (AUX1)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="2180" y="590" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

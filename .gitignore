@@ -2,6 +2,11 @@
 .playwright-mcp/
 __pycache__/
 
+# Scratch directories created by host tests / provisioning when run from the
+# repository root (firmware/.gitignore covers the same names under firmware/).
+*_tmp/
+/TMP/
+
 # Local backups and archives
 *.zip
 

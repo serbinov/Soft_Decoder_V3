@@ -1,37 +1,32 @@
 # Sound-related CVs
 
-Firmware 0.9. All values are 0..255 unless noted. CV7 is read-only (decoder
+Firmware 0.10. All values are 0..255 unless noted. CV7 is read-only (decoder
 version, mirrors `version.txt`); CV8 = 8 triggers a CV factory reset.
 
 | CV | Name | Default | Meaning |
 |---|---|---|---|
-| 30 | Sound options | 0 | Bit 0 `Skip StoD1` — do not start the D1 (lowest drive) table from a standstill. Bit 1 `Skip D1toS` — do not play the Stop table on stopping. Other bits reserved. |
-| 63 | Master volume (alias) | 20 | Bidirectional alias of the persisted master volume (`mvol`). Read/write via the normal CV API. |
-| 114 | Chuff / exhaust rate | 57 | Playback-rate modifier for the engine (chuff/exhaust) loop. |
-| 115 | Bell ring rate | 5 | Playback-rate modifier for random/automatic sounds. |
-| 116 | Dynamic brake rate | 30 | Playback-rate modifier for the brake-squeal cue. |
+| 63 | Master volume (alias) | 20 | Bidirectional alias of the persisted master volume (`mvol`). Read/write via the normal CV API; applied by the audio mixer. |
+| 30 | Sound options (legacy) | 0 | Stored for compatibility; the graph engine does not read it. |
+| 114 | Chuff / exhaust rate (legacy) | 57 | Stored for compatibility; not consumed in 0.10. |
+| 115 | Bell ring rate (legacy) | 5 | Stored for compatibility; not consumed in 0.10. |
+| 116 | Dynamic brake rate (legacy) | 30 | Stored for compatibility; not consumed in 0.10. |
 
-## Rate mapping
+## Current sound control (0.10)
 
-CV114/115/116 are converted to a playback-rate permille:
+The graph sound engine is the only sound behaviour model; the legacy MDS/table
+subsystem that used CV30 and the CV114–116 rate mapping was removed
+(see `sound_scheme.md`). In 0.10:
 
-```
-permille = 500 + cv * 2500 / 255
-```
+- playback `rate` and `volume` are properties of a graph state, authored in the
+  block editor (`/sound-editor/blocks.html`);
+- `engine_volume` / `effects_volume` scale the corresponding channels;
+- CV63 (`mvol`) is the final master volume applied by the mixer.
 
-| CV | rate | note |
-|---|---|---|
-| 0 | 500 ‰ | 0.5× (slowest) |
-| 51 | 1000 ‰ | 1.0× (nominal) |
-| 255 | 3000 ‰ | 3.0× (fastest) |
-
-Defaults: CV114 = 57 ≈ 1.06×, CV115 = 5 ≈ 0.55×, CV116 = 30 ≈ 0.79×.
-
-Per-table `rate_scale` (0..127, edited in the sound table UI) adds further
-speed-dependent scaling on top of CV114 for that table.
+CV30/CV114/CV115/CV116 remain in NVS and in the CV editor so existing dumps and
+older documentation do not break. They have no runtime effect.
 
 ## Editing
 
-- CV30/63/114/115/116 are in the CV editor and in the «Звук: Параметры» panel.
+- CV63 is in the CV editor and in the «Звук: Параметры» panel.
 - CV63 writes are staged like other CVs and committed by the deferred path
   (`safety_task`), never synchronously in the DCC callback.

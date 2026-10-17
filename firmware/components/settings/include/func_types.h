@@ -23,7 +23,19 @@
 #define FUNC_STATE_STOPPED 2
 
 #define FUNC_FLAG_DUCK   (1u << 0)  /* duck the engine while active */
-#define FUNC_FLAG_INVERT (1u << 1)
+#define FUNC_FLAG_INVERT (1u << 1)  /* invert the final condition (Logic False) */
+/* Graph output/logic bindings may carry a variable condition. To keep the NVS
+ * blob layout compatible, the otherwise-unused legacy fields are reused:
+ *   short_table = condition 1 variable index (0..15)
+ *   short_ms    = op1 (bits 0..2), op2 (bits 3..5), var2 (bits 12..15)
+ *   min_ms      = value 1 (int16)
+ *   fade_ms     = value 2 (int16)
+ * Bit 2 enables the condition, bit 3 enables the second condition, bit 4 makes
+ * the pair OR (otherwise AND). Comparisons are value-based; rhsVar is not
+ * supported by the compact binding. */
+#define FUNC_FLAG_COND   (1u << 2)
+#define FUNC_FLAG_COND2  (1u << 3)
+#define FUNC_FLAG_COND_OR (1u << 4)
 
 /* Logic targets. */
 #define FUNC_LOGIC_MUTE_STOP        1

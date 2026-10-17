@@ -6,9 +6,6 @@
 #include <stdatomic.h>
 #include <math.h>
 
-#include "../../components/sound/src/sound_graph.c"
-#include "../../components/sound/src/sound_graph_runner.c"
-
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
@@ -17,8 +14,6 @@
 #include "freertos/task.h"
 #include "pinmap.h"
 #include "storage.h"
-#include "sound.h"
-#include "settings.h"
 #include "motor.h"
 #ifdef _WIN32
 #include <windows.h>
@@ -65,11 +60,6 @@ static esp_err_t audio_test_i2s_enable(i2s_chan_handle_t channel);
 #undef i2s_channel_write
 #undef gpio_config
 #undef gpio_set_level
-#define TAG sound_test_tag
-#define s_inhibited sound_test_inhibited
-#include "../../components/sound/src/sound.c"
-#undef s_inhibited
-#undef TAG
 #undef static
 
 #include "../../test_libs/teststubs/stubs.c"
@@ -162,25 +152,6 @@ esp_err_t storage_access_begin(void)
 void storage_access_end(void) { --s_storage_leases; }
 bool storage_is_mounted(void) { return true; }
 const char *storage_get_root(void) { return getenv("TEMP") != NULL ? getenv("TEMP") : "."; }
-esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
-{
-    (void)idx;
-    *out = 51;
-    return ESP_OK;
-}
-esp_err_t settings_active_scheme_get(char *out, size_t cap)
-{
-    (void)cap;
-    out[0] = 0;
-    return ESP_ERR_NOT_FOUND;
-}
-esp_err_t settings_active_scheme_set(const char *name) { (void)name; return ESP_OK; }
-esp_err_t settings_func_bind_load(func_binding_t *out, size_t *count)
-{
-    (void)out;
-    *count = 0;
-    return ESP_OK;
-}
 void motor_get_applied_speed(uint8_t *speed, bool *forward) { *speed = 0; *forward = true; }
 
 #define TMP_MONO   "dcc_test_mono.wav"
@@ -310,9 +281,6 @@ void setUp(void)
     s_i2s_delete_calls = 0;
     s_i2s_disable_calls = 0;
     s_i2s_enable_err = ESP_OK;
-    s_lock = NULL;
-    sound_test_inhibited = false;
-    s_control_armed = true;
     mock_mutex_create_fail = 0;
     s_volume = 100;
     /* The anti-click envelope is exercised by dedicated tests; keep the
@@ -1189,9 +1157,7 @@ static void test_inhibit_confirmed_quiescence(void)
 static void test_reserved_voices_survive_fx_saturation(void)
 {
     make_wav_const(s_path_mono, 22050, 2000, 1000);
-    audio_voice_handle_t engine, secondary;
-    TEST_ASSERT_EQUAL(ESP_OK,
-                      audio_voice_play_generation(18, s_path_mono, true, 100, &engine));
+    audio_voice_handle_t secondary;
     TEST_ASSERT_EQUAL(ESP_OK,
                       audio_voice_play_generation(19, s_path_mono, true, 100, &secondary));
     mixer_step();
@@ -1204,9 +1170,8 @@ static void test_reserved_voices_survive_fx_saturation(void)
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, audio_voice_alloc_owned(&overflow));
     TEST_ASSERT_EQUAL(AUDIO_VOICE_NONE, overflow.voice);
     mixer_step();
-    TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(engine));
     TEST_ASSERT_EQUAL(AUDIO_VOICE_PLAYING, audio_voice_get_state(secondary));
-    TEST_ASSERT_EQUAL(2, s_storage_leases);
+    TEST_ASSERT_EQUAL(1, s_storage_leases);
     audio_stop_all();
     mixer_step();
     TEST_ASSERT_EQUAL(0, s_storage_leases);

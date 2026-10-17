@@ -110,6 +110,37 @@ def _base(name):
     return base
 
 
+def _sanitize(name):
+    """Match tools/pack_sounds.py and components/web/src/web_util.c."""
+    out = []
+    for ch in name:
+        o = ord(ch)
+        if ch.isascii() and ch.isalnum():
+            out.append(ch)
+        elif o >= 0x80 or ch in ("_", "-", "."):
+            out.append(ch)
+        else:
+            out.append("_")
+    return "".join(out)
+
+
+def _sound_alias():
+    """Map sanitized device filename -> source WAV in SOUND/."""
+    aliases = {}
+    try:
+        names = os.listdir(SOUND_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        if not name.lower().endswith(".wav"):
+            continue
+        aliases.setdefault(_sanitize(name[:-4]) + ".wav", name)
+    return aliases
+
+
+SOUND_ALIASES = _sound_alias()
+
+
 def _parse_pack(body):
     """Validate an AURA Sound Pack (.asp) and return its index entries.
     Raises ValueError with a short reason on any structural problem."""
@@ -818,11 +849,7 @@ def handle_api(method, path, query, body):
         return 200, log_json(query)
 
     if path == "/api/sound-files":
-        try:
-            files = set(name for name in os.listdir(SOUND_DIR)
-                        if name.lower().endswith(".wav"))
-        except OSError:
-            files = set()
+        files = set(SOUND_ALIASES.keys())
         files |= set(n + ".wav" for n in LIBRARY)
         return 200, ok(files=sorted(files))
 
@@ -928,7 +955,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, LIBRARY[base]["wav"], "audio/wav")
             safe = os.path.normpath(os.path.join(SOUND_DIR, rel))
             if safe.startswith(SOUND_DIR):
-                return self._serve_file(safe)
+                if os.path.isfile(safe):
+                    return self._serve_file(safe)
+                alias = SOUND_ALIASES.get(rel)
+                if alias:
+                    return self._serve_file(os.path.join(SOUND_DIR, alias))
             return self._json(404, {"ok": False, "error": "not found"})
 
         if path.startswith("/api/") or path == "/api":

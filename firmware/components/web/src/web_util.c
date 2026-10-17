@@ -300,8 +300,51 @@ uint16_t web_util_func_desired(const settings_func_map_t *m, bool fn_on,
     return on ? mask : 0U;
 }
 
-uint16_t func_eval(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t state,
-                   uint8_t dir, func_eval_cb_t cb, void *ctx)
+static bool func_cmp(int32_t lhs, uint8_t op, int32_t rhs)
+{
+    switch (op) {
+        case 0: return lhs == rhs;
+        case 1: return lhs != rhs;
+        case 2: return lhs < rhs;
+        case 3: return lhs <= rhs;
+        case 4: return lhs > rhs;
+        case 5: return lhs >= rhs;
+        default: return false;
+    }
+}
+
+static bool func_cond_value(func_var_get_t vars, void *ctx, uint8_t var, int32_t *out)
+{
+    if (vars == NULL || out == NULL || var >= 16U) {
+        return false;
+    }
+    return vars(ctx, var, out);
+}
+
+static bool func_binding_cond_ok(const func_binding_t *b, func_var_get_t vars, void *ctx)
+{
+    if ((b->flags & FUNC_FLAG_COND) == 0U) {
+        return true;
+    }
+    int32_t lhs = 0;
+    if (!func_cond_value(vars, ctx, (uint8_t)(b->short_table & 0x0FU), &lhs)) {
+        return false;
+    }
+    bool ok = func_cmp(lhs, (uint8_t)(b->short_ms & 0x07U), (int32_t)(int16_t)b->min_ms);
+    if ((b->flags & FUNC_FLAG_COND2) != 0U) {
+        int32_t lhs2 = 0;
+        if (!func_cond_value(vars, ctx, (uint8_t)((b->short_ms >> 12) & 0x0FU), &lhs2)) {
+            return false;
+        }
+        bool ok2 = func_cmp(lhs2, (uint8_t)((b->short_ms >> 3) & 0x07U), (int32_t)(int16_t)b->fade_ms);
+        ok = (b->flags & FUNC_FLAG_COND_OR) != 0U ? (ok || ok2) : (ok && ok2);
+    }
+    return (b->flags & FUNC_FLAG_INVERT) != 0U ? !ok : ok;
+}
+
+uint16_t func_eval_ex(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t state,
+                      uint8_t dir, func_eval_cb_t cb, void *ctx,
+                      func_var_get_t vars, void *var_ctx)
 {
     if (bind == NULL) {
         return 0U;
@@ -316,6 +359,9 @@ uint16_t func_eval(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t
             continue;
         }
         if (b->state != FUNC_STATE_ANY && b->state != state) {
+            continue;
+        }
+        if (!func_binding_cond_ok(b, vars, var_ctx)) {
             continue;
         }
         switch (b->target_type) {
@@ -336,6 +382,12 @@ uint16_t func_eval(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t
         }
     }
     return mask;
+}
+
+uint16_t func_eval(const func_binding_t *bind, size_t count, uint8_t fn, uint8_t state,
+                   uint8_t dir, func_eval_cb_t cb, void *ctx)
+{
+    return func_eval_ex(bind, count, fn, state, dir, cb, ctx, NULL, NULL);
 }
 
 uint8_t web_util_voice_volume(uint8_t fn, const uint8_t *cats, bool cats_loaded,

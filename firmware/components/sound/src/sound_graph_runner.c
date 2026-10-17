@@ -6,20 +6,38 @@ static void sgr_release(sg_runner_t *r, sg_channel_t *c)
 {
     if (c->playing && r->io.release) { r->io.release(r->io.ctx,c->handle); }
     c->playing = false;
+    c->retry_play = false;
     c->handle = (sg_handle_t){SG_NONE,0};
+}
+/* Start the current state's sample. A missing free voice is transient: keep the
+ * channel in its state and retry on the next tick instead of disabling it. */
+static bool sgr_start_audio(sg_runner_t *r, sg_channel_t *c, bool engine)
+{
+    if (!r->graph->states[c->state].file[0]) { return true; }
+    if (!r->io.play) { c->failed = true; return false; }
+    esp_err_t err = r->io.play(r->io.ctx,engine,&r->graph->states[c->state],&c->handle);
+    if (err == ESP_OK) { c->playing = true; c->retry_play = false; return true; }
+    c->retry_play = (err == ESP_ERR_NO_MEM || err == ESP_ERR_INVALID_STATE);
+    if (!c->retry_play) { c->failed = true; }
+    return false;
 }
 static void sgr_enter(sg_runner_t *r, unsigned channel, uint8_t state)
 {
     sg_channel_t *c = &r->channels[channel]; sgr_release(r,c);
     c->state = state; c->pending = SG_NONE; c->done = false; c->elapsed_ms = 0; c->loops_done = 0;
+    c->entered = true; c->retry_play = false;
     memset(c->speed_match,0,sizeof(c->speed_match));
     const sg_state_t *s = &r->graph->states[state];
     if (s->has_set && s->set_var < r->graph->variable_count) { r->vars[s->set_var] = s->set_value; }
-    if (!s->file[0]) { return; }
-    if (!r->io.play || r->io.play(r->io.ctx,channel == 0,s,&c->handle) != ESP_OK) {
-        c->failed = true; return;
-    }
-    c->playing = true;
+    (void)sgr_start_audio(r,c,channel == 0);
+}
+/* Repeat the current looping state without resetting elapsed_ms: a timeout loop
+ * measures the total time in the loop, not the length of the last sample. */
+static void sgr_replay_loop(sg_runner_t *r, unsigned channel)
+{
+    sg_channel_t *c = &r->channels[channel];
+    c->done = false; c->entered = false;
+    (void)sgr_start_audio(r,c,channel == 0);
 }
 void sg_runner_init(sg_runner_t *r, const sg_graph_t *g, const sg_io_t *io)
 {
@@ -39,7 +57,13 @@ void sg_runner_reset(sg_runner_t *r)
         for (unsigned i = 0; i < r->graph->effect_count; ++i) { r->channels[i+1].state = r->graph->effects[i].entry_index; }
         for (unsigned i = 0; i < r->graph->variable_count && i < SG_MAX_VARIABLES; ++i) { r->vars[i] = r->graph->variables[i].init; }
     }
-    r->engine_on = false; r->armed = false; r->fn_press = 0; r->fn_release = 0;
+    /* No engine F-key means the prime mover runs continuously (its graph is
+       still speed-driven); an Input-linked F toggles engine_on on press. */
+    r->engine_on = r->graph && r->graph->engine_fn == SG_NONE;
+    /* A continuous engine must be ticked from boot; otherwise wait for an F or
+       a motion event. */
+    r->armed = r->engine_on || (r->graph && r->graph->observers);
+    r->fn_press = 0; r->fn_release = 0;
 }
 void sg_runner_function(sg_runner_t *r, uint8_t fn, bool on)
 {
@@ -48,7 +72,10 @@ void sg_runner_function(sg_runner_t *r, uint8_t fn, bool on)
     if (on) { r->fn_levels |= bit; r->fn_press |= bit; }
     else { r->fn_levels &= ~bit; r->fn_release |= bit; }
     r->armed = true;
-    if (on && fn == r->graph->engine_fn) { r->engine_on = !r->engine_on; }
+    if (r->graph->engine_fn <= 28 && fn == r->graph->engine_fn) {
+        if (r->graph->engine_hold) { r->engine_on = on; }
+        else if (on) { r->engine_on = !r->engine_on; }
+    }
 }
 void sg_runner_power(sg_runner_t *r, bool on)
 {
@@ -67,7 +94,7 @@ static int32_t sgr_var(sg_runner_t *r, uint8_t idx, uint8_t speed)
         default: return r->vars[idx];
     }
 }
-static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_t speed, int32_t accel)
+static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_t speed, int32_t accel, bool entered)
 {
     const sg_condition_t *c = &r->graph->transitions[idx].condition;
     uint32_t bit = c->fn <= 28 ? UINT32_C(1) << c->fn : 0;
@@ -81,6 +108,7 @@ static bool sgr_condition(sg_runner_t *r, sg_channel_t *ch, unsigned idx, uint8_
         case SG_DIR_FWD: return r->forward;
         case SG_DIR_REV: return !r->forward;
         case SG_SAMPLE_DONE: return ch->done;
+        case SG_STATE_ENTER: return entered;
         case SG_RANDOM: return (sgr_rand(r) % 100u) < (c->has_min ? c->min : 100u);
         case SG_TIMEOUT: return c->has_min && ch->elapsed_ms >= (uint32_t)c->min * 50u;
         case SG_VAR_CMP: {
@@ -130,6 +158,9 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
     for (unsigned i = 0; i <= r->graph->effect_count; ++i) {
         sg_channel_t *ch = &r->channels[i]; if (ch->failed) { continue; }
         ch->elapsed_ms += dt_ms;
+        if (!ch->started) { ch->started = true; sgr_enter(r,i,ch->state); if (ch->failed) { continue; } }
+        if (ch->retry_play && !ch->playing) { (void)sgr_start_audio(r,ch,i == 0); if (ch->failed) { continue; } }
+        bool was_entered = ch->entered; ch->entered = false;
         if (!r->graph->states[ch->state].file[0]) { ch->done = true; }
         if (ch->playing && r->io.poll) {
             sg_audio_state_t audio = r->io.poll(r->io.ctx,ch->handle);
@@ -138,16 +169,17 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
                 sgr_release(r,ch);
                 const sg_state_t *st = &r->graph->states[ch->state];
                 if (st->loop && st->loops > 0 && ++ch->loops_done < st->loops) {
-                    /* more repeats to go: replay without signalling sample_done */
-                    if (r->io.play && r->io.play(r->io.ctx,i == 0,st,&ch->handle) == ESP_OK) { ch->playing = true; ch->elapsed_ms = 0; ch->done = false; }
-                    else { ch->failed = true; }
+                    /* more repeats to go: replay without signalling sample_done;
+                     * keep elapsed_ms so a timeout covers the whole loop run. */
+                    ch->done = false; ch->entered = false;
+                    (void)sgr_start_audio(r,ch,i == 0);
                 } else { ch->done = true; }
             }
         }
         uint8_t imm[SG_MAX_TRANSITIONS], pend[SG_MAX_TRANSITIONS]; int ni = 0, np = 0;
         for (unsigned j = 0; j < r->graph->transition_count; ++j) {
             const sg_transition_t *e = &r->graph->transitions[j];
-            if (e->source_index != ch->state || !sgr_condition(r,ch,j,speed,accel)) { continue; }
+            if (e->source_index != ch->state || !sgr_condition(r,ch,j,speed,accel,was_entered)) { continue; }
             if (e->timing == SG_AFTER_SAMPLE && ch->playing) { pend[np++] = (uint8_t)j; }
             else { imm[ni++] = (uint8_t)j; }
         }
@@ -158,7 +190,7 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
             sgr_enter(r,i,e->target_index); continue;
         }
         const sg_state_t *cs = &r->graph->states[ch->state];
-        if (ch->done && cs->loop && cs->loops == 0) { sgr_enter(r,i,ch->state); }
+        if (ch->done && cs->loop && cs->loops == 0) { sgr_replay_loop(r,i); }
         else { ch->done = false; }
     }
     r->fn_press = 0; r->fn_release = 0;

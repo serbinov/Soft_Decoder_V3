@@ -1,14 +1,18 @@
 # Soft Decoder V3 — ADDITIPUS AURA-X
 
 Прошивка DCC-декодера для моделей железных дорог на ESP32-S3 (ESP-IDF 6.0).
-Версия: **0.9** (`firmware/version.txt`).
+Версия: **0.10** (`firmware/version.txt`).
 
 Полное техническое описание — [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md).
 История изменений — [`CHANGELOG.md`](CHANGELOG.md).
 Исправления по код-ревью — [`firmware/FIXES_LOG.md`](firmware/FIXES_LOG.md) и
-[`firmware/CODE_REVIEW_REPORT.md`](firmware/CODE_REVIEW_REPORT.md).
+[`firmware/CODE_REVIEW_REPORT.md`](firmware/CODE_REVIEW_REPORT.md)
+(актуальное ревью 2026-10-17 — §6).
 Проверка нестабильных оборотов и программные исправления BEMF (2026-10-02) —
 [`firmware/BEMF_DIAGNOSTICS.md`](firmware/BEMF_DIAGNOSTICS.md).
+Проектирование звукового движка — исторические
+[`firmware/SOUND_ENGINE_ROADMAP.md`](firmware/SOUND_ENGINE_ROADMAP.md) и
+[`firmware/SOUND_ENGINE_IMPLEMENTATION.md`](firmware/SOUND_ENGINE_IMPLEMENTATION.md).
 
 ## Возможности
 
@@ -32,9 +36,10 @@
 - Эффекты AUX: включение/выключение, мигание (несколько режимов).
 
 **Звук**
-- Выход 22,05 кГц; PCM16 WAV 1–192 кГц, 1–2 канала. До 20 голосов, из них
-  18 dynamic FX и 2 reserved engine; допустимость формата не гарантирует
-  throughput любой комбинации файлов. Громкости: общая/двигатель/эффекты.
+- Выход 22,05 кГц; PCM16 WAV 1–192 кГц, 1–2 канала. До 20 голосов: голос 19
+  зарезервирован под двигатель, эффектам доступны голоса 0..18 (до 19
+  одновременных эффектов). Допустимость формата не гарантирует throughput любой
+  комбинации файлов. Громкости: общая/двигатель/эффекты.
 - Загрузка звуков через веб и по COM (PROV); хранение на внешней NOR.
 - Пакетная загрузка звуков одним файлом: контейнер `.asp` (до 400 звуков,
   по умолчанию IMA ADPCM ~4×, `--pcm` для PCM16), собирается на ПК
@@ -44,8 +49,21 @@
 - Прослушивание звуков по умолчанию — в браузере компьютера (переключатель
   «На компьютере / На декодере»); конструктор блоков тоже играет на ПК через
   `GET /sound-files/<name>`.
+- Конструктор блоков открывается двумя пунктами меню — **Миксы** и
+  **Звуковые схемы** (один редактор, `?mode=mix`/`?mode=scheme`); в каждом
+  режиме видны только блоки своего раздела. Двигатель работает всегда и имеет
+  только выходы ступеней скорости — звук подключается к ним блоками «Звук».
+  При первом открытии загружается типовой локомотив: двигатель с четырьмя
+  схемами по ступеням скорости, семь звуковых схем (гудок, звонок, компрессор,
+  сцепка, песочница, двери открыть/закрыть), логика Mixes через cue-блоки,
+  ambient-тормоз, фары/AUX1..4 и notch; F14 — условный AUX4 «Вентилятор»
+  (`speed > 20`). **Файл → Типовой локомотив** загружает его повторно,
+  **Новый** создаёт пустой проект.
 - Метаданные слотов (имена/категории, карта F↔AUX) в манифесте `tracks.txt`,
   переживают полный сброс NVS.
+- CV30/CV114–CV116 сохранены для совместимости, но в 0.10 не влияют на
+  воспроизведение: rate/volume задаются в блоках, общая громкость — CV63
+  (`firmware/docs/cv_sound.md`).
 
 **Веб-интерфейс и связь**
 - Управление мотором и функциями, редактор CV, загрузка звуков, калибровка BEMF.
@@ -111,7 +129,8 @@ cd firmware
 четыре фиксированных файла в `release/flash_download_tool/` и `manifest.json`
 с версией, адресами и SHA256. Этот комплект использует `web_flasher`.
 Для автоматизации: `build_firmware.bat --no-pause`. Полная офлайн-проверка:
-`python firmware/tools/release_artifacts.py verify --release release`.
+`python firmware/tools/release_artifacts.py verify --release release`
+(на 2026-10-17 проверены все 6 BIN, версия 0.10).
 
 Из каталога `firmware/`. Путь к ESP-IDF 6.0 задаётся через `-IdfPath`,
 переменную `$env:IDF_PATH` или файл `firmware\.idf_path`:
@@ -150,6 +169,21 @@ build_ota_with_sounds.ps1                           # составной OTA (п
   `flash`, `flash + monitor`, `erase + flash`, `fullclean`, `Host tests`;
 - `launch.json` — отладка через расширение ESP-IDF (`ESP-IDF: debug`).
 
+## Предпросмотр веб-интерфейса
+
+Без платы страницу и конструктор блоков можно открыть через mock-сервер:
+
+```powershell
+web_preview\start_preview.bat
+# или: python web_preview\mock_server.py [port]
+```
+
+`http://127.0.0.1:8080/` отдаёт настоящий `firmware/web_ui.html` и собранный
+`firmware/sound_editor/dist`; API отвечает тестовыми данными. После правки
+`firmware/sound_editor/public/blocks.html` пересоберите бандл
+(`cd firmware\sound_editor; npm run build`) и закоммитьте `dist/`, иначе сборка
+прошивки отклонит устаревшие ассеты (см. `firmware/docs/sound_blocks_editor.md`).
+
 ## Структура репозитория
 
 ```
@@ -157,14 +191,24 @@ firmware/            исходники прошивки и документац
   components/        модули: dcc, motor, track, audio, auxio, sound, web,
                      settings, storage, pinmap, provision, selftest
   main/              app_main.c
-  test/              host-тесты (Unity + gcc) и test/hil (по железу)
+  docs/              sound_scheme.md, sound_pack.md, sound_blocks_editor.md,
+                     cv_sound.md
+  sound_editor/      исходник и собранный офлайн-редактор блоков
+                     (public/ + scripts/, dist/ коммитится)
+  test/              host-тесты (Unity + gcc), test/sound_editor_assets.py,
+                     test/test_web_ui.js и test/hil (по железу)
   test_libs/         заглушки ESP-IDF для host-тестов
-  tools/             gen_web_html.py, bump_version.ps1, gen_flash_readme.ps1
+  tools/             gen_web_html.py, gen_sound_editor.py, pack_sounds.py,
+                     release_artifacts.py, bump_version.ps1, gen_flash_readme.ps1
   web_ui.html        исходник веб-страницы (сборка генерирует web_html.h)
   idf_build.ps1      сборка/прошивка через idf.py
-release/             собранные образы (ADDITIPUS_AURA-X_v<ver>.bin)
+release/             собранные образы (ADDITIPUS_AURA-X_v<ver>.bin),
+                     flash_download_tool/ и manifest.json
+SOUND/               исходные WAV-сэмплы для провижининга звуков
 web_flasher/         веб-панель (статус/настройка и запуск скриптов): start_flasher.bat
+web_preview/         локальный mock-сервер для браузерной проверки web_ui.html
 .vscode/             конфигурация VS Code (задачи, IntelliSense, отладка)
+.githooks/           git-хуки (запись в CHANGELOG.md после коммита)
 setup.ps1            автонастройка окружения (ESP-IDF, .idf_path, VS Code)
 .kilo/               агенты/команды код-ревью (см. .kilo/agent, .kilo/command)
 ```
@@ -178,8 +222,8 @@ powershell -ExecutionPolicy Bypass -File test\run_tests.ps1   # host-набор�
 powershell -ExecutionPolicy Bypass -File test\coverage.ps1    # покрытие строк host-сборок (gcov)
 ```
 
-Итоговый прогон исправлений 2026-10-02: **16 C-наборов, 705 тестов PASS**
-и **13 JavaScript-тестов PASS**. Для JS нужен Node.js (проверено с 22.16);
+Итоговый прогон 2026-10-17: **18 C-наборов, 790 тестов PASS**
+и **27 JavaScript-тестов PASS**. Для JS нужен Node.js (проверено с 22.18);
 без него runner выдаёт предупреждение, а JS не считается проверенным.
 Исходный прогон до исправлений: 15 наборов / 534 PASS; временные FAIL тогда
 выявили дефекты и позднее заменены постоянными регрессиями.
@@ -188,9 +232,13 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1    # покрытие
 node --test test\test_web_ui.js
 ```
 
-Ранее полученные 100% покрытия относятся к union исполняемых строк,
-попавших в gcov из host-сборок, а не ко всем ветвям или физическому поведению
-устройства. В проверке 2026-10-02 покрытие повторно не измерялось.
+Покрытие 2026-10-17 (`test\coverage.ps1`): **92,8 % (8237/8875 строк)** —
+union исполняемых строк first-party исходников (`components/` + `main/`),
+попавших в gcov из host-сборок. Это не покрытие всех ветвей, всего кода или
+физического поведения устройства; `web.c` — 83,8 %, `sound_graph_store.c` —
+96,0 %, `web_wifi.c` — 100 %. `sound.c` (RTOS-обвязка) в host-gcov не входит.
+Ранее сообщавшиеся 100 % относились к другому, меньшему набору строк и здесь не
+переиспользуются.
 
 Первый запуск скачает Unity (нужен Git/интернет). Компилятор ищется так:
 `$env:DCC_TEST_CC` → портативный TCC в `%TEMP%\tcc` → `gcc`/`clang` в PATH.

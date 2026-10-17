@@ -50,6 +50,10 @@ void sound_request_stop(void);
 esp_err_t sound_set_inhibited(bool inhibited);
 bool sound_engine_is_on(void);
 
+/* Current value of a graph variable by index (built-ins are resolved from the
+ * live motion/engine state). Used by conditional output/logic bindings. */
+bool sound_variable_get(uint8_t index, int32_t *out);
+
 /* Runtime inputs. */
 void sound_set_speed(uint8_t speed, bool forward);
 void sound_function(uint8_t fn, bool state);
@@ -58,5 +62,13 @@ void sound_function(uint8_t fn, bool state);
 bool sound_enabled(void);
 /* Directly start/stop the prime mover (HIL / diagnostics). */
 void sound_engine_power(bool on);
+/* Per-category gain for graph states (0..100). Master volume is handled by
+ * audio_set_volume(); these scale engine vs effect voices before playback. */
+void sound_set_volumes(uint8_t engine, uint8_t effects);
+/* Runtime logic actions compiled from FUNC_TARGET_LOGIC bindings.
+ * mute silences the graph; drive_hold freezes the speed/notch seen by the
+ * graph; coast/dynamic_brake force idle; notch_offset shifts the graph speed. */
+void sound_set_logic(bool mute, bool drive_hold, bool coast, bool dynamic_brake,
+                     int8_t notch_offset);
 
 #endif

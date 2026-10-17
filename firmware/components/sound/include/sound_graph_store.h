@@ -5,6 +5,9 @@
 
 #define SG_STORE_MAX_PROJECTS 64U
 #define SG_STORE_MAX_ENTRIES 1024U
+/* Newest revisions kept per project. Older files are pruned after a save;
+ * the selected revision is always retained so boot/apply stays valid. */
+#define SG_STORE_KEEP_REVISIONS 8U
 
 typedef struct {
     char id[SG_ID_CAP], name[SG_NAME_CAP];
@@ -27,9 +30,14 @@ esp_err_t sg_store_select(const char *id, uint32_t revision);
 esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision,
                              bool *graph_selected);
 esp_err_t sg_store_select_legacy(void);
+/* Delete every revision of a project. If it was selected, selection is
+ * switched to legacy first. was_selected may be NULL. */
+esp_err_t sg_store_delete(const char *id, bool *was_selected);
 esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag);
 esp_err_t sg_asset_inspect(const char *file, sg_asset_t *out, sg_diagnostic_t *diag);
-/* Failure means caller must refuse destructive asset operations. */
+/* Failure means caller must refuse destructive asset operations. Only the
+ * latest revision of each project and the selected revision are inspected;
+ * historical revisions are not allowed to block asset replacement. */
 esp_err_t sg_store_file_referenced(const char *file, bool *referenced);
 
 #endif

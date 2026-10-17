@@ -102,6 +102,7 @@ int web_mock_fclose(FILE *f);
 #define rename test_atomic_rename
 #define open test_binary_open
 #include "../../components/web/src/web.c"
+#include "../../components/web/src/web_wifi.c"
 #undef xTaskCreate
 #undef esp_ota_set_boot_partition
 #undef audio_is_quiescent
@@ -277,8 +278,11 @@ void setUp(void)
     s_func_bind_count = 0;
     s_func_bind_present = false;
     s_outputs_applied = 0;
+    s_logic_active = 0;
+    s_logic_notch = 0;
     s_control_mutex = (SemaphoreHandle_t)1;
     s_actuation_ready = true;
+    func_tracks_cache_refresh();
     s_maintenance_owner = NULL;
     s_maintenance_exclusive_fs = false;
     s_mutation_count = 0;
@@ -501,7 +505,10 @@ static void test_web_apply_function_starts_sound(void)
     mock_tracks[0].slot = 3;
     mock_tracks[0].enabled = true;
     snprintf(mock_tracks[0].file, sizeof(mock_tracks[0].file), "audio/slot3.wav");
+    func_tracks_cache_refresh();
+    int loads = mock_tracks_load_calls;
     web_apply_function(1, true);
+    TEST_ASSERT_EQUAL_INT(loads, mock_tracks_load_calls);
     TEST_ASSERT_EQUAL_INT(1, mock_audio_voice_play_calls);
     TEST_ASSERT_EQUAL_STRING("web_tmp/audio/slot3.wav", mock_audio_last_path);
 }
@@ -519,6 +526,7 @@ static void test_web_apply_function_tracks_load_fail(void)
 {
     s_func_map[1].slot_a = 4;
     mock_tracks_load_ret = ESP_FAIL;
+    func_tracks_cache_refresh();
     web_apply_function(1, true);
     TEST_ASSERT_EQUAL_INT(0, mock_audio_voice_play_calls);
 }
@@ -534,6 +542,7 @@ static void test_web_apply_function_double_voice(void)
     mock_tracks[1].slot = 2;
     mock_tracks[1].enabled = true;
     snprintf(mock_tracks[1].file, sizeof(mock_tracks[1].file), "audio/b.wav");
+    func_tracks_cache_refresh();
     web_apply_function(2, true);
     TEST_ASSERT_EQUAL_INT(2, mock_audio_voice_play_calls);
 }
@@ -549,6 +558,7 @@ static void test_web_apply_function_secondary_above_10(void)
     mock_tracks[1].slot = 2;
     mock_tracks[1].enabled = true;
     snprintf(mock_tracks[1].file, sizeof(mock_tracks[1].file), "audio/b.wav");
+    func_tracks_cache_refresh();
     web_apply_function(11, true);
     TEST_ASSERT_EQUAL_INT(2, mock_audio_voice_play_calls);
 }
@@ -750,10 +760,10 @@ static void test_wifi_auto_off_paths(void)
     wifi_auto_off_task(NULL);
 
     s_wifi_started = true;
-    s_cfg.auto_off_min = 0;
+    s_auto_off_min = 0;
     wifi_auto_off_task(NULL);
 
-    s_cfg.auto_off_min = 5;
+    s_auto_off_min = 5;
     s_ap_sta_count = 1;
     wifi_auto_off_task(NULL);
 
@@ -1407,6 +1417,103 @@ static bool saved_track_exists(size_t index)
     return file_exists(path);
 }
 
+static void pack_test_put16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFU);
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void pack_test_put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFU);
+    p[1] = (uint8_t)((v >> 8) & 0xFFU);
+    p[2] = (uint8_t)((v >> 16) & 0xFFU);
+    p[3] = (uint8_t)((v >> 24) & 0xFFU);
+}
+
+static size_t pack_test_build(uint8_t *buf, const char *name,
+                              const uint8_t *pcm, size_t pcm_len)
+{
+    size_t nlen = strlen(name);
+    uint32_t data_off = (uint32_t)(AUDIO_PACK_HDR_LEN + AUDIO_PACK_ENTRY_HDR_LEN + nlen);
+    memset(buf, 0, data_off + pcm_len);
+    memcpy(buf, AUDIO_PACK_MAGIC, AUDIO_PACK_MAGIC_LEN);
+    pack_test_put16(buf + 8, AUDIO_PACK_VERSION);
+    pack_test_put16(buf + 10, 1);
+    pack_test_put32(buf + 12, data_off);
+    uint8_t *e = buf + AUDIO_PACK_HDR_LEN;
+    e[0] = (uint8_t)nlen;
+    e[1] = 100;
+    e[2] = 1;
+    e[3] = AUDIO_PACK_BITS_PCM;
+    pack_test_put32(e + 4, 22050);
+    pack_test_put32(e + 8, data_off);
+    pack_test_put32(e + 12, (uint32_t)pcm_len);
+    memcpy(buf + AUDIO_PACK_HDR_LEN + AUDIO_PACK_ENTRY_HDR_LEN, name, nlen);
+    memcpy(buf + data_off, pcm, pcm_len);
+    return data_off + pcm_len;
+}
+
+static void test_audio_pack_upload_replaces_library(void)
+{
+    FILE *old = fopen("web_tmp/audio/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(old);
+    TEST_ASSERT_EQUAL_INT(3, (int)fwrite("OLD", 1, 3, old));
+    fclose(old);
+
+    uint8_t pcm[16] = { 0 };
+    uint8_t pack[128];
+    size_t n = pack_test_build(pack, "new", pcm, sizeof(pcm));
+    set_body(pack, n);
+    httpd_req_t req = make_req(n);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/new.wav"));
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/volumes.txt"));
+}
+
+static void test_audio_pack_upload_rolls_back_on_publish_failure(void)
+{
+    FILE *old = fopen("web_tmp/audio/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(old);
+    TEST_ASSERT_EQUAL_INT(3, (int)fwrite("OLD", 1, 3, old));
+    fclose(old);
+
+    uint8_t pcm[16] = { 0 };
+    uint8_t pack[128];
+    size_t n = pack_test_build(pack, "new", pcm, sizeof(pcm));
+    set_body(pack, n);
+    httpd_req_t req = make_req(n);
+    test_rename_fail_at = 2; /* backup succeeds, publication fails */
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/new.wav"));
+}
+
+static void test_audio_pack_upload_rejects_graph_reference(void)
+{
+    FILE *old = fopen("web_tmp/audio/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(old);
+    TEST_ASSERT_EQUAL_INT(3, (int)fwrite("OLD", 1, 3, old));
+    fclose(old);
+
+    uint8_t pcm[16] = { 0 };
+    uint8_t pack[128];
+    size_t n = pack_test_build(pack, "new", pcm, sizeof(pcm));
+    set_body(pack, n);
+    httpd_req_t req = make_req(n);
+    mock_graph_referenced = true;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "graph asset referenced"));
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/new.wav"));
+}
+
 static void test_audio_upload_guards(void)
 {
     httpd_req_t req = make_req(16);
@@ -1504,6 +1611,26 @@ static void test_audio_upload_slots_full(void)
     snprintf(mock_header_name, sizeof(mock_header_name), "y.wav");
     TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
     TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+}
+
+static void test_audio_upload_asset_only_over_slots(void)
+{
+    mock_tracks_count = SETTINGS_MAX_TRACKS;
+    for (int i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
+        mock_tracks[i].slot = (uint8_t)(i + 1);
+        snprintf(mock_tracks[i].file, sizeof(mock_tracks[i].file), "audio/t%d.wav", i);
+    }
+    uint8_t data[16];
+    memset(data, 5, sizeof(data));
+    httpd_req_t req = make_req(sizeof(data));
+    set_body(data, sizeof(data));
+    set_query("asset=1");
+    snprintf(mock_header_name, sizeof(mock_header_name), "asset.wav");
+    int saves = mock_tracks_save_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/asset.wav"));
+    TEST_ASSERT_EQUAL_INT(saves, mock_tracks_save_calls);
 }
 
 /* No slot in the query -> the first free slot is assigned (slot 0 is not
@@ -1912,6 +2039,44 @@ static void test_func_bind_get_view(void)
     mock_alloc_fail_at = 0;
     TEST_ASSERT_EQUAL(ESP_OK, func_map_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "oom"));
+}
+
+static void test_logic_bindings_apply_runtime_actions(void)
+{
+    s_motion_initialized = true;
+    s_motion_speed = 30;
+    s_motion_forward = true;
+    s_func_bind_present = true;
+    s_func_bind_count = 3;
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_LOGIC;
+    s_func_bind[0].target_id = FUNC_LOGIC_MUTE_MOVE;
+    s_func_bind[1].used = 1;
+    s_func_bind[1].fn = 2;
+    s_func_bind[1].target_type = FUNC_TARGET_LOGIC;
+    s_func_bind[1].target_id = FUNC_LOGIC_DRIVE_HOLD;
+    s_func_bind[2].used = 1;
+    s_func_bind[2].fn = 3;
+    s_func_bind[2].target_type = FUNC_TARGET_LOGIC;
+    s_func_bind[2].target_id = FUNC_LOGIC_NOTCH_UP;
+
+    web_apply_function(1, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_mute);
+    web_apply_function(1, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_mute);
+
+    web_apply_function(2, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_drive_hold);
+    web_apply_function(2, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_drive_hold);
+
+    web_apply_function(3, true);
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_logic_notch);
+    web_apply_function(3, false);
+    web_apply_function(3, true);
+    TEST_ASSERT_EQUAL_INT(2, mock_sound_logic_notch);
 }
 
 static void test_func_map_post_binding(void)
@@ -3042,6 +3207,7 @@ static void test_legacy_voices_do_not_collide(void)
     }
     s_func_map[1].slot_a = 1; s_func_map[1].slot_b = 2;
     s_func_map[11].slot_a = 3;
+    func_tracks_cache_refresh();
     web_apply_function(1, true);
     web_apply_function(11, true);
     TEST_ASSERT_NOT_EQUAL(s_legacy_voice[1][1].voice, s_legacy_voice[11][0].voice);
@@ -3796,6 +3962,24 @@ static void test_graph_apply_motion_and_transaction_failures(void)
     TEST_ASSERT_TRUE((mock_graph_primed & (1U << 2)) != 0);
 }
 
+static void test_graph_delete_project(void)
+{
+    httpd_req_t req = make_req(0);
+    set_query("id=demo");
+    mock_graph_delete_selected = true;
+    mock_graph_status.active = true;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_project_delete_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_delete_calls);
+    TEST_ASSERT_FALSE(mock_graph_status.active);
+
+    mock_graph_delete_err = ESP_ERR_INVALID_STATE;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_project_delete_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+}
+
 static void test_graph_get_roundtrip_assets_and_routes(void)
 {
     seed_graph(); httpd_req_t req = make_req(0);
@@ -3825,8 +4009,8 @@ static void test_graph_get_roundtrip_assets_and_routes(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
     TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
     reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
-    TEST_ASSERT_EQUAL_UINT32(57, s_route_count);
-    TEST_ASSERT_EQUAL_UINT32(57, mock_route_count);
+    TEST_ASSERT_EQUAL_UINT32(58, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(58, mock_route_count);
 }
 
 static void test_graph_referenced_uploads_fail_closed(void)
@@ -3900,6 +4084,7 @@ int main(void)
     RUN_TEST(test_graph_exact_max_body_and_trailing_json);
     RUN_TEST(test_graph_maintenance_and_binding_mutation_guards);
     RUN_TEST(test_graph_apply_motion_and_transaction_failures);
+    RUN_TEST(test_graph_delete_project);
     RUN_TEST(test_graph_get_roundtrip_assets_and_routes);
     RUN_TEST(test_graph_referenced_uploads_fail_closed);
     RUN_TEST(test_graph_factory_reset_selection_and_failure);
@@ -4002,10 +4187,14 @@ int main(void)
     RUN_TEST(test_stream_short_body);
     RUN_TEST(test_stream_file_write_failure);
     RUN_TEST(test_audio_upload_guards);
+    RUN_TEST(test_audio_pack_upload_replaces_library);
+    RUN_TEST(test_audio_pack_upload_rolls_back_on_publish_failure);
+    RUN_TEST(test_audio_pack_upload_rejects_graph_reference);
     RUN_TEST(test_audio_upload_success);
     RUN_TEST(test_audio_upload_replaces_and_retains_old);
     RUN_TEST(test_audio_upload_compacts_duplicates);
     RUN_TEST(test_audio_upload_slots_full);
+    RUN_TEST(test_audio_upload_asset_only_over_slots);
     RUN_TEST(test_audio_upload_autoslot);
     RUN_TEST(test_audio_upload_autoslot_full);
     RUN_TEST(test_audio_upload_validate_and_save_fail);
@@ -4023,6 +4212,7 @@ int main(void)
     RUN_TEST(test_func_map_get_post);
     RUN_TEST(test_func_bind_load_and_desired);
     RUN_TEST(test_func_bind_get_view);
+    RUN_TEST(test_logic_bindings_apply_runtime_actions);
     RUN_TEST(test_func_map_post_binding);
     RUN_TEST(test_web_func_map_set_preserves_sound_bindings);
     RUN_TEST(test_utf8_four_byte_and_outputs_init);

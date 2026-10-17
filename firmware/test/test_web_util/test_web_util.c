@@ -632,6 +632,53 @@ static void test_func_eval_callbacks(void)
     TEST_ASSERT_EQUAL_UINT16(0, func_eval(b, 4, 1, FUNC_STATE_ANY, FUNC_DIR_ANY, NULL, NULL));
 }
 
+static bool test_vars_get(void *ctx, uint8_t index, int32_t *out)
+{
+    const int32_t *vars = ctx;
+    if (index >= 2U) { return false; }
+    *out = vars[index];
+    return true;
+}
+
+static void test_func_eval_conditions(void)
+{
+    func_binding_t b;
+    memset(&b, 0, sizeof(b));
+    b.used = 1; b.fn = 1; b.target_type = FUNC_TARGET_OUTPUT; b.target_id = 0;
+    b.flags = FUNC_FLAG_COND;
+    b.short_table = 0;          /* var 0 */
+    b.short_ms = 4;             /* op 4 = greater-than */
+    b.min_ms = 10;
+    int32_t vars[2] = { 11, 5 };
+    TEST_ASSERT_EQUAL_UINT16(1U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, test_vars_get, vars));
+    vars[0] = 10;
+    TEST_ASSERT_EQUAL_UINT16(0U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, test_vars_get, vars));
+    /* Missing resolver / unresolved variable fails closed. */
+    TEST_ASSERT_EQUAL_UINT16(0U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, NULL, NULL));
+    /* False branch inverts the final result. */
+    b.flags |= FUNC_FLAG_INVERT;
+    TEST_ASSERT_EQUAL_UINT16(1U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, test_vars_get, vars));
+
+    /* Two conditions: var0 > 10 AND var1 == 5. */
+    b.flags = FUNC_FLAG_COND | FUNC_FLAG_COND2;
+    b.short_ms = 4U | (0U << 3) | (1U << 12);
+    b.min_ms = 10; b.fade_ms = 5;
+    vars[0] = 11; vars[1] = 5;
+    TEST_ASSERT_EQUAL_UINT16(1U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, test_vars_get, vars));
+    vars[1] = 6;
+    TEST_ASSERT_EQUAL_UINT16(0U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, test_vars_get, vars));
+    /* OR makes the second comparison sufficient. */
+    b.flags |= FUNC_FLAG_COND_OR;
+    TEST_ASSERT_EQUAL_UINT16(1U, func_eval_ex(&b, 1, 1, FUNC_STATE_ANY, FUNC_DIR_ANY,
+                                              NULL, NULL, test_vars_get, vars));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -665,6 +712,7 @@ int main(void)
     RUN_TEST(test_func_eval_outputs);
     RUN_TEST(test_func_eval_dir_state_gates);
     RUN_TEST(test_func_eval_callbacks);
+    RUN_TEST(test_func_eval_conditions);
     RUN_TEST(test_fuzz_random_inputs);
     return UNITY_END();
 }

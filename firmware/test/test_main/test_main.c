@@ -133,6 +133,7 @@ esp_err_t esp_ota_mark_app_valid_cancel_rollback(void)
 }
 bool track_is_dc_mode(void) { return g_dc; }
 bool web_control_is_rails(void) { return g_rails && (!g_boot_mode || g_admitted); }
+bool web_control_source_is_rails(void) { return g_rails && (!g_boot_mode || g_admitted); }
 bool web_control_rails_begin(uint32_t *generation)
 {
     (void)generation;
@@ -156,7 +157,7 @@ esp_err_t motor_set_speed(uint8_t speed, bool forward)
 }
 void motor_emergency_stop(void)
 {
-    TEST_ASSERT_EQUAL_INT(1, g_lease_depth);
+    /* The DCC emergency callback stops motion before taking the source lease. */
     ++g_motor_calls;
 }
 void track_note_dcc_motor_command(void)
@@ -178,6 +179,7 @@ void web_apply_function(uint8_t fn, bool state)
     ++g_functions;
 }
 void sound_stop_all(void) { ++g_sound_stops; }
+void sound_set_volumes(uint8_t engine, uint8_t effects) { (void)engine; (void)effects; }
 void sound_request_stop(void) { ++g_sound_requests; }
 void web_log_event(const char *tag, const char *format, ...)
 {

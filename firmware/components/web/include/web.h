@@ -17,6 +17,9 @@ bool web_get_function_state(uint8_t fn);
 
 /* True only when rails control is ready and maintenance is inactive. */
 bool web_control_is_rails(void);
+/* Non-blocking source check for safety callbacks: does not take the control
+ * mutex, so an emergency stop is never dropped behind a long REST mutation. */
+bool web_control_source_is_rails(void);
 /* Source lease serializes a rail command with web/source handover. */
 bool web_control_rails_begin(uint32_t *generation);
 void web_control_rails_end(void);

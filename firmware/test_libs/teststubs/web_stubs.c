@@ -762,6 +762,7 @@ int mock_tracks_load_ret = 0;
 settings_track_t mock_saved_tracks[SETTINGS_MAX_TRACKS];
 size_t mock_saved_tracks_count = 0;
 int mock_tracks_save_ret = 0;
+int mock_tracks_load_calls = 0;
 int mock_tracks_save_calls = 0;
 
 uint8_t mock_cats[SETTINGS_MAX_TRACKS];
@@ -850,6 +851,7 @@ void settings_cv_commit_deferred(void)
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 {
+    mock_tracks_load_calls++;
     if (tracks != NULL && count != NULL) {
         memcpy(tracks, mock_tracks, sizeof(mock_tracks));
         *count = mock_tracks_count;
@@ -1067,6 +1069,12 @@ bool mock_sound_last_state = false;
 int mock_sound_stop_all_calls = 0;
 
 bool sound_enabled(void) { return mock_sound_scheme_enabled != 0; }
+bool sound_variable_get(uint8_t index, int32_t *out)
+{
+    if (out == NULL) { return false; }
+    *out = 0;
+    return index < 16U;
+}
 void sound_function(uint8_t fn, bool state)
 {
     mock_sound_function_calls++;
@@ -1074,6 +1082,23 @@ void sound_function(uint8_t fn, bool state)
     mock_sound_last_state = state;
 }
 void sound_stop_all(void) { mock_sound_stop_all_calls++; }
+void sound_set_volumes(uint8_t engine, uint8_t effects) { (void)engine; (void)effects; }
+int mock_sound_logic_calls;
+bool mock_sound_logic_mute;
+bool mock_sound_logic_drive_hold;
+bool mock_sound_logic_coast;
+bool mock_sound_logic_dynamic_brake;
+int mock_sound_logic_notch;
+void sound_set_logic(bool mute, bool drive_hold, bool coast, bool dynamic_brake,
+                     int8_t notch_offset)
+{
+    mock_sound_logic_calls++;
+    mock_sound_logic_mute = mute;
+    mock_sound_logic_drive_hold = drive_hold;
+    mock_sound_logic_coast = coast;
+    mock_sound_logic_dynamic_brake = dynamic_brake;
+    mock_sound_logic_notch = notch_offset;
+}
 
 int mock_sound_inhibit_ret;
 bool mock_sound_inhibited;
@@ -1184,6 +1209,12 @@ esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume)
 }
 
 esp_err_t audio_validate_wav(const char *path)
+{
+    (void)path;
+    return (esp_err_t)mock_audio_validate_ret;
+}
+
+esp_err_t audio_inspect_wav(const char *path)
 {
     (void)path;
     return (esp_err_t)mock_audio_validate_ret;
@@ -1394,11 +1425,20 @@ esp_err_t auxio_init(void)
     return (esp_err_t)mock_auxio_init_ret;
 }
 
+int mock_auxio_enabled_state[8];
 esp_err_t auxio_set_enabled(uint8_t channel, bool enabled)
 {
     mock_auxio_set_enabled_calls++;
     mock_auxio_last_channel = channel;
     mock_auxio_last_enabled = enabled ? 1 : 0;
+    if (channel < 8U) mock_auxio_enabled_state[channel] = enabled ? 1 : 0;
+    return ESP_OK;
+}
+
+esp_err_t auxio_get_enabled(uint8_t channel, bool *out_enabled)
+{
+    if (channel >= 8U || out_enabled == NULL) return ESP_ERR_INVALID_ARG;
+    *out_enabled = mock_auxio_enabled_state[channel] != 0;
     return ESP_OK;
 }
 
@@ -1484,6 +1524,11 @@ bool storage_is_quiescent(void)
 bool storage_is_mounted(void)
 {
     return mock_storage_is_mounted != 0;
+}
+
+const char *storage_get_root(void)
+{
+    return WEB_USERDATA_DIR;
 }
 
 esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
@@ -1592,6 +1637,16 @@ esp_err_t sg_store_select(const char *id, uint32_t revision)
     (void)id; (void)revision; ++mock_graph_select_calls; return mock_graph_select_err;
 }
 esp_err_t sg_store_select_legacy(void) { ++mock_graph_select_calls; return mock_graph_select_err; }
+int mock_graph_delete_calls;
+esp_err_t mock_graph_delete_err;
+bool mock_graph_delete_selected;
+esp_err_t sg_store_delete(const char *id, bool *was_selected)
+{
+    (void)id;
+    ++mock_graph_delete_calls;
+    if (was_selected) *was_selected = mock_graph_delete_selected;
+    return mock_graph_delete_err;
+}
 esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag)
 {
     (void)graph; (void)diag; return mock_graph_assets_err;
@@ -1616,6 +1671,9 @@ void mock_web_reset(void)
 {
     mock_graph_json[0] = '\0'; mock_graph_revision = 0;
     mock_graph_save_err = mock_graph_read_err = mock_graph_select_err = ESP_OK;
+    mock_graph_delete_calls = 0;
+    mock_graph_delete_err = ESP_OK;
+    mock_graph_delete_selected = false;
     mock_graph_assets_err = mock_graph_prepare_err = mock_graph_reference_err = ESP_OK;
     mock_graph_referenced = false;
     mock_graph_save_calls = mock_graph_select_calls = mock_graph_commit_calls = 0;
@@ -1734,6 +1792,7 @@ void mock_web_reset(void)
     mock_tracks_count = 0;
     mock_tracks_load_ret = 0;
     mock_tracks_save_ret = 0;
+    mock_tracks_load_calls = 0;
     mock_tracks_save_calls = 0;
     mock_saved_tracks_count = 0;
 
@@ -1780,6 +1839,12 @@ void mock_web_reset(void)
     mock_sound_last_fn = 0;
     mock_sound_last_state = false;
     mock_sound_stop_all_calls = 0;
+    mock_sound_logic_calls = 0;
+    mock_sound_logic_mute = false;
+    mock_sound_logic_drive_hold = false;
+    mock_sound_logic_coast = false;
+    mock_sound_logic_dynamic_brake = false;
+    mock_sound_logic_notch = 0;
 
     mock_audio_is_playing = 0;
     mock_audio_validate_ret = 0;
@@ -1814,6 +1879,7 @@ void mock_web_reset(void)
     mock_auxio_set_enabled_calls = 0;
     mock_auxio_set_effect_calls = 0;
     mock_auxio_config_calls = 0;
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
     mock_auxio_last_channel = 0;
     mock_auxio_last_pwm_on = 0;
     mock_auxio_last_pwm_off = 0;

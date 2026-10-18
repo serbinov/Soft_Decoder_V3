@@ -257,6 +257,7 @@ label{color:var(--text);font-weight:600}
           <button class="btn" id="src_rails" onclick="setControlSource('rails')" data-i18n="src_rails">Рельсы</button>
           <button class="btn" id="src_web" onclick="setControlSource('web')" data-i18n="src_web">Веб</button>
         </div>
+        <div class="hint" id="src_hint" data-i18n="hint_rails">Управление — с рельс. По умолчанию режим DCC; включите «DC», чтобы управлять от напряжения на рельсах.</div>
       </div>
     </div>
     <div class="panel">
@@ -288,7 +289,6 @@ label{color:var(--text);font-weight:600}
     <button class="set-item" data-target="panel_mode" onclick="showSetting('panel_mode')" data-i18n="nav_mode">Режим управления</button>
     <div class="set-group" data-i18n="grp_sound">Звук</div>
     <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')" data-i18n="nav_snd">Загрузка звуков</button>
-    <button class="set-item" onclick="openSoundEditor('mix')" data-i18n="nav_mixes">Миксы</button>
     <button class="set-item" onclick="openSoundEditor('scheme')" data-i18n="nav_schemes">Звуковые схемы</button>
     <div class="set-group" data-i18n="grp_settings">Настройки</div>
     <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')" data-i18n="nav_cv">CV</button>
@@ -374,7 +374,7 @@ label{color:var(--text);font-weight:600}
           <button class="btn sm danger" onclick="stopAudio()" data-i18n="stop">■ Стоп</button>
         </div>
       </div>
-      <div class="row" style="justify-content:flex-start;margin-bottom:8px;gap:8px;flex-wrap:wrap;grid-column:1/-1">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap;grid-column:1/-1;align-items:center">
         <label class="hint" style="display:flex;align-items:center;gap:6px">
           <span data-i18n="play_target">Воспроизведение:</span>
           <select id="play_target" onchange="setPlayTarget(this.value)" style="width:auto">
@@ -382,6 +382,7 @@ label{color:var(--text);font-weight:600}
             <option value="decoder" data-i18n="play_decoder">На декодере</option>
           </select>
         </label>
+        <input id="lib_search" type="text" placeholder="Поиск звука..." data-i18n-ph="lib_search_ph" oninput="onLibSearch()" style="max-width:240px;padding:6px 9px;font-size:12px">
       </div>
       <div class="up-bar" id="pack_bar" style="margin-bottom:6px;grid-column:1/-1"><i id="packbar"></i></div>
       <div class="up-meta" id="pack_meta" style="grid-column:1/-1"></div>
@@ -402,7 +403,13 @@ label{color:var(--text);font-weight:600}
         <button class="btn sm ghost" onclick="stepCv(1)">▶</button>
         <button class="btn primary" onclick="writeActiveCv()" data-i18n="cv_write">Записать</button>
       </div>
-      <div class="muted" id="cv_active_name" style="margin-bottom:8px;grid-column:1/-1">CV 1</div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;grid-column:1/-1;gap:8px;flex-wrap:wrap">
+        <div class="muted" id="cv_active_name">CV 1</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="cv_search" type="text" placeholder="Поиск CV..." data-i18n-ph="cv_search_ph" oninput="onCvSearch()" style="max-width:200px;padding:6px 9px;font-size:12px">
+          <button class="btn sm ghost" id="cv_tbl_btn" onclick="toggleSpeedTableCv()" data-i18n="cv_show_table">Таблица CV67..94</button>
+        </div>
+      </div>
       <div class="cv-list" id="cv_list" style="grid-column:1/-1"></div>
       <div class="row" style="margin-top:12px;grid-column:1/-1">
         <button class="btn danger" onclick="cvFactoryReset()" data-i18n="cv_factory">К заводским параметрам CV</button>
@@ -539,11 +546,11 @@ bemf_unknown:'Статус калибровки неизвестен: связь
 bemf_step:'Калибровка: шаг ',bemf_step_of:' из ',
 bemf_confirm_clear:'Сбросить сохранённую калибровку BEMF?',
 snd_title:'Загрузка звуков',free_prefix:'Свободно: ',free_space_idle:'Свободно: —',refresh:'Обновить',stop:'■ Стоп',
-upload_pack:'Загрузить звуковой пакет',pack_confirm:'Загрузить звуковой пакет? ВСЕ текущие звуки на устройстве будут удалены и заменены.',pack_uploading:'пакет ',pack_done:'пакет загружен, звуков: ',pack_empty:'на устройстве нет звуков',lib_play:'Воспроизвести',play_target:'Воспроизведение:',play_pc:'На компьютере',play_decoder:'На декодере',pack_bad_ext:'нужен файл .asp: ',pack_hint:'Формат .asp — контейнер звукового пакета (IMA ADPCM/PCM16), собирается утилитой pack_sounds.py',size_col:'Размер',
+upload_pack:'Загрузить звуковой пакет',pack_confirm:'Загрузить звуковой пакет? ВСЕ текущие звуки на устройстве будут удалены и заменены.',pack_uploading:'пакет ',pack_done:'пакет загружен, звуков: ',pack_empty:'на устройстве нет звуков',lib_play:'Воспроизвести',play_target:'Воспроизведение:',play_pc:'На компьютере',play_decoder:'На декодере',pack_bad_ext:'нужен файл .asp: ',pack_hint:'Формат .asp — контейнер звукового пакета (IMA ADPCM/PCM16), собирается утилитой pack_sounds.py',size_col:'Размер',lib_search_ph:'Поиск звука...',
 slot_prefix:'Слот ',cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
 cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
 upload_wav:'Загрузить WAV',del_track_title:'Удалить трек',
-cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',
+cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',cv_search_ph:'Поиск CV...',cv_show_table:'Таблица CV67..94',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
 wifi_pw:'Новый пароль точки доступа (≥8 символов)',wifi_pw_ph:'пусто = оставить текущий пароль',
@@ -600,11 +607,11 @@ bemf_unknown:'Calibration status unknown: connection lost',
 bemf_step:'Calibration: step ',bemf_step_of:' of ',
 bemf_confirm_clear:'Reset the stored BEMF calibration?',
 snd_title:'Sound upload',free_prefix:'Free: ',free_space_idle:'Free: —',refresh:'Refresh',stop:'■ Stop',
-upload_pack:'Upload sound pack',pack_confirm:'Upload the sound pack? ALL current sounds on the device will be deleted and replaced.',pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_empty:'no sounds on the device',lib_play:'Play',play_target:'Playback:',play_pc:'On computer',play_decoder:'On decoder',pack_bad_ext:'expected an .asp file: ',pack_hint:'.asp is the sound-pack container (IMA ADPCM/PCM16), built with tools/pack_sounds.py',size_col:'Size',
+upload_pack:'Upload sound pack',pack_confirm:'Upload the sound pack? ALL current sounds on the device will be deleted and replaced.',pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_empty:'no sounds on the device',lib_play:'Play',play_target:'Playback:',play_pc:'On computer',play_decoder:'On decoder',pack_bad_ext:'expected an .asp file: ',pack_hint:'.asp is the sound-pack container (IMA ADPCM/PCM16), built with tools/pack_sounds.py',size_col:'Size',lib_search_ph:'Search sound...',
 slot_prefix:'Slot ',cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
 cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
 upload_wav:'Upload WAV',del_track_title:'Delete track',
-cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',
+cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',cv_search_ph:'Search CV...',cv_show_table:'Table CV67..94',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
 wifi_pw:'New access point password (≥8 characters)',wifi_pw_ph:'empty = keep the current password',
@@ -1155,7 +1162,7 @@ function applyAudioStatus(d){
 }
 
 /* ---------- sound library (installed files shown as a compact list) ---------- */
-var libFiles=[],libPreview='',lastLibSig='';
+var libFiles=[],libPreview='',lastLibSig='',libSearch='';
 /* Where previews play: in this browser ("pc", default) or on the decoder.
  * Shared with the block editor via the same localStorage key. */
 var PLAY_TARGET_KEY='aura_sound_play',pcAudio=null;
@@ -1179,8 +1186,14 @@ function playLibOnPc(name){
     if(p&&p.catch)p.catch(function(e){log(t('tag_sound'),'PC: '+e.message);if(libPreview===name){libPreview='';lastLibSig='';renderLibrary();}});
   }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
 }
+function onLibSearch(){
+  var inp=byId('lib_search');
+  libSearch=inp?String(inp.value||'').toLowerCase().trim():'';
+  lastLibSig='';
+  renderLibrary();
+}
 function libSig(){
-  var s=state.audio.playing+'|'+libPreview+'|';
+  var s=state.audio.playing+'|'+libPreview+'|'+libSearch+'|';
   for(var i=0;i<libFiles.length;i++){s+=libFiles[i].name+':'+libFiles[i].vol+':'+libFiles[i].size+';';}
   return s;
 }
@@ -1193,6 +1206,7 @@ function renderLibrary(){
   var rows=[];
   for(var i=0;i<libFiles.length;i++){
     var f=libFiles[i];
+    if(libSearch&&String(f.name||'').toLowerCase().indexOf(libSearch)<0)continue;
     var playing=(libPreview===f.name);
     var v=Number(f.vol);if(isNaN(v))v=100;
     var sz=Number(f.size)||0;
@@ -1208,7 +1222,7 @@ function renderLibrary(){
       +'<span class="vv" id="vv_'+i+'">'+v+'</span>'
       +'</div>');
   }
-  box.innerHTML=rows.join('');
+  box.innerHTML=rows.length?rows.join(''):'<div class="lib-empty">'+esc(t('nothing_found'))+'</div>';
   if(typeof applyPanelSplit==='function')applyPanelSplit();
 }
 async function loadLibrary(){
@@ -1312,6 +1326,16 @@ function uploadPack(input){
   var xhr=new XMLHttpRequest();
   xhr.open('POST','/api/audio/pack',true);
   xhr.timeout=600000;
+  if(xhr.upload){
+    xhr.upload.onprogress=function(e){
+      if(!e.lengthComputable||upServerOk)return;
+      var sec=Math.max(0.1,(Date.now()-started)/1000);
+      var cp=Math.round(e.loaded/e.total*100);
+      if(cp>=100)cp=99;
+      barIn.style.width=cp+'%';
+      meta.textContent=t('transferred')+e.loaded+t('of')+e.total+t('bytes_suffix')+' · '+Math.round((e.loaded/1024)/sec)+' '+t('kb_per_s');
+    };
+  }
   function finishUp(){
     uploadBusy=false;
     upPack=false;
@@ -1370,16 +1394,46 @@ var cvDB=[
 ];
 for(var cvs=0;cvs<28;cvs++){cvDB.push({index:67+cvs,name:{ru:'Таблица скоростей CV'+(67+cvs),en:'Speed table CV'+(67+cvs)},value:Math.round(cvs*255/27),desc:{ru:'Уровень ШИМ для внутренней ступени '+(cvs+1)+' из 28 (действует при CV29 бит 4 = 1)',en:'PWM level for internal step '+(cvs+1)+' of 28 (active when CV29 bit 4 = 1)'}});}
 var readOnlyCv={7:1};
+var legacyCv={30:1,114:1,115:1,116:1};
+var cvSearch='',showSpeedTableCv=false;
+function onCvSearch(){
+  var inp=byId('cv_search');
+  cvSearch=inp?String(inp.value||'').toLowerCase().trim():'';
+  renderCvList();
+}
+function toggleSpeedTableCv(){
+  showSpeedTableCv=!showSpeedTableCv;
+  var btn=byId('cv_tbl_btn');
+  if(btn)btn.classList.toggle('active',showSpeedTableCv);
+  renderCvList();
+}
 function cvByIndex(index){for(var i=0;i<cvDB.length;i++){if(cvDB[i].index===index)return cvDB[i];}return null;}
 function setActiveCaption(index){
   var def=cvByIndex(index);
   setText('cv_active_name',def?('CV '+index+' — '+tr(def.name)+(def.vendor?' ('+def.vendor+')':'')):('CV '+index));
 }
 function filteredCv(){
-  return cvDB;
+  var out=[];
+  for(var i=0;i<cvDB.length;i++){
+    var cv=cvDB[i];
+    if(cvSearch){
+      var s=('cv'+cv.index+' cv '+cv.index+' '+tr(cv.name)+' '+tr(cv.desc)).toLowerCase();
+      if(s.indexOf(cvSearch)<0)continue;
+      out.push(cv);
+      continue;
+    }
+    if(legacyCv[cv.index]&&activeCv!==cv.index)continue;
+    if(!showSpeedTableCv&&cv.index>=67&&cv.index<=94&&(activeCv<67||activeCv>94))continue;
+    out.push(cv);
+  }
+  return out;
 }
 function setActiveCv(index){
+  var prev=activeCv;
   activeCv=clamp(Number(index)||1,1,1024);
+  if(legacyCv[activeCv]||legacyCv[prev]||(!showSpeedTableCv&&((activeCv>=67&&activeCv<=94)||(prev>=67&&prev<=94)))){
+    renderCvList();
+  }
   byId('cv_quick_index').value=activeCv;
   var f=byId('cv_value_'+activeCv);
   byId('cv_quick_value').value=f?f.value:cvValueOf(activeCv);
@@ -1801,6 +1855,7 @@ function init(){
   if(typeof addEventListener!=='undefined')addEventListener('hashchange',function(){showPage(pageFromHash());});
   if(typeof addEventListener!=='undefined')addEventListener('resize',function(){applySettingsMode();applyPanelSplit();});
   byId('device_name').addEventListener('input',onDeviceNameInput);
+  byId('device_name').addEventListener('keydown',function(ev){if(ev&&ev.key==='Enter'){ev.preventDefault();saveDeviceName();}});
   renderCvList();
   setActiveCv(1);
   loadCvValues();

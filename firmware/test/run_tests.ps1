@@ -112,6 +112,9 @@ if ($node) {
     Write-Host "=== test_web_ui (Node.js) ===" -ForegroundColor Cyan
     & $node.Source --test "$root\test\test_web_ui.js"
     if ($LASTEXITCODE -ne 0) { $failed++ }
+    Write-Host "=== test_blocks_editor (Node.js) ===" -ForegroundColor Cyan
+    & $node.Source --test "$root\test\test_blocks_editor.js"
+    if ($LASTEXITCODE -ne 0) { $failed++ }
 } else {
     Write-Warning "Node.js not found: JavaScript regressions were NOT run."
 }

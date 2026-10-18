@@ -240,6 +240,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-19 (v0.10) — feat(web,sound-editor): flowchart export, UI cleanup, inspector and CV/sound filters
 - 2026-10-18 (v0.10) — feat(sound): engine idle output, idle scheme and editor updates
 - 2026-10-16 (v0.10) — feat(sound-editor): wider link hit area and Del to delete selected link
 - 2026-10-16 (v0.10) — feat(sound-editor): text labels, toolbar cleanup, cross-layout clipboard, favicon

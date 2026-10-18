@@ -460,3 +460,20 @@ test('changed AP address is probed without CORS before navigating', async t => {
   assert.equal(requests[0].options.mode, 'no-cors');
   assert.equal(context.location.href, 'http://192.168.101.1/');
 });
+
+test('CV filtering hides legacy CVs and collapses speed table CV67..94 until toggled or searched', t => {
+  const { context, element } = fixture(t);
+  context.renderCvList();
+  const initialRows = context.filteredCv();
+  assert.equal(initialRows.some(c => c.index === 30 || c.index === 114), false, 'Legacy CVs hidden by default');
+  assert.equal(initialRows.some(c => c.index >= 67 && c.index <= 94), false, 'Speed table CVs collapsed by default');
+
+  context.toggleSpeedTableCv();
+  assert.equal(context.filteredCv().some(c => c.index === 67), true, 'Speed table CVs shown when toggled');
+
+  element('cv_search').value = '114';
+  context.onCvSearch();
+  assert.equal(context.filteredCv().length, 1);
+  assert.equal(context.filteredCv()[0].index, 114, 'Search finds legacy CV 114');
+});
+

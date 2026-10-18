@@ -249,8 +249,39 @@ def _new_tracks():
 
 
 def _asset(name):
-    return {"file": name, "size": 44144, "crc32": "12345678",
-            "sampleRate": 22050, "channels": 1, "bits": 16, "durationMs": 1000}
+    size = 44144
+    sample_rate = 22050
+    channels = 1
+    bits = 16
+    duration_ms = 1000
+    base = _base(name)
+    raw = None
+    if base in LIBRARY:
+        raw = LIBRARY[base]["wav"]
+    else:
+        safe = os.path.normpath(os.path.join(SOUND_DIR, name or ""))
+        if not (safe.startswith(SOUND_DIR) and os.path.isfile(safe)):
+            alias = SOUND_ALIASES.get(name or "")
+            if alias:
+                safe = os.path.join(SOUND_DIR, alias)
+        if os.path.isfile(safe):
+            try:
+                with open(safe, "rb") as fh:
+                    raw = fh.read(64)
+                size = os.path.getsize(safe)
+            except OSError:
+                raw = None
+    if raw and len(raw) >= 44 and raw[0:4] == b"RIFF":
+        if size == 44144:
+            size = len(raw)
+        channels = max(1, struct.unpack_from("<H", raw, 22)[0])
+        sample_rate = max(1, struct.unpack_from("<I", raw, 24)[0])
+        bits = max(4, struct.unpack_from("<H", raw, 34)[0])
+        bytes_per_sec = sample_rate * channels * max(1, bits) / 8.0
+        if bytes_per_sec > 0 and size > 44:
+            duration_ms = max(20, int(round((size - 44) * 1000.0 / bytes_per_sec)))
+    return {"file": name, "size": size, "crc32": "12345678",
+            "sampleRate": sample_rate, "channels": channels, "bits": bits, "durationMs": duration_ms}
 
 
 def _state(sid, name, filename, loop, volume=80):
@@ -268,13 +299,13 @@ def _new_graph():
     a compiled v1 behaviour layer, mirroring what the sound editor saves."""
     states = [
         {"id": "off", "name": "Выкл / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
-        _state("engine_idle", "Холостой ход", "slot01.wav", True),
-        _state("engine_run", "Тяга", "slot03.wav", True),
-        _state("engine_stop", "Останов двигателя", "slot14.wav", False),
-        {"id": "horn_off", "name": "Гудок / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
-        _state("horn_start", "Атака гудка", "slot09.wav", False),
-        _state("horn_hold", "Удержание гудка", "slot09.wav", True),
-        _state("horn_end", "Отпускание гудка", "slot07.wav", False),
+        _state("engine_idle", "Холостой ход ЧМЭ3", "s-loop1.1.wav", True),
+        _state("engine_run", "Тяга ЧМЭ3", "notch_4-loop1.1.wav", True),
+        _state("engine_stop", "Останов дизеля", "ms-end.wav", False),
+        {"id": "horn_off", "name": "Тифон / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
+        _state("horn_start", "Атака тифона", "horn-low-init.wav", False),
+        _state("horn_hold", "Удержание тифона", "horn-low-loop.wav", True),
+        _state("horn_end", "Отпускание тифона", "horn-low-exit.wav", False),
     ]
     transitions = [
         _edge("t1", "off", "engine_idle", 10, "immediate", {"type": "engine_on"}),
@@ -290,26 +321,26 @@ def _new_graph():
         _edge("t11", "horn_end", "horn_off", 10, "immediate", {"type": "sample_done"}),
     ]
     effect_tables = [
-        {"id": "horn", "name": "Гудок", "kind": "horn", "preset": "shortLong",
-         "init": "slot09.wav", "loop": "slot09.wav", "end": "slot07.wav", "short": "slot07.wav",
+        {"id": "horn", "name": "Тифон", "kind": "horn", "preset": "shortLong",
+         "init": "horn-low-init.wav", "loop": "horn-low-loop.wav", "end": "horn-low-exit.wav", "short": "horn-low-exit.wav",
          "shortMs": 400, "volume": 80, "rate": 1000, "behavior": "horn_off"},
-        {"id": "motor", "name": "Мотор", "kind": "motor", "preset": "loopHeld",
-         "init": "slot01.wav", "loop": "slot01.wav", "end": "slot14.wav", "short": "",
-         "shortMs": 400, "volume": 80, "rate": 1000, "behavior": ""},
+        {"id": "motor", "name": "Дизель ЧМЭ3", "kind": "motor", "preset": "loopHeld",
+         "init": "sm.wav", "loop": "s-loop1.1.wav", "end": "ms-end.wav", "short": "",
+         "shortMs": 400, "volume": 85, "rate": 1000, "behavior": ""},
         {"id": "brake", "name": "Тормоза", "kind": "brake", "preset": "state",
-         "init": "", "loop": "", "end": "slot14.wav", "short": "",
-         "shortMs": 400, "volume": 70, "rate": 1000, "behavior": ""},
-        {"id": "bell", "name": "Звонок", "kind": "bell", "preset": "random",
-         "init": "slot09.wav", "loop": "", "end": "", "short": "",
-         "shortMs": 400, "volume": 60, "rate": 1000, "behavior": ""},
-        {"id": "coupler", "name": "Сцепка", "kind": "coupler", "preset": "oneShot",
-         "init": "slot07.wav", "loop": "", "end": "", "short": "",
+         "init": "", "loop": "", "end": "bremse-anlegen_lokbremse.wav", "short": "",
          "shortMs": 400, "volume": 75, "rate": 1000, "behavior": ""},
+        {"id": "bell", "name": "Радиостанция", "kind": "bell", "preset": "random",
+         "init": "piepton-rangierfunk.wav", "loop": "", "end": "", "short": "",
+         "shortMs": 400, "volume": 75, "rate": 1000, "behavior": ""},
+        {"id": "coupler", "name": "Автосцепка", "kind": "coupler", "preset": "oneShot",
+         "init": "ankuppeln.wav", "loop": "", "end": "", "short": "",
+         "shortMs": 400, "volume": 80, "rate": 1000, "behavior": ""},
     ]
     sources = [
         {"id": "src_engine", "role": "engine", "fn": 8, "label": "Двигатель"},
-        {"id": "src_horn", "role": "fn", "fn": 2, "label": "F2 Гудок"},
-        {"id": "src_f3", "role": "fn", "fn": 3, "label": "F3 Звонок"},
+        {"id": "src_horn", "role": "fn", "fn": 2, "label": "F2 Тифон"},
+        {"id": "src_f3", "role": "fn", "fn": 5, "label": "F5 Радиостанция"},
     ]
     blocks = [
         {"id": "blk_motor", "kind": "sound", "table": "motor", "op": "and", "min": 0, "max": 0},
@@ -340,7 +371,7 @@ def _new_graph():
         positions[node["id"]] = {"x": 200, "y": 80}
     return {
         "format": "sound-graph", "schemaVersion": 2, "id": "preview",
-        "name": "Тепловоз ТЭП70 (превью)",
+        "name": "Тепловоз ЧМЭ3 (превью)",
         "engine": {"entry": "off", "fn": 8}, "hysteresis": 3,
         "effectTables": effect_tables, "sources": sources, "blocks": blocks,
         "sinks": sinks, "wires": wires,

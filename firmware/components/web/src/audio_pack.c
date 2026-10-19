@@ -76,15 +76,23 @@ bool audio_pack_entry_head(const uint8_t buf[AUDIO_PACK_ENTRY_HDR_LEN],
             return false;
         }
         frame = (uint32_t)channels * 2U;
+        if (sample_rate == 0U || sample_rate > 192000U) {
+            return false;
+        }
     } else if (bits == AUDIO_PACK_BITS_ADPCM) {
         if (channels != 1U) {
             return false; /* the packer/decoder support mono ADPCM only */
         }
         frame = AUDIO_PACK_ADPCM_BLOCK;
+        if (sample_rate == 0U || sample_rate > 192000U) {
+            return false;
+        }
+    } else if (bits == AUDIO_PACK_BITS_SCHEME) {
+        if (channels != 0U || sample_rate != 0U || data_len == 0U || data_len > 131072U) {
+            return false;
+        }
+        frame = 1U;
     } else {
-        return false;
-    }
-    if (sample_rate == 0U || sample_rate > 192000U) {
         return false;
     }
     if (data_len < frame || (data_len % frame) != 0U) {

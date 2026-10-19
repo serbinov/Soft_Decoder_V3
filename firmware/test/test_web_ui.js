@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const zlib = require('node:zlib');
 const { test } = require('node:test');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'web_ui.html'), 'utf8');
@@ -11,6 +12,42 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const response = data => ({ ok: true, status: 200,
   headers: new Headers({ 'content-type': 'application/json' }),
   json: async () => data });
+
+function buildAsp(entries) {  const names = entries.map(e => Buffer.from(e.name, 'utf8'));
+  const indexLen = entries.reduce((n, e, i) => n + 16 + names[i].length, 0);
+  const dataOff = 16 + indexLen;
+  const buf = Buffer.alloc(dataOff + entries.reduce((n, e) => n + e.data.length, 0));
+  buf.write('AURASP01', 0, 'ascii');
+  buf.writeUInt16LE(1, 8);
+  buf.writeUInt16LE(entries.length, 10);
+  buf.writeUInt32LE(dataOff, 12);
+  let pos = 16, off = dataOff;
+  entries.forEach((e, i) => {
+    buf[pos] = names[i].length;
+    buf[pos + 1] = e.vol;
+    buf[pos + 2] = e.ch;
+    buf[pos + 3] = e.bits;
+    buf.writeUInt32LE(e.rate, pos + 4);
+    buf.writeUInt32LE(off, pos + 8);
+    buf.writeUInt32LE(e.data.length, pos + 12);
+    names[i].copy(buf, pos + 16);
+    pos += 16 + names[i].length;
+    e.data.copy(buf, off);
+    off += e.data.length;
+  });
+  return new Uint8Array(buf);
+}
+
+function validPack() {
+  return buildAsp([{ name: 'Horn', vol: 100, ch: 1, bits: 16, rate: 22050,
+    data: Buffer.from([1, 0, 2, 0]) }]);
+}
+
+function packFile(name, bytes, withArrayBuffer = true) {
+  const file = { name, size: bytes.length, bytes };
+  if (withArrayBuffer) file.arrayBuffer = async () => bytes.buffer;
+  return file;
+}
 
 function fixture(t) {
   const elements = new Map(), events = {}, timers = new Set(), intervals = new Map();
@@ -25,7 +62,7 @@ function fixture(t) {
   }
   const requests = [], xhrs = [];
   const context = {
-    console, AbortController, Headers, URL, Date, Promise,
+    console, AbortController, Headers, URL, Date, Promise, TextDecoder, TextEncoder, Blob,
     document: { hidden: false, activeElement: null,
       getElementById: element, createElement: () => element('created'),
       addEventListener: (name, fn) => { events[name] = fn; } },
@@ -397,11 +434,13 @@ test('visibility does not restart normal polling during upload', t => {
   assert.equal(intervals.get(context.upPollTimer).ms, 400);
 });
 
-test('pack timeout and abort release upload state', t => {
+test('pack timeout and abort release upload state', async t => {
   const { context, xhrs } = fixture(t);
   context.startHeartbeat = context.refreshStatus = () => {};
-  const input = { files: [{ name: 'pack.asp', size: 1000 }], value: 'pack.asp' };
-  context.uploadPack(input);
+  context.showPackStatsDialog = async () => true;
+  const bytes = validPack();
+  const input = { files: [packFile('pack.asp', bytes)], value: 'pack.asp' };
+  await context.uploadPack(input);
   assert.equal(context.uploadBusy, true);
   assert.equal(xhrs[0].url, '/api/audio/pack');
   assert.equal(xhrs[0].timeout, 600000);
@@ -411,32 +450,199 @@ test('pack timeout and abort release upload state', t => {
   assert.equal(context.upPollTimer, null);
 });
 
-test('pack upload accepts only .asp within the size limit', t => {
+test('pack upload accepts only .asp within the size limit', async t => {
   const { context, xhrs } = fixture(t);
   context.startHeartbeat = context.refreshStatus = () => {};
-  context.uploadPack({ files: [{ name: 'sound.zip', size: 100 }], value: 'sound.zip' });
+  context.showPackStatsDialog = async () => true;
+  await context.uploadPack({ files: [{ name: 'sound.zip', size: 100 }], value: 'sound.zip' });
   assert.equal(context.uploadBusy, false);
   assert.equal(xhrs.length, 0);
-  context.uploadPack({ files: [{ name: 'big.asp', size: 16 * 1024 * 1024 }], value: 'big.asp' });
+  await context.uploadPack({ files: [{ name: 'big.asp', size: 16 * 1024 * 1024 }], value: 'big.asp' });
   assert.equal(context.uploadBusy, false);
   assert.equal(xhrs.length, 0);
-  context.uploadPack({ files: [{ name: 'pack.ASP', size: 4096 }], value: 'pack.ASP' });
+  await context.uploadPack({ files: [packFile('pack.ASP', validPack())], value: 'pack.ASP' });
   assert.equal(context.uploadBusy, true);
   assert.equal(xhrs.length, 1);
   assert.equal(xhrs[0].url, '/api/audio/pack');
 });
 
-test('library rows show index and size', t => {
+test('pack upload validates the container and respects the stats dialog', async t => {
+  const { context, xhrs } = fixture(t);
+  context.startHeartbeat = context.refreshStatus = () => {};
+  let shown = 0;
+  context.showPackStatsDialog = async () => { shown++; return false; };
+  await context.uploadPack({ files: [packFile('bad.asp', new Uint8Array(32))], value: 'bad.asp' });
+  assert.equal(shown, 0, 'invalid pack is rejected before the dialog');
+  assert.equal(context.uploadBusy, false);
+  assert.equal(xhrs.length, 0);
+  const bytes = validPack();
+  await context.uploadPack({ files: [packFile('pack.asp', bytes)], value: 'pack.asp' });
+  assert.equal(shown, 1, 'valid pack opens the statistics dialog');
+  assert.equal(context.uploadBusy, false, 'cancellation does not start an upload');
+  assert.equal(xhrs.length, 0);
+});
+
+test('pack upload reads files through FileReader when arrayBuffer is unavailable', async t => {
+  const { context, xhrs } = fixture(t);
+  context.startHeartbeat = context.refreshStatus = () => {};
+  context.showPackStatsDialog = async () => true;
+  context.FileReader = class {
+    readAsArrayBuffer(file) { this.result = file.bytes.buffer; this.onload(); }
+  };
+  const bytes = validPack();
+  await context.uploadPack({ files: [packFile('pack.asp', bytes, false)], value: 'pack.asp' });
+  assert.equal(xhrs.length, 1);
+  assert.equal(xhrs[0].url, '/api/audio/pack');
+});
+
+test('library rows show index, .wav name, volume and icon play/delete buttons', t => {
   const { context, element } = fixture(t);
   context.libFiles = [{ name: 'Horn', size: 46080, vol: 100 }, { name: 'Bell', size: 1536, vol: 80 }];
   context.lastLibSig = '';
   context.renderLibrary();
   const html = element('sound_lib').innerHTML;
-  assert.match(html, /class="idx">01</);
-  assert.match(html, /class="idx">02</);
+  assert.match(html, /class="idx">1\.</);
+  assert.match(html, /class="idx">2\.</);
   assert.match(html, /class="sz"[^>]*>45 КБ</);
   assert.match(html, /class="sz"[^>]*>2 КБ</);
-  assert.match(html, /Horn/);
+  assert.match(html, /Horn\.wav/);
+  assert.match(html, /<button class="btn sm primary"[^>]*>▶<\/button>/);
+  assert.match(html, /class="btn sm lib-del"[^>]*><svg/);
+});
+
+test('encryptAspBytes and decryptAspBytes round-trip password-protected sound packs', t => {
+  const { context } = fixture(t);
+  const plain = new Uint8Array([65, 85, 82, 65, 83, 80, 48, 49, 1, 0, 1, 0, 32, 0, 0, 0]);
+  const enc = context.encryptAspBytes(plain, 'secret123');
+  assert.equal(context.isEncryptedAsp(enc), true);
+  assert.equal(context.decryptAspBytes(enc, 'wrong'), null, 'Wrong password returns null');
+  const dec = context.decryptAspBytes(enc, 'secret123');
+  assert.deepEqual(Array.from(dec), Array.from(plain), 'Correct password restores original .asp bytes');
+});
+
+test('parseAspPack validates a pack and reports sound and scheme statistics', t => {
+  const { context } = fixture(t);
+  const pcm = Buffer.from([1, 0, 2, 0]);
+  const scheme = Buffer.from(JSON.stringify({
+    format: 'sound-graph', id: 'loco', name: 'TEPLOVOZ',
+    states: [{ id: 'a' }, { id: 'b' }], transitions: [{ id: 't' }], effects: [{ id: 'e' }]
+  }));
+  const bytes = buildAsp([
+    { name: 'Horn', vol: 80, ch: 1, bits: 16, rate: 22050, data: pcm },
+    { name: '__aura_scheme__', vol: 0, ch: 0, bits: 0, rate: 0, data: scheme }
+  ]);
+  const info = context.parseAspPack(bytes);
+  assert.equal(info.audio.length, 1);
+  assert.equal(info.audio[0].name, 'Horn');
+  assert.equal(info.audio[0].vol, 80);
+  assert.equal(info.pcm, 1);
+  assert.equal(info.adpcm, 0);
+  assert.equal(info.totalData, 4);
+  assert.equal(info.rates[22050], 1);
+  assert.equal(info.scheme.id, 'loco');
+  assert.equal(info.scheme.name, 'TEPLOVOZ');
+  assert.equal(info.scheme.states, 2);
+  assert.equal(info.scheme.transitions, 1);
+  assert.equal(info.scheme.effects, 1);
+});
+
+test('parseAspPack rejects non-ASP data and broken payload bounds', t => {
+  const { context } = fixture(t);
+  assert.throws(() => context.parseAspPack(new Uint8Array(32)), /заголовок/);
+  const pcm = Buffer.from([1, 0, 2, 0]);
+  const bytes = buildAsp([{ name: 'Horn', vol: 100, ch: 1, bits: 16, rate: 22050, data: pcm }]);
+  const trimmed = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.length - 1);
+  assert.throws(() => context.parseAspPack(trimmed), /границы/);
+  const padded = new Uint8Array(bytes.length + 2);
+  padded.set(bytes);
+  assert.throws(() => context.parseAspPack(padded), /размер/);
+});
+
+test('schemeBytesForPack rebuilds the asset manifest for the canonical unpacked WAV', t => {
+  const { context } = fixture(t);
+  const payload = Buffer.from([1, 0, 2, 0]);
+  const adpcm = Buffer.alloc(512, 7);
+  const project = {
+    format: 'sound-graph', id: 'loco', name: 'TEPLOVOZ',
+    states: [{ id: 'a', file: 'Horn.wav' }, { id: 'b', file: 'Brake.wav' }], transitions: [], effects: []
+  };
+  const raw = context.schemeBytesForPack(project, [
+    { name: 'Horn', vol: 100, ch: 1, bits: 16, rate: 22050, data: new Uint8Array(payload) },
+    { name: 'Brake', vol: 80, ch: 1, bits: 4, rate: 16000, data: new Uint8Array(adpcm) }
+  ]);
+  const doc = JSON.parse(Buffer.from(raw).toString('utf8'));
+  const hdr = Buffer.from(context.packWavHeader(payload.length, 22050, 1, 16));
+  assert.equal(hdr.length, 44);
+  const crc = (zlib.crc32(Buffer.concat([hdr, payload])) >>> 0).toString(16).padStart(8, '0');
+  const adpcmHdr = Buffer.from(context.packWavHeader(adpcm.length, 16000, 1, 4));
+  assert.equal(adpcmHdr.length, 60);
+  const adpcmCrc = (zlib.crc32(Buffer.concat([adpcmHdr, adpcm])) >>> 0).toString(16).padStart(8, '0');
+  assert.deepEqual(doc.assets, [
+    { file: 'Horn.wav', size: 48, sampleRate: 22050, channels: 1, bits: 16, durationMs: 1, crc32: crc },
+    { file: 'Brake.wav', size: 572, sampleRate: 16000, channels: 1, bits: 4, durationMs: 63, crc32: adpcmCrc }
+  ]);
+  assert.throws(() => context.schemeBytesForPack(project, []), /отсутствующий звук/);
+});
+
+test('packFileBase keeps the locomotive name and strips unsafe filename characters', t => {
+  const { context } = fixture(t);
+  assert.equal(context.packFileBase('ТЕПЛОВОЗ'), 'ТЕПЛОВОЗ');
+  assert.equal(context.packFileBase('Тепловоз ЧМЭ3'), 'Тепловоз ЧМЭ3');
+  assert.equal(context.packFileBase('  ТЕПЛОВОЗ / #1  '), 'ТЕПЛОВОЗ_#1');
+  assert.equal(context.packFileBase(''), 'sound_pack');
+});
+
+test('exportSoundPack builds a validated pack named after the locomotive', async t => {
+  const { context } = fixture(t);
+  const logs = [];
+  context.log = (title, msg) => logs.push(msg);
+  context.showSetting = () => {};
+  context.loadLibrary = async () => {};
+  context.promptPasswordDialog = async () => '';
+  let exportStats = null;
+  context.showSavePackDialog = async (name, size, downloadInfo, tooBig, repairs) => {
+    exportStats = { name, size, download: downloadInfo, tooBig, repairs };
+    if (downloadInfo) download = downloadInfo.name;
+    return true;
+  };
+  context.libFiles = [{ name: 'Horn', size: 4, vol: 55 }];
+  context.api = async url => {
+    if (url === '/api/device') return { ok: true, name: 'ТЕПЛОВОЗ / 1' };
+    if (url === '/api/sound/graph/state') return { ok: true, id: 'loco', revision: 2 };
+    if (url.indexOf('/api/sound/graph/project') === 0)
+      return { ok: true, project: { format: 'sound-graph', id: 'loco', name: 'TEPLOVOZ',
+        states: [{ id: 's', file: 'Horn.wav' }], transitions: [], effects: [] } };
+    if (url.indexOf('/api/func-map') === 0) return { ok: true, binds: [] };
+    if (url.indexOf('/api/aux/cfg') === 0) return { ok: true, aux: {} };
+    throw new Error('unexpected ' + url);
+  };
+  const pcm = new Uint8Array([1, 0, 2, 0]);
+  context.fetch = async () => ({ ok: true, arrayBuffer: async () => pcm.buffer,
+    headers: { get: n => ({ 'X-Audio-Rate': '22050', 'X-Audio-Channels': '1', 'X-Audio-Bits': '16' })[n] } });
+  let captured = null;
+  context.Blob = class { constructor(parts) { this.bytes = Buffer.from(parts[0]); captured = this.bytes; } };
+  context.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+  context.setTimeout = () => {};
+  let download = '';
+  context.document.createElement = () => {
+    const a = { href: '', click: () => {} };
+    Object.defineProperty(a, 'download', { get: () => download, set: v => { download = v; } });
+    return a;
+  };
+  await context.exportSoundPack();
+  assert.ok(captured, 'a downloadable pack is produced: ' + logs.join(' | '));
+  const info = context.parseAspPack(new Uint8Array(captured));
+  assert.equal(info.audio.length, 1);
+  assert.equal(info.audio[0].name, 'Horn');
+  assert.equal(info.audio[0].vol, 55);
+  assert.equal(info.scheme.id, 'loco');
+  assert.equal(download, 'TEPLOVOZ.asp');
+  assert.ok(exportStats, 'save dialog is shown');
+  assert.equal(exportStats.name, 'TEPLOVOZ.asp');
+  assert.equal(exportStats.download.name, 'TEPLOVOZ.asp');
+  assert.match(exportStats.download.url, /^blob:/);
+  assert.equal(info.audio.length, 1);
+  assert.equal(info.adpcm, 1, 'PCM is compressed to ADPCM on export');
 });
 
 test('OTA timeout and abort release upload state', t => {

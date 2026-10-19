@@ -1,4 +1,4 @@
-﻿/* White-box host tests for components/web/src/web.c.
+/* White-box host tests for components/web/src/web.c.
  *
  * web.c is compiled into this translation unit with `static` stripped (so the
  * internal handlers/helpers are callable) together with the pure web_util.c
@@ -1454,6 +1454,43 @@ static size_t pack_test_build(uint8_t *buf, const char *name,
     return data_off + pcm_len;
 }
 
+static const char pack_scheme_fixture[] =
+    "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"demo\",\"name\":\"Demo\","
+    "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":3,"
+    "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+    "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
+
+static size_t pack_test_build_scheme(uint8_t *buf, const char *name,
+                                     const uint8_t *pcm, size_t pcm_len,
+                                     const char *scheme, size_t scheme_len)
+{
+    size_t nlen = strlen(name);
+    size_t snlen = strlen(AUDIO_PACK_SCHEME_NAME);
+    uint32_t entry1 = AUDIO_PACK_HDR_LEN;
+    uint32_t entry2 = entry1 + AUDIO_PACK_ENTRY_HDR_LEN + (uint32_t)nlen;
+    uint32_t data_off = entry2 + AUDIO_PACK_ENTRY_HDR_LEN + (uint32_t)snlen;
+    memset(buf, 0, data_off + pcm_len + scheme_len);
+    memcpy(buf, AUDIO_PACK_MAGIC, AUDIO_PACK_MAGIC_LEN);
+    pack_test_put16(buf + 8, AUDIO_PACK_VERSION);
+    pack_test_put16(buf + 10, 2);
+    pack_test_put32(buf + 12, data_off);
+    uint8_t *e = buf + entry1;
+    e[0] = (uint8_t)nlen; e[1] = 100; e[2] = 1; e[3] = AUDIO_PACK_BITS_PCM;
+    pack_test_put32(e + 4, 22050);
+    pack_test_put32(e + 8, data_off);
+    pack_test_put32(e + 12, (uint32_t)pcm_len);
+    memcpy(buf + entry1 + AUDIO_PACK_ENTRY_HDR_LEN, name, nlen);
+    e = buf + entry2;
+    e[0] = (uint8_t)snlen; e[1] = 0; e[2] = 0; e[3] = AUDIO_PACK_BITS_SCHEME;
+    pack_test_put32(e + 4, 0);
+    pack_test_put32(e + 8, data_off + (uint32_t)pcm_len);
+    pack_test_put32(e + 12, (uint32_t)scheme_len);
+    memcpy(buf + entry2 + AUDIO_PACK_ENTRY_HDR_LEN, AUDIO_PACK_SCHEME_NAME, snlen);
+    memcpy(buf + data_off, pcm, pcm_len);
+    memcpy(buf + data_off + pcm_len, scheme, scheme_len);
+    return data_off + pcm_len + scheme_len;
+}
+
 static void test_audio_pack_upload_replaces_library(void)
 {
     FILE *old = fopen("web_tmp/audio/old.wav", "wb");
@@ -1510,6 +1547,66 @@ static void test_audio_pack_upload_rejects_graph_reference(void)
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "graph asset referenced"));
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/new.wav"));
+}
+
+static void test_audio_pack_upload_applies_bundled_scheme(void)
+{
+    FILE *old = fopen("web_tmp/audio/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(old);
+    TEST_ASSERT_EQUAL_INT(3, (int)fwrite("OLD", 1, 3, old));
+    fclose(old);
+
+    uint8_t pcm[16] = { 0 };
+    uint8_t pack[4096];
+    size_t n = pack_test_build_scheme(pack, "new", pcm, sizeof(pcm),
+                                      pack_scheme_fixture, strlen(pack_scheme_fixture));
+    set_body(pack, n);
+    httpd_req_t req = make_req(n);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"scheme\":"));
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/new.wav"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_save_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_commit_calls);
+}
+
+static void test_audio_pack_upload_rolls_back_when_scheme_fails(void)
+{
+    FILE *old = fopen("web_tmp/audio/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(old);
+    TEST_ASSERT_EQUAL_INT(3, (int)fwrite("OLD", 1, 3, old));
+    fclose(old);
+
+    uint8_t pcm[16] = { 0 };
+    uint8_t pack[4096];
+    size_t n = pack_test_build_scheme(pack, "new", pcm, sizeof(pcm),
+                                      pack_scheme_fixture, strlen(pack_scheme_fixture));
+    set_body(pack, n);
+    httpd_req_t req = make_req(n);
+
+    mock_graph_assets_err = ESP_ERR_INVALID_ARG;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_save_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_select_calls);
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_FALSE(file_exists("web_tmp/audio/new.wav"));
+
+    mock_graph_assets_err = ESP_OK;
+    mock_graph_select_err = ESP_FAIL;
+    set_body(pack, n);
+    req = make_req(n);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_pack_upload_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_save_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_select_calls);
     TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
     TEST_ASSERT_FALSE(file_exists("web_tmp/audio/new.wav"));
 }
@@ -4009,8 +4106,8 @@ static void test_graph_get_roundtrip_assets_and_routes(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
     TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
     reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
-    TEST_ASSERT_EQUAL_UINT32(58, s_route_count);
-    TEST_ASSERT_EQUAL_UINT32(58, mock_route_count);
+    TEST_ASSERT_EQUAL_UINT32(60, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(60, mock_route_count);
 }
 
 static void test_graph_referenced_uploads_fail_closed(void)
@@ -4190,6 +4287,8 @@ int main(void)
     RUN_TEST(test_audio_pack_upload_replaces_library);
     RUN_TEST(test_audio_pack_upload_rolls_back_on_publish_failure);
     RUN_TEST(test_audio_pack_upload_rejects_graph_reference);
+    RUN_TEST(test_audio_pack_upload_applies_bundled_scheme);
+    RUN_TEST(test_audio_pack_upload_rolls_back_when_scheme_fails);
     RUN_TEST(test_audio_upload_success);
     RUN_TEST(test_audio_upload_replaces_and_retains_old);
     RUN_TEST(test_audio_upload_compacts_duplicates);

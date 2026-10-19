@@ -43,10 +43,13 @@
  * (extra 20-byte fmt + 12-byte fact chunk). */
 #define AUDIO_PACK_WAV_HDR_LEN   44
 #define AUDIO_PACK_WAV_HDR_MAX   60
-/* Per-entry `bits` selects the payload encoding: 16 = PCM16, 4 = IMA ADPCM. */
+/* Per-entry `bits` selects the payload encoding: 16 = PCM16, 4 = IMA ADPCM,
+ * 0 = embedded JSON metadata (reserved name "__aura_scheme__"). */
 #define AUDIO_PACK_BITS_PCM      16
 #define AUDIO_PACK_BITS_ADPCM    4
+#define AUDIO_PACK_BITS_SCHEME   0
 #define AUDIO_PACK_ADPCM_BLOCK   256
+#define AUDIO_PACK_SCHEME_NAME   "__aura_scheme__"
 
 typedef struct {
     uint32_t count;

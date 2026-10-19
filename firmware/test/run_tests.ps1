@@ -115,6 +115,14 @@ if ($node) {
     Write-Host "=== test_blocks_editor (Node.js) ===" -ForegroundColor Cyan
     & $node.Source --test "$root\test\test_blocks_editor.js"
     if ($LASTEXITCODE -ne 0) { $failed++ }
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($python) {
+        Write-Host "=== test_pack_integration (Node.js + Python) ===" -ForegroundColor Cyan
+        & $node.Source --test "$root\test\test_pack_integration.js"
+        if ($LASTEXITCODE -ne 0) { $failed++ }
+    } else {
+        Write-Warning "Python not found: real .asp import/export tests were NOT run."
+    }
 } else {
     Write-Warning "Node.js not found: JavaScript regressions were NOT run."
 }

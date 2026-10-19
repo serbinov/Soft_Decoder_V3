@@ -1615,6 +1615,10 @@ esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, siz
     memcpy(mock_graph_json, json, len); mock_graph_json[len] = '\0';
     *revision = ++mock_graph_revision; return ESP_OK;
 }
+esp_err_t sg_store_save_force(const char *id, const char *json, size_t len, uint32_t *revision, sg_diagnostic_t *diag)
+{
+    return sg_store_save(id, mock_graph_revision, json, len, revision, diag);
+}
 esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *len, uint32_t *actual)
 {
     (void)id; *out = NULL;
@@ -1664,6 +1668,11 @@ esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
 {
     (void)file; *referenced = mock_graph_reference_err != ESP_OK || mock_graph_referenced;
     return mock_graph_reference_err;
+}
+esp_err_t sg_store_file_referenced_except(const char *except_id, const char *file, bool *referenced)
+{
+    (void)except_id;
+    return sg_store_file_referenced(file, referenced);
 }
 /* Restore every mock flag/injector to its neutral default and clear the
  * web.c module state so each Unity test starts from a known baseline. */

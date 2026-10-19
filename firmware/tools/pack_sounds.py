@@ -32,14 +32,68 @@ Per-file volumes: an optional "volumes.txt" in SRC_DIR with lines
 from __future__ import annotations
 
 import argparse
+import binascii
+import json
 import os
 import struct
 import sys
 
 MAGIC = b"AURASP01"
+PW_MAGIC = b"AURAPW01"
 VERSION = 1
 MAX_FILES = 400
 NAME_MAX = 63
+SCHEME_ENTRY_NAME = "__aura_scheme__"
+SCHEME_MAX_BYTES = 131072
+
+
+def _fnv32(data: bytes) -> int:
+    h = 0x811C9DC5
+    for b in data:
+        h ^= b
+        h = ((h * 0x01000193) & 0xFFFFFFFF)
+    return h
+
+
+def _prng_keystream(pw_bytes: bytes, salt: bytes, length: int) -> bytes:
+    seed = pw_bytes + salt
+    s0 = _fnv32(seed) or 0x9E3779B9
+    s1 = _fnv32(salt) ^ 0x85EBCA6B
+    out = bytearray(length)
+    for i in range(length):
+        s0 ^= (s0 << 13) & 0xFFFFFFFF
+        s0 ^= (s0 >> 17) & 0xFFFFFFFF
+        s0 ^= (s0 << 5) & 0xFFFFFFFF
+        s1 = (s1 * 1664525 + 1013904223) & 0xFFFFFFFF
+        out[i] = ((s0 ^ s1) >> ((i & 3) * 8)) & 0xFF
+    return bytes(out)
+
+
+def encrypt_asp(plain: bytes, password: str) -> bytes:
+    """Casual obfuscation only (XOR stream + 32-bit tag), not encryption."""
+    if not password:
+        return plain
+    pw_bytes = password.encode("utf-8")
+    salt = os.urandom(4)
+    tag = _fnv32(pw_bytes + salt)
+    ks = _prng_keystream(pw_bytes, salt, len(plain))
+    cipher = bytes(a ^ b for a, b in zip(plain, ks))
+    return PW_MAGIC + salt + struct.pack("<I", tag) + cipher
+
+
+def decrypt_asp(data: bytes, password: str) -> bytes:
+    if not data.startswith(PW_MAGIC):
+        return data
+    if len(data) < 24:
+        raise SystemExit("corrupted encrypted .asp container")
+    pw_bytes = (password or "").encode("utf-8")
+    salt = data[8:12]
+    expected_tag = struct.unpack_from("<I", data, 12)[0]
+    if _fnv32(pw_bytes + salt) != expected_tag:
+        raise SystemExit("wrong sound pack password")
+    cipher = data[16:]
+    ks = _prng_keystream(pw_bytes, salt, len(cipher))
+    return bytes(a ^ b for a, b in zip(cipher, ks))
 
 # IMA/DVI ADPCM tables (Microsoft WAVE_FORMAT_IMA_ADPCM).
 _IMA_INDEX_TABLE = (-1, -1, -1, -1, 2, 4, 6, 8,
@@ -128,6 +182,71 @@ def _sanitize(name: str) -> str:
         else:
             out.append("_")
     return "".join(out)
+
+
+def _valid_entry_name(name: str) -> bool:
+    """Reject names that the device would sanitize or that escape a directory."""
+    if not name or len(name.encode("utf-8")) > NAME_MAX:
+        return False
+    if name in (".", "..") or "\x00" in name or "/" in name or "\\" in name:
+        return False
+    return name == _sanitize(name)
+
+
+def _validate_pack_entries(entries: list, data_off: int, total_len: int) -> None:
+    """Mirror the container checks in audio_pack.c before writing anything."""
+    seen = set()
+    expected = data_off
+    audio_count = 0
+    for name, vol, ch, bits, rate, eoff, elen in entries:
+        if not _valid_entry_name(name):
+            raise SystemExit("unsafe or invalid entry name: %r" % name)
+        if vol > 100:
+            raise SystemExit("invalid volume for %r" % name)
+        if bits == 0:
+            if name != SCHEME_ENTRY_NAME or ch != 0 or rate != 0 or elen < 1 or elen > SCHEME_MAX_BYTES:
+                raise SystemExit("invalid scheme entry")
+        elif bits == 16:
+            if ch < 1 or ch > 2 or rate < 1 or rate > 192000:
+                raise SystemExit("invalid PCM entry %r" % name)
+            frame = ch * 2
+            if elen < frame or elen % frame:
+                raise SystemExit("invalid PCM payload size for %r" % name)
+        elif bits == 4:
+            if ch != 1 or rate < 1 or rate > 192000:
+                raise SystemExit("invalid ADPCM entry %r" % name)
+            if elen < IMA_BLOCK_ALIGN or elen % IMA_BLOCK_ALIGN:
+                raise SystemExit("invalid ADPCM payload size for %r" % name)
+        else:
+            raise SystemExit("unsupported bit depth %d for %r" % (bits, name))
+        key = name.lower()
+        if key in seen:
+            raise SystemExit("duplicate entry name: %r" % name)
+        seen.add(key)
+        if eoff != expected:
+            raise SystemExit("non-contiguous payload offset for %r" % name)
+        if eoff + elen > total_len:
+            raise SystemExit("payload outside the container for %r" % name)
+        expected += elen
+        if bits != 0:
+            audio_count += 1
+    if expected != total_len:
+        raise SystemExit("container size mismatch")
+    if audio_count == 0:
+        raise SystemExit("pack contains no audio entries")
+
+
+def _safe_wav_path(out_dir: str, name: str) -> str:
+    root = os.path.realpath(out_dir)
+    dest = os.path.realpath(os.path.join(root, name + ".wav"))
+    try:
+        inside = os.path.commonpath([root, dest]) == root
+    except ValueError:
+        inside = False
+    if not inside:
+        raise SystemExit("entry escapes the output directory: %r" % name)
+    return dest
+
 
 
 def _truncate_utf8(s: str, max_bytes: int) -> str:
@@ -315,8 +434,156 @@ def _load_volume_overrides(src_dir: str, default_volume: int):
     return vols
 
 
+def _build_wav_header(data_len: int, sample_rate: int, channels: int, bits: int) -> bytes:
+    """Build the exact canonical WAV header that the device writes on unpack."""
+    if bits == 4:
+        block_align = IMA_BLOCK_ALIGN
+        spb = IMA_SAMPLES_PER_BLOCK
+        byte_rate = (sample_rate * block_align) // spb
+        total_samples = (data_len // block_align) * spb
+        return struct.pack(
+            "<4sI4s4sIHHIIHHHH4sII4sI",
+            b"RIFF", 52 + data_len, b"WAVE",
+            b"fmt ", 20, 0x0011, 1, sample_rate, byte_rate, block_align, 4, 2, spb,
+            b"fact", 4, total_samples,
+            b"data", data_len,
+        )
+    block_align = channels * 2
+    byte_rate = sample_rate * block_align
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + data_len, b"WAVE",
+        b"fmt ", 16, 1, channels, sample_rate, byte_rate, block_align, 16,
+        b"data", data_len,
+    )
+
+
+def _compute_asset_manifest(name: str, sample_rate: int, channels: int, bits: int, payload: bytes) -> dict:
+    """Compute the exact sg_asset_t manifest for a packed WAV entry."""
+    hdr = _build_wav_header(len(payload), sample_rate, channels, bits)
+    full = hdr + payload
+    crc = binascii.crc32(full) & 0xFFFFFFFF
+    if bits == 4:
+        duration_ms = ((len(payload) // IMA_BLOCK_ALIGN) * IMA_SAMPLES_PER_BLOCK * 1000) // sample_rate
+    else:
+        duration_ms = (len(payload) * 1000) // (sample_rate * channels * 2)
+    return {
+        "file": name + ".wav",
+        "size": len(full),
+        "sampleRate": sample_rate,
+        "channels": channels,
+        "bits": bits,
+        "durationMs": max(1, int(duration_ms)),
+        "crc32": "%08x" % crc,
+    }
+
+
+def _find_scheme_file(src_dir: str, explicit_path: str | None) -> str | None:
+    if explicit_path:
+        if not os.path.isfile(explicit_path):
+            raise SystemExit("scheme file not found: %s" % explicit_path)
+        return explicit_path
+    for candidate in ("scheme.json", "sound_graph.json", "project.json"):
+        p = os.path.join(src_dir, candidate)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _prepare_scheme_payload(scheme_path: str, entries: list) -> bytes:
+    """Load a sound-graph JSON, populate its assets[] manifest from the packed WAVs, and serialize."""
+    with open(scheme_path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    if not isinstance(doc, dict) or doc.get("format") != "sound-graph":
+        raise SystemExit("%s: expected JSON with \"format\": \"sound-graph\"" % scheme_path)
+    manifest_by_file = {}
+    for name, _vol, erate, ech, ebits, payload in entries:
+        m = _compute_asset_manifest(name, erate, ech, ebits, payload)
+        manifest_by_file[m["file"]] = m
+    referenced = []
+    seen = set()
+    for st in doc.get("states", []):
+        f = st.get("file", "") if isinstance(st, dict) else ""
+        if f and f not in seen:
+            if f not in manifest_by_file:
+                raise SystemExit("%s: state '%s' references WAV '%s' not present in pack" %
+                                 (scheme_path, st.get("id", "?"), f))
+            seen.add(f)
+            referenced.append(manifest_by_file[f])
+    doc["assets"] = referenced
+    raw = json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(raw) > SCHEME_MAX_BYTES:
+        raise SystemExit("%s: serialized scheme exceeds %d B (%d B)" %
+                         (scheme_path, SCHEME_MAX_BYTES, len(raw)))
+    return raw
+
+
+def unpack(asp_path: str, out_dir: str, password: str = "") -> int:
+    """Unpack an .asp container into WAV files, volumes.txt, and scheme.json (if bundled)."""
+    if not os.path.isfile(asp_path):
+        raise SystemExit("pack file not found: %s" % asp_path)
+    with open(asp_path, "rb") as fh:
+        data = fh.read()
+    if data.startswith(PW_MAGIC):
+        data = decrypt_asp(data, password)
+    if len(data) < 16 or data[:8] != MAGIC:
+        raise SystemExit("not a valid AURASP01 container: %s" % asp_path)
+    version, count, data_off = struct.unpack_from("<HHI", data, 8)
+    if version != VERSION or count == 0 or count > MAX_FILES:
+        raise SystemExit("unsupported version or entry count in %s" % asp_path)
+    pos = 16
+    entries = []
+    for _ in range(count):
+        if pos + 16 > data_off:
+            raise SystemExit("truncated index in %s" % asp_path)
+        nlen, vol, ch, bits, rate, eoff, elen = struct.unpack_from("<BBBBIII", data, pos)
+        pos += 16
+        if nlen < 1 or nlen > NAME_MAX or pos + nlen > data_off:
+            raise SystemExit("truncated entry name in %s" % asp_path)
+        try:
+            name = data[pos:pos + nlen].decode("utf-8")
+        except UnicodeDecodeError:
+            raise SystemExit("invalid UTF-8 entry name in %s" % asp_path)
+        pos += nlen
+        entries.append((name, vol, ch, bits, rate, eoff, elen))
+    if pos != data_off:
+        raise SystemExit("index length mismatch in %s" % asp_path)
+    _validate_pack_entries(entries, data_off, len(data))
+    os.makedirs(out_dir, exist_ok=True)
+    vol_lines = []
+    wav_written = 0
+    scheme_written = False
+    for name, vol, ch, bits, rate, eoff, elen in entries:
+        payload = data[eoff:eoff + elen]
+        if bits == 0 and name == SCHEME_ENTRY_NAME:
+            scheme_out = os.path.join(out_dir, "scheme.json")
+            try:
+                parsed = json.loads(payload.decode("utf-8"))
+                with open(scheme_out, "w", encoding="utf-8") as sf:
+                    json.dump(parsed, sf, ensure_ascii=False, indent=2)
+            except Exception:
+                with open(scheme_out, "wb") as sf:
+                    sf.write(payload)
+            scheme_written = True
+            continue
+        hdr = _build_wav_header(elen, rate, ch, bits)
+        wav_out = _safe_wav_path(out_dir, name)
+        with open(wav_out, "wb") as wf:
+            wf.write(hdr)
+            wf.write(payload)
+        vol_lines.append("%s=%d\n" % (name, vol))
+        wav_written += 1
+    if vol_lines:
+        with open(os.path.join(out_dir, "volumes.txt"), "w", encoding="utf-8") as vf:
+            vf.writelines(vol_lines)
+    print("Unpacked %d WAV file(s)%s -> %s" %
+          (wav_written, " + scheme.json" if scheme_written else "", out_dir))
+    return 0
+
+
 def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
-         default_volume: int, order: str, adpcm: bool) -> int:
+         default_volume: int, order: str, adpcm: bool,
+         scheme_path: str | None = None, password: str = "") -> int:
     if not os.path.isdir(src_dir):
         raise SystemExit("source folder not found: %s" % src_dir)
     files = [f for f in os.listdir(src_dir) if f.lower().endswith(".wav")]
@@ -365,6 +632,14 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
         vol = overrides.get(name, default_volume)
         entries.append((name, vol, out_rate, out_channels, out_bits, payload))
 
+    resolved_scheme = _find_scheme_file(src_dir, scheme_path)
+    if resolved_scheme:
+        scheme_bytes = _prepare_scheme_payload(resolved_scheme, entries)
+        entries.append((SCHEME_ENTRY_NAME, 0, 0, 0, 0, scheme_bytes))
+    if len(entries) > MAX_FILES:
+        raise SystemExit("too many entries: %d (max %d including the bundled scheme)" %
+                         (len(entries), MAX_FILES))
+
     header_off = 16
     index_len = sum(16 + len(e[0].encode("utf-8")) for e in entries)
     data_off = header_off + index_len
@@ -382,25 +657,37 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
         chunks.append(payload)
 
     blob = b"".join(chunks)
+    if password:
+        blob = encrypt_asp(blob, password)
     tmp = out_path + ".tmp"
     with open(tmp, "wb") as fh:
         fh.write(blob)
     os.replace(tmp, out_path)
 
     total = len(blob)
-    print("Packed %d file(s), %d B -> %s (%s)" %
-          (len(entries), total, out_path,
+    wav_entries = [e for e in entries if e[4] != 0]
+    print("Packed %d WAV file(s)%s%s, %d B -> %s (%s)" %
+          (len(wav_entries),
+           " + sound scheme (%s)" % os.path.basename(resolved_scheme) if resolved_scheme else "",
+           " [password-protected]" if password else "",
+           total, out_path,
            "IMA ADPCM" if adpcm else "PCM16"))
     for name, vol, erate, ech, ebits, payload in entries:
-        print("  %-40s %6d B  %d Hz  %dch  %s  vol=%d" %
-              (name, len(payload), erate, ech, "ADPCM" if ebits == 4 else "PCM16", vol))
+        if ebits == 0:
+            print("  %-40s %6d B  JSON sound-graph scheme" % (name, len(payload)))
+        else:
+            print("  %-40s %6d B  %d Hz  %dch  %s  vol=%d" %
+                  (name, len(payload), erate, ech, "ADPCM" if ebits == 4 else "PCM16", vol))
     return 0
 
 
 def main(argv) -> int:
-    ap = argparse.ArgumentParser(description="Pack WAV files into an AURA Sound Pack (.asp)")
-    ap.add_argument("src_dir", help="folder with .wav files")
-    ap.add_argument("-o", "--output", default=None, help="output .asp path")
+    ap = argparse.ArgumentParser(description="Pack/unpack WAV files and sound scheme in an AURA Sound Pack (.asp)")
+    ap.add_argument("src", nargs="?", help="folder with .wav files (or .asp path with --unpack)")
+    ap.add_argument("-o", "--output", default=None, help="output .asp path (or output folder with --unpack)")
+    ap.add_argument("--scheme", default=None, help="optional sound-graph JSON file to bundle into the .asp")
+    ap.add_argument("--password", default="", help="optional password to encrypt/decrypt the .asp pack")
+    ap.add_argument("--unpack", action="store_true", help="unpack an .asp file into a folder")
     ap.add_argument("--rate", type=int, default=22050, help="target sample rate (default 22050)")
     ap.add_argument("--stereo", action="store_true", help="keep stereo (default mono)")
     ap.add_argument("--pcm", action="store_true",
@@ -408,12 +695,17 @@ def main(argv) -> int:
     ap.add_argument("--volume", type=int, default=100, help="default per-file volume 0..100")
     ap.add_argument("--order", choices=("name", "mtime"), default="name", help="index order")
     args = ap.parse_args(argv)
+    if not args.src:
+        ap.error("src path is required")
+    if args.unpack:
+        out_dir = args.output or (args.src[:-4] if args.src.lower().endswith(".asp") else args.src + "_unpacked")
+        return unpack(args.src, out_dir, args.password)
     adpcm = not args.pcm
     if adpcm and args.stereo:
         ap.error("--stereo cannot be combined with IMA ADPCM (ADPCM is mono)")
-    out = args.output or (args.src_dir.rstrip("/\\") + ".asp")
-    return pack(args.src_dir, out, max(1, args.rate), args.stereo,
-                max(0, min(100, args.volume)), args.order, adpcm)
+    out = args.output or (args.src.rstrip("/\\") + ".asp")
+    return pack(args.src, out, max(1, args.rate), args.stereo,
+                max(0, min(100, args.volume)), args.order, adpcm, args.scheme, args.password)
 
 
 if __name__ == "__main__":

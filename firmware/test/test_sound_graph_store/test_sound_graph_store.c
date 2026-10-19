@@ -366,6 +366,29 @@ static void test_historical_references_and_fail_closed(void)
     free(json); free(silent);
 }
 
+static void test_reference_scan_can_exclude_bundled_project(void)
+{
+    make_wav(); sg_asset_t asset; sg_asset_inspect("loop.wav", &asset, NULL);
+    char *a = fixture("a", "loop.wav", &asset);
+    char *b = fixture("b", "", NULL);
+    uint32_t rev = save_json("a", 0, a);
+    save_json("b", 0, b);
+    bool referenced = false;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced("loop.wav", &referenced));
+    TEST_ASSERT_TRUE(referenced);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced_except("a", "loop.wav", &referenced));
+    TEST_ASSERT_FALSE(referenced);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced_except("b", "loop.wav", &referenced));
+    TEST_ASSERT_TRUE(referenced);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_select("a", rev));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced_except("a", "loop.wav", &referenced));
+    TEST_ASSERT_FALSE(referenced);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_file_referenced_except("b", "loop.wav", &referenced));
+    TEST_ASSERT_TRUE(referenced);
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_INVALID_ARG, sg_store_file_referenced_except("bad/id", "loop.wav", &referenced));
+    free(a); free(b);
+}
+
 static void test_retention_keeps_latest_and_selected(void)
 {
     char *json = fixture("a", "", NULL);
@@ -498,6 +521,7 @@ int main(void)
     RUN_TEST(test_missing_assets_and_missing_manifest_drafts);
     RUN_TEST(test_invalid_wav_and_paths);
     RUN_TEST(test_historical_references_and_fail_closed);
+    RUN_TEST(test_reference_scan_can_exclude_bundled_project);
     RUN_TEST(test_retention_keeps_latest_and_selected);
     RUN_TEST(test_delete_project_and_selection);
     RUN_TEST(test_missing_revision_fails_reference_scan);

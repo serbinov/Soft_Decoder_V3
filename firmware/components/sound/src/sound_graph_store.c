@@ -300,8 +300,9 @@ static void prune_locked(const char *id, uint32_t latest)
     closedir(dir);
 }
 
-esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, size_t len,
-                        uint32_t *newrev, sg_diagnostic_t *diag)
+static esp_err_t store_save_impl(const char *id, uint32_t expected, bool check_expected,
+                                 const char *json, size_t len, uint32_t *newrev,
+                                 sg_diagnostic_t *diag)
 {
     if (diag) { memset(diag, 0, sizeof(*diag)); }
     if (newrev) { *newrev = 0; }
@@ -321,7 +322,7 @@ esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, siz
     uint32_t current = 0, size = 0, crc = 0, revision = 0;
     err = latest_read(id, &current, &size, &crc);
     if (err == ESP_ERR_NOT_FOUND) { err = ESP_OK; }
-    if (err == ESP_OK && current != expected) {
+    if (err == ESP_OK && check_expected && current != expected) {
         err = diagnostic(diag, ESP_ERR_INVALID_STATE, "Stale expectedRevision");
     }
     if (err == ESP_OK) { err = ensure_dir(); }
@@ -343,6 +344,18 @@ esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, siz
         diagnostic(diag, err, "Graph storage write failed; previous latest preserved");
     }
     leave(); return err;
+}
+
+esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, size_t len,
+                        uint32_t *newrev, sg_diagnostic_t *diag)
+{
+    return store_save_impl(id, expected, true, json, len, newrev, diag);
+}
+
+esp_err_t sg_store_save_force(const char *id, const char *json, size_t len,
+                              uint32_t *newrev, sg_diagnostic_t *diag)
+{
+    return store_save_impl(id, 0, false, json, len, newrev, diag);
 }
 
 static esp_err_t selection_write(const char *payload)
@@ -658,11 +671,12 @@ static esp_err_t json_uses_file(const char *id, const char *json, size_t len,
     return err;
 }
 
-esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
+esp_err_t sg_store_file_referenced_except(const char *except_id, const char *file, bool *referenced)
 {
     if (!referenced) { return ESP_ERR_INVALID_ARG; }
     *referenced = true;
     if (!sg_filename_valid(file)) { return ESP_ERR_INVALID_ARG; }
+    if (except_id != NULL && !sg_id_valid(except_id)) { return ESP_ERR_INVALID_ARG; }
     esp_err_t err = enter();
     if (err != ESP_OK) { return err; }
     char path[SG_PATH_CAP];
@@ -683,6 +697,9 @@ esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
         if (n - 7 >= SG_ID_CAP) { err = ESP_FAIL; break; }
         char id[SG_ID_CAP]; memcpy(id, entry->d_name, n - 7); id[n - 7] = 0;
         if (!sg_id_valid(id)) { err = ESP_FAIL; break; }
+        /* The bundled project is being replaced as a whole, so its old
+         * revisions must not block dropping files that it referenced. */
+        if (except_id != NULL && strcmp(id, except_id) == 0) continue;
         char *json = NULL; size_t len = 0; uint32_t actual;
         err = read_locked(id, 0, &json, &len, &actual);
         if (err == ESP_OK && (bytes += len) > SG_SCAN_BYTES) { err = ESP_ERR_INVALID_SIZE; }
@@ -704,6 +721,8 @@ esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
             if (sscanf(selection, "graph %31s %lu\n%n", project, &rev, &used) != 2 ||
                 selection[used] || !sg_id_valid(project) || !rev || rev > UINT32_MAX) {
                 err = ESP_FAIL;
+            } else if (except_id != NULL && strcmp(project, except_id) == 0) {
+                err = ESP_OK;
             } else {
                 char *json = NULL; size_t len = 0; uint32_t actual;
                 err = read_locked(project, (uint32_t)rev, &json, &len, &actual);
@@ -719,4 +738,9 @@ esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
     }
     if (err == ESP_OK) { *referenced = found; }
     leave(); return err;
+}
+
+esp_err_t sg_store_file_referenced(const char *file, bool *referenced)
+{
+    return sg_store_file_referenced_except(NULL, file, referenced);
 }

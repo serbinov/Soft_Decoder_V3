@@ -173,6 +173,7 @@
       <button id="b_new" data-i18n="new">Новый</button>
       <button id="b_default" data-i18n="default_project">Тепловоз ЧМЭ3</button>
       <button id="b_check_blocks" data-i18n="check_blocks">Проверить блоки</button>
+      <button id="b_export_scheme" data-i18n="export_scheme">Экспорт схемы для пакета (.json)</button>
       <button id="b_file_png" data-i18n="download_png">Скачать картинку</button>
       <button id="b_file_txt" data-i18n="download_txt">Скачать текст</button>
       <div style="padding:6px 8px;border-top:1px solid var(--line)">
@@ -305,7 +306,7 @@ vars_title:"Переменные",vars_builtins:"Встроенные",vars_add:
 mini_none:"Нет блоков.",lt_none:"Связей нет.",lt_source:"Источник",lt_target:"Цель",lt_condition:"Условие",
 bd_run:" · запуск: ",bd_idle:" · холостой: ",bd_stop:" · стоп: ",bd_step_a:"ступень ",bd_prot_a:"защита ",bd_out_mid:" · выход: ",bd_delay_a:", задержка ",bd_delay_b:" мс",bd_random:" · случайно из:",bd_trigger:"запуск: ",tr_auto:"авто",bd_speed_a:"скорость ",bd_speed_b:"% · защита ",bd_dir:"направление: ",bd_dir_fwd:"вперёд",bd_dir_rev:"назад",bd_out_a:"выход: ",
 bt_scheme:"Схема: ",bt_counts_a:"Блоков: ",bt_counts_b:", связей: ",bt_blocks:"== Блоки ==",bt_links:"== Связи ==",
-st_no_scheme:"Нет схемы",st_png_saved:"Блок-схема сохранена в JPG",st_png_fail:"Не удалось сохранить JPG",st_txt_saved:"Блок-схема сохранена в TXT",
+st_no_scheme:"Нет схемы",st_png_saved:"Блок-схема сохранена в JPG",st_png_fail:"Не удалось сохранить JPG",st_txt_saved:"Блок-схема сохранена в TXT",export_scheme:"Экспорт схемы для пакета (.json)",st_scheme_saved:"Файл scheme.json сохранён для упаковки в .asp",
 confirm_new:"Создать новую схему? Несохранённые правки будут потеряны.",default_project:"Тепловоз ЧМЭ3",default_project_name:"Тепловоз ЧМЭ3",default_horn_scheme:"Тифон (низкий)",default_whistle_scheme:"Свисток",default_bell_scheme:"Радиостанция",default_compressor_scheme:"Компрессор",default_coupler_scheme:"Автосцепка",default_uncoupler_scheme:"Расцепка",default_sander_scheme:"Песочница",default_fan_scheme:"Вентилятор холодильника",default_vent_scheme:"Выпуск воздуха",default_door_open_scheme:"Двери кабины: откр.",default_door_close_scheme:"Двери кабины: закр.",default_brake_scheme:"Торможение ЧМЭ3",confirm_default:"Загрузить типовой проект тепловоза ЧМЭ3? Несохранённые правки будут потеряны.",st_default_loaded:"Загружен типовой проект тепловоза ЧМЭ3.",st_new_scheme:"Новая схема",err_not_blocks_file:"Это не файл блоков",err_import:"Импорт не удался: ",st_imported:"Импортирована схема",cancel:"Отмена",load_device:"Загрузить с устройства",check_blocks:"Проверить блоки",project_name:"Имя проекта",project_id:"ID проекта",project_bad_id:"ID: только A-Z, a-z, 0-9, _ и -, до 31 символа.",st_no_projects:"На устройстве нет сохранённых проектов.",st_no_editor_copy:"В этом проекте нет редакторской копии (сохранён только граф).",st_loaded_device:"Загружен проект: ",st_load_error:"Ошибка загрузки: ",st_restored:"Восстановленный граф",rev_no_trigger:"Не найден триггер для блока: ",rev_unsupported:"Состояния без редакторского эквивалента пропущены: ",rev_logic:"Логический блок пропущен (сложная логика): ",st_no_outputs:"На устройстве нет привязок выходов или логики.",st_engine_out_bind:"Выход двигателя можно подключить к звуку/логике; к блоку выхода нельзя (нет диапазона скорости).",st_imported_outputs_a:"Импортировано выходов: ",st_imported_outputs_b:", обновлено: ",st_import_error:"Ошибка импорта выходов: ",v_bad_project_id:"Некорректный ID проекта.",v_bad_project_name:"Имя проекта пустое или длиннее 63 байт.",
 st_writing_outputs:"Запись выходов...",st_outputs_written:"Выходы записаны",st_outputs_not_written:"Выходы не записаны: ",st_impout_a:"Импортировано выходов: ",st_impout_none:"Новых выходов нет",
 new_scheme_name:"Новая схема тепловоза",
@@ -364,7 +365,7 @@ vars_title:"Variables",vars_builtins:"Built-in",vars_add:"+ Variable",vars_add_h
 mini_none:"No blocks.",lt_none:"No links.",lt_source:"Source",lt_target:"Target",lt_condition:"Condition",
 bd_run:" · start: ",bd_idle:" · idle: ",bd_stop:" · stop: ",bd_step_a:"step ",bd_prot_a:"margin ",bd_out_mid:" · output: ",bd_delay_a:", delay ",bd_delay_b:" ms",bd_random:" · randomly from:",bd_trigger:"trigger: ",tr_auto:"auto",bd_speed_a:"speed ",bd_speed_b:"% · margin ",bd_dir:"direction: ",bd_dir_fwd:"forward",bd_dir_rev:"reverse",bd_out_a:"output: ",
 bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"== Blocks ==",bt_links:"== Links ==",
-st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",
+st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",export_scheme:"Export scheme for pack (.json)",st_scheme_saved:"scheme.json saved for packing into .asp",
 confirm_new:"Create a new scheme? Unsaved changes will be lost.",default_project:"ChME3 Locomotive",default_project_name:"ChME3 Locomotive",default_horn_scheme:"Horn (low)",default_whistle_scheme:"Whistle",default_bell_scheme:"Shunting radio",default_compressor_scheme:"Air compressor",default_coupler_scheme:"Coupler",default_uncoupler_scheme:"Uncoupler",default_sander_scheme:"Sander",default_fan_scheme:"Cooling fan",default_vent_scheme:"Air release",default_door_open_scheme:"Cab door: open",default_door_close_scheme:"Cab door: close",default_brake_scheme:"ChME3 Brake",confirm_default:"Load the default ChME3 locomotive project? Unsaved changes will be lost.",st_default_loaded:"Default ChME3 locomotive project loaded.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",cancel:"Cancel",load_device:"Load from device",check_blocks:"Check blocks",project_name:"Project name",project_id:"Project ID",project_bad_id:"ID: only A-Z, a-z, 0-9, _ and -, up to 31 characters.",st_no_projects:"No saved projects on the device.",st_no_editor_copy:"This project has no editor copy (only the graph was stored).",st_loaded_device:"Project loaded: ",st_load_error:"Load failed: ",st_restored:"Recovered graph",rev_no_trigger:"No trigger found for block: ",rev_unsupported:"States without an editor equivalent were skipped: ",rev_logic:"Logic block skipped (complex logic): ",st_no_outputs:"No output or logic bindings on the device.",st_engine_out_bind:"An engine output can drive sounds/logic, not an output block (no speed range).",st_imported_outputs_a:"Outputs imported: ",st_imported_outputs_b:", updated: ",st_import_error:"Output import failed: ",v_bad_project_id:"Invalid project ID.",v_bad_project_name:"Project name is empty or longer than 63 bytes.",
 st_writing_outputs:"Writing outputs...",st_outputs_written:"Outputs written",st_outputs_not_written:"Outputs not written: ",st_impout_a:"Outputs imported: ",st_impout_none:"No new outputs",
 new_scheme_name:"New locomotive scheme",
@@ -1273,8 +1274,8 @@ function _compileFlat(){
       const globalLogic=!graphHasIn(b.id)&&!trigs.length;
       if(!globalLogic){
         const hasOutPort=p=>project.links.some(l=>{if(l.from!==b.id||l.kind!=="after"||(l.cond||"true")!==p)return false;const tc=blockTypeOf(l.to);return tc&&tc.kind!=="output"&&tc.kind!=="logicout";});
-        if(!hasOutPort("true"))addEdge(T,e,{type:"sample_done"},5);
-        if(conds.length&&!hasOutPort("false"))addEdge(b.id+"_false",e,{type:"sample_done"},5);
+        if(!hasOutPort("true"))addEdge(T,e,{type:"state_enter"},5);
+        if(conds.length&&!hasOutPort("false"))addEdge(b.id+"_false",e,{type:"state_enter"},5);
       }
       if(!graphHasIn(b.id)||trigs.length)effects.push({id:b.id,entry:e,fn:(trigs[0]&&trigs[0].fn!=null?trigs[0].fn:0)});
       continue;
@@ -1327,7 +1328,7 @@ function _compileFlat(){
     const isEngOwned=engineChainIds.has(b.id);
     const entry=isEngOwned?engineEntry:(b.id+"_off");
     const mode0=BY_TYPE[b.type].mode;
-    const isChainedPrimitive=isEngOwned||((mode0==="end"||mode0==="simple"||mode0==="loop"||mode0==="mute")&&!inputTrigs(b.id).length&&!directTargets.has(b.id)&&graphHasIn(b.id));
+    const isChainedPrimitive=isEngOwned||((mode0==="end"||mode0==="simple"||mode0==="loop"||mode0==="mute"||mode0==="start")&&!inputTrigs(b.id).length&&!directTargets.has(b.id)&&graphHasIn(b.id));
     if(!isChainedPrimitive)silent(entry,blockName(b)+t("s_silent_in"));
     if(mode0==="speed"){
       speedHysts.push(b.hyst==null?SPEED_HYST:b.hyst);
@@ -1335,7 +1336,11 @@ function _compileFlat(){
       bands.forEach(x=>{const s=b.id+"_sp"+items.length;addState(s,blockName(b)+" "+Math.round(x.from||0)+"-"+Math.round(x.to==null?100:x.to)+"%",x.file,true,vol,rate);items.push({state:s,lo:pctSpeed(x.from),hi:pctSpeed(x.to==null?100:x.to)});});
       items.forEach((it,i)=>addEdge(entry,it.state,{type:"speed",min:it.lo,max:it.hi},i+1,"after_sample"));
       items.forEach((it,i)=>items.forEach((jt,j)=>{if(i!==j)addEdge(it.state,jt.state,{type:"speed",min:jt.lo,max:jt.hi},j+1,"after_sample");}));
-      items.forEach(it=>addEdge(it.state,entry,{type:"engine_off"},255));
+      items.forEach(it=>{
+        if(it.lo>0&&!items.some(jt=>jt.lo===0&&jt.hi>=it.lo-1))addEdge(it.state,entry,{type:"speed",min:0,max:it.lo-1},240,"after_sample");
+        if(it.hi<255&&!items.some(jt=>jt.lo<=it.hi+1&&jt.hi===255))addEdge(it.state,entry,{type:"speed",min:it.hi+1,max:255},241,"after_sample");
+        addEdge(it.state,entry,{type:"engine_off"},255);
+      });
       effects.push({id:b.id,entry,fn:0});
       continue;
     }
@@ -1397,7 +1402,7 @@ function _compileFlat(){
       if(b.files.sound){
         const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,false,vol,rate);
         if(!hasAfterIn||trigs.length)trigs.forEach((c,i)=>addEdge(entry,ph,c,10+i,c&&c.type==="speed"?"after_sample":"immediate"));
-        if(isLeaf(b.id))addEdge(ph,entry,{type:"sample_done"},10);
+        if(!isChainedPrimitive&&isLeaf(b.id))addEdge(ph,entry,{type:"sample_done"},10);
         else if(trig&&trig.type==="speed"){
           speedOutConds(trig).forEach((c,i)=>addEdge(ph,entry,c,200+i,c&&c.type==="engine_off"?"immediate":"after_sample"));
         }
@@ -1460,6 +1465,10 @@ function _compileFlat(){
         trigs.forEach((c,i)=>addEdge(entry,ph,c,10+i,c.type==="speed"?speedTiming:"immediate"));
         const stops=Array.isArray(sStop)?sStop:[sStop];
         if((!isChainedPrimitive||isEngOwned)&&isLeaf(b.id))stops.forEach((c,i)=>addEdge(ph,entry,c,10+i,c&&c.type==="speed"?speedTiming:"immediate"));
+        else if(hasSpeed&&!isLeaf(b.id)){
+          const rootId=chainRootOf(b.id),rootEntry=engineChainIds.has(rootId)?engineEntry:((rootId||b.id)+"_off");
+          addEdge(ph,rootEntry,{type:"engine_off"},255,"immediate");
+        }
         stopCondOf[b.id]=stops;audible[b.id]=ph;terminal[b.id]=ph;
       }
       const lFn=(trigs[0]&&trigs[0].fn!=null)?trigs[0].fn:(b.fn>=0&&b.fn<=28?b.fn:null);
@@ -1592,19 +1601,21 @@ function _compileFlat(){
       const srcState=ev==="start"?(to.id+"_off"):terminal[from.id];
       if(!srcState||!conds.length){dropped.push({id:from.id,reason:"src"});continue;}
       const prio=prioFor(srcState);
-      if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));conds.forEach(c=>addEdge(srcState,w,c,prioFor(srcState)));addEdge(w,a,{type:"timeout",min:waitUnits},prio);}
-      else conds.forEach(c=>addEdge(srcState,a,c,prioFor(srcState)));
+      const edgeTiming=(c)=>c&&c.type==="speed"?"after_sample":"immediate";
+      if(delay>0){const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));conds.forEach(c=>addEdge(srcState,w,c,prioFor(srcState),edgeTiming(c)));addEdge(w,a,{type:"timeout",min:waitUnits},prio);}
+      else conds.forEach(c=>addEdge(srcState,a,c,prioFor(srcState),edgeTiming(c)));
     }else{
       const dst=tk==="output"?null:entryOf(to.id),srcState=terminal[from.id]||audible[from.id];
       if(!srcState||!dst){dropped.push({id:from.id,reason:"src"});continue;}
       const rawCond=stopCondOf[from.id]||{type:"sample_done"};
       const conds=Array.isArray(rawCond)?rawCond:[rawCond];
+      const edgeTiming=(c)=>c&&c.type==="speed"?"after_sample":"immediate";
       if(delay>0){
         const w=from.id+"_w"+(++waitN);silent(w,blockName(from)+t("s_delay"));
-        conds.forEach(c=>{if(c)addEdge(srcState,w,c,prioFor(srcState));});
+        conds.forEach(c=>{if(c)addEdge(srcState,w,c,prioFor(srcState),edgeTiming(c));});
         addEdge(w,dst,{type:"timeout",min:waitUnits},prioFor(w));
       }else{
-        conds.forEach(c=>{if(c)addEdge(srcState,dst,c,prioFor(srcState));});
+        conds.forEach(c=>{if(c)addEdge(srcState,dst,c,prioFor(srcState),edgeTiming(c));});
       }
     }
   }
@@ -1622,9 +1633,9 @@ function _compileFlat(){
     const cat=BY_TYPE[b.type];
     if(!cat)continue;
     if(cat.mode==="start"&&b.files&&b.files.sound&&!isLeaf(b.id)){
-      const trigs=inputTrigs(b.id),trig=trigs[0]||null;
+      const trig=inputTrigs(b.id)[0]||triggerCondOf(b.id)||null;
       if(trig&&(trig.type==="fn_on"||trig.type==="fn_press")){
-        const endBlk=project.blocks.find(x=>BY_TYPE[x.type]&&BY_TYPE[x.type].mode==="end"&&chainRootOf(x.id)===b.id);
+        const endBlk=project.blocks.find(x=>BY_TYPE[x.type]&&BY_TYPE[x.type].mode==="end"&&chainRootOf(x.id)===chainRootOf(b.id));
         if(endBlk&&endBlk.files&&endBlk.files.sound){
           const earlyStop=holdStopOf(trig);
           if(earlyStop)addEdge(b.id+"_play",endBlk.id+"_end",earlyStop,200);
@@ -1979,7 +1990,26 @@ async function req(path,init){
 }
 const qs=o=>Object.keys(o).map(k=>encodeURIComponent(k)+"="+encodeURIComponent(o[k])).join("&");
 async function refreshStatus(){
-  try{const s=await req("/api/sound/graph/state");online=true;revision=Number(s.revision)||0;}catch(e){online=false;}
+  try{
+    const s=await req("/api/sound/graph/state");online=true;
+    const srvRev=Number(s.revision)||0;
+    const srvId=s.id||"";
+    if(srvId&&srvRev>0&&(srvId!==savedId||srvRev!==revision)&&!localStorage.getItem(STORE_KEY)){
+      try{
+        const full=await req("/api/sound/graph/project?"+qs({id:srvId,revision:srvRev}));
+        const embedded=full&&full.project&&full.project.editor&&full.project.editor.project;
+        if(embedded&&embedded.format==="sound-blocks"){
+          project=normalizeProject(JSON.parse(JSON.stringify(embedded)));
+        }else if(full&&full.project){
+          const restored=reverseGraphToProject(full.project,full.project.name||srvId);
+          if(restored&&restored.project)project=restored.project;
+        }
+        savedId=srvId;revision=srvRev;
+        render();
+      }catch(e){}
+    }
+    revision=srvRev;if(srvId)savedId=srvId;
+  }catch(e){online=false;}
   $("on").classList.toggle("on",online);$("on_txt").textContent=online?t("connected"):t("offline");
   try{const sf=await req("/api/sound-files");soundFiles=(sf.files||[]).filter(f=>/\.wav$/i.test(f));}catch(e){soundFiles=[];}
   try{const rb=await req("/api/func-map?view=bind");deviceBinds=rb.binds||[];}catch(e){deviceBinds=[];}
@@ -2048,19 +2078,18 @@ async function applyOutputs(){
   const have=new Set(existing.map(x=>bindKey(bindObj(x))));
   const desiredKeys=new Set(desired.map(bindKey));
   for(const b of desired){if(!have.has(bindKey(b)))await req("/api/func-map?bind=1&"+qs(b),{method:"POST"});}
-  /* Old tracked keys had five fields; append the condition fields as zeros so
-     bindings created before conditional outputs are still removable. */
-  const normBindKey=k=>{const p=String(k).split(":");while(p.length<10)p.push("0");return p.slice(0,10).join(":");};
-  const tracked=(project.editor.bindTuples||[]).map(normBindKey);
-  for(const k of tracked){
-    if(desiredKeys.has(k))continue;
+  /* Remove any existing Output (type 1) or LogicOut (type 4) binding on the
+     device that is not in desiredKeys so deleted or modified bindings do not
+     linger on the device. */
+  while(true){
     const now=await list();
-    const idx=now.findIndex(x=>bindKey(bindObj(x))===k);
-    if(idx>=0)await req("/api/func-map?bind=1&remove=1&idx="+idx,{method:"POST"});
+    const idx=now.findIndex(x=>((x.type|0)===1||(x.type|0)===4)&&!desiredKeys.has(bindKey(bindObj(x))));
+    if(idx<0)break;
+    await req("/api/func-map?bind=1&remove=1&idx="+idx,{method:"POST"});
   }
-  const desiredAux=auxConfigs(),trackedAux=project.editor.auxChannels||[];
-  for(const ch of trackedAux){
-    if(!desiredAux.some(c=>c.ch===ch)){try{await req("/api/aux/cfg?"+qs({ch:ch,level:0,effect:0}),{method:"POST"});}catch(e){}}
+  const desiredAux=auxConfigs(),desiredAuxCh=new Set(desiredAux.map(c=>c.ch));
+  for(let ch=0;ch<=8;ch++){
+    if(!desiredAuxCh.has(ch)){try{await req("/api/aux/cfg?"+qs({ch:ch,level:0,effect:0}),{method:"POST"});}catch(e){}}
   }
   for(const c of desiredAux){try{await req("/api/aux/cfg?"+qs({ch:c.ch,level:c.level,effect:c.effect}),{method:"POST"});}catch(e){}}
   project.editor.bindTuples=desired.map(bindKey);
@@ -2767,10 +2796,18 @@ function simTickChannel(ch,press,release,speed){
   const cands=[];
   for(const t of (sim.payload.transitions||[])){
     if(t.source!==st.id)continue;
-    if(t.timing==="after_sample"&&ch.playing)continue;
+    if(t.timing==="after_sample"){
+      if(ch.done){
+        if(simCond(t.condition,ch,press,release,speed,wasEntered)||ch.pending===t.id)cands.push(t);
+      }else if(simCond(t.condition,ch,press,release,speed,wasEntered)){
+        if(!ch.pending||t.priority>ch.pendingPrio){ch.pending=t.id;ch.pendingPrio=t.priority;}
+      }
+      continue;
+    }
     if(simCond(t.condition,ch,press,release,speed,wasEntered))cands.push(t);
   }
   if(cands.length){
+    ch.pending=null;ch.pendingPrio=0;
     const max=cands.reduce((m,t)=>Math.max(m,t.priority|0),0);
     const group=cands.filter(t=>(t.priority|0)===max);
     const rnd=group.filter(t=>t.condition&&t.condition.type==="random");
@@ -2778,6 +2815,7 @@ function simTickChannel(ch,press,release,speed){
     simEnter(ch,pick.target);return;
   }
   if(ch.done){
+    ch.pending=null;ch.pendingPrio=0;
     if(st.loop&&((st.loops||0)===0||ch.loopsDone<(st.loops||0)))simReplay(ch,st);
     else if(!st.loop)ch.done=false;
     else ch.done=false;
@@ -4280,6 +4318,16 @@ function buildText(){
   return L.join("\r\n");
 }
 function exportText(){const blob=new Blob([buildText()],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=exportFileBase()+"-logic.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setStatus(t("st_txt_saved"));}
+function exportCompiledSchemeJson(){
+  const v=validate();
+  const blob=new Blob([JSON.stringify(v.payload,null,2)],{type:"application/json;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="scheme.json";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  setStatus(t("st_scheme_saved"));
+}
 
 /* ---- toolbar --------------------------------------------------------- */
 $("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
@@ -4318,6 +4366,7 @@ $("b_insp").onclick=()=>document.body.classList.toggle("show-insp");
 $("b_text").onclick=()=>{textMode=!textMode;$("b_text").classList.toggle("on",textMode);$("stage").style.cursor=textMode?"crosshair":"";setStatus(textMode?t("text_adding"):t("ready"));};
 $("b_file_png").onclick=exportSchemePng;
 $("b_file_txt").onclick=exportText;
+if($("b_export_scheme"))$("b_export_scheme").onclick=exportCompiledSchemeJson;
 $("b_undo").onclick=undo;$("b_redo").onclick=redo;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&(ev.target.isContentEditable||/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)))return;

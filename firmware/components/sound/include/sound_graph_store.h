@@ -20,6 +20,10 @@ typedef struct {
 esp_err_t sg_store_save(const char *id, uint32_t expected_revision,
                         const char *json, size_t len, uint32_t *new_revision,
                         sg_diagnostic_t *diag);
+/* Save a graph revision unconditionally (creating or advancing past any
+ * existing latest revision), used when unpacking a bundled .asp sound pack. */
+esp_err_t sg_store_save_force(const char *id, const char *json, size_t len,
+                              uint32_t *new_revision, sg_diagnostic_t *diag);
 esp_err_t sg_store_read(const char *id, uint32_t revision, char **out,
                         size_t *len, uint32_t *actual_revision);
 esp_err_t sg_store_list(sg_store_descriptor_t *out, size_t capacity, size_t *count);
@@ -39,5 +43,8 @@ esp_err_t sg_asset_inspect(const char *file, sg_asset_t *out, sg_diagnostic_t *d
  * latest revision of each project and the selected revision are inspected;
  * historical revisions are not allowed to block asset replacement. */
 esp_err_t sg_store_file_referenced(const char *file, bool *referenced);
+/* Same as sg_store_file_referenced(), but ignores the project `except_id`.
+ * Used when an import replaces that project together with its assets. */
+esp_err_t sg_store_file_referenced_except(const char *except_id, const char *file, bool *referenced);
 
 #endif

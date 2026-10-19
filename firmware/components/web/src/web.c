@@ -2209,14 +2209,16 @@ static esp_err_t audio_library_get(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
     }
     size_t vn = web_vol_load(vols, AUDIO_PACK_MAX_FILES);
-    size_t n = 0;
+    size_t n = 0, total = 0;
     DIR *d = opendir(WEB_AUDIO_DIR);
     if (d != NULL) {
         struct dirent *ent;
-        while (n < AUDIO_PACK_MAX_FILES && (ent = readdir(d)) != NULL) {
+        while ((ent = readdir(d)) != NULL) {
             if (!web_name_is_wav(ent->d_name)) continue;
             size_t l = strlen(ent->d_name);
             if (l - 4U >= WEB_LIB_NAME_MAX) continue;
+            total++;
+            if (n >= AUDIO_PACK_MAX_FILES) continue;
             memcpy(items[n].name, ent->d_name, l - 4U);
             items[n].name[l - 4U] = '\0';
             items[n].size = 0;
@@ -2235,8 +2237,8 @@ static esp_err_t audio_library_get(httpd_req_t *req)
     qsort(items, n, sizeof(*items), web_name_cmp);
 
     size_t used = 0;
-    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "{\"ok\":true,\"count\":%u,\"preview\":\"",
-                (unsigned)n);
+    buf_appendf(json, WEB_LIB_JSON_MAX, &used, "{\"ok\":true,\"count\":%u,\"total\":%u,\"preview\":\"",
+                (unsigned)n, (unsigned)total);
     char pe[WEB_LIB_NAME_MAX * 2];
     json_escape(s_preview_name, pe, sizeof(pe));
     buf_appendf(json, WEB_LIB_JSON_MAX, &used, "%s\",\"files\":[", pe);
@@ -3670,6 +3672,9 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     uint8_t *buf = malloc(8192);
     audio_pack_entry_t *idx = NULL;
     pack_tx_t *ptx = NULL;
+    char *scheme_json = NULL;
+    size_t scheme_len = 0;
+    sg_graph_t *scheme_graph = NULL;
     if (st == NULL || buf == NULL) {
         free(st); free(buf);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
@@ -3693,6 +3698,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     uint32_t index_end = AUDIO_PACK_HDR_LEN;
     uint32_t payload_off = ph.data_off;
     uint64_t total_data = 0;
+    uint32_t wav_count = 0;
     for (uint32_t i = 0; i < ph.count; ++i) {
         uint8_t eh[AUDIO_PACK_ENTRY_HDR_LEN];
         if (ota_stream_read(st, eh, sizeof(eh)) != (int)sizeof(eh)) { errmsg = "truncated index"; goto fail; }
@@ -3703,6 +3709,11 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         if (ota_stream_read(st, nm, nlen) != (int)nlen) { errmsg = "truncated name"; goto fail; }
         index_end += nlen;
         if (!audio_pack_entry_name(&idx[i], nm, nlen)) { errmsg = "bad name"; goto fail; }
+        if (idx[i].bits == AUDIO_PACK_BITS_SCHEME) {
+            if (strcmp(idx[i].name, AUDIO_PACK_SCHEME_NAME) != 0) { errmsg = "bad scheme entry"; goto fail; }
+        } else {
+            wav_count++;
+        }
         char base[WEB_LIB_NAME_MAX];
         if (!web_lib_base_name(idx[i].name, base, sizeof(base))) { errmsg = "bad name"; goto fail; }
         for (uint32_t j = 0; j < i; ++j) {
@@ -3714,6 +3725,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         if ((uint64_t)payload_off > (uint64_t)req->content_len) { errmsg = "payload past end"; goto fail; }
         total_data += idx[i].data_len;
     }
+    if (wav_count == 0U) { errmsg = "no audio entries"; goto fail; }
     if (index_end != ph.data_off) { errmsg = "index length mismatch"; goto fail; }
     if ((uint64_t)payload_off != (uint64_t)req->content_len) { errmsg = "size mismatch"; goto fail; }
 
@@ -3752,22 +3764,6 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         }
     }
 
-    /* Reject only files that a saved graph needs but the pack does not carry.
-     * Replacing a referenced file with a new version of the same name is OK. */
-    for (size_t i = 0; i < ptx->old_count; ++i) {
-        if (pack_name_in_index(idx, ph.count, ptx->old_names[i])) continue;
-        bool referenced = false;
-        if (sg_store_file_referenced(ptx->old_names[i], &referenced) != ESP_OK) {
-            errmsg = "graph reference check failed";
-            goto fail_tx;
-        }
-        if (referenced) {
-            errmsg = "graph asset referenced by saved project";
-            errstatus = 409;
-            goto fail_tx;
-        }
-    }
-
     audio_voice_release_owned(s_preview_voice);
     memset(&s_preview_voice, 0, sizeof(s_preview_voice));
     s_preview_name[0] = '\0';
@@ -3775,6 +3771,33 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
 
     /* Stage all new files while the old library is still intact. */
     for (uint32_t i = 0; i < ph.count; ++i) {
+        if (idx[i].bits == AUDIO_PACK_BITS_SCHEME) {
+            scheme_len = idx[i].data_len;
+            scheme_json = malloc(scheme_len + 1U);
+            if (scheme_json == NULL) { errmsg = "no scheme memory"; goto fail_tx; }
+            size_t got = 0;
+            while (got < scheme_len) {
+                size_t want = (scheme_len - got) > 8192U ? 8192U : (scheme_len - got);
+                int r = ota_stream_read(st, (uint8_t *)scheme_json + got, want);
+                if (r <= 0) break;
+                got += (size_t)r;
+                s_up_received = (int)req->content_len - st->remaining - (int)(st->len - st->pos);
+            }
+            if (got != scheme_len || memchr(scheme_json, '\0', scheme_len) != NULL) {
+                errmsg = "invalid embedded scheme";
+                goto fail_tx;
+            }
+            scheme_json[scheme_len] = '\0';
+            scheme_graph = malloc(sizeof(*scheme_graph));
+            if (scheme_graph == NULL) { errmsg = "no scheme memory"; goto fail_tx; }
+            sg_diagnostic_t sdiag = {0};
+            if (sg_parse(scheme_json, scheme_len, scheme_graph, &sdiag) != ESP_OK ||
+                sg_validate(scheme_graph, &sdiag) != ESP_OK) {
+                errmsg = sdiag.message[0] ? "embedded scheme validation failed" : "invalid embedded scheme";
+                goto fail_tx;
+            }
+            continue;
+        }
         char rel[128];
         FILE *f = create_private_file(ptx->files[i].staged,
                                       sizeof(ptx->files[i].staged),
@@ -3809,6 +3832,26 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         goto fail_tx;
     }
 
+    /* The bundled project is replaced as a whole, so its assets may disappear.
+     * Files used by any other saved project would be left dangling: reject
+     * those, even though the pack carries a scheme. */
+    {
+        const char *except_id = scheme_graph != NULL ? scheme_graph->id : NULL;
+        for (size_t i = 0; i < ptx->old_count; ++i) {
+            if (pack_name_in_index(idx, ph.count, ptx->old_names[i])) continue;
+            bool referenced = false;
+            if (sg_store_file_referenced_except(except_id, ptx->old_names[i], &referenced) != ESP_OK) {
+                errmsg = "graph reference check failed";
+                goto fail_tx;
+            }
+            if (referenced) {
+                errmsg = "graph asset referenced by another saved project";
+                errstatus = 409;
+                goto fail_tx;
+            }
+        }
+    }
+
     /* Move the old library aside. Nothing is deleted yet. */
     if (ptx->old_count != 0U) {
         snprintf(ptx->backup_dir, sizeof(ptx->backup_dir), WEB_AUDIO_DIR "/.pb%08lx_%08lx",
@@ -3833,6 +3876,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
 
     /* Publish staged files. A failure here rolls every old file back. */
     for (uint32_t i = 0; i < ph.count; ++i) {
+        if (idx[i].bits == AUDIO_PACK_BITS_SCHEME) continue;
         if (rename(ptx->files[i].staged, ptx->files[i].canonical) != 0) {
             errmsg = "canonical publication failed";
             goto fail_tx;
@@ -3841,27 +3885,64 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         ptx->files[i].published = true;
     }
 
-    /* The volume sidecar is the commit point: it is replaced atomically and
-     * only after every new WAV is in place. Check the deadline before it so a
-     * timeout cannot roll files back after the sidecar was already replaced. */
     if (transfer_expired()) {
         errmsg = "transfer timeout";
         goto fail_tx;
     }
+
+    /* The bundled scheme is part of the import transaction: validate and apply
+     * it before the volume sidecar is replaced. The old library backup is still
+     * present, so any failure here can roll the sounds back. */
+    bool scheme_applied = false;
+    uint32_t scheme_rev = 0;
+    if (scheme_json != NULL && scheme_graph != NULL) {
+        sg_diagnostic_t sdiag = {0};
+        if (sg_assets_validate(scheme_graph, &sdiag) != ESP_OK) {
+            errmsg = "embedded scheme does not match the pack";
+            goto fail_tx;
+        }
+        if (sg_store_save_force(scheme_graph->id, scheme_json, scheme_len, &scheme_rev, &sdiag) != ESP_OK) {
+            errmsg = "embedded scheme save failed";
+            goto fail_tx;
+        }
+        sound_graph_prepared_t *prepared = NULL;
+        if (sound_graph_prepare(scheme_graph, scheme_graph->id, scheme_rev, &prepared) != ESP_OK) {
+            sound_graph_prepared_free(prepared);
+            errmsg = "embedded scheme prepare failed";
+            goto fail_tx;
+        }
+        if (sg_store_select(scheme_graph->id, scheme_rev) != ESP_OK) {
+            sound_graph_prepared_free(prepared);
+            errmsg = "embedded scheme select failed";
+            goto fail_tx;
+        }
+        sound_graph_commit(prepared);
+        uint32_t levels = 0;
+        if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+        for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) if (s_fn[fn]) levels |= 1UL << fn;
+        sound_graph_prime_functions(levels);
+        if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+        scheme_applied = true;
+    }
+
+    /* Per-file volumes are best-effort: a failure must not roll back an
+     * already-applied scheme, it only leaves the default volume of 100. */
     {
-        web_vol_t *v = malloc(sizeof(*v) * ph.count);
+        web_vol_t *v = malloc(sizeof(*v) * wav_count);
         bool ok = v != NULL;
         if (ok) {
+            uint32_t vi = 0;
             for (uint32_t i = 0; i < ph.count; ++i) {
-                snprintf(v[i].name, sizeof(v[i].name), "%s", idx[i].name);
-                v[i].vol = idx[i].volume;
+                if (idx[i].bits == AUDIO_PACK_BITS_SCHEME) continue;
+                snprintf(v[vi].name, sizeof(v[vi].name), "%s", idx[i].name);
+                v[vi].vol = idx[i].volume;
+                vi++;
             }
-            ok = web_vol_save(v, ph.count) == ESP_OK;
+            ok = web_vol_save(v, wav_count) == ESP_OK;
             free(v);
         }
         if (!ok) {
-            errmsg = "volume save failed";
-            goto fail_tx;
+            ESP_LOGW(TAG, "PACK: volume sidecar not saved");
         }
     }
 
@@ -3870,18 +3951,30 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     pack_tx_free(ptx);
     ptx = NULL;
 
-    ESP_LOGI(TAG, "PACK: %lu file(s), %lu bytes",
-             (unsigned long)ph.count, (unsigned long)total_data);
-    web_log_event("Звук", "пакет: %lu звук(ов)", (unsigned long)ph.count);
-    char json[128];
-    snprintf(json, sizeof(json), "{\"ok\":true,\"files\":%lu,\"bytes\":%lu}",
-             (unsigned long)ph.count, (unsigned long)total_data);
+    ESP_LOGI(TAG, "PACK: %lu file(s), %lu bytes, scheme=%d",
+             (unsigned long)wav_count, (unsigned long)total_data, (int)scheme_applied);
+    web_log_event("Звук", "пакет: %lu звук(ов)%s", (unsigned long)wav_count,
+                  scheme_applied ? " + звуковая схема" : "");
+    char json[192];
+    if (scheme_applied && scheme_graph != NULL) {
+        snprintf(json, sizeof(json),
+                 "{\"ok\":true,\"files\":%lu,\"bytes\":%lu,\"scheme\":\"%s\",\"revision\":%lu}",
+                 (unsigned long)wav_count, (unsigned long)total_data,
+                 scheme_graph->id, (unsigned long)scheme_rev);
+    } else {
+        snprintf(json, sizeof(json), "{\"ok\":true,\"files\":%lu,\"bytes\":%lu}",
+                 (unsigned long)wav_count, (unsigned long)total_data);
+    }
+    free(scheme_json);
+    free(scheme_graph);
     free(idx);
     free(st);
     free(buf);
     return send_json(req, json);
 
 fail_tx:
+    free(scheme_json);
+    free(scheme_graph);
     pack_tx_rollback(ptx);
     pack_tx_free(ptx);
     free(idx);
@@ -3896,10 +3989,107 @@ fail_tx:
     return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, errmsg);
 
 fail:
+    free(scheme_json);
+    free(scheme_graph);
     free(idx);
     free(st);
     free(buf);
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, errmsg);
+}
+
+/* DELETE / POST /api/audio/library/delete?name=<name> — remove one library WAV
+ * when it is not referenced by a saved sound graph. */
+static esp_err_t audio_library_delete_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = { 0 };
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    char raw[WEB_LIB_NAME_MAX] = { 0 };
+    char base[WEB_LIB_NAME_MAX] = { 0 };
+    if (!parse_query(query, "name", raw, sizeof(raw)) ||
+        !web_lib_base_name(raw, base, sizeof(base))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad name");
+    }
+    char wav_name[WEB_LIB_NAME_MAX + 8];
+    snprintf(wav_name, sizeof(wav_name), "%s.wav", base);
+    bool referenced = true;
+    esp_err_t ref_err = sg_store_file_referenced(wav_name, &referenced);
+    if (ref_err != ESP_OK) {
+        return graph_error(req, "500 Internal Server Error", "graph reference check failed");
+    }
+    if (referenced) {
+        return graph_error(req, "409 Conflict", "file referenced by saved sound scheme");
+    }
+    if (strcmp(s_preview_name, base) == 0) {
+        audio_voice_release_owned(s_preview_voice);
+        memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+        s_preview_name[0] = '\0';
+    }
+    char path[192];
+    snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
+    if (remove(path) != 0 && errno != ENOENT) {
+        return send_json(req, "{\"ok\":false,\"error\":\"remove failed\"}");
+    }
+    web_log_event("Звук", "удалён %s.wav", base);
+    char esc[WEB_LIB_NAME_MAX * 2];
+    json_escape(base, esc, sizeof(esc));
+    char json[160];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"name\":\"%s\"}", esc);
+    return send_json(req, json);
+}
+
+/* Stream the raw stored WAV payload (without RIFF header) for /api/audio/raw/<name>. */
+static esp_err_t sound_file_raw_get(httpd_req_t *req)
+{
+    const char *prefix = "/api/audio/raw/";
+    char dec[WEB_LIB_NAME_MAX * 2];
+    url_decode(req->uri + strlen(prefix), dec, sizeof(dec));
+    char base[WEB_LIB_NAME_MAX];
+    if (!web_lib_base_name(dec, base, sizeof(base))) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    char path[192];
+    snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
+    if (storage_access_begin() != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage busy");
+    }
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    uint16_t format, channels, block_align, bits, spb;
+    uint32_t rate, data_off, data_len;
+    if (!web_wav_probe(f, &format, &channels, &rate, &block_align, &bits, &spb,
+                       &data_off, &data_len) ||
+        !((format == 1U && bits == 16U) || format == 0x0011U) ||
+        fseek(f, (long)data_off, SEEK_SET) != 0) {
+        fclose(f);
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported audio");
+    }
+    char hdr_rate[16], hdr_ch[8], hdr_bits[8];
+    snprintf(hdr_rate, sizeof(hdr_rate), "%lu", (unsigned long)rate);
+    snprintf(hdr_ch, sizeof(hdr_ch), "%u", (unsigned)channels);
+    snprintf(hdr_bits, sizeof(hdr_bits), "%u", (unsigned)(format == 0x0011U ? 4U : 16U));
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Audio-Rate", hdr_rate);
+    httpd_resp_set_hdr(req, "X-Audio-Channels", hdr_ch);
+    httpd_resp_set_hdr(req, "X-Audio-Bits", hdr_bits);
+    uint8_t buf[2048];
+    uint32_t left = data_len;
+    esp_err_t err = ESP_OK;
+    while (err == ESP_OK && left > 0U) {
+        size_t want = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
+        size_t got = fread(buf, 1, want, f);
+        if (got == 0U) { err = ESP_FAIL; break; }
+        left -= (uint32_t)got;
+        err = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)got);
+    }
+    fclose(f);
+    storage_access_end();
+    if (err != ESP_OK) return ESP_FAIL;
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /* POST /api/ota/update
@@ -4446,7 +4636,7 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
                      handler == audio_play_post || handler == bemf_cal_post || handler == bemf_use_post;
     esp_err_t err;
     if (actuation && !ready) err = send_json(req, "{\"ok\":false,\"error\":\"actuation not ready\"}");
-    else if (handler == audio_track_delete_post) {
+    else if (handler == audio_track_delete_post || handler == audio_library_delete_post) {
         err = web_maintenance_begin(false);
         if (err == ESP_OK) {
             err = storage_access_begin();
@@ -4540,7 +4730,9 @@ static esp_err_t start_http_server(void)
     register_route("/api/audio/delete", HTTP_POST, audio_track_delete_post);
     register_route("/api/audio/library", HTTP_GET, audio_library_get);
     register_route("/api/audio/library/volume", HTTP_POST, audio_library_volume_post);
+    register_route("/api/audio/library/delete", HTTP_POST, audio_library_delete_post);
     register_route("/api/audio/pack", HTTP_POST, audio_pack_upload_post);
+    register_route("/api/audio/raw/*", HTTP_GET, sound_file_raw_get);
     register_route("/api/sound-files", HTTP_GET, sound_files_list_get);
     register_route("/sound-files/*", HTTP_GET, sound_file_get);
     register_route("/api/track/category", HTTP_POST, track_category_post);

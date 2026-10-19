@@ -63,7 +63,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.cv-list,
   .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.log,
   .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>#cv_active_name{grid-column:1/-1}
-  .page[data-page=settings].md-on .set-body>.panel.active.split .lib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px 12px}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:column;grid-template-rows:repeat(var(--lib-rows,1),auto);gap:2px 18px;align-content:start}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib>.lib-head{display:grid}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib>.lib-head+.lib-head{display:grid}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib>.lib-head:first-child{grid-area:1/1}
+  .page[data-page=settings].md-on .set-body>.panel.active.split .lib>.lib-head:nth-child(2){grid-area:1/2}
   .page[data-page=settings].md-on .set-body>.panel.active.split .cv-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px}
   /* A vertical divider makes the two split blocks visibly separate. */
   .page[data-page=settings].md-on .set-body>.panel.active.split .lib,
@@ -147,17 +151,22 @@ label{color:var(--text);font-weight:600}
 .up-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 .up-meta{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;display:none}
 
-.lib{display:flex;flex-direction:column;gap:1px}
-.lib-empty{padding:10px;font-size:12px;color:var(--muted)}
-.lib-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;min-width:0}
-.lib-row:nth-child(odd){background:var(--panel2)}
-.lib-row.playing{outline:1px solid var(--good)}
-.lib-row .nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
-.lib-row .grow{flex:1 1 auto;min-width:8px}
-.lib-row .idx{flex:none;width:22px;text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-.lib-row .sz{flex:none;width:54px;text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-.lib-row input[type=range]{width:96px;flex:none}
-.lib-row .vv{width:30px;flex:none;text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lib{--lib-cols:30px minmax(0,1fr) 56px 36px minmax(64px,128px) 32px 34px;display:flex;flex-direction:column;gap:2px}
+.lib-empty{padding:10px;font-size:12px;color:var(--muted);grid-column:1/-1}
+.lib-head{display:none;grid-template-columns:var(--lib-cols);align-items:center;gap:8px;padding:0 6px 3px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.lib-head+.lib-head{display:none}
+.lib-row{display:grid;grid-template-columns:var(--lib-cols);align-items:center;gap:8px;padding:4px 6px;border-radius:7px;min-width:0}
+.lib-row:hover{background:var(--panel2)}
+.lib-row.playing{background:rgba(62,207,142,.09);box-shadow:inset 2px 0 0 var(--good)}
+.lib-row .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.lib .idx{text-align:right;padding-right:2px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lib .sz{text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lib .vv{text-align:right;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lib-row input[type=range]{width:100%;min-width:0;margin:0}
+.lib-row .btn{width:34px;height:30px;min-height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;font-size:12px;line-height:1}
+.lib-row .btn svg{display:block;pointer-events:none}
+.lib-del{background:transparent;border-color:transparent;color:var(--bad);opacity:.75}
+.lib-del:hover,.lib-del:focus-visible{background:var(--bad-bg);border-color:var(--bad-bg);color:#fff;opacity:1}
 
 .cv-quick{display:grid;grid-template-columns:130px 130px auto auto auto auto;gap:8px;align-items:end;margin-bottom:10px}
 .cv-list{display:grid;gap:6px}
@@ -180,12 +189,34 @@ label{color:var(--text);font-weight:600}
 .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .modal .msg{font-size:14px;margin-bottom:14px;white-space:pre-line}
 .modal .acts{display:flex;gap:8px;justify-content:flex-end}
+.pack-box{max-width:560px}
+.pack-title{font-size:15px;font-weight:800;margin-bottom:2px}
+.pack-sub{font-size:11px;color:var(--muted);margin-bottom:10px;overflow-wrap:anywhere}
+.pack-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+.pack-stat{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;min-width:0}
+.pack-stat b{display:block;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:1px}
+.pack-stat span{font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.pack-stat.wide{grid-column:1/-1}
+.pack-list{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:7px;margin-bottom:10px;background:var(--input)}
+.pack-item{display:grid;grid-template-columns:24px minmax(0,1fr) auto 44px;gap:8px;align-items:center;padding:4px 8px;font-size:11px;border-bottom:1px solid var(--line)}
+.pack-item:last-child{border-bottom:0}
+.pack-item .pi{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.pack-item .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pack-item .sz,.pack-item .pvol{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pack-warn{font-size:11px;color:var(--bad);font-weight:600;margin-bottom:10px}
+.pack-warn.note{color:var(--muted);font-weight:400}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,16px);opacity:0;pointer-events:none;z-index:300;max-width:min(92vw,560px);padding:10px 14px;border-radius:9px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--good);box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:12px;line-height:1.35;transition:opacity .18s,transform .18s;overflow-wrap:anywhere}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-left-color:var(--bad)}
+@media(max-width:480px){.pack-stats{grid-template-columns:1fr}}
 
 @media(max-width:760px){
   .shell{padding:0 12px 10px}
   .s-grid{grid-template-columns:1fr}
   .cv-quick{grid-template-columns:1fr 1fr}
   .fn-grid{grid-template-columns:repeat(auto-fill,minmax(72px,1fr))}
+  .lib{--lib-cols:24px minmax(0,1fr) 30px minmax(48px,1fr) 26px 28px}
+  .lib .sz{display:none}
 }
 @media(max-width:600px){
   .brand small{display:block;margin-left:0}
@@ -288,8 +319,11 @@ label{color:var(--text);font-weight:600}
     <button class="set-item" data-target="panel_bemf" onclick="showSetting('panel_bemf')" data-i18n="nav_bemf">Калибровка BEMF</button>
     <button class="set-item" data-target="panel_mode" onclick="showSetting('panel_mode')" data-i18n="nav_mode">Режим управления</button>
     <div class="set-group" data-i18n="grp_sound">Звук</div>
-    <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')" data-i18n="nav_snd">Загрузка звуков</button>
+    <button class="set-item" data-target="panel_snd" onclick="showSetting('panel_snd')" data-i18n="nav_snd">Звуки</button>
     <button class="set-item" onclick="openSoundEditor('mix')" data-i18n="nav_schemes">Конструктор Блок Схем</button>
+    <label class="set-item" for="pack_file" style="display:block;cursor:pointer;margin:0" title="Формат .asp — контейнер звукового пакета и звуковой схемы" data-i18n="nav_pack_import" data-i18n-title="pack_hint">Импорт звукового пакета</label>
+    <input type="file" id="pack_file" accept=".asp" onchange="uploadPack(this)" style="display:none">
+    <button class="set-item" onclick="exportSoundPack()" data-i18n="nav_pack_export">Экспорт звукового пакета</button>
     <div class="set-group" data-i18n="grp_settings">Настройки</div>
     <button class="set-item" data-target="panel_cv" onclick="showSetting('panel_cv')" data-i18n="nav_cv">CV</button>
     <button class="set-item" data-target="panel_wifi" onclick="showSetting('panel_wifi')" data-i18n="nav_wifi">Wi-Fi</button>
@@ -361,16 +395,16 @@ label{color:var(--text);font-weight:600}
 
   <div class="panel" data-page="settings" style="display:none" id="panel_snd">
     <div class="panel-hd" id="hd_snd" onclick="togglePanel('snd')">
-      <h2 data-i18n="snd_title">Загрузка звуков</h2>
+      <h2 data-i18n="snd_title">Звуки</h2>
       <span class="chev" id="chev_snd">▸</span>
     </div>
     <div class="bd" id="bd_snd" style="display:none">
       <div class="row" style="justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;grid-column:1/-1;align-items:center">
-        <span class="chip" id="free_space" data-i18n="free_space_idle">Свободно: —</span>
+        <span class="chip" id="free_space" data-i18n="free_space_idle">Свободно на внешней памяти: —</span>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <label class="btn sm primary" for="pack_file" data-i18n="upload_pack" data-i18n-title="pack_hint" title="Формат .asp — контейнер звукового пакета" style="display:inline-flex;align-items:center;justify-content:center;line-height:1">Загрузить звуковой пакет</label>
-          <input type="file" id="pack_file" accept=".asp" onchange="uploadPack(this)" style="display:none">
-          <button class="btn sm ghost" onclick="loadLibrary()" data-i18n="refresh">Обновить</button>
+          <label class="btn sm primary" for="wav_file" data-i18n="upload_wav" style="display:inline-flex;align-items:center;justify-content:center;line-height:1;cursor:pointer">Загрузить WAV</label>
+          <input type="file" id="wav_file" accept=".wav,audio/wav" multiple onchange="uploadWavFiles(this)" style="display:none">
+          <button class="btn sm ghost" onclick="loadLibrary();loadFreeSpace()" data-i18n="refresh">Обновить</button>
           <button class="btn sm danger" onclick="stopAudio()" data-i18n="stop">■ Стоп</button>
         </div>
       </div>
@@ -486,6 +520,34 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
+  <div class="modal" id="pw_modal">
+    <div class="box">
+      <div class="msg" id="pw_modal_msg"></div>
+      <input type="password" id="pw_modal_inp" autocomplete="off" style="width:100%;margin-bottom:12px" onkeydown="if(event.key==='Enter'){event.preventDefault();pwAnswer(true);}">
+      <div class="acts">
+        <button class="btn" id="pw_modal_cancel" onclick="pwAnswer(false)" data-i18n="bemf_cancel">Отменить</button>
+        <button class="btn primary" id="pw_modal_ok" onclick="pwAnswer(true)">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="pack_modal">
+    <div class="box pack-box">
+      <div class="pack-title" id="pack_modal_title">Звуковой пакет</div>
+      <div class="pack-sub" id="pack_modal_sub"></div>
+      <div class="pack-stats" id="pack_modal_stats"></div>
+      <div class="pack-list" id="pack_modal_list"></div>
+      <div class="pack-warn" id="pack_modal_warn"></div>
+      <div class="acts">
+        <button class="btn" onclick="packAnswer(false)" data-i18n="bemf_cancel">Отменить</button>
+        <a class="btn primary" id="pack_modal_save" style="display:none" download onclick="packAnswer(true)">Скачать</a>
+        <button class="btn primary" id="pack_modal_ok" onclick="packAnswer(true)">Импортировать</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
 </div>
 
 <script>
@@ -507,6 +569,15 @@ window.addEventListener('unhandledrejection',function(ev){
 });
 /* helpers */
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});}
+function readFileBytes(file){
+  if(typeof file.arrayBuffer==='function')return file.arrayBuffer().then(function(b){return new Uint8Array(b);});
+  return new Promise(function(resolve,reject){
+    var fr=new FileReader();
+    fr.onload=function(){resolve(new Uint8Array(fr.result));};
+    fr.onerror=function(){reject(fr.error||new Error('file read failed'));};
+    fr.readAsArrayBuffer(file);
+  });
+}
 function clamp(v,a,b){v=Number(v);if(isNaN(v))return a;return Math.max(a,Math.min(b,v));}
 function byId(id){return document.getElementById(id);}
 function setText(id,text){var el=byId(id);if(el)el.textContent=text;}
@@ -533,7 +604,7 @@ hint_rails:'Управление — с рельс. По умолчанию ре
 info_title:'Информация',info_device:'Устройство',info_placeholder:'ТЕПЛОВОЗ',save:'Сохранить',
 info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Состояние',
 set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Звук',grp_settings:'Настройки',grp_service:'Сервис',
-nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Загрузка звуков',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
+nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Звуки',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_pack_import:'Импорт звукового пакета',nav_pack_export:'Экспорт звукового пакета',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
 bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',
 bemf_status_idle:'Статус: —',
@@ -545,11 +616,12 @@ bemf_meta_running:'Калибровка идёт, не трогайте мото
 bemf_unknown:'Статус калибровки неизвестен: связь потеряна',
 bemf_step:'Калибровка: шаг ',bemf_step_of:' из ',
 bemf_confirm_clear:'Сбросить сохранённую калибровку BEMF?',
-snd_title:'Загрузка звуков',free_prefix:'Свободно: ',free_space_idle:'Свободно: —',refresh:'Обновить',stop:'■ Стоп',
-upload_pack:'Загрузить звуковой пакет',pack_confirm:'Загрузить звуковой пакет? ВСЕ текущие звуки на устройстве будут удалены и заменены.',pack_uploading:'пакет ',pack_done:'пакет загружен, звуков: ',pack_empty:'на устройстве нет звуков',lib_play:'Воспроизвести',play_target:'Воспроизведение:',play_pc:'На компьютере',play_decoder:'На декодере',pack_bad_ext:'нужен файл .asp: ',pack_hint:'Формат .asp — контейнер звукового пакета (IMA ADPCM/PCM16), собирается утилитой pack_sounds.py',size_col:'Размер',lib_search_ph:'Поиск звука...',
+snd_title:'Звуки',free_prefix:'Свободно на внешней памяти: ',free_space_idle:'Свободно на внешней памяти: —',refresh:'Обновить',stop:'■ Стоп',
+pack_uploading:'пакет ',pack_done:'пакет загружен, звуков: ',pack_scheme_loaded:' + звуковая схема',pack_empty:'на устройстве нет звуков',lib_play:'Плей',col_num:'№',file_col:'Файл',vol_col:'Громкость',play_target:'Воспроизведение:',play_pc:'На компьютере',play_decoder:'На декодере',pack_bad_ext:'нужен файл .asp: ',pack_hint:'Формат .asp — контейнер звукового пакета и звуковой схемы (IMA ADPCM/PCM16 + scheme.json)',size_col:'Размер',lib_search_ph:'Поиск звука...',
 slot_prefix:'Слот ',cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
 cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
-upload_wav:'Загрузить WAV',del_track_title:'Удалить трек',
+upload_wav:'Загрузить WAV',del_track_title:'Удалить звук',del_sound_confirm:'Удалить звук «',del_sound_confirm_b:'» с устройства?',
+pw_export_msg:'Пароль для экспорта звукового пакета (обфускация, не шифрование; пусто — без пароля):',pw_import_msg:'Звуковой пакет закодирован паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль звукового пакета',pack_exporting:'Экспорт звукового пакета...',pack_exported:'Звуковой пакет сохранён: ',pack_stats_title:'Звуковой пакет',pack_save_title:'Сохранить звуковой пакет?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 400 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
 cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',cv_search_ph:'Поиск CV...',cv_show_table:'Таблица CV67..94',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
@@ -594,7 +666,7 @@ hint_rails:'Control comes from the rails. DCC by default; enable «DC» to contr
 info_title:'Information',info_device:'Device',info_placeholder:'LOCOMOTIVE',save:'Save',
 info_fw:'Firmware version',info_addr:'Address',info_state:'State',
 set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Sound',grp_settings:'Settings',grp_service:'Service',
-nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sound upload',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
+nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sounds',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_pack_import:'Import sound pack',nav_pack_export:'Export sound pack',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
 bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',
 bemf_status_idle:'Status: —',
@@ -606,11 +678,12 @@ bemf_meta_running:'Calibration in progress, do not touch the motor...',
 bemf_unknown:'Calibration status unknown: connection lost',
 bemf_step:'Calibration: step ',bemf_step_of:' of ',
 bemf_confirm_clear:'Reset the stored BEMF calibration?',
-snd_title:'Sound upload',free_prefix:'Free: ',free_space_idle:'Free: —',refresh:'Refresh',stop:'■ Stop',
-upload_pack:'Upload sound pack',pack_confirm:'Upload the sound pack? ALL current sounds on the device will be deleted and replaced.',pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_empty:'no sounds on the device',lib_play:'Play',play_target:'Playback:',play_pc:'On computer',play_decoder:'On decoder',pack_bad_ext:'expected an .asp file: ',pack_hint:'.asp is the sound-pack container (IMA ADPCM/PCM16), built with tools/pack_sounds.py',size_col:'Size',lib_search_ph:'Search sound...',
+snd_title:'Sounds',free_prefix:'Free external memory: ',free_space_idle:'Free external memory: —',refresh:'Refresh',stop:'■ Stop',
+pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_scheme_loaded:' + sound scheme',pack_empty:'no sounds on the device',lib_play:'Play',col_num:'No.',file_col:'File',vol_col:'Volume',play_target:'Playback:',play_pc:'On computer',play_decoder:'On decoder',pack_bad_ext:'expected an .asp file: ',pack_hint:'.asp is the sound-pack & scheme container (IMA ADPCM/PCM16 + scheme.json)',size_col:'Size',lib_search_ph:'Search sound...',
 slot_prefix:'Slot ',cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
 cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
-upload_wav:'Upload WAV',del_track_title:'Delete track',
+upload_wav:'Upload WAV',del_track_title:'Delete sound',del_sound_confirm:'Delete sound "',del_sound_confirm_b:'" from the device?',
+pw_export_msg:'Password for the exported sound pack (obfuscation, not encryption; leave empty for none):',pw_import_msg:'This sound pack is password-obfuscated. Enter password to import:',pw_wrong:'wrong sound pack password',pack_exporting:'Exporting sound pack...',pack_exported:'Sound pack saved: ',pack_stats_title:'Sound pack',pack_save_title:'Save sound pack?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 400 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
 cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',cv_search_ph:'Search CV...',cv_show_table:'Table CV67..94',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
@@ -727,6 +800,26 @@ function dlgAnswer(ok){
   byId('modal').classList.remove('show');
   if(dlgResolve){var r=dlgResolve;dlgResolve=null;r(ok);}
 }
+var pwResolve=null;
+function promptPasswordDialog(msg){
+  if(pwResolve){pwResolve(null);pwResolve=null;}
+  return new Promise(function(resolve){
+    pwResolve=resolve;
+    setText('pw_modal_msg',msg);
+    var inp=byId('pw_modal_inp');
+    if(inp){inp.value='';}
+    var m=byId('pw_modal');
+    if(m)m.classList.add('show');
+    if(inp&&inp.focus)setTimeout(function(){inp.focus();},30);
+  });
+}
+function pwAnswer(ok){
+  var m=byId('pw_modal');
+  if(m)m.classList.remove('show');
+  var inp=byId('pw_modal_inp');
+  var val=inp?String(inp.value||''):'';
+  if(pwResolve){var r=pwResolve;pwResolve=null;r(ok?val:null);}
+}
 
 /* journal */
 var isOffline=false;
@@ -739,6 +832,16 @@ function log(title,msg){
   while(logEl.children.length>40){logEl.removeChild(logEl.lastChild);}
 }
 function clearLog(){var l=byId('app_log');if(l)l.innerHTML='';}
+var toastTimer=null;
+function toast(msg,bad){
+  var el=byId('toast');
+  if(!el)return;
+  el.textContent=String(msg||'');
+  el.classList.toggle('bad',!!bad);
+  el.classList.add('show');
+  if(toastTimer)clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){el.classList.remove('show');toastTimer=null;},4500);
+}
 
 /* connection: the page only loads when the link is up, so start online and
    switch to offline only after several consecutive failed polls (a single
@@ -1162,7 +1265,7 @@ function applyAudioStatus(d){
 }
 
 /* ---------- sound library (installed files shown as a compact list) ---------- */
-var libFiles=[],libPreview='',lastLibSig='',libSearch='';
+var libFiles=[],libPreview='',lastLibSig='',libSearch='',libTotal=0;
 /* Where previews play: in this browser ("pc", default) or on the decoder.
  * Shared with the block editor via the same localStorage key. */
 var PLAY_TARGET_KEY='aura_sound_play',pcAudio=null;
@@ -1177,7 +1280,8 @@ function libVolOf(name){for(var i=0;i<libFiles.length;i++){if(libFiles[i].name==
 function playLibOnPc(name){
   stopPcAudio();
   try{
-    var a=new Audio('/sound-files/'+encodeURIComponent(name));
+    var wavUrl=/\.wav$/i.test(name)?name:(name+'.wav');
+    var a=new Audio('/sound-files/'+encodeURIComponent(wavUrl));
     a.volume=Math.min(1,Math.max(0,(isNaN(libVolOf(name))?100:libVolOf(name))/100));
     a.onended=function(){if(libPreview===name){libPreview='';lastLibSig='';renderLibrary();}};
     pcAudio=a;
@@ -1197,6 +1301,17 @@ function libSig(){
   for(var i=0;i<libFiles.length;i++){s+=libFiles[i].name+':'+libFiles[i].vol+':'+libFiles[i].size+';';}
   return s;
 }
+var LIB_TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
+function libHeadHtml(){
+  return '<div class="lib-head">'
+    +'<span class="idx">'+esc(t('col_num'))+'</span>'
+    +'<span class="nm">'+esc(t('file_col'))+'</span>'
+    +'<span class="sz">'+esc(t('size_col'))+'</span>'
+    +'<span></span>'
+    +'<span class="vv">'+esc(t('vol_col'))+'</span>'
+    +'<span></span><span></span>'
+    +'</div>';
+}
 function renderLibrary(){
   var sig=libSig();
   if(sig===lastLibSig)return;
@@ -1210,26 +1325,94 @@ function renderLibrary(){
     var playing=(libPreview===f.name);
     var v=Number(f.vol);if(isNaN(v))v=100;
     var sz=Number(f.size)||0;
-    var num=(i+1);var numTxt=(num<10?'0':'')+num;
+    var num=(i+1);var numTxt=num+'.';
+    var wavNm=/\.wav$/i.test(f.name)?f.name:(f.name+'.wav');
     rows.push('<div class="lib-row'+(playing?' playing':'')+'">'
       +'<span class="idx">'+numTxt+'</span>'
-      +(playing?'<button class="btn sm danger" title="'+esc(t('stop'))+'" onclick="stopAudio()">■</button>'
-               :'<button class="btn sm primary" title="'+esc(t('lib_play'))+'" onclick="playLib('+i+')">▶</button>')
-      +'<span class="nm" title="'+esc(f.name)+'">'+esc(f.name)+'</span>'
+      +'<span class="nm" title="'+esc(wavNm)+'">'+esc(wavNm)+'</span>'
       +'<span class="sz" title="'+esc(t('size_col'))+'">'+(sz>0?esc(fmtBytes(sz)):'')+'</span>'
-      +'<span class="grow"></span>'
-      +'<input type="range" min="0" max="100" value="'+v+'" oninput="libVolInput('+i+',this)" onchange="libVolCommit('+i+',this)">'
+      +(playing?'<button class="btn sm danger" title="'+esc(t('stop'))+'" aria-label="'+esc(t('stop'))+'" onclick="stopAudio()">■</button>'
+               :'<button class="btn sm primary" title="'+esc(t('lib_play'))+'" aria-label="'+esc(t('lib_play'))+'" onclick="playLib('+i+')">▶</button>')
+      +'<input type="range" min="0" max="100" value="'+v+'" aria-label="'+esc(t('vol_col'))+'" oninput="libVolInput('+i+',this)" onchange="libVolCommit('+i+',this)">'
       +'<span class="vv" id="vv_'+i+'">'+v+'</span>'
+      +'<button class="btn sm lib-del" title="'+esc(t('del_track_title'))+'" aria-label="'+esc(t('del_track_title'))+'" onclick="deleteLibSound('+i+')">'+LIB_TRASH+'</button>'
       +'</div>');
   }
-  box.innerHTML=rows.length?rows.join(''):'<div class="lib-empty">'+esc(t('nothing_found'))+'</div>';
+  var head=libHeadHtml();
+  box.innerHTML=rows.length?head+head+rows.join(''):'<div class="lib-empty">'+esc(t('nothing_found'))+'</div>';
+  if(box.style&&box.style.setProperty)box.style.setProperty('--lib-rows',String(Math.ceil(rows.length/2)+1));
   if(typeof applyPanelSplit==='function')applyPanelSplit();
+}
+async function deleteLibSound(i){
+  var f=libFiles[i];if(!f)return;
+  var wavNm=/\.wav$/i.test(f.name)?f.name:(f.name+'.wav');
+  if(!(await confirmDialog(t('del_sound_confirm')+wavNm+t('del_sound_confirm_b'))))return;
+  if(libPreview===f.name)stopAudio();
+  try{
+    var d=await api('/api/audio/library/delete?name='+encodeURIComponent(f.name),{method:'POST'});
+    if(!d||!d.ok)throw new Error((d&&d.error)||t('failed'));
+    log(t('tag_sound'),'DEL '+wavNm);
+    await loadLibrary();
+    loadFreeSpace();
+  }catch(e){log(t('tag_sound'),t('err_prefix')+e.message);}
+}
+async function uploadWavFiles(input){
+  var files=input&&input.files?Array.prototype.slice.call(input.files):[];
+  if(!files.length)return;
+  if(uploadBusy){log(t('tag_upload'),t('upload_busy'));input.value='';return;}
+  for(var k=0;k<files.length;k++){
+    var file=files[k];
+    if(!/\.wav$/i.test(String(file.name||''))){log(t('tag_upload'),t('err_prefix')+t('wav_bad_ext')+file.name);continue;}
+    await new Promise(function(resolve){
+      uploadBusy=true;
+      var bar=byId('pack_bar'),barIn=byId('packbar'),meta=byId('pack_meta');
+      bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
+      meta.textContent=t('upload_file')+file.name+' (0%)';
+      var started=Date.now();
+      var xhr=new XMLHttpRequest();
+      xhr.open('POST','/api/audio/upload?asset=1',true);
+      xhr.setRequestHeader('X-File-Name',encodeURIComponent(file.name));
+      xhr.timeout=300000;
+      if(xhr.upload){
+        xhr.upload.onprogress=function(e){
+          if(!e.lengthComputable)return;
+          var cp=Math.min(99,Math.round(e.loaded/e.total*100));
+          barIn.style.width=cp+'%';
+          var sec=Math.max(0.1,(Date.now()-started)/1000);
+          meta.textContent=t('transferred')+e.loaded+t('of')+e.total+t('bytes_suffix')+' · '+Math.round((e.loaded/1024)/sec)+' '+t('kb_per_s');
+        };
+      }
+      function doneOne(){
+        uploadBusy=false;
+        bar.style.display='none';meta.style.display='none';
+        resolve();
+      }
+      xhr.onload=function(){
+        var res=null;try{res=JSON.parse(xhr.responseText);}catch(err){}
+        if(xhr.status===200&&res&&res.ok){
+          log(t('tag_upload'),t('wav_uploaded')+file.name);
+        }else{
+          log(t('tag_upload'),t('error_prefix')+(res&&res.error?res.error:('HTTP '+xhr.status)));
+        }
+        doneOne();
+      };
+      xhr.onerror=xhr.ontimeout=xhr.onabort=function(){
+        log(t('tag_upload'),t('error_prefix')+t('err_network'));
+        doneOne();
+      };
+      xhr.send(file);
+    });
+  }
+  input.value='';
+  await loadLibrary();
+  loadFreeSpace();
 }
 async function loadLibrary(){
   try{
     var d=await api('/api/audio/library');
     if(!d||!d.ok)throw new Error(t('load_failed'));
     libFiles=d.files||[];
+    libTotal=Number(d.total)||libFiles.length;
     libPreview=d.preview||'';
     lastLibSig='';
     renderLibrary();
@@ -1306,19 +1489,544 @@ function startUpPoll(){
       .then(function(){upPollBusy=false;});
   },400);
 }
-function uploadPack(input){
-  var file=input.files&&input.files[0];
-  if(!file)return;
-  /* Only .asp containers, within the device limit (15 MB). */
-  if(!/\.asp$/i.test(String(file.name||''))){log(t('tag_upload'),t('err_prefix')+t('pack_bad_ext')+file.name);input.value='';return;}
-  if(!file.size||file.size>15*1024*1024){log(t('tag_upload'),t('err_prefix')+t('file_gt')+'15 '+t('unit_mb'));input.value='';return;}
-  if(uploadBusy){log(t('tag_upload'),t('upload_busy'));input.value='';return;}
-  if(!confirm(t('pack_confirm'))){input.value='';return;}
+var ASP_ENC_MAGIC='AURAPW01';
+function utf8Bytes(str){
+  var s=String(str||'');
+  if(typeof TextEncoder!=='undefined')return new TextEncoder().encode(s);
+  var u=unescape(encodeURIComponent(s)),out=new Uint8Array(u.length);
+  for(var i=0;i<u.length;i++)out[i]=u.charCodeAt(i)&0xff;
+  return out;
+}
+function fnv32(bytes){
+  var h=0x811c9dc5;
+  for(var i=0;i<bytes.length;i++){
+    h^=bytes[i]&0xff;
+    h=Math.imul(h,0x01000193)>>>0;
+  }
+  return h>>>0;
+}
+function prngKeystream(pwBytes,saltBytes,len){
+  var seed=new Uint8Array(pwBytes.length+saltBytes.length);
+  seed.set(pwBytes,0);seed.set(saltBytes,pwBytes.length);
+  var s0=fnv32(seed)||0x9e3779b9;
+  var s1=fnv32(saltBytes)^0x85ebca6b;
+  var out=new Uint8Array(len);
+  for(var i=0;i<len;i++){
+    s0^=s0<<13;s0^=s0>>>17;s0^=s0<<5;s0=s0>>>0;
+    s1=(Math.imul(s1,1664525)+1013904223)>>>0;
+    out[i]=((s0^s1)>>>((i&3)*8))&0xff;
+  }
+  return out;
+}
+/* Casual obfuscation only: a custom XOR stream with a 32-bit check tag.
+ * It is not authenticated encryption and must not be used for confidentiality. */
+function encryptAspBytes(plain,password){
+  if(!password)return plain;
+  var pwBytes=utf8Bytes(password);
+  var salt=new Uint8Array(4);
+  for(var s=0;s<4;s++)salt[s]=Math.floor(Math.random()*256)&0xff;
+  var tagInput=new Uint8Array(pwBytes.length+4);
+  tagInput.set(pwBytes,0);tagInput.set(salt,pwBytes.length);
+  var tag=fnv32(tagInput);
+  var ks=prngKeystream(pwBytes,salt,plain.length);
+  var out=new Uint8Array(16+plain.length);
+  for(var m=0;m<8;m++)out[m]=ASP_ENC_MAGIC.charCodeAt(m);
+  out.set(salt,8);
+  out[12]=tag&0xff;out[13]=(tag>>>8)&0xff;out[14]=(tag>>>16)&0xff;out[15]=(tag>>>24)&0xff;
+  for(var i=0;i<plain.length;i++)out[16+i]=plain[i]^ks[i];
+  return out;
+}
+function isEncryptedAsp(bytes){
+  if(!bytes||bytes.length<24)return false;
+  for(var i=0;i<8;i++){if(bytes[i]!==ASP_ENC_MAGIC.charCodeAt(i))return false;}
+  return true;
+}
+function decryptAspBytes(bytes,password){
+  var pwBytes=utf8Bytes(password);
+  var salt=bytes.slice(8,12);
+  var expectedTag=(bytes[12]|(bytes[13]<<8)|(bytes[14]<<16)|(bytes[15]<<24))>>>0;
+  var tagInput=new Uint8Array(pwBytes.length+4);
+  tagInput.set(pwBytes,0);tagInput.set(salt,pwBytes.length);
+  if(fnv32(tagInput)!==expectedTag)return null;
+  var cipher=bytes.slice(16);
+  var ks=prngKeystream(pwBytes,salt,cipher.length);
+  var plain=new Uint8Array(cipher.length);
+  for(var i=0;i<cipher.length;i++)plain[i]=cipher[i]^ks[i];
+  return plain;
+}
+function utf8DecodeBytes(bytes){
+  if(typeof TextDecoder!=='undefined')return new TextDecoder('utf-8').decode(bytes);
+  var raw='';
+  for(var i=0;i<bytes.length;i++)raw+=String.fromCharCode(bytes[i]);
+  try{return decodeURIComponent(escape(raw));}catch(e){return raw;}
+}
+/* Parse and validate an AURASP01 container that is already decrypted.
+ * Mirrors the checks in components/web/src/audio_pack.c so a broken pack is
+ * rejected in the browser instead of during a long upload. */
+function parseAspPack(bytes){
+  if(!bytes||bytes.length<16)throw new Error(t('pack_err_header'));
+  var magic='AURASP01';
+  for(var m=0;m<8;m++){if(bytes[m]!==magic.charCodeAt(m))throw new Error(t('pack_err_header'));}
+  var dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  var version=dv.getUint16(8,true),count=dv.getUint16(10,true),dataOff=dv.getUint32(12,true);
+  if(version!==1)throw new Error(t('pack_err_version'));
+  if(count<1||count>400)throw new Error(t('pack_err_index'));
+  if(dataOff<16+count*16||dataOff>bytes.length)throw new Error(t('pack_err_index'));
+  var pos=16,payloadOff=dataOff,audio=[],scheme=null,pcm=0,adpcm=0,totalData=0,rates={},seen={};
+  for(var e=0;e<count;e++){
+    if(pos+16>dataOff)throw new Error(t('pack_err_index'));
+    var nlen=bytes[pos],vol=bytes[pos+1],ch=bytes[pos+2],bits=bytes[pos+3];
+    var rate=dv.getUint32(pos+4,true),off=dv.getUint32(pos+8,true),len=dv.getUint32(pos+12,true);
+    pos+=16;
+    if(nlen<1||nlen>63||pos+nlen>dataOff)throw new Error(t('pack_err_index'));
+    var name=utf8DecodeBytes(bytes.subarray(pos,pos+nlen));
+    pos+=nlen;
+    if(!name||name.indexOf('\0')>=0||/[\/\\]/.test(name)||name==='.'||name==='..')throw new Error(t('pack_err_name'));
+    if(vol>100)throw new Error(t('pack_err_entry'));
+    var frame;
+    if(bits===16){
+      if(ch<1||ch>2||!rate||rate>192000)throw new Error(t('pack_err_entry'));
+      frame=ch*2;
+    }else if(bits===4){
+      if(ch!==1||!rate||rate>192000)throw new Error(t('pack_err_entry'));
+      frame=256;
+    }else if(bits===0){
+      if(name!=='__aura_scheme__'||ch!==0||rate!==0||len<1||len>131072)throw new Error(t('pack_err_scheme'));
+      frame=1;
+    }else{
+      throw new Error(t('pack_err_entry'));
+    }
+    if(len<frame||(len%frame)!==0)throw new Error(t('pack_err_entry'));
+    if(off!==payloadOff||off+len>bytes.length)throw new Error(t('pack_err_bounds'));
+    payloadOff+=len;
+    if(bits!==0){
+      var key=name.toLowerCase();
+      if(seen[key])throw new Error(t('pack_err_dup')+name);
+      seen[key]=1;
+      if(bits===16)pcm++;else adpcm++;
+      totalData+=len;
+      rates[rate]=(rates[rate]||0)+1;
+      audio.push({name:name,vol:vol,ch:ch,bits:bits,rate:rate,len:len});
+    }else{
+      var txt=utf8DecodeBytes(bytes.subarray(off,off+len));
+      if(txt.indexOf('\0')>=0)throw new Error(t('pack_err_scheme'));
+      var doc=null;
+      try{doc=JSON.parse(txt);}catch(err){throw new Error(t('pack_err_scheme'));}
+      if(!doc||doc.format!=='sound-graph')throw new Error(t('pack_err_scheme'));
+      scheme={
+        id:String(doc.id||''),
+        name:String(doc.name||''),
+        states:Array.isArray(doc.states)?doc.states.length:0,
+        transitions:Array.isArray(doc.transitions)?doc.transitions.length:0,
+        effects:Array.isArray(doc.effects)?doc.effects.length:0
+      };
+    }
+  }
+  if(pos!==dataOff)throw new Error(t('pack_err_index'));
+  if(payloadOff!==bytes.length)throw new Error(t('pack_err_size'));
+  if(!audio.length)throw new Error(t('pack_err_no_audio'));
+  return {version:version,count:count,audio:audio,scheme:scheme,pcm:pcm,adpcm:adpcm,totalData:totalData,rates:rates};
+}
+function packStatHtml(label,value,wide){
+  return '<div class="pack-stat'+(wide?' wide':'')+'"><b>'+esc(label)+'</b><span>'+esc(value)+'</span></div>';
+}
+var packDlgResolve=null;
+function showPackStatsDialog(fileName,fileSize,info,encrypted){
+  if(packDlgResolve){packDlgResolve(false);packDlgResolve=null;}
+  return new Promise(function(resolve){
+    packDlgResolve=resolve;
+    var fmt=[];
+    if(info.pcm)fmt.push('PCM16 ×'+info.pcm);
+    if(info.adpcm)fmt.push('IMA ADPCM ×'+info.adpcm);
+    var rates=[];
+    for(var r in info.rates){if(info.rates.hasOwnProperty(r))rates.push(r+' '+t('hz')+' ×'+info.rates[r]);}
+    var schTxt=t('pack_scheme_none');
+    if(info.scheme){
+      var sc=info.scheme,parts=[];
+      parts.push(sc.name||sc.id||t('pack_stats_title'));
+      parts.push(t('pack_states')+': '+sc.states);
+      parts.push(t('pack_transitions')+': '+sc.transitions);
+      parts.push(t('pack_effects')+': '+sc.effects);
+      schTxt=parts.join(' · ');
+    }
+    var stat=[];
+    stat.push(packStatHtml(t('pack_stat_sounds'),String(info.audio.length)));
+    stat.push(packStatHtml(t('pack_stat_size'),fmtBytes(fileSize)));
+    stat.push(packStatHtml(t('pack_stat_audio'),fmtBytes(info.totalData)));
+    stat.push(packStatHtml(t('pack_stat_format'),fmt.join(' · ')));
+    stat.push(packStatHtml(t('pack_stat_rate'),rates.join(', ')));
+    stat.push(packStatHtml(t('pack_stat_pw'),encrypted?t('pack_pw_yes'):t('pack_pw_no')));
+    stat.push(packStatHtml(t('pack_stat_scheme'),schTxt,true));
+    var items=[];
+    for(var i=0;i<info.audio.length;i++){
+      var a=info.audio[i];
+      var tip=a.name+' · '+(a.bits===4?'IMA ADPCM':'PCM16')+' · '+a.rate+' '+t('hz')+' · '+a.vol+'%';
+      items.push('<div class="pack-item" title="'+esc(tip)+'">'
+        +'<span class="pi">'+(i+1)+'</span>'
+        +'<span class="nm">'+esc(a.name)+'</span>'
+        +'<span class="sz">'+esc(fmtBytes(a.len))+'</span>'
+        +'<span class="pvol">'+a.vol+'%</span>'
+        +'</div>');
+    }
+    byId('pack_modal_title').textContent=t('pack_stats_title');
+    byId('pack_modal_sub').textContent=fileName+' · '+fmtBytes(fileSize);
+    var statsEl=byId('pack_modal_stats'),listEl=byId('pack_modal_list');
+    statsEl.style.display='';listEl.style.display='';
+    statsEl.innerHTML=stat.join('');
+    listEl.innerHTML=items.join('');
+    var warn=byId('pack_modal_warn');
+    warn.style.display='';
+    warn.textContent=info.scheme?t('pack_replace_warn'):t('pack_replace_warn_sounds');
+    warn.classList.remove('note');
+    var saveEl=byId('pack_modal_save'),okEl=byId('pack_modal_ok');
+    saveEl.style.display='none';
+    saveEl.removeAttribute('href');
+    saveEl.removeAttribute('download');
+    okEl.style.display='';
+    okEl.textContent=t('pack_import_btn');
+    byId('pack_modal').classList.add('show');
+  });
+}
+function showSavePackDialog(fileName,fileSize,download,tooBig,repairs){
+  if(packDlgResolve){packDlgResolve(false);packDlgResolve=null;}
+  return new Promise(function(resolve){
+    packDlgResolve=resolve;
+    byId('pack_modal_title').textContent=t('pack_save_title');
+    byId('pack_modal_sub').textContent=fileName+' · '+fmtBytes(fileSize);
+    var statsEl=byId('pack_modal_stats'),listEl=byId('pack_modal_list');
+    statsEl.style.display='none';listEl.style.display='none';
+    statsEl.innerHTML='';listEl.innerHTML='';
+    var warn=byId('pack_modal_warn');
+    warn.style.display=(tooBig||repairs)?'':'none';
+    var warnTxt=tooBig?t('pack_export_too_big'):'';
+    if(repairs)warnTxt=t('pack_repaired')+repairs+'. '+warnTxt;
+    warn.textContent=warnTxt;
+    warn.classList.toggle('note',!tooBig&&!repairs);
+    var saveEl=byId('pack_modal_save'),okEl=byId('pack_modal_ok');
+    saveEl.href=download.url;
+    saveEl.download=download.name;
+    saveEl.textContent=t('pack_export_btn');
+    saveEl.style.display='';
+    okEl.style.display='none';
+    byId('pack_modal').classList.add('show');
+  });
+}
+function packAnswer(ok){
+  byId('pack_modal').classList.remove('show');
+  if(packDlgResolve){var r=packDlgResolve;packDlgResolve=null;r(!!ok);}
+}
+function packFileBase(name){
+  var s=String(name||'').trim().replace(/[\\/:*?"<>|\u0000-\u001f]+/g,'_').replace(/\s+/g,' ').replace(/\s*_\s*/g,'_').replace(/_+/g,'_').replace(/^[. _]+|[. _]+$/g,'');
+  if(!s)s='sound_pack';
+  return s.slice(0,80);
+}
+var crc32Table=null;
+function crc32Bytes(bytes){
+  if(!crc32Table){
+    crc32Table=new Uint32Array(256);
+    for(var n=0;n<256;n++){
+      var c=n;
+      for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);
+      crc32Table[n]=c>>>0;
+    }
+  }
+  var crc=0xFFFFFFFF;
+  for(var i=0;i<bytes.length;i++)crc=crc32Table[(crc^bytes[i])&0xFF]^(crc>>>8);
+  return (crc^0xFFFFFFFF)>>>0;
+}
+/* IMA/DVI ADPCM (Microsoft WAVE_FORMAT_IMA_ADPCM), mirrored from
+ * tools/pack_sounds.py. Used so an export of PCM16 device sounds becomes the
+ * same compact format the pack importer expects. */
+var IMA_INDEX_TABLE=[-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8];
+var IMA_STEP_TABLE=[7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,2066,2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,7845,8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,24623,27086,29794,32767];
+var IMA_BLOCK_ALIGN=256,IMA_SAMPLES_PER_BLOCK=505;
+function pcm8To16(bytes,channels){
+  var frames=Math.floor(bytes.length/channels);
+  var out=new Uint8Array(frames*channels*2);
+  var dv=new DataView(out.buffer);
+  for(var i=0;i<frames*channels;i++)dv.setInt16(i*2,(bytes[i]-128)<<8,true);
+  return out;
+}
+function imaEncodePcm16(bytes,channels){  if(channels<1||channels>8)throw new Error(t('pack_err_entry'));
+  var total=Math.floor(bytes.length/(2*channels));
+  var out=new Uint8Array(Math.ceil(total/IMA_SAMPLES_PER_BLOCK)*IMA_BLOCK_ALIGN);
+  var dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  var op=0,index=0;
+  function sampleAt(i){
+    if(channels===1)return dv.getInt16(i*2,true);
+    var sum=0;
+    for(var c=0;c<channels;c++)sum+=dv.getInt16((i*channels+c)*2,true);
+    return Math.floor(sum/channels);
+  }
+  for(var pos=0;pos<total;pos+=IMA_SAMPLES_PER_BLOCK){
+    var count=Math.min(IMA_SAMPLES_PER_BLOCK,total-pos);
+    var first=sampleAt(pos);
+    if(first>32767)first=32767;
+    if(first<-32768)first=-32768;
+    out[op]=first&0xFF;out[op+1]=(first>>8)&0xFF;out[op+2]=index;out[op+3]=0;op+=4;
+    var predictor=first,cur=0;
+    for(var k=1;k<IMA_SAMPLES_PER_BLOCK;k++){
+      var s=(k<count)?sampleAt(pos+k):sampleAt(pos+count-1);
+      var step=IMA_STEP_TABLE[index];
+      var diff=s-predictor;
+      var sign=diff<0?8:0;
+      if(sign)diff=-diff;
+      var code=0;
+      if(diff>=step){code|=4;diff-=step;}
+      var half=step>>1;
+      if(diff>=half){code|=2;diff-=half;}
+      var quarter=step>>2;
+      if(diff>=quarter)code|=1;
+      code|=sign;
+      var delta=step>>3;
+      if(code&1)delta+=step>>2;
+      if(code&2)delta+=step>>1;
+      if(code&4)delta+=step;
+      predictor=(code&8)?predictor-delta:predictor+delta;
+      if(predictor>32767)predictor=32767;
+      else if(predictor<-32768)predictor=-32768;
+      index+=IMA_INDEX_TABLE[code];
+      if(index<0)index=0;
+      else if(index>88)index=88;
+      if(k&1)cur=code;
+      else out[op++]=cur|(code<<4);
+    }
+  }
+  return out;
+}
+var packRepairs=[];
+function packPrepareEntry(name,vol,ch,bits,rate,data){
+  var repaired=false;
+  if(!ch||ch>8){ch=1;repaired=true;}
+  if(!rate){rate=22050;repaired=true;}
+  else if(rate>192000){rate=192000;repaired=true;}
+  if(bits===8){
+    if(data.length<ch){
+      var padded8=new Uint8Array(ch);
+      padded8.set(data,0);
+      data=padded8;
+      repaired=true;
+    }
+    data=pcm8To16(data,ch);
+    bits=16;
+  }
+  if(bits===16){
+    if(data.length<2*ch){
+      var paddedPcm=new Uint8Array(2*ch);
+      paddedPcm.set(data,0);
+      data=paddedPcm;
+      repaired=true;
+    }
+    if(repaired)packRepairs.push(name);
+    return {name:name,vol:vol,ch:1,bits:4,rate:rate,data:imaEncodePcm16(data,ch)};
+  }
+  if(bits===4){
+    if(ch!==1)throw new Error(t('pack_err_adpcm_stereo')+name);
+    if(data.length<IMA_BLOCK_ALIGN){
+      var paddedOne=new Uint8Array(IMA_BLOCK_ALIGN);
+      paddedOne.set(data,0);
+      data=paddedOne;
+      repaired=true;
+    }else if(data.length%IMA_BLOCK_ALIGN){
+      var padded=new Uint8Array(Math.ceil(data.length/IMA_BLOCK_ALIGN)*IMA_BLOCK_ALIGN);
+      padded.set(data,0);
+      data=padded;
+      repaired=true;
+    }
+    if(repaired)packRepairs.push(name);
+    return {name:name,vol:vol,ch:1,bits:4,rate:rate,data:data};
+  }
+  throw new Error(t('pack_err_entry')+name);
+}
+/* Exact mirror of audio_pack_wav_header(): the manifest CRC/size must match
+ * the WAV the device will write when this pack is imported. */
+function packWavHeader(dataLen,rate,ch,bits){
+  var len=bits===4?60:44;
+  var b=new Uint8Array(len),dv=new DataView(b.buffer);
+  function tag(off,s){for(var i=0;i<s.length;i++)b[off+i]=s.charCodeAt(i);}
+  tag(0,'RIFF');
+  dv.setUint32(4,(bits===4?52:36)+dataLen,true);
+  tag(8,'WAVE');
+  if(bits===4){
+    tag(12,'fmt ');
+    dv.setUint32(16,20,true);
+    dv.setUint16(20,0x0011,true);
+    dv.setUint16(22,1,true);
+    dv.setUint32(24,rate,true);
+    dv.setUint32(28,Math.floor(rate*256/505),true);
+    dv.setUint16(32,256,true);
+    dv.setUint16(34,4,true);
+    dv.setUint16(36,2,true);
+    dv.setUint16(38,505,true);
+    tag(40,'fact');
+    dv.setUint32(44,4,true);
+    dv.setUint32(48,Math.floor(dataLen/256)*505,true);
+    tag(52,'data');
+    dv.setUint32(56,dataLen,true);
+  }else{
+    var align=ch*2;
+    tag(12,'fmt ');
+    dv.setUint32(16,16,true);
+    dv.setUint16(20,1,true);
+    dv.setUint16(22,ch,true);
+    dv.setUint32(24,rate,true);
+    dv.setUint32(28,rate*align,true);
+    dv.setUint16(32,align,true);
+    dv.setUint16(34,16,true);
+    tag(36,'data');
+    dv.setUint32(40,dataLen,true);
+  }
+  return b;
+}
+/* Rebuild project.assets[] from the WAVs actually going into the pack, like
+ * tools/pack_sounds.py does, so a device accepts the bundled scheme. */
+function schemeBytesForPack(project,entries){
+  var byFile={};
+  for(var i=0;i<entries.length;i++){
+    var e=entries[i];
+    if(e.bits)byFile[e.name+'.wav']=e;
+  }
+  var manifest=[],seen={};
+  var states=Array.isArray(project.states)?project.states:[];
+  for(var s=0;s<states.length;s++){
+    var file=states[s]&&states[s].file?String(states[s].file):'';
+    if(!file||seen[file])continue;
+    var a=byFile[file];
+    if(!a)throw new Error(t('pack_err_missing')+file);
+    seen[file]=1;
+    var hdr=packWavHeader(a.data.length,a.rate,a.ch,a.bits);
+    var fullLen=hdr.length+a.data.length;
+    var full=new Uint8Array(fullLen);
+    full.set(hdr,0);full.set(a.data,hdr.length);
+    var dur=a.bits===4?Math.floor((Math.floor(a.data.length/256)*505*1000)/a.rate):Math.floor((a.data.length*1000)/(a.rate*a.ch*2));
+    if(!dur)dur=1;
+    manifest.push({
+      file:file,
+      size:fullLen,
+      sampleRate:a.rate,
+      channels:a.ch,
+      bits:a.bits,
+      durationMs:dur,
+      crc32:('00000000'+crc32Bytes(full).toString(16)).slice(-8)
+    });
+  }
+  project.assets=manifest;
+  var json=utf8Bytes(JSON.stringify(project));
+  if(json.length>131072)throw new Error(t('pack_err_scheme'));
+  return json;
+}
+async function exportSoundPack(){
+  if(uploadBusy){log(t('tag_sound'),t('upload_busy'));return;}
+  var pw=await promptPasswordDialog(t('pw_export_msg'));
+  if(pw===null)return;
+  showSetting('panel_snd');
+  log(t('tag_sound'),t('pack_exporting'));
+  try{
+    await loadLibrary();
+    if(libTotal>400)throw new Error(t('pack_err_library_big')+libTotal);
+    var devName='';
+    try{
+      var dev=await api('/api/device',{timeout:4000,cache:'no-store'});
+      if(dev&&dev.ok)devName=String(dev.name||'').trim();
+    }catch(e){}
+    var st=await api('/api/sound/graph/state');
+    var projectObj=null,projId='locomotive_default';
+    if(st&&st.ok&&st.id&&st.revision>0){
+      projId=st.id;
+      var pr=await api('/api/sound/graph/project?id='+encodeURIComponent(st.id)+'&revision='+st.revision);
+      if(pr&&pr.ok&&pr.project){
+        var bindRes=null,auxRes=null;
+        try{bindRes=await api('/api/func-map?view=bind');}catch(e){}
+        try{auxRes=await api('/api/aux/cfg');}catch(e){}
+        if(!pr.project.editor)pr.project.editor={};
+        if(bindRes&&bindRes.ok&&bindRes.binds)pr.project.editor.binds=bindRes.binds;
+        if(auxRes&&auxRes.ok&&auxRes.aux)pr.project.editor.aux=auxRes.aux;
+        projectObj=pr.project;
+      }
+    }
+    var entries=[];
+    var compressed=0;
+    packRepairs=[];
+    for(var i=0;i<libFiles.length;i++){
+      var f=libFiles[i];
+      var r=await fetch('/api/audio/raw/'+encodeURIComponent(f.name),{cache:'no-store'});
+      if(!r.ok)throw new Error('raw fetch failed: '+f.name);
+      var ab=await r.arrayBuffer();
+      var rate=Number(r.headers.get('X-Audio-Rate'))||22050;
+      var ch=Number(r.headers.get('X-Audio-Channels'))||1;
+      var bits=Number(r.headers.get('X-Audio-Bits'))||16;
+      var vol=Number(f.vol);if(isNaN(vol))vol=100;
+      var entry=packPrepareEntry(f.name,vol,ch,bits,rate,new Uint8Array(ab));
+      if(bits===16)compressed++;
+      entries.push(entry);
+    }
+    if(compressed)log(t('tag_sound'),t('pack_compressed')+compressed+'/'+libFiles.length);
+    if(packRepairs.length)log(t('tag_sound'),t('pack_repaired')+packRepairs.join(', '));
+    if(projectObj){
+      entries.push({name:'__aura_scheme__',vol:0,ch:0,bits:0,rate:0,data:schemeBytesForPack(projectObj,entries)});
+    }
+    if(!entries.length)throw new Error(t('pack_empty'));
+    if(entries.length>400)throw new Error(t('pack_err_index'));
+    var audioCount=0,audioPayload=0;
+    for(var q=0;q<entries.length;q++){
+      if(utf8Bytes(entries[q].name).length>63)throw new Error(t('pack_err_name')+entries[q].name);
+      if(entries[q].bits){audioCount++;audioPayload+=entries[q].data.length;}
+    }
+    var nameBytesList=entries.map(function(e){return utf8Bytes(e.name);});
+    var indexLen=0;
+    for(var j=0;j<entries.length;j++)indexLen+=16+nameBytesList[j].length;
+    var dataOff=16+indexLen;
+    var totalPayload=0;
+    for(var k=0;k<entries.length;k++)totalPayload+=entries[k].data.length;
+    var asp=new Uint8Array(dataOff+totalPayload);
+    var dv=new DataView(asp.buffer);
+    var magic='AURASP01';
+    for(var m=0;m<8;m++)asp[m]=magic.charCodeAt(m);
+    dv.setUint16(8,1,true);
+    dv.setUint16(10,entries.length,true);
+    dv.setUint32(12,dataOff,true);
+    var pos=16,runningOff=dataOff;
+    for(var ei=0;ei<entries.length;ei++){
+      var e=entries[ei],nb=nameBytesList[ei];
+      asp[pos]=nb.length;
+      asp[pos+1]=Math.max(0,Math.min(100,e.vol));
+      asp[pos+2]=e.ch;
+      asp[pos+3]=e.bits;
+      dv.setUint32(pos+4,e.rate,true);
+      dv.setUint32(pos+8,runningOff,true);
+      dv.setUint32(pos+12,e.data.length,true);
+      asp.set(nb,pos+16);
+      pos+=16+nb.length;
+      asp.set(e.data,runningOff);
+      runningOff+=e.data.length;
+    }
+    var finalBytes=encryptAspBytes(asp,pw);
+    var tooBig=finalBytes.length>15*1024*1024;
+    var check=parseAspPack(asp);
+    if(check.count!==entries.length||check.audio.length!==audioCount||check.totalData!==audioPayload)throw new Error(t('pack_err_size'));
+    var fname=packFileBase((projectObj&&projectObj.name)||devName||projId||'sound_pack')+'.asp';
+    var blob=new Blob([finalBytes],{type:'application/octet-stream'});
+    var dlUrl=URL.createObjectURL(blob);
+    var proceed=await showSavePackDialog(fname,finalBytes.length,{url:dlUrl,name:fname},tooBig,packRepairs.length);
+    if(!proceed){
+      try{URL.revokeObjectURL(dlUrl);}catch(e){}
+      log(t('tag_sound'),t('pack_export_cancelled'));
+      return;
+    }
+    setTimeout(function(){try{URL.revokeObjectURL(dlUrl);}catch(e){}},10000);
+    log(t('tag_sound'),t('pack_exported')+fname);
+    toast(tooBig?t('pack_exported_big'):(t('pack_exported')+fname+' ('+fmtBytes(finalBytes.length)+')'),tooBig);
+  }catch(e){
+    log(t('tag_sound'),t('err_prefix')+e.message);
+    toast(t('err_prefix')+e.message,true);
+  }
+}
+function sendPackPayload(input,fileName,payloadBody,payloadSize){
   uploadBusy=true;
   var bar=byId('pack_bar'),barIn=byId('packbar'),meta=byId('pack_meta');
   bar.style.display='block';barIn.style.width='0%';meta.style.display='block';
-  meta.textContent=t('written')+'0'+t('of')+file.size+t('bytes_suffix')+' · 0 '+t('kb_per_s');
-  log(t('tag_upload'),t('pack_uploading')+file.name+' ('+file.size+t('bytes_suffix')+')');
+  meta.textContent=t('written')+'0'+t('of')+payloadSize+t('bytes_suffix')+' · 0 '+t('kb_per_s');
+  log(t('tag_upload'),t('pack_uploading')+fileName+' ('+payloadSize+t('bytes_suffix')+')');
   var started=Date.now();
   stopStatusPoll();
   stopHeartbeat();
@@ -1351,20 +2059,73 @@ function uploadPack(input){
     finishUp();
     input.value='';
     if(ok){
-      log(t('tag_upload'),t('pack_done')+(res&&res.files!=null?res.files:0)+t('in_seconds')+Math.round((Date.now()-started)/1000)+t('sec_suffix'));
+      var schTxt=(res&&res.scheme)?(t('pack_scheme_loaded')+' ('+res.scheme+')'):'';
+      var okMsg=t('pack_done')+(res&&res.files!=null?res.files:0)+schTxt;
+      if(res&&res.scheme){try{localStorage.removeItem('aura_blocks_project_v1');}catch(e){}}
+      log(t('tag_upload'),okMsg+t('in_seconds')+Math.round((Date.now()-started)/1000)+t('sec_suffix'));
+      toast(okMsg);
       loadLibrary();
     }else{
-      log(t('tag_upload'),t('error_prefix')+(res&&res.error?res.error:('HTTP '+xhr.status)));
+      var errMsg=t('error_prefix')+(res&&res.error?res.error:('HTTP '+xhr.status));
+      log(t('tag_upload'),errMsg);
+      toast(errMsg,true);
     }
   };
   xhr.onerror=function(){
     bar.style.display='none';meta.style.display='none';
     finishUp();
-    log(t('tag_upload'),t('error_prefix')+t('err_network'));
+    var errMsg=t('error_prefix')+t('err_network');
+    log(t('tag_upload'),errMsg);
+    toast(errMsg,true);
     input.value='';
   };
   xhr.ontimeout=xhr.onabort=xhr.onerror;
-  xhr.send(file);
+  xhr.send(payloadBody);
+}
+async function uploadPack(input){
+  var file=input.files&&input.files[0];
+  if(!file)return;
+  showSetting('panel_snd');
+  /* Only .asp containers, within the device limit (15 MB). */
+  if(!/\.asp$/i.test(String(file.name||''))){var m1=t('err_prefix')+t('pack_bad_ext')+file.name;log(t('tag_upload'),m1);toast(m1,true);input.value='';return;}
+  if(!file.size||file.size>15*1024*1024){var m2=t('err_prefix')+t('file_gt')+'15 '+t('unit_mb');log(t('tag_upload'),m2);toast(m2,true);input.value='';return;}
+  if(uploadBusy){log(t('tag_upload'),t('upload_busy'));toast(t('upload_busy'),true);input.value='';return;}
+  var rawBuf;
+  try{
+    rawBuf=await readFileBytes(file);
+  }catch(e){
+    log(t('tag_upload'),t('err_prefix')+e.message);
+    toast(t('err_prefix')+e.message,true);
+    input.value='';
+    return;
+  }
+  var encrypted=isEncryptedAsp(rawBuf);
+  if(encrypted){
+    var pw=await promptPasswordDialog(t('pw_import_msg'));
+    if(pw===null){input.value='';return;}
+    var dec=decryptAspBytes(rawBuf,pw);
+    if(!dec){
+      log(t('tag_upload'),t('err_prefix')+t('pw_wrong'));
+      toast(t('pw_wrong'),true);
+      input.value='';
+      return;
+    }
+    rawBuf=dec;
+  }
+  var info;
+  try{
+    info=parseAspPack(rawBuf);
+  }catch(e){
+    var m3=t('pack_invalid')+e.message;
+    log(t('tag_upload'),t('err_prefix')+m3);
+    toast(m3,true);
+    input.value='';
+    return;
+  }
+  var ok=await showPackStatsDialog(file.name,file.size,info,encrypted);
+  if(!ok){input.value='';return;}
+  var sendBlob=new Blob([rawBuf],{type:'application/octet-stream'});
+  sendPackPayload(input,file.name,sendBlob,rawBuf.length);
 }
 
 /* CV */

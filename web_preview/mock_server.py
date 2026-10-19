@@ -131,7 +131,7 @@ def _sound_alias():
         names = os.listdir(SOUND_DIR)
     except OSError:
         names = []
-    for name in names:
+    for name in sorted(names):
         if not name.lower().endswith(".wav"):
             continue
         aliases.setdefault(_sanitize(name[:-4]) + ".wav", name)
@@ -139,6 +139,22 @@ def _sound_alias():
 
 
 SOUND_ALIASES = _sound_alias()
+
+
+def _seed_library_from_sound_dir():
+    """Populate LIBRARY with WAV files from SOUND/ on startup so the Sounds
+    section in the preview UI immediately displays available sounds."""
+    for dev_wav, orig_name in sorted(SOUND_ALIASES.items()):
+        base = _base(dev_wav)
+        fpath = os.path.join(SOUND_DIR, orig_name)
+        try:
+            size = os.path.getsize(fpath)
+        except OSError:
+            continue
+        LIBRARY[base] = {"vol": 100, "path": fpath, "size": size}
+
+
+_seed_library_from_sound_dir()
 
 
 def _parse_pack(body):
@@ -179,15 +195,19 @@ def _parse_pack(body):
         if name in seen:
             raise ValueError("дубликат имени: %s" % name)
         seen.add(name)
-        if ch not in (1, 2) or bits not in (4, 16):
-            raise ValueError("формат %d/%d бит не поддержан" % (ch, bits))
-        if bits == 4 and ch != 1:
-            raise ValueError("ADPCM только моно")
-        if not (0 < rate <= 192000):
-            raise ValueError("неверная частота")
-        frame = ch * 2 if bits == 16 else IMA_BLOCK
-        if dlen < frame or dlen % frame != 0:
-            raise ValueError("неверная длина данных")
+        if bits == 0:
+            if name != "__aura_scheme__" or ch != 0 or rate != 0 or not (0 < dlen <= 131072):
+                raise ValueError("неверная запись схемы")
+        else:
+            if ch not in (1, 2) or bits not in (4, 16):
+                raise ValueError("формат %d/%d бит не поддержан" % (ch, bits))
+            if bits == 4 and ch != 1:
+                raise ValueError("ADPCM только моно")
+            if not (0 < rate <= 192000):
+                raise ValueError("неверная частота")
+            frame = ch * 2 if bits == 16 else IMA_BLOCK
+            if dlen < frame or dlen % frame != 0:
+                raise ValueError("неверная длина данных")
         if doff + dlen > len(body):
             raise ValueError("данные выходят за файл")
         entries.append({"name": name, "vol": vol, "bits": bits, "channels": ch,
@@ -205,13 +225,26 @@ def _parse_pack(body):
 
 
 def _load_pack(body):
-    """Replace the in-memory library with an uploaded pack. Returns (files,
-    bytes, encoding) or raises ValueError."""
+    """Replace the in-memory library (and optional bundled sound scheme) with
+    an uploaded pack. Returns (files, bytes, encoding, scheme_id) or raises ValueError."""
     entries = _parse_pack(body)
     lib = {}
     encodings = set()
+    scheme_id = ""
     for e in entries:
         payload = body[e["off"]:e["off"] + e["len"]]
+        if e["bits"] == 0 and e["name"] == "__aura_scheme__":
+            try:
+                doc = json.loads(payload.decode("utf-8"))
+                if isinstance(doc, dict) and doc.get("format") == "sound-graph":
+                    GRAPH["project"] = doc
+                    GRAPH["revision"] = GRAPH.get("revision", 0) + 1
+                    GRAPH["active"] = True
+                    GRAPH["fault"] = False
+                    scheme_id = doc.get("id", "locomotive_default")
+            except Exception as exc:
+                raise ValueError("некорректная схема в пакете: %s" % exc)
+            continue
         if e["bits"] == 4:
             blocks = e["len"] // IMA_BLOCK
             samples = []
@@ -226,11 +259,12 @@ def _load_pack(body):
         # "size" mirrors the .wav the device writes on unpack; "wav" is the
         # decoded PCM16 used only for browser playback.
         lib[e["name"]] = {"vol": e["vol"], "wav": _pcm16_wav(samples, e["rate"]),
-                          "size": stored_hdr + e["len"]}
+                          "size": stored_hdr + e["len"], "raw": payload,
+                          "rate": e["rate"], "channels": e["channels"], "bits": e["bits"]}
     LIBRARY.clear()
     LIBRARY.update(lib)
     PREVIEW["name"] = ""
-    return len(entries), len(body), "/".join(sorted(encodings))
+    return len(lib), len(body), "/".join(sorted(encodings)), scheme_id
 
 
 
@@ -257,7 +291,17 @@ def _asset(name):
     base = _base(name)
     raw = None
     if base in LIBRARY:
-        raw = LIBRARY[base]["wav"]
+        entry = LIBRARY[base]
+        if "wav" in entry:
+            raw = entry["wav"]
+            size = len(raw)
+        elif "path" in entry and os.path.isfile(entry["path"]):
+            try:
+                with open(entry["path"], "rb") as fh:
+                    raw = fh.read(64)
+                size = os.path.getsize(entry["path"])
+            except OSError:
+                raw = None
     else:
         safe = os.path.normpath(os.path.join(SOUND_DIR, name or ""))
         if not (safe.startswith(SOUND_DIR) and os.path.isfile(safe)):
@@ -671,14 +715,29 @@ def handle_api(method, path, query, body):
             LIBRARY[name]["vol"] = vol
         return 200, ok()
 
+    if path == "/api/audio/library/delete":
+        name = _base(q1(query, "name", ""))
+        if not name:
+            return 400, {"ok": False, "error": "bad name"}
+        LIBRARY.pop(name, None)
+        if PREVIEW.get("name") == name:
+            PREVIEW["name"] = ""
+        add_log("Звук", "удалён %s.wav" % name)
+        return 200, ok(name=name)
+
     if path == "/api/audio/pack":
         try:
-            files, size, encoding = _load_pack(body)
+            files, size, encoding, scheme_id = _load_pack(body)
         except ValueError as exc:
             add_log("Звук", "пакет отклонён: %s" % exc)
             return 200, {"ok": False, "error": str(exc)}
-        add_log("Звук", "пакет: %d звук(ов), %d Б (%s)" % (files, size, encoding))
-        return 200, ok(files=files, bytes=size, encoding=encoding)
+        add_log("Звук", "пакет: %d звук(ов)%s, %d Б (%s)" %
+                (files, " + схема " + scheme_id if scheme_id else "", size, encoding))
+        res = ok(files=files, bytes=size, encoding=encoding)
+        if scheme_id:
+            res["scheme"] = scheme_id
+            res["revision"] = GRAPH["revision"]
+        return 200, res
 
     if path == "/api/audio/delete":
         slot = as_int(q1(query, "slot"), 0)
@@ -691,6 +750,18 @@ def handle_api(method, path, query, body):
         return 200, ok(slot=slot)
 
     if path == "/api/audio/upload":
+        if as_bool(q1(query, "asset"), False):
+            hdr_name = unquote(q1(query, "name", ""))
+            base = _sanitize(_base(hdr_name))
+            if not base:
+                return 400, {"ok": False, "error": "bad name"}
+            LIBRARY[base] = {"vol": 100, "wav": body, "size": len(body),
+                             "raw": body[44:] if len(body) > 44 else body,
+                             "rate": 22050, "channels": 1, "bits": 16}
+            add_log("Звук", "загружен %s.wav (%d байт)" % (base, len(body)))
+            return 200, ok(file="audio/%s.wav" % base, label=base,
+                           enabled=True, bytes=len(body),
+                           recovery_cleanup_pending=False, recovery="")
         slot = as_int(q1(query, "slot"), 0)
         if slot <= 0:
             used = {t["slot"] for t in s["tracks"] if t["enabled"]}
@@ -838,7 +909,8 @@ def handle_api(method, path, query, body):
     if path == "/api/sound/graph/state":
         m = s["motor"]
         return 200, ok(active=GRAPH["active"], fault=GRAPH["fault"],
-                       id=GRAPH["project"]["id"], revision=GRAPH["revision"],
+                       id=GRAPH["project"]["id"], projectId=GRAPH["project"]["id"],
+                       revision=GRAPH["revision"],
                        engine=False, armed=True, states=[0],
                        failedChannels=0, speed=m["speed"])
 
@@ -981,21 +1053,54 @@ class Handler(BaseHTTPRequestHandler):
             rel = unquote(path[len("/sound-files/"):])
             base = _base(rel)
             if base in LIBRARY:
-                # Uploaded pack entry, already decoded to a PCM16 WAV so the
-                # browser can play it even when the pack is IMA ADPCM.
-                return self._send(200, LIBRARY[base]["wav"], "audio/wav")
+                entry = LIBRARY[base]
+                if "wav" in entry:
+                    return self._send(200, entry["wav"], "audio/wav")
+                if "path" in entry and os.path.isfile(entry["path"]):
+                    return self._serve_file(entry["path"])
             safe = os.path.normpath(os.path.join(SOUND_DIR, rel))
             if safe.startswith(SOUND_DIR):
                 if os.path.isfile(safe):
                     return self._serve_file(safe)
-                alias = SOUND_ALIASES.get(rel)
+                alias = SOUND_ALIASES.get(rel) or SOUND_ALIASES.get(base + ".wav")
                 if alias:
                     return self._serve_file(os.path.join(SOUND_DIR, alias))
+            return self._json(404, {"ok": False, "error": "not found"})
+
+        if path.startswith("/api/audio/raw/"):
+            rel = unquote(path[len("/api/audio/raw/"):])
+            base = _base(rel)
+            if base in LIBRARY:
+                e = LIBRARY[base]
+                if "raw" in e or "wav" in e:
+                    raw = e.get("raw", e["wav"][44:] if len(e["wav"]) > 44 else e["wav"])
+                    return self._send(200, raw, "application/octet-stream",
+                                      extra=[("X-Audio-Rate", str(e.get("rate", 22050))),
+                                             ("X-Audio-Channels", str(e.get("channels", 1))),
+                                             ("X-Audio-Bits", str(e.get("bits", 16)))])
+                if "path" in e and os.path.isfile(e["path"]):
+                    try:
+                        with open(e["path"], "rb") as fh:
+                            wav_bytes = fh.read()
+                        ch = struct.unpack_from("<H", wav_bytes, 22)[0] if len(wav_bytes) >= 44 else 1
+                        rate = struct.unpack_from("<I", wav_bytes, 24)[0] if len(wav_bytes) >= 44 else 22050
+                        bits = struct.unpack_from("<H", wav_bytes, 34)[0] if len(wav_bytes) >= 44 else 16
+                        raw = wav_bytes[44:] if len(wav_bytes) > 44 else wav_bytes
+                        return self._send(200, raw, "application/octet-stream",
+                                          extra=[("X-Audio-Rate", str(rate)),
+                                                 ("X-Audio-Channels", str(ch)),
+                                                 ("X-Audio-Bits", str(bits))])
+                    except OSError:
+                        pass
             return self._json(404, {"ok": False, "error": "not found"})
 
         if path.startswith("/api/") or path == "/api":
             length = as_int(self.headers.get("Content-Length"), 0)
             body = self.rfile.read(length) if length > 0 else b""
+            hdr_fname = self.headers.get("X-File-Name")
+            if hdr_fname and "name" not in query:
+                query = dict(query)
+                query["name"] = [hdr_fname]
             try:
                 status, payload = handle_api(method, path, query, body)
             except Exception as exc:  # keep the preview alive on bad input

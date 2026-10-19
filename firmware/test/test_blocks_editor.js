@@ -566,4 +566,41 @@ test('25. alignBlocks and fitViewport arrange nodes and update viewport, and inv
   eng.run[0].from = origFrom;
 });
 
+test('26. Chained Start block after Delay/Logic and multi-step speed scheme (Start -> Loop -> End) compile without unreachable states', t => {
+  const { api } = createEditorFixture(t);
+  const p = api.project();
 
+  // Chain F5 -> Delay -> Start -> End
+  const d = { id: 'dl_test', type: 'delay', name: 'Delay', fn: -1, delayMs: 250, x: 200, y: 200, files: {} };
+  const st = { id: 'st_test', type: 'start', name: 'Start', fn: -1, volume: 80, rate: 1000, files: { sound: 'init.wav' }, outEvent: 'finish', outDelay: 0, x: 350, y: 200 };
+  const ed = { id: 'ed_test', type: 'end', name: 'End', fn: -1, volume: 80, rate: 1000, files: { sound: 'exit.wav' }, outEvent: 'finish', outDelay: 0, x: 500, y: 200 };
+  p.mix.blocks.push(d, st, ed);
+  p.mix.links.push(
+    { id: 'lt1', from: 'f5', to: 'dl_test', kind: 'after', cond: 'out' },
+    { id: 'lt2', from: 'dl_test', to: 'st_test', kind: 'after', cond: 'out' },
+    { id: 'lt3', from: 'st_test', to: 'ed_test', kind: 'after', cond: 'out' }
+  );
+
+  // Also replace eng1 scheme with 3-phase Start -> Loop -> End
+  const eng1Scheme = p.schemes.find(s => s.id === 'eng1');
+  eng1Scheme.blocks = [
+    { id: 'e1_s', type: 'start', name: 'S', fn: -1, volume: 80, rate: 1000, files: { sound: 's.wav' }, outEvent: 'finish', outDelay: 0, x: 40, y: 40 },
+    { id: 'e1_l', type: 'loop', name: 'L', fn: -1, volume: 80, rate: 1000, loopMode: 'hold', files: { sound: 'l.wav' }, outEvent: 'finish', outDelay: 0, x: 240, y: 40 },
+    { id: 'e1_e', type: 'end', name: 'E', fn: -1, volume: 80, rate: 1000, files: { sound: 'e.wav' }, outEvent: 'finish', outDelay: 0, x: 440, y: 40 }
+  ];
+  eng1Scheme.links = [
+    { id: 'el1', from: 'e1_s', to: 'e1_l', kind: 'after', cond: 'out' },
+    { id: 'el2', from: 'e1_l', to: 'e1_e', kind: 'after', cond: 'out' }
+  ];
+
+  const v = api.validate();
+  const errors = v.diagnostics.filter(dg => dg.severity === 'error');
+  assert.equal(errors.length, 0, `Expected 0 validation errors, got: ${JSON.stringify(errors)}`);
+
+  // Verify Loop -> End transition uses after_sample timing for speed exit
+  const speedExitToEnd = v.payload.transitions.find(
+    tr => tr.source.endsWith('e1_l_play') && tr.target.endsWith('e1_e_end') && tr.condition.type === 'speed'
+  );
+  assert.ok(speedExitToEnd, 'Speed-driven Loop transitions to End on speed band exit');
+  assert.equal(speedExitToEnd.timing, 'after_sample', 'Speed exit from Loop to End uses after_sample timing');
+});

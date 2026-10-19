@@ -1080,7 +1080,7 @@ static bool graph_revision(const char *query, const char *key, uint32_t *revisio
 
 static esp_err_t graph_capabilities_get(httpd_req_t *req)
 {
-    return send_json(req, "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,\"limits\":{\"states\":57,\"soundStates\":31,\"transitions\":128,\"effects\":24,\"assets\":31,\"variables\":16,\"jsonBytes\":131072},\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\",\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\",\"sample_done\",\"dir_fwd\",\"dir_rev\",\"random\",\"timeout\",\"var_cmp\"],\"variableKinds\":[\"speed\",\"forward\",\"moving\",\"engine\"],\"compareOps\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\"]}");
+    return send_json(req, "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,\"limits\":{\"states\":128,\"soundStates\":96,\"transitions\":250,\"effects\":32,\"assets\":64,\"variables\":16,\"jsonBytes\":131072},\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\",\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\",\"sample_done\",\"dir_fwd\",\"dir_rev\",\"random\",\"timeout\",\"var_cmp\"],\"variableKinds\":[\"speed\",\"forward\",\"moving\",\"engine\"],\"compareOps\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\"]}");
 }
 
 static esp_err_t graph_projects_get(httpd_req_t *req)
@@ -1130,7 +1130,7 @@ static esp_err_t graph_state_get(httpd_req_t *req)
 {
     sound_graph_status_t st = {0};
     sound_graph_status_get(&st);
-    char json[512], id[SG_ID_CAP * 6]; size_t used = 0;
+    char json[768], id[SG_ID_CAP * 6]; size_t used = 0;
     json_escape(st.id, id, sizeof(id));
     buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"active\":%s,\"id\":\"%s\",\"revision\":%lu,\"engine\":%s,\"armed\":%s,\"failedChannels\":%lu,\"states\":[", st.active ? "true" : "false", id, (unsigned long)st.revision, st.engine ? "true" : "false", st.armed ? "true" : "false", (unsigned long)st.failed_channels);
     for (size_t i = 0; i < SG_MAX_EFFECTS + 1; ++i) buf_appendf(json, sizeof(json), &used, "%s%u", i ? "," : "", st.states[i]);

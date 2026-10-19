@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SG_TOKEN_LIMIT 8192U
+#define SG_TOKEN_LIMIT 16384U
 #define SG_DEPTH_LIMIT 16U
 #define SG_STRING_LIMIT 1024U
 typedef struct { uint32_t start; uint16_t len, next, count; char type; } sg_token_t;
@@ -351,7 +351,7 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
         if (s->file[0]) { SG_CHECK(sg_filename_valid(s->file),"invalid WAV basename"); ++audible; } else { ++silent; }
         for (unsigned j = 0; j < i; ++j) { SG_CHECK(strcmp(s->id,g->states[j].id),"duplicate state ID"); }
     }
-    SG_CHECK(audible <= 31 && silent <= 26,"audible/silent state capacity");
+    SG_CHECK(audible <= SG_MAX_SOUND_STATES && silent <= SG_MAX_SILENT_STATES,"audible/silent state capacity");
     int entry = sg_state_index(g,g->engine_entry); SG_CHECK(entry >= 0 && !g->states[entry].file[0],"engine entry must be silent"); g->engine_entry_index = (uint8_t)entry;
     for (unsigned i = 0; i < g->asset_count; ++i) {
         if (diag) { diag->id[0] = 0; snprintf(diag->field,sizeof(diag->field),"assets"); }
@@ -393,7 +393,7 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
     }
     /* A silent state supplies no audio boundary. Persistent immediate guards
      * must not form a cycle; edge events and next-tick sample_done are temporal. */
-    uint64_t immediate[SG_MAX_STATES] = {0};
+    uint8_t immediate[SG_MAX_STATES][SG_MAX_STATES] = {{0}};
     for (unsigned i = 0; i < g->transition_count; ++i) {
         const sg_transition_t *e = &g->transitions[i];
         if (e->timing == SG_IMMEDIATE && e->condition.type >= SG_FN_ON &&
@@ -401,31 +401,36 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
             e->condition.type != SG_TIMEOUT && e->condition.type != SG_VAR_CMP &&
             e->condition.type != SG_STATE_ENTER &&
             !g->states[e->source_index].file[0] && !g->states[e->target_index].file[0]) {
-            immediate[e->source_index] |= UINT64_C(1) << e->target_index;
+            immediate[e->source_index][e->target_index] = 1;
         }
     }
     for (unsigned k = 0; k < g->state_count; ++k) {
         for (unsigned i = 0; i < g->state_count; ++i) {
-            if (immediate[i] & (UINT64_C(1) << k)) { immediate[i] |= immediate[k]; }
+            if (immediate[i][k]) {
+                for (unsigned j = 0; j < g->state_count; ++j) {
+                    if (immediate[k][j]) { immediate[i][j] = 1; }
+                }
+            }
         }
     }
     for (unsigned i = 0; i < g->state_count; ++i) {
         if (diag) { snprintf(diag->id,sizeof(diag->id),"%s",g->states[i].id); snprintf(diag->field,sizeof(diag->field),"transitions"); }
-        SG_CHECK(!(immediate[i] & (UINT64_C(1) << i)),"immediate silent cycle");
+        SG_CHECK(!immediate[i][i],"immediate silent cycle");
     }
-    uint64_t reached = UINT64_C(1) << g->engine_entry_index;
-    for (unsigned i = 0; i < g->effect_count; ++i) { reached |= UINT64_C(1) << g->effects[i].entry_index; }
+    bool reached[SG_MAX_STATES] = {false};
+    reached[g->engine_entry_index] = true;
+    for (unsigned i = 0; i < g->effect_count; ++i) { reached[g->effects[i].entry_index] = true; }
     for (unsigned pass = 0; pass < g->state_count; ++pass) {
-        uint64_t before = reached;
+        bool changed = false;
         for (unsigned i = 0; i < g->transition_count; ++i) {
             const sg_transition_t *e = &g->transitions[i];
-            if (reached & (UINT64_C(1) << e->source_index)) { reached |= UINT64_C(1) << e->target_index; }
+            if (reached[e->source_index] && !reached[e->target_index]) { reached[e->target_index] = true; changed = true; }
         }
-        if (before == reached) { break; }
+        if (!changed) { break; }
     }
     for (unsigned i = 0; i < g->state_count; ++i) {
         if (diag) { snprintf(diag->id,sizeof(diag->id),"%s",g->states[i].id); snprintf(diag->field,sizeof(diag->field),"states"); }
-        SG_CHECK(reached & (UINT64_C(1) << i),"unreachable state");
+        SG_CHECK(reached[i],"unreachable state");
     }
     if (diag) { memset(diag,0,sizeof(*diag)); } return ESP_OK;
 #undef SG_CHECK

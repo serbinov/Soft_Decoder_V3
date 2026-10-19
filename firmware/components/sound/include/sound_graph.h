@@ -6,10 +6,12 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-#define SG_MAX_STATES 57
-#define SG_MAX_TRANSITIONS 128
-#define SG_MAX_EFFECTS 24
-#define SG_MAX_ASSETS 31
+#define SG_MAX_STATES 128
+#define SG_MAX_SOUND_STATES 96
+#define SG_MAX_SILENT_STATES 64
+#define SG_MAX_TRANSITIONS 250
+#define SG_MAX_EFFECTS 32
+#define SG_MAX_ASSETS 64
 #define SG_MAX_VARIABLES 16
 #define SG_VAR_NAME_CAP 24
 #define SG_ID_CAP 32

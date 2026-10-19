@@ -439,17 +439,25 @@ test('15, 16 & 17. Oversized project does not throw ReferenceError in _compileFl
   assert.match(dom.getEl('status_txt').textContent, /в порядке/);
 });
 
-test('18, 19, 20 & 21. Copy/paste/duplicate preserves links, blocks invalid types in scheme mode, and uses accurate nodeHeight', t => {
+test('18, 19, 20 & 21. Copy/paste/duplicate preserves links, blocks duplicate F-key when all F0..F28 are used, blocks invalid types in scheme mode, and uses accurate nodeHeight', t => {
   const { api } = createEditorFixture(t);
   const p = api.project();
 
-  // Select f2 and horn_cue (which are linked f2 -> horn_cue) and duplicate them
+  // Select f2 and horn_cue while all F0..F28 are used -> fx_in cannot be duplicated, only horn_cue is duplicated
+  api.selectNode('f2', false);
+  api.selectNode('horn_cue', true);
+  const beforeBlocksAllUsed = p.mix.blocks.length;
+  api.duplicateSelected();
+  assert.equal(p.mix.blocks.length, beforeBlocksAllUsed + 1, 'When all F0..F28 are used, duplicate fx_in is blocked');
+
+  // Free F28 so there is an available F-key, then duplicate f2 + horn_cue -> both duplicate and link is preserved
+  p.mix.blocks = p.mix.blocks.filter(b => b.id !== 'f28');
   api.selectNode('f2', false);
   api.selectNode('horn_cue', true);
   const beforeBlocks = p.mix.blocks.length;
   const beforeLinks = p.mix.links.length;
   api.duplicateSelected();
-  assert.equal(p.mix.blocks.length, beforeBlocks + 2, 'Both selected blocks duplicated');
+  assert.equal(p.mix.blocks.length, beforeBlocks + 2, 'Both selected blocks duplicated when an F-key is free');
   assert.equal(p.mix.links.length, beforeLinks + 1, 'Link between duplicated blocks preserved');
 
   // Copy f0 (Input Fx) in mix mode and try to paste in scheme mode -> should be blocked
@@ -460,12 +468,12 @@ test('18, 19, 20 & 21. Copy/paste/duplicate preserves links, blocks invalid type
   api.pasteClip();
   assert.equal(api.project().blocks.length, schemeBlocksBefore, 'Mix-only block fx_in is not pasted into sound scheme');
 
-  // Check nodeHeight: normal block is 80px, engine with 7 steps + idle is 200px
+  // Check nodeHeight: normal block is 80px, engine with 7 steps + idle + brake is 220px
   api.switchMode('mix');
   const eng = p.mix.blocks.find(b => b.type === 'engine');
   const vol = p.mix.blocks.find(b => b.type === 'volume');
   assert.equal(api.nodeHeight(vol), 80);
-  assert.equal(api.nodeHeight(eng), 200);
+  assert.equal(api.nodeHeight(eng), 220);
 });
 
 test('22 & 23. Finite repeat count Loop in Simulator and reverseGraphToProject with End block', async t => {

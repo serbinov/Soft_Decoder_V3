@@ -309,13 +309,25 @@ static void test_state_and_asset_capacity(void)
     g->state_count = 0;
     for (unsigned i = 0; i < SG_MAX_STATES; ++i) {
         char id[32], file[64]; snprintf(id,sizeof(id),"s%u",i);
-        snprintf(file,sizeof(file),"f%u.wav",i); state(id,i < 26 ? "" : file,false);
+        snprintf(file,sizeof(file),"f%u.wav",i); state(id,i < SG_MAX_SILENT_STATES ? "" : file,false);
         if (i > 0) { char src[32]; snprintf(src,sizeof(src),"s%u",i-1); edge(src,id,1,SG_SAMPLE_DONE,0,SG_IMMEDIATE); }
     }
     snprintf(g->engine_entry,SG_ID_CAP,"s0"); TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
-    snprintf(g->states[25].file,SG_FILE_CAP,"extra.wav"); TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
-    g->states[25].file[0] = 0; g->states[26].file[0] = 0; TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
-    snprintf(g->states[26].file,SG_FILE_CAP,"f26.wav"); g->asset_count = 32; TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    for (unsigned i = 1; i < SG_MAX_STATES; ++i) {
+        char file[64]; snprintf(file,sizeof(file),"f%u.wav",i);
+        snprintf(g->states[i].file,SG_FILE_CAP,"%s",i <= SG_MAX_SOUND_STATES + 1 ? file : "");
+    }
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    for (unsigned i = 0; i < SG_MAX_STATES; ++i) {
+        char file[64]; snprintf(file,sizeof(file),"f%u.wav",i);
+        snprintf(g->states[i].file,SG_FILE_CAP,"%s",i <= SG_MAX_SILENT_STATES ? "" : file);
+    }
+    TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+    for (unsigned i = 0; i < SG_MAX_STATES; ++i) {
+        char file[64]; snprintf(file,sizeof(file),"f%u.wav",i);
+        snprintf(g->states[i].file,SG_FILE_CAP,"%s",i < SG_MAX_SILENT_STATES ? "" : file);
+    }
+    g->asset_count = SG_MAX_ASSETS + 1; TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
 }
 static void test_pending_cannot_mask_current_immediate_and_event_is_not_latched(void)
 {

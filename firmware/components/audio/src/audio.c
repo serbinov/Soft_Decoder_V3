@@ -26,7 +26,11 @@ static const char *TAG = "audio";
 /* Per-voice stdio buffer. Kept small on purpose: with AUDIO_MAX_VOICES voices a
  * large buffer would consume a lot of internal DRAM (allocations below
  * CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL never go to PSRAM). */
-#define VOICE_IO_BUF 2048
+#define VOICE_IO_BUF 1024
+/* PCM voices read this many source frames per stdio call instead of one
+ * fread() per output sample. The cache is allocated only while a voice is
+ * active, so idle voices cost no sample memory. */
+#define PCM_CACHE_FRAMES 256
 /* Envelope full-scale (fixed point); the anti-click fade ramps 0..AUDIO_ENV_ONE. */
 #define AUDIO_ENV_ONE 1024
 
@@ -68,22 +72,23 @@ typedef struct {
     uint32_t samples_left;
     bool loop;
     uint8_t volume;
-    double pos;
+    float pos;
     uint32_t cur_idx;
     int16_t s_cur;
     int16_t s_next;
     uint16_t rate_permille; /* target rate, 1000 = nominal */
-    double rate_cur;        /* smoothed rate actually used by the resampler */
+    float rate_cur;         /* smoothed rate actually used by the resampler */
     uint32_t played;        /* output samples produced since the last start */
     uint16_t env;           /* anti-click envelope, 0..AUDIO_ENV_ONE */
     bool stopping;          /* fading out towards silence, then close */
     bool storage_lease;
     bool io_failed;
-    /* IMA ADPCM: decoded block cache (mono). PCM voices never touch it. */
+    /* Mono sample cache: PCM reads blocks here; ADPCM decodes a block here.
+     * Allocated only for an active voice and freed on close. */
     bool adpcm;
-    uint32_t dbuf_len;
-    uint32_t dbuf_pos;
-    int16_t dbuf[IMA_ADPCM_SAMPLES_PER_BLOCK];
+    uint32_t cache_len;
+    uint32_t cache_pos;
+    int16_t *cache;
 } voice_state_t;
 
 typedef struct {
@@ -137,6 +142,10 @@ static void voice_close(voice_state_t *st)
 {
     if (st->f != NULL) { fclose(st->f); st->f = NULL; }
     if (st->storage_lease) { storage_access_end(); st->storage_lease = false; }
+    free(st->cache);
+    st->cache = NULL;
+    st->cache_len = 0;
+    st->cache_pos = 0;
     st->active = false;
 }
 
@@ -326,21 +335,83 @@ esp_err_t audio_inspect_wav(const char *path)
     return validate_wav_file(path, true);
 }
 
+/* Allocate the per-voice mono sample cache on first use. */
+static bool voice_ensure_cache(voice_state_t *st, size_t samples)
+{
+    if (st->cache != NULL) { return true; }
+    st->cache = malloc(samples * sizeof(*st->cache));
+    if (st->cache == NULL) {
+        st->io_failed = true;
+        return false;
+    }
+    return true;
+}
+
+static bool voice_rewind(voice_state_t *st)
+{
+    if (!st->loop || st->samples_total == 0U) { return false; }
+    if (fseek(st->f, (long)st->data_start, SEEK_SET) != 0) {
+        st->io_failed = true;
+        return false;
+    }
+    st->samples_left = st->samples_total;
+    st->cache_len = 0;
+    st->cache_pos = 0;
+    return true;
+}
+
 /* Decode one ADPCM block into the voice's sample cache. */
 static bool voice_read_block(voice_state_t *st)
 {
+    if (!voice_ensure_cache(st, IMA_ADPCM_SAMPLES_PER_BLOCK)) { return false; }
     uint8_t raw[IMA_ADPCM_BLOCK_ALIGN];
     if (fread(raw, 1, sizeof(raw), st->f) != sizeof(raw)) {
         st->io_failed = true;
         return false;
     }
-    int cnt = ima_adpcm_decode_block(raw, sizeof(raw), st->dbuf, IMA_ADPCM_SAMPLES_PER_BLOCK);
+    int cnt = ima_adpcm_decode_block(raw, sizeof(raw), st->cache, IMA_ADPCM_SAMPLES_PER_BLOCK);
     if (cnt <= 0) {
         st->io_failed = true;
         return false;
     }
-    st->dbuf_len = (uint32_t)cnt;
-    st->dbuf_pos = 0;
+    st->cache_len = (uint32_t)cnt;
+    st->cache_pos = 0;
+    return true;
+}
+
+/* Fill the PCM cache with the next block of downmixed source frames. */
+static bool voice_fill_pcm_cache(voice_state_t *st)
+{
+    if (!voice_ensure_cache(st, PCM_CACHE_FRAMES)) { return false; }
+    uint32_t frames = st->samples_left < PCM_CACHE_FRAMES
+                          ? st->samples_left
+                          : (uint32_t)PCM_CACHE_FRAMES;
+    if (frames == 0U) { return false; }
+
+    if (st->channels == 1U) {
+        if (fread(st->cache, sizeof(*st->cache), frames, st->f) != frames) {
+            st->io_failed = true;
+            return false;
+        }
+    } else {
+        /* Read stereo in small chunks so the mixer stack stays small. */
+        uint32_t done = 0;
+        while (done < frames) {
+            uint32_t chunk = (frames - done) > 128U ? 128U : (frames - done);
+            int16_t raw[256];
+            if (fread(raw, sizeof(*raw), chunk * 2U, st->f) != chunk * 2U) {
+                st->io_failed = true;
+                return false;
+            }
+            for (uint32_t i = 0; i < chunk; ++i) {
+                st->cache[done + i] = (int16_t)(((int32_t)raw[i * 2U] +
+                                                 (int32_t)raw[i * 2U + 1U]) / 2);
+            }
+            done += chunk;
+        }
+    }
+    st->cache_len = frames;
+    st->cache_pos = 0;
     return true;
 }
 
@@ -348,40 +419,20 @@ static bool voice_read_block(voice_state_t *st)
 static bool voice_next_sample(voice_state_t *st, int16_t *out)
 {
     for (;;) {
+        if (st->cache_pos < st->cache_len) {
+            st->samples_left--;
+            *out = st->cache[st->cache_pos++];
+            return true;
+        }
         if (st->samples_left == 0U) {
-            if (st->loop && st->samples_total > 0U) {
-                if (fseek(st->f, (long)st->data_start, SEEK_SET) != 0) { st->io_failed = true; return false; }
-                st->samples_left = st->samples_total;
-                st->dbuf_len = 0;
-                st->dbuf_pos = 0;
-                continue;
-            }
+            if (voice_rewind(st)) { continue; }
             return false;
         }
-        st->samples_left--;
         if (st->adpcm) {
-            if (st->dbuf_pos >= st->dbuf_len) {
-                if (!voice_read_block(st)) { return false; }
-            }
-            *out = st->dbuf[st->dbuf_pos++];
-            return true;
-        }
-        if (st->channels == 1U) {
-            int16_t l;
-            if (fread(&l, 2, 1, st->f) != 1) {
-                st->io_failed = true;
-                return false;
-            }
-            *out = l;
-            return true;
-        }
-        int16_t l, r;
-        if (fread(&l, 2, 1, st->f) != 1 || fread(&r, 2, 1, st->f) != 1) {
-            st->io_failed = true;
+            if (!voice_read_block(st)) { return false; }
+        } else if (!voice_fill_pcm_cache(st)) {
             return false;
         }
-        *out = (int16_t)(((int32_t)l + (int32_t)r) / 2);
-        return true;
     }
 }
 
@@ -391,9 +442,9 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
     /* Smooth the playback rate towards its target once per block so a rate step
      * does not produce an audible click (miniaudio/SoLoud rule: keep the
      * resampler active even at 1.0). */
-    double target = (double)st->rate_permille / 1000.0;
-    st->rate_cur += (target - st->rate_cur) * 0.25;
-    double step = ((double)st->sample_rate / (double)MIX_RATE) * st->rate_cur;
+    float target = (float)st->rate_permille / 1000.0f;
+    st->rate_cur += (target - st->rate_cur) * 0.25f;
+    float step = ((float)st->sample_rate / (float)MIX_RATE) * st->rate_cur;
 
     /* Anti-click envelope: ramp in on start / out on stop over s_fade_blocks. */
     int env_step = 0;
@@ -413,9 +464,9 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
                 st->env = (uint16_t)(e > AUDIO_ENV_ONE ? AUDIO_ENV_ONE : e);
             }
         }
-        double frac = st->pos;
+        float frac = st->pos;
         int32_t s = (int32_t)st->s_cur +
-                    (int32_t)((double)(st->s_next - st->s_cur) * frac);
+                    (int32_t)((float)(st->s_next - st->s_cur) * frac);
         int32_t gain = (int32_t)st->volume * (int32_t)s_volume / 100;
         int32_t out = s * gain / 100;
         if (env_step != 0) {
@@ -437,8 +488,8 @@ static int voice_fill(voice_state_t *st, int16_t *mix, int count)
         }
 
         st->pos += step;
-        while (st->pos >= 1.0) {
-            st->pos -= 1.0; /* bounded fractional phase, independent of index wrap */
+        while (st->pos >= 1.0f) {
+            st->pos -= 1.0f; /* bounded fractional phase, independent of index wrap */
             st->cur_idx++;
             st->s_cur = st->s_next;
             if (!voice_next_sample(st, &st->s_next)) {
@@ -498,14 +549,14 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     st->samples_total = samples_total;
     st->samples_left = samples_total;
     st->adpcm = info.adpcm;
-    st->dbuf_len = 0;
-    st->dbuf_pos = 0;
+    st->cache_len = 0;
+    st->cache_pos = 0;
     st->loop = loop;
     st->volume = volume > 100U ? 100U : volume;
-    st->pos = 0.0;
+    st->pos = 0.0f;
     st->cur_idx = 0;
     st->rate_permille = rate;
-    st->rate_cur = (double)rate / 1000.0;
+    st->rate_cur = (float)rate / 1000.0f;
     st->played = 0;
     st->stopping = false;
     st->env = (s_fade_blocks == 0U) ? AUDIO_ENV_ONE : 0U;

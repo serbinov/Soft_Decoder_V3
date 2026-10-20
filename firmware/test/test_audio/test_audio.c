@@ -1086,7 +1086,9 @@ static void replace_during_read(void)
 
 static void test_generation_eof_interleave_and_stale_release(void)
 {
-    make_wav_const(s_path_mono, 22050, 4, 1000);
+    /* Long enough that one mix block does not hit EOF before the interleaved
+     * replacement request is applied (the cache reads 256 frames at a time). */
+    make_wav_const(s_path_mono, 22050, 1000, 1000);
     make_wav_const(s_path_stereo, 22050, 2000, 2000);
     TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&s_race_handle));
     TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&s_race_handle, s_path_mono, false, 100));

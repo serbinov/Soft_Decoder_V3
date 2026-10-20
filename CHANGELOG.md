@@ -11,6 +11,19 @@
 
 ## Релизы
 
+### 2026-10-20 — оптимизация аудиотракта
+
+- Микшер переведён с `double` на `float`: на ESP32-S3 `double` эмулируется
+  программно, теперь расчёт позиции/шага использует аппаратный FPU.
+- PCM-голоса читают WAV блоками по 256 кадров в per-voice кэш вместо `fread`
+  на каждый сэмпл; стерео читается чанками по 128 кадров.
+- ADPCM-кэш (505 сэмплов) стал динамическим: выделяется только у играющего
+  ADPCM-голоса и освобождается при закрытии, вместо статических ~20 КБ.
+- `VOICE_IO_BUF` уменьшен с 2048 до 1024 байт.
+- Итог: DIRAM 145 454 → 125 054 Б (−20 400 Б, −14 %), `libaudio.a` DIRAM
+  25 796 → 5 396 Б; flash-код 668 084 → 667 960 Б. Тесты: 800 C + 68 JS/Python
+  PASS; сборка ESP-IDF успешна.
+
 ### 2026-10-20 — очистка мёртвого кода, зависимостей и документации
 
 - Удалены неиспользуемые API: `settings_active_scheme_*`, `sound_engine_is_on`,
@@ -266,6 +279,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-20 (v0.10) — perf(audio): block PCM reads, dynamic ADPCM cache and float resampler
 - 2026-10-20 (v0.10) — chore(cleanup): remove dead code, update deps/docs and add CI test gates
 - 2026-10-20 (v0.10) — feat(sound,web): sound pack import/export, ADPCM compression and scheme editor sync
 - 2026-10-19 (v0.10) — feat(sound,sound-editor): brake scheme port, simulator UI, block legends, F-key lock, scheme creation and raised graph limits

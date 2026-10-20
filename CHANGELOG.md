@@ -11,6 +11,19 @@
 
 ## Релизы
 
+### 2026-10-20 — проверка sound editor
+
+- Редактор остаётся полностью встроенным в прошивку (не optional): ассеты
+  `blocks.html` и `THIRD_PARTY_NOTICES.txt` отдаются с gzip и корректным MIME.
+- Добавлен интеграционный тест реального `sound_editor/dist`: проверяет свежесть
+  `build-inputs.json`, наличие всех маршрутов `/sound-editor/*`, бюджет 512 КиБ
+  и точное совпадение распакованного gzip с исходным `blocks.html`.
+- Редактор проверен в браузере через `web_preview/mock_server.py`: загрузка
+  `/sound-editor/blocks.html`, переключение «Миксы/Звуковые схемы», запросы
+  `/api/sound/graph/*`, `/api/sound-files`, `/api/func-map`, `/api/aux/cfg` —
+  без console errors.
+- Итог: 800 C-тестов и 69 JS/Python-тестов PASS.
+
 ### 2026-10-20 — оптимизация аудиотракта
 
 - Микшер переведён с `double` на `float`: на ESP32-S3 `double` эмулируется
@@ -24,7 +37,7 @@
   образ остаётся на `-Os`.
 - Итог: DIRAM 145 454 → 125 054 Б (−20 400 Б, −14 %), `libaudio.a` DIRAM
   25 796 → 5 396 Б; flash-код 668 084 → 668 992 Б (+908 Б брутто, +1 032 Б
-  к варианту без `-O2`). Тесты: 800 C + 68 JS/Python PASS; сборка ESP-IDF
+  к варианту без `-O2`). Тесты: 800 C + 69 JS/Python PASS; сборка ESP-IDF
   успешна.
 
 ### 2026-10-20 — очистка мёртвого кода, зависимостей и документации
@@ -50,7 +63,7 @@
 - Обновлены `esp_littlefs` 1.22.3 → 1.23.0 и upstream `littlefs` 2.11.3.
 - Усилены host-тесты: добавлены проверки ADPCM-воспроизведения, live volume,
   emergency endpoint, graph GET, Wi-Fi fallback; fuzz-тесты проверяют инварианты.
-- Проверка: 800 C-тестов и 68 JS/Python-тестов PASS, чистая сборка ESP-IDF
+- Проверка: 800 C-тестов и 69 JS/Python-тестов PASS, чистая сборка ESP-IDF
   успешна, покрытие host-строк 92,9 % (8266/8893), ветвей — 76,2 % (6449/8468).
 - Добавлены branch-тесты парсеров `ima_adpcm`, `sound_graph`, `settings` и
   error-path `web.c`; CI-workflow запускает host-тесты и ASan+UBSan.
@@ -282,6 +295,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-20 (v0.10) — test(editor): verify embedded sound editor assets and browser flow
 - 2026-10-20 (v0.10) — perf(audio): compile mixer hot path with -O2
 - 2026-10-20 (v0.10) — perf(audio): block PCM reads, dynamic ADPCM cache and float resampler
 - 2026-10-20 (v0.10) — chore(cleanup): remove dead code, update deps/docs and add CI test gates

@@ -267,8 +267,8 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 `test_audio_pack`, `test_main`) и пять Node/Python-наборов
 (`test_web_ui`, `test_blocks_editor`, `test_pack_integration`,
 `test_sound_editor_assets`, `test_release_artifacts`).
-Итог 2026-10-20: **800 C-тестов, 18 наборов PASSED**, плюс **68 JS/Python-тестов
-PASS** (36 web UI, 13 block editor, 8 pack integration, 11 Python asset/release).
+Итог 2026-10-20: **800 C-тестов, 18 наборов PASSED**, плюс **69 JS/Python-тестов
+PASS** (36 web UI, 13 block editor, 8 pack integration, 12 Python asset/release).
 
 Покрытие (`test\coverage.ps1`, gcov, union по строкам): **92,9 % — 8266 из 8893
 исполняемых строк** first-party исходников, попавших в host-сборки. Ветвевое

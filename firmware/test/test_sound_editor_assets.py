@@ -46,6 +46,23 @@ class EditorAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 MODULE.generate(root, root)
 
+    def test_repository_editor_build_is_current_and_servable(self):
+        root = Path(__file__).resolve().parents[1]
+        dist = root / "sound_editor" / "dist"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            total = MODULE.generate(dist, output, root / "sound_editor")
+            generated = (output / "sound_editor_assets.c").read_text(encoding="utf-8")
+            # Every advertised file is embedded with a safe /sound-editor/ path.
+            self.assertIn('"/sound-editor/blocks.html"', generated)
+            self.assertIn("text/html; charset=utf-8", generated)
+            self.assertIn('"/sound-editor/THIRD_PARTY_NOTICES.txt"', generated)
+            self.assertLessEqual(total, 512 * 1024)
+            # The embedded gzip stream must decompress to the exact source page.
+            numbers = re.search(r"\[\] = \{(.*?)\};", generated, re.S).group(1)
+            embedded = bytes(int(number) for number in re.findall(r"\d+", numbers))
+            self.assertEqual((dist / "blocks.html").read_bytes(), gzip.decompress(embedded))
+
     def test_stale_build_and_missing_stamp_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)

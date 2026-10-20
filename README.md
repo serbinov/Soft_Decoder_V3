@@ -219,8 +219,8 @@ CI (`.github/workflows/host-tests.yml`) запускает C-наборы, JS/Py
 отдельный job с ASan+UBSan.
 
 Итоговый прогон 2026-10-20: **18 C-наборов, 800 тестов PASS**
-и **68 JavaScript/Python-тестов PASS** (36 web UI, 13 block editor,
-8 pack integration, 11 Python asset/release). Для JS нужен Node.js (проверено
+и **69 JavaScript/Python-тестов PASS** (36 web UI, 13 block editor,
+8 pack integration, 12 Python asset/release). Для JS нужен Node.js (проверено
 с 22.18); без него runner выдаёт предупреждение, а JS не считается проверенным.
 
 ```powershell

@@ -267,8 +267,8 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1 -Only test_web
 `test_audio_pack`, `test_main`) и пять Node/Python-наборов
 (`test_web_ui`, `test_blocks_editor`, `test_pack_integration`,
 `test_sound_editor_assets`, `test_release_artifacts`).
-Итог 2026-10-20: **800 C-тестов, 18 наборов PASSED**, плюс **69 JS/Python-тестов
-PASS** (36 web UI, 13 block editor, 8 pack integration, 12 Python asset/release).
+Итог 2026-10-20: **800 C-тестов, 18 наборов PASSED**, плюс **75 JS/Python-тестов
+PASS** (37 web UI, 13 block editor, 8 pack integration, 17 Python asset/release/crypto).
 
 Покрытие (`test\coverage.ps1`, gcov, union по строкам): **92,9 % — 8266 из 8893
 исполняемых строк** first-party исходников, попавших в host-сборки. Ветвевое
@@ -943,15 +943,15 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 | Параметр | Значение |
 |---|---|
-| `soft_decoder_v3.bin` | 1 170 976 Б (`0x11DE20`) |
+| `soft_decoder_v3.bin` | 1 183 280 Б (`0x120E30`) |
 | OTA-слот приложения | 1 966 080 Б (`0x1E0000`) |
-| Свободно в слоте | 795 104 Б (40 %) |
+| Свободно в слоте | 782 800 Б (40 %) |
 | Flash-код | 668 992 Б |
-| Flash-данные | 396 952 Б |
+| Flash-данные | 409 272 Б |
 | DIRAM | 125 054 Б (36,59 % из 341 760) |
 | IRAM | 16 384 Б (100 %) |
 
-Общий размер образа — 1 170 866 Б. Разбивка по компонентам, секциям и стекам —
+Общий размер образа — 1 183 170 Б. Разбивка по компонентам, секциям и стекам —
 в `build/soft_decoder_v3.map` после сборки и `idf.py size-components`.
 
 ### 17.2 Куда смотреть при росте ресурсов
@@ -981,8 +981,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 **Ограничения/риски:**
 
-- Текущая сборка v0.10 — 1 170 976 Б (59,5 % OTA-слота `0x1e0000`, свободно
-  795 104 Б / 40 %). Рост кода и рабочих буферов требует повторного size/heap
+- Текущая сборка v0.10 — 1 183 280 Б (60,2 % OTA-слота `0x1e0000`, свободно
+  782 800 Б / 40 %). Рост кода и рабочих буферов требует повторного size/heap
   контроля; release-артефакты нужно пересобрать после изменений.
 - **PSRAM включена** (2 МБ heap); крупные буферы могут уходить в неё, но не все
   (DMA-совместимость, `SPIRAM_MALLOC_ALWAYSINTERNAL`).

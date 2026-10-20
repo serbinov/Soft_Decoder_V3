@@ -621,7 +621,7 @@ pack_uploading:'пакет ',pack_done:'пакет загружен, звуко�
 slot_prefix:'Слот ',cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
 cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
 upload_wav:'Загрузить WAV',del_track_title:'Удалить звук',del_sound_confirm:'Удалить звук «',del_sound_confirm_b:'» с устройства?',
-pw_export_msg:'Пароль для экспорта звукового пакета (обфускация, не шифрование; пусто — без пароля):',pw_import_msg:'Звуковой пакет закодирован паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль звукового пакета',pack_exporting:'Экспорт звукового пакета...',pack_exported:'Звуковой пакет сохранён: ',pack_stats_title:'Звуковой пакет',pack_save_title:'Сохранить звуковой пакет?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 400 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
+pw_export_msg:'Пароль для экспорта (scrypt + ChaCha20, ≥8 символов; пусто — без пароля):',pw_import_msg:'Пакет защищён паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль или повреждённый пакет',pw_short:'пароль должен быть не короче 8 символов',pack_legacy_warn:'старый формат защиты пакета; пересохраните пакет с новым паролем',pack_checking:'проверка пароля...',pack_exporting:'Экспорт звукового пакета...',pack_exported:'Звуковой пакет сохранён: ',pack_stats_title:'Звуковой пакет',pack_save_title:'Сохранить звуковой пакет?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 400 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
 cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',cv_search_ph:'Поиск CV...',cv_show_table:'Таблица CV67..94',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
@@ -683,7 +683,7 @@ pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_scheme_loaded:' 
 slot_prefix:'Slot ',cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
 cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
 upload_wav:'Upload WAV',del_track_title:'Delete sound',del_sound_confirm:'Delete sound "',del_sound_confirm_b:'" from the device?',
-pw_export_msg:'Password for the exported sound pack (obfuscation, not encryption; leave empty for none):',pw_import_msg:'This sound pack is password-obfuscated. Enter password to import:',pw_wrong:'wrong sound pack password',pack_exporting:'Exporting sound pack...',pack_exported:'Sound pack saved: ',pack_stats_title:'Sound pack',pack_save_title:'Save sound pack?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 400 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
+pw_export_msg:'Password for export (scrypt + ChaCha20, at least 8 characters; empty = none):',pw_import_msg:'This sound pack is password-protected. Enter password to import:',pw_wrong:'wrong password or damaged sound pack',pw_short:'password must be at least 8 characters',pack_legacy_warn:'legacy pack protection; re-save with a new password',pack_checking:'checking password...',pack_exporting:'Exporting sound pack...',pack_exported:'Sound pack saved: ',pack_stats_title:'Sound pack',pack_save_title:'Save sound pack?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 400 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
 cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',cv_search_ph:'Search CV...',cv_show_table:'Table CV67..94',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
@@ -1490,6 +1490,9 @@ function startUpPoll(){
   },400);
 }
 var ASP_ENC_MAGIC='AURAPW01';
+var ASP_ENC2_MAGIC='AURAPW02';
+var ASP_SCRYPT_LOG_N=13,ASP_SCRYPT_R=8,ASP_SCRYPT_P=1;
+var ASP_SALT_LEN=16, ASP_NONCE_LEN=12, ASP_TAG_LEN=32, ASP_HDR2_LEN=44;
 function utf8Bytes(str){
   var s=String(str||'');
   if(typeof TextEncoder!=='undefined')return new TextEncoder().encode(s);
@@ -1497,6 +1500,7 @@ function utf8Bytes(str){
   for(var i=0;i<u.length;i++)out[i]=u.charCodeAt(i)&0xff;
   return out;
 }
+/* Legacy AURAPW01 helpers: kept only so old packs can still be imported. */
 function fnv32(bytes){
   var h=0x811c9dc5;
   for(var i=0;i<bytes.length;i++){
@@ -1518,33 +1522,289 @@ function prngKeystream(pwBytes,saltBytes,len){
   }
   return out;
 }
-/* Casual obfuscation only: a custom XOR stream with a 32-bit check tag.
- * It is not authenticated encryption and must not be used for confidentiality. */
-function encryptAspBytes(plain,password){
-  if(!password)return plain;
-  var pwBytes=utf8Bytes(password);
-  var salt=new Uint8Array(4);
-  for(var s=0;s<4;s++)salt[s]=Math.floor(Math.random()*256)&0xff;
-  var tagInput=new Uint8Array(pwBytes.length+4);
-  tagInput.set(pwBytes,0);tagInput.set(salt,pwBytes.length);
-  var tag=fnv32(tagInput);
-  var ks=prngKeystream(pwBytes,salt,plain.length);
-  var out=new Uint8Array(16+plain.length);
-  for(var m=0;m<8;m++)out[m]=ASP_ENC_MAGIC.charCodeAt(m);
-  out.set(salt,8);
-  out[12]=tag&0xff;out[13]=(tag>>>8)&0xff;out[14]=(tag>>>16)&0xff;out[15]=(tag>>>24)&0xff;
-  for(var i=0;i<plain.length;i++)out[16+i]=plain[i]^ks[i];
+function readU32LE(a,o){return (a[o]|(a[o+1]<<8)|(a[o+2]<<16)|(a[o+3]<<24))>>>0;}
+function writeU32LE(a,o,v){a[o]=v&255;a[o+1]=(v>>>8)&255;a[o+2]=(v>>>16)&255;a[o+3]=(v>>>24)&255;}
+function rotr32(v,n){return ((v>>>n)|(v<<(32-n)))>>>0;}
+function rotl32(v,n){return ((v<<n)|(v>>>(32-n)))>>>0;}
+var SHA256_K=[
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+function sha256Bytes(data){
+  var H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var l=data.length, padded=(((l+9+63)>>6)<<6), msg=new Uint8Array(padded);
+  msg.set(data);msg[l]=0x80;
+  var bits=l*8, hi=Math.floor(bits/0x100000000)>>>0, lo=bits>>>0;
+  msg[padded-8]=(hi>>>24)&255;msg[padded-7]=(hi>>>16)&255;msg[padded-6]=(hi>>>8)&255;msg[padded-5]=hi&255;
+  msg[padded-4]=(lo>>>24)&255;msg[padded-3]=(lo>>>16)&255;msg[padded-2]=(lo>>>8)&255;msg[padded-1]=lo&255;
+  var w=new Uint32Array(64);
+  for(var off=0;off<padded;off+=64){
+    for(var i=0;i<16;i++)w[i]=((msg[off+i*4]<<24)|(msg[off+i*4+1]<<16)|(msg[off+i*4+2]<<8)|msg[off+i*4+3])>>>0;
+    for(var i=16;i<64;i++){
+      var s0=(rotr32(w[i-15],7)^rotr32(w[i-15],18)^(w[i-15]>>>3))>>>0;
+      var s1=(rotr32(w[i-2],17)^rotr32(w[i-2],19)^(w[i-2]>>>10))>>>0;
+      w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;
+    }
+    var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+    for(var i=0;i<64;i++){
+      var S1=(rotr32(e,6)^rotr32(e,11)^rotr32(e,25))>>>0;
+      var ch=((e&f)^((~e)&g))>>>0;
+      var t1=(h+S1+ch+SHA256_K[i]+w[i])>>>0;
+      var S0=(rotr32(a,2)^rotr32(a,13)^rotr32(a,22))>>>0;
+      var maj=((a&b)^(a&c)^(b&c))>>>0;
+      var t2=(S0+maj)>>>0;
+      h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+    }
+    H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;
+    H[4]=(H[4]+e)>>>0;H[5]=(H[5]+f)>>>0;H[6]=(H[6]+g)>>>0;H[7]=(H[7]+h)>>>0;
+  }
+  var out=new Uint8Array(32);
+  for(var i=0;i<8;i++){out[i*4]=(H[i]>>>24)&255;out[i*4+1]=(H[i]>>>16)&255;out[i*4+2]=(H[i]>>>8)&255;out[i*4+3]=H[i]&255;}
   return out;
 }
-function isEncryptedAsp(bytes){
+function hmacSha256(key,msg){
+  var k=key.length>64?sha256Bytes(key):key;
+  var ipad=new Uint8Array(64+msg.length), opad=new Uint8Array(64+32);
+  for(var i=0;i<64;i++){var b=i<k.length?k[i]:0;ipad[i]=b^0x36;opad[i]=b^0x5c;}
+  ipad.set(msg,64);
+  opad.set(sha256Bytes(ipad),64);
+  return sha256Bytes(opad);
+}
+function pbkdf2Sha256(pw,salt,iterations,dkLen){
+  var key=pw.length>64?sha256Bytes(pw):pw;
+  var ipad=new Uint8Array(64),opad=new Uint8Array(64);
+  for(var i=0;i<64;i++){var kb=i<key.length?key[i]:0;ipad[i]=kb^0x36;opad[i]=kb^0x5c;}
+  var IV=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+          0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var buf=new Uint8Array(128), w=new Uint32Array(64), H=new Uint32Array(8);
+  function compress(off){
+    for(var i=0;i<16;i++)w[i]=((buf[off+i*4]<<24)|(buf[off+i*4+1]<<16)|(buf[off+i*4+2]<<8)|buf[off+i*4+3])>>>0;
+    for(var i=16;i<64;i++){
+      var s0=(rotr32(w[i-15],7)^rotr32(w[i-15],18)^(w[i-15]>>>3))>>>0;
+      var s1=(rotr32(w[i-2],17)^rotr32(w[i-2],19)^(w[i-2]>>>10))>>>0;
+      w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;
+    }
+    var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+    for(var i=0;i<64;i++){
+      var S1=(rotr32(e,6)^rotr32(e,11)^rotr32(e,25))>>>0;
+      var ch=((e&f)^((~e)&g))>>>0;
+      var t1=(h+S1+ch+SHA256_K[i]+w[i])>>>0;
+      var S0=(rotr32(a,2)^rotr32(a,13)^rotr32(a,22))>>>0;
+      var maj=((a&b)^(a&c)^(b&c))>>>0;
+      var t2=(S0+maj)>>>0;
+      h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+    }
+    H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;
+    H[4]=(H[4]+e)>>>0;H[5]=(H[5]+f)>>>0;H[6]=(H[6]+g)>>>0;H[7]=(H[7]+h)>>>0;
+  }
+  function hmacFast(msg,msgLen,out){
+    buf.fill(0);buf.set(ipad,0);buf.set(msg,64);buf[64+msgLen]=0x80;
+    var bits=(64+msgLen)*8;
+    buf[120]=(bits>>>24)&255;buf[121]=(bits>>>16)&255;buf[122]=(bits>>>8)&255;buf[123]=bits&255;
+    for(var i=0;i<8;i++)H[i]=IV[i];
+    compress(0);compress(64);
+    for(var i=0;i<8;i++){
+      buf[64+i*4]=(H[i]>>>24)&255;buf[65+i*4]=(H[i]>>>16)&255;
+      buf[66+i*4]=(H[i]>>>8)&255;buf[67+i*4]=H[i]&255;
+    }
+    buf.set(opad,0);buf[96]=0x80;buf.fill(0,97,120);
+    var obits=(64+32)*8;
+    buf[120]=(obits>>>24)&255;buf[121]=(obits>>>16)&255;buf[122]=(obits>>>8)&255;buf[123]=obits&255;
+    for(var i=0;i<8;i++)H[i]=IV[i];
+    compress(0);compress(64);
+    for(var i=0;i<8;i++){
+      out[i*4]=(H[i]>>>24)&255;out[i*4+1]=(H[i]>>>16)&255;
+      out[i*4+2]=(H[i]>>>8)&255;out[i*4+3]=H[i]&255;
+    }
+  }
+  var out=new Uint8Array(dkLen),offset=0,block=1;
+  var msg=new Uint8Array(salt.length+4);
+  msg.set(salt);
+  var u=new Uint8Array(32),u2=new Uint8Array(32),t=new Uint8Array(32);
+  while(offset<dkLen){
+    msg[salt.length]=(block>>>24)&255;msg[salt.length+1]=(block>>>16)&255;
+    msg[salt.length+2]=(block>>>8)&255;msg[salt.length+3]=block&255;
+    hmacFast(msg,msg.length,u);t.set(u);
+    for(var i=1;i<iterations;i++){
+      hmacFast(u,32,u2);
+      for(var j=0;j<32;j++)t[j]^=u2[j];
+      var swap=u;u=u2;u2=swap;
+    }
+    var n=Math.min(32,dkLen-offset);out.set(t.subarray(0,n),offset);offset+=n;block++;
+  }
+  return out;
+}
+
+function wordsFromBytes(bytes){
+  var words=new Uint32Array(bytes.length>>2);
+  for(var i=0;i<words.length;i++)words[i]=readU32LE(bytes,i*4);
+  return words;
+}
+function bytesFromWords(words){
+  var out=new Uint8Array(words.length*4);
+  for(var i=0;i<words.length;i++)writeU32LE(out,i*4,words[i]);
+  return out;
+}
+function salsa208(B){
+  var x=new Uint32Array(B);
+  for(var i=0;i<8;i+=2){
+    x[4]^=rotl32((x[0]+x[12])>>>0,7);x[8]^=rotl32((x[4]+x[0])>>>0,9);
+    x[12]^=rotl32((x[8]+x[4])>>>0,13);x[0]^=rotl32((x[12]+x[8])>>>0,18);
+    x[9]^=rotl32((x[5]+x[1])>>>0,7);x[13]^=rotl32((x[9]+x[5])>>>0,9);
+    x[1]^=rotl32((x[13]+x[9])>>>0,13);x[5]^=rotl32((x[1]+x[13])>>>0,18);
+    x[14]^=rotl32((x[10]+x[6])>>>0,7);x[2]^=rotl32((x[14]+x[10])>>>0,9);
+    x[6]^=rotl32((x[2]+x[14])>>>0,13);x[10]^=rotl32((x[6]+x[2])>>>0,18);
+    x[3]^=rotl32((x[15]+x[11])>>>0,7);x[7]^=rotl32((x[3]+x[15])>>>0,9);
+    x[11]^=rotl32((x[7]+x[3])>>>0,13);x[15]^=rotl32((x[11]+x[7])>>>0,18);
+    x[1]^=rotl32((x[0]+x[3])>>>0,7);x[2]^=rotl32((x[1]+x[0])>>>0,9);
+    x[3]^=rotl32((x[2]+x[1])>>>0,13);x[0]^=rotl32((x[3]+x[2])>>>0,18);
+    x[6]^=rotl32((x[5]+x[4])>>>0,7);x[7]^=rotl32((x[6]+x[5])>>>0,9);
+    x[4]^=rotl32((x[7]+x[6])>>>0,13);x[5]^=rotl32((x[4]+x[7])>>>0,18);
+    x[11]^=rotl32((x[10]+x[9])>>>0,7);x[8]^=rotl32((x[11]+x[10])>>>0,9);
+    x[9]^=rotl32((x[8]+x[11])>>>0,13);x[10]^=rotl32((x[9]+x[8])>>>0,18);
+    x[12]^=rotl32((x[15]+x[14])>>>0,7);x[13]^=rotl32((x[12]+x[15])>>>0,9);
+    x[14]^=rotl32((x[13]+x[12])>>>0,13);x[15]^=rotl32((x[14]+x[13])>>>0,18);
+  }
+  for(var i=0;i<16;i++)B[i]=(B[i]+x[i])>>>0;
+}
+function blockMix(B,Y,r){
+  var X=new Uint32Array(16);
+  X.set(B.subarray((2*r-1)*16,2*r*16));
+  for(var i=0;i<2*r;i++){
+    for(var j=0;j<16;j++)X[j]=(X[j]^B[i*16+j])>>>0;
+    salsa208(X);
+    var at=(i%2===0)?(i/2)*16:(r+(i-1)/2)*16;
+    Y.set(X,at);
+  }
+}
+function romix(B,N,r){
+  var words=32*r;
+  var X=new Uint32Array(B),Y=new Uint32Array(words),V=new Array(N);
+  for(var i=0;i<N;i++){
+    V[i]=X.slice();blockMix(X,Y,r);
+    var t=X;X=Y;Y=t;
+  }
+  for(var i=0;i<N;i++){
+    var j=X[(2*r-1)*16]&(N-1);
+    for(var k=0;k<words;k++)X[k]=(X[k]^V[j][k])>>>0;
+    blockMix(X,Y,r);
+    var t=X;X=Y;Y=t;
+  }
+  return X;
+}
+function pbkdf2Sha256Generic(pw,salt,iterations,dkLen){
+  var out=new Uint8Array(dkLen),offset=0,block=1;
+  while(offset<dkLen){
+    var msg=new Uint8Array(salt.length+4);msg.set(salt);
+    msg[salt.length]=(block>>>24)&255;msg[salt.length+1]=(block>>>16)&255;
+    msg[salt.length+2]=(block>>>8)&255;msg[salt.length+3]=block&255;
+    var u=hmacSha256(pw,msg),t=u.slice();
+    for(var i=1;i<iterations;i++){u=hmacSha256(pw,u);for(var j=0;j<32;j++)t[j]^=u[j];}
+    var n=Math.min(32,dkLen-offset);out.set(t.subarray(0,n),offset);offset+=n;block++;
+  }
+  return out;
+}
+function scryptRaw(pw,salt,N,r,p,dkLen){
+  var B=pbkdf2Sha256Generic(pw,salt,1,128*r*p);
+  for(var i=0;i<p;i++){
+    var words=wordsFromBytes(B.subarray(i*128*r,(i+1)*128*r));
+    var out=romix(words,N,r);
+    B.set(bytesFromWords(out),i*128*r);
+  }
+  return pbkdf2Sha256Generic(pw,B,1,dkLen);
+}
+function scryptKeys(password,salt,logN,r,p){
+  var N=1<<logN;
+  var raw=scryptRaw(utf8Bytes(password),salt,N,r,p,64);
+  return {enc:raw.slice(0,32),mac:raw.slice(32,64)};
+}
+
+function chacha20Block(key,counter,nonce){
+  var st=new Uint32Array(16);
+  st[0]=0x61707865;st[1]=0x3320646e;st[2]=0x79622d32;st[3]=0x6b206574;
+  for(var i=0;i<8;i++)st[4+i]=readU32LE(key,i*4);
+  st[12]=counter>>>0;
+  for(var i=0;i<3;i++)st[13+i]=readU32LE(nonce,i*4);
+  var x=st.slice();
+  function qr(a,b,c,d){
+    x[a]=(x[a]+x[b])>>>0;x[d]=(x[d]^x[a])>>>0;x[d]=rotl32(x[d],16);
+    x[c]=(x[c]+x[d])>>>0;x[b]=(x[b]^x[c])>>>0;x[b]=rotl32(x[b],12);
+    x[a]=(x[a]+x[b])>>>0;x[d]=(x[d]^x[a])>>>0;x[d]=rotl32(x[d],8);
+    x[c]=(x[c]+x[d])>>>0;x[b]=(x[b]^x[c])>>>0;x[b]=rotl32(x[b],7);
+  }
+  for(var r=0;r<10;r++){
+    qr(0,4,8,12);qr(1,5,9,13);qr(2,6,10,14);qr(3,7,11,15);
+    qr(0,5,10,15);qr(1,6,11,12);qr(2,7,8,13);qr(3,4,9,14);
+  }
+  var out=new Uint8Array(64);
+  for(var i=0;i<16;i++){
+    var v=(x[i]+st[i])>>>0;
+    out[i*4]=v&255;out[i*4+1]=(v>>>8)&255;out[i*4+2]=(v>>>16)&255;out[i*4+3]=(v>>>24)&255;
+  }
+  return out;
+}
+function chacha20Xor(key,nonce,data){
+  if(key.length!==32||nonce.length!==12)throw new Error('invalid ChaCha20 key/nonce');
+  var out=new Uint8Array(data.length),off=0,counter=0;
+  while(off<data.length){
+    var ks=chacha20Block(key,counter,nonce);
+    for(var i=0;i<64&&off<data.length;i++,off++)out[off]=data[off]^ks[i];
+    counter=(counter+1)>>>0;
+  }
+  return out;
+}
+function secureRandomBytes(n){
+  var c=null;
+  if(typeof crypto!=='undefined'&&crypto)c=crypto;
+  else if(typeof window!=='undefined'&&window.crypto)c=window.crypto;
+  if(!c||typeof c.getRandomValues!=='function')throw new Error('secure random generator unavailable');
+  var out=new Uint8Array(n);c.getRandomValues(out);return out;
+}
+function ctEqual(a,b){
+  if(a.length!==b.length)return false;
+  var d=0;for(var i=0;i<a.length;i++)d|=(a[i]^b[i]);
+  return d===0;
+}
+async function deriveAspKeys(password,salt,logN,r,p){
+  /* Let the UI paint the progress message before the CPU-heavy KDF. */
+  await new Promise(function(resolve){setTimeout(resolve,0);});
+  return scryptKeys(password,salt,logN,r,p);
+}
+function isLegacyAsp(bytes){
   if(!bytes||bytes.length<24)return false;
   for(var i=0;i<8;i++){if(bytes[i]!==ASP_ENC_MAGIC.charCodeAt(i))return false;}
   return true;
 }
-function decryptAspBytes(bytes,password){
+function isEncryptedAsp(bytes){
+  if(!bytes||bytes.length<8)return false;
+  var magic=String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3],bytes[4],bytes[5],bytes[6],bytes[7]);
+  return magic===ASP_ENC_MAGIC||magic===ASP_ENC2_MAGIC;
+}
+async function encryptAspBytes(plain,password){
+  if(!password)return plain;
+  if(password.length<8)throw new Error('password must be at least 8 characters');
+  var salt=secureRandomBytes(ASP_SALT_LEN), nonce=secureRandomBytes(ASP_NONCE_LEN);
+  var keys=await deriveAspKeys(password,salt,ASP_SCRYPT_LOG_N,ASP_SCRYPT_R,ASP_SCRYPT_P);
+  var cipher=chacha20Xor(keys.enc,nonce,plain);
+  var out=new Uint8Array(ASP_HDR2_LEN+cipher.length+ASP_TAG_LEN);
+  for(var i=0;i<8;i++)out[i]=ASP_ENC2_MAGIC.charCodeAt(i);
+  out[8]=2;out[9]=2;out[10]=1;out[11]=1;
+  out[12]=ASP_SCRYPT_LOG_N;out[13]=ASP_SCRYPT_R;out[14]=ASP_SCRYPT_P;out[15]=0;
+  out.set(salt,16);out.set(nonce,32);out.set(cipher,ASP_HDR2_LEN);
+  var tag=hmacSha256(keys.mac,out.subarray(0,ASP_HDR2_LEN+cipher.length));
+  keys.enc.fill(0);keys.mac.fill(0);
+  out.set(tag,ASP_HDR2_LEN+cipher.length);
+  return out;
+}
+function decryptLegacyAspBytes(bytes,password){
   var pwBytes=utf8Bytes(password);
   var salt=bytes.slice(8,12);
-  var expectedTag=(bytes[12]|(bytes[13]<<8)|(bytes[14]<<16)|(bytes[15]<<24))>>>0;
+  var expectedTag=readU32LE(bytes,12);
   var tagInput=new Uint8Array(pwBytes.length+4);
   tagInput.set(pwBytes,0);tagInput.set(salt,pwBytes.length);
   if(fnv32(tagInput)!==expectedTag)return null;
@@ -1554,6 +1814,26 @@ function decryptAspBytes(bytes,password){
   for(var i=0;i<cipher.length;i++)plain[i]=cipher[i]^ks[i];
   return plain;
 }
+async function decryptAspBytes(bytes,password){
+  if(!bytes)return null;
+  if(isLegacyAsp(bytes))return decryptLegacyAspBytes(bytes,password);
+  if(!isEncryptedAsp(bytes))return null;
+  if(bytes.length<ASP_HDR2_LEN+ASP_TAG_LEN)return null;
+  var version=bytes[8],kdf=bytes[9],cipherId=bytes[10],macId=bytes[11];
+  if(version!==2||kdf!==2||cipherId!==1||macId!==1)return null;
+  var logN=bytes[12],r=bytes[13],p=bytes[14];
+  if(logN<12||logN>14||r!==8||p<1||p>2)return null;
+  if(128*(1<<logN)*r>64*1024*1024)return null;
+  var salt=bytes.slice(16,32), nonce=bytes.slice(32,44);
+  var macOff=bytes.length-ASP_TAG_LEN;
+  var keys=await deriveAspKeys(password,salt,logN,r,p);
+  var actual=hmacSha256(keys.mac,bytes.subarray(0,macOff));
+  if(!ctEqual(actual,bytes.subarray(macOff))){keys.enc.fill(0);keys.mac.fill(0);return null;}
+  var plain=chacha20Xor(keys.enc,nonce,bytes.slice(ASP_HDR2_LEN,macOff));
+  keys.enc.fill(0);keys.mac.fill(0);
+  return plain;
+}
+
 function utf8DecodeBytes(bytes){
   if(typeof TextDecoder!=='undefined')return new TextDecoder('utf-8').decode(bytes);
   var raw='';
@@ -1919,6 +2199,7 @@ async function exportSoundPack(){
   if(uploadBusy){log(t('tag_sound'),t('upload_busy'));return;}
   var pw=await promptPasswordDialog(t('pw_export_msg'));
   if(pw===null)return;
+  if(pw&&pw.length<8){log(t('tag_sound'),t('pw_short'));return;}
   showSetting('panel_snd');
   log(t('tag_sound'),t('pack_exporting'));
   try{
@@ -2000,7 +2281,7 @@ async function exportSoundPack(){
       asp.set(e.data,runningOff);
       runningOff+=e.data.length;
     }
-    var finalBytes=encryptAspBytes(asp,pw);
+    var finalBytes=await encryptAspBytes(asp,pw);
     var tooBig=finalBytes.length>15*1024*1024;
     var check=parseAspPack(asp);
     if(check.count!==entries.length||check.audio.length!==audioCount||check.totalData!==audioPayload)throw new Error(t('pack_err_size'));
@@ -2101,9 +2382,11 @@ async function uploadPack(input){
   }
   var encrypted=isEncryptedAsp(rawBuf);
   if(encrypted){
+    if(isLegacyAsp(rawBuf))log(t('tag_upload'),t('pack_legacy_warn'));
     var pw=await promptPasswordDialog(t('pw_import_msg'));
     if(pw===null){input.value='';return;}
-    var dec=decryptAspBytes(rawBuf,pw);
+    log(t('tag_upload'),t('pack_checking'));
+    var dec=await decryptAspBytes(rawBuf,pw);
     if(!dec){
       log(t('tag_upload'),t('err_prefix')+t('pw_wrong'));
       toast(t('pw_wrong'),true);

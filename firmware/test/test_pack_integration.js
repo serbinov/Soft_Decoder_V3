@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const nodeCrypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
@@ -108,6 +109,7 @@ function harness() {
   const ctx = {
     console, AbortController, Headers, URL, Date, Promise, TextDecoder, TextEncoder,
     Blob: MockBlob,
+    crypto: { getRandomValues(bytes) { nodeCrypto.randomFillSync(bytes); return bytes; } },
     document: {
       hidden: false, getElementById: element,
       createElement: () => {
@@ -118,7 +120,7 @@ function harness() {
       addEventListener() {}
     },
     location: { hostname: 'device', href: '' },
-    setTimeout() {}, clearTimeout() {}, setInterval() { return 1; }, clearInterval() {},
+    setTimeout(fn) { if (typeof fn === 'function') fn(); return 0; }, clearTimeout() {}, setInterval() { return 1; }, clearInterval() {},
     confirm: () => true, fetch: null,
     XMLHttpRequest: class {
       constructor() {
@@ -321,7 +323,7 @@ test('JS encrypted export -> Python unpack with the same password', async t => {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const h = harness();
   const { bytes } = await exportPack(h, 'secret-42');
-  assert.equal(bytes.toString('ascii', 0, 8), 'AURAPW01');
+  assert.equal(bytes.toString('ascii', 0, 8), 'AURAPW02');
   const asp = path.join(dir, 'pack.asp');
   fs.writeFileSync(asp, bytes);
   const out = path.join(dir, 'out');
@@ -414,7 +416,7 @@ test('Python encrypted pack -> JS password prompt and import of decrypted bytes'
   const asp = path.join(dir, 'pack.asp');
   runPython([dir, '-o', asp, '--password', 'secret-42']);
   const bytes = new Uint8Array(fs.readFileSync(asp));
-  assert.equal(Buffer.from(bytes).toString('ascii', 0, 8), 'AURAPW01');
+  assert.equal(Buffer.from(bytes).toString('ascii', 0, 8), 'AURAPW02');
 
   const h = harness();
   const xhrs = lastXhr(h.ctx);

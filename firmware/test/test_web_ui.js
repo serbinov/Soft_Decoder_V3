@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const nodeCrypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { test } = require('node:test');
 
@@ -63,6 +64,7 @@ function fixture(t) {
   const requests = [], xhrs = [];
   const context = {
     console, AbortController, Headers, URL, Date, Promise, TextDecoder, TextEncoder, Blob,
+    crypto: { getRandomValues(bytes) { nodeCrypto.randomFillSync(bytes); return bytes; } },
     document: { hidden: false, activeElement: null,
       getElementById: element, createElement: () => element('created'),
       addEventListener: (name, fn) => { events[name] = fn; } },
@@ -510,14 +512,38 @@ test('library rows show index, .wav name, volume and icon play/delete buttons', 
   assert.match(html, /class="btn sm lib-del"[^>]*><svg/);
 });
 
-test('encryptAspBytes and decryptAspBytes round-trip password-protected sound packs', t => {
+test('encryptAspBytes and decryptAspBytes round-trip password-protected sound packs', async t => {
   const { context } = fixture(t);
   const plain = new Uint8Array([65, 85, 82, 65, 83, 80, 48, 49, 1, 0, 1, 0, 32, 0, 0, 0]);
-  const enc = context.encryptAspBytes(plain, 'secret123');
+  const enc = await context.encryptAspBytes(plain, 'secret123');
   assert.equal(context.isEncryptedAsp(enc), true);
-  assert.equal(context.decryptAspBytes(enc, 'wrong'), null, 'Wrong password returns null');
-  const dec = context.decryptAspBytes(enc, 'secret123');
+  assert.equal(Buffer.from(enc).toString('ascii', 0, 8), 'AURAPW02');
+  assert.equal(await context.decryptAspBytes(enc, 'wrong'), null, 'Wrong password returns null');
+  const tampered = enc.slice(); tampered[60] ^= 1;
+  assert.equal(await context.decryptAspBytes(tampered, 'secret123'), null, 'Tampering is rejected');
+  const dec = await context.decryptAspBytes(enc, 'secret123');
   assert.deepEqual(Array.from(dec), Array.from(plain), 'Correct password restores original .asp bytes');
+});
+
+test('legacy AURAPW01 packs still decrypt and short new passwords are rejected', async t => {
+  const { context } = fixture(t);
+  const plain = new Uint8Array([65, 85, 82, 65, 83, 80, 48, 49, 9, 9]);
+  const pw = 'old-pass';
+  const pwBytes = context.utf8Bytes(pw);
+  const salt = new Uint8Array([1, 2, 3, 4]);
+  const tagInput = new Uint8Array(pwBytes.length + 4);
+  tagInput.set(pwBytes); tagInput.set(salt, pwBytes.length);
+  const ks = context.prngKeystream(pwBytes, salt, plain.length);
+  const legacy = new Uint8Array(16 + plain.length);
+  for (let i = 0; i < 8; i++) legacy[i] = 'AURAPW01'.charCodeAt(i);
+  legacy.set(salt, 8);
+  const tag = context.fnv32(tagInput);
+  legacy[12] = tag & 255; legacy[13] = (tag >>> 8) & 255;
+  legacy[14] = (tag >>> 16) & 255; legacy[15] = (tag >>> 24) & 255;
+  for (let i = 0; i < plain.length; i++) legacy[16 + i] = plain[i] ^ ks[i];
+  assert.equal(context.isEncryptedAsp(legacy), true);
+  assert.deepEqual(Array.from(await context.decryptAspBytes(legacy, pw)), Array.from(plain));
+  await assert.rejects(() => context.encryptAspBytes(plain, 'short'), /at least 8/);
 });
 
 test('parseAspPack validates a pack and reports sound and scheme statistics', t => {

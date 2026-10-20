@@ -29,6 +29,7 @@ jobs:
         run: |
           python test/test_sound_editor_assets.py
           python test/test_release_artifacts.py
+          python test/test_pack_crypto.py
 
   sanitizers:
     name: Host tests (ASan + UBSan)

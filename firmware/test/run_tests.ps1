@@ -126,6 +126,9 @@ if ($node) {
         Write-Host "=== test_release_artifacts (Python) ===" -ForegroundColor Cyan
         & $python.Source "$root\test\test_release_artifacts.py"
         if ($LASTEXITCODE -ne 0) { $failed++ }
+        Write-Host "=== test_pack_crypto (Python) ===" -ForegroundColor Cyan
+        & $python.Source "$root\test\test_pack_crypto.py"
+        if ($LASTEXITCODE -ne 0) { $failed++ }
     } else {
         Write-Warning "Python not found: real .asp import/export tests were NOT run."
     }

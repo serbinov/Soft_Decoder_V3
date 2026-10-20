@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import argparse
 import binascii
+import hashlib
+import hmac
 import json
 import os
 import struct
@@ -69,10 +71,69 @@ def _prng_keystream(pw_bytes: bytes, salt: bytes, length: int) -> bytes:
     return bytes(out)
 
 
-def encrypt_asp(plain: bytes, password: str) -> bytes:
-    """Casual obfuscation only (XOR stream + 32-bit tag), not encryption."""
-    if not password:
-        return plain
+PW_MAGIC_V2 = b"AURAPW02"
+PW_VERSION = 2
+KDF_SCRYPT = 2
+CIPHER_CHACHA20 = 1
+MAC_HMAC_SHA256 = 1
+SCRYPT_LOG_N = 13
+SCRYPT_R = 8
+SCRYPT_P = 1
+SALT_LEN = 16
+NONCE_LEN = 12
+TAG_LEN = 32
+HDR2_LEN = 44
+
+
+def _rotl32(value: int, bits: int) -> int:
+    return ((value << bits) & 0xFFFFFFFF) | (value >> (32 - bits))
+
+
+def _chacha20_block(key: bytes, counter: int, nonce: bytes) -> bytes:
+    if len(key) != 32 or len(nonce) != 12:
+        raise ValueError("invalid ChaCha20 key/nonce")
+    state = [
+        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
+        *struct.unpack("<8I", key),
+        counter & 0xFFFFFFFF,
+        *struct.unpack("<3I", nonce),
+    ]
+    x = state[:]
+    def qr(a: int, b: int, c: int, d: int) -> None:
+        x[a] = (x[a] + x[b]) & 0xFFFFFFFF
+        x[d] = _rotl32(x[d] ^ x[a], 16)
+        x[c] = (x[c] + x[d]) & 0xFFFFFFFF
+        x[b] = _rotl32(x[b] ^ x[c], 12)
+        x[a] = (x[a] + x[b]) & 0xFFFFFFFF
+        x[d] = _rotl32(x[d] ^ x[a], 8)
+        x[c] = (x[c] + x[d]) & 0xFFFFFFFF
+        x[b] = _rotl32(x[b] ^ x[c], 7)
+    for _ in range(10):
+        qr(0, 4, 8, 12); qr(1, 5, 9, 13); qr(2, 6, 10, 14); qr(3, 7, 11, 15)
+        qr(0, 5, 10, 15); qr(1, 6, 11, 12); qr(2, 7, 8, 13); qr(3, 4, 9, 14)
+    return struct.pack("<16I", *((x[i] + state[i]) & 0xFFFFFFFF for i in range(16)))
+
+
+def _chacha20_xor(key: bytes, nonce: bytes, data: bytes) -> bytes:
+    out = bytearray(len(data))
+    counter = 0
+    for offset in range(0, len(data), 64):
+        block = _chacha20_block(key, counter, nonce)
+        chunk = data[offset:offset + 64]
+        for index, value in enumerate(chunk):
+            out[offset + index] = value ^ block[index]
+        counter = (counter + 1) & 0xFFFFFFFF
+    return bytes(out)
+
+
+def _derive_keys(password: str, salt: bytes, log_n: int, r: int, p: int) -> tuple[bytes, bytes]:
+    material = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=1 << log_n, r=r, p=p,
+                              dklen=64, maxmem=128 * 1024 * 1024)
+    return material[:32], material[32:]
+
+
+def _encrypt_legacy(plain: bytes, password: str) -> bytes:
+    """AURAPW01, import-only compatibility for packs made by older releases."""
     pw_bytes = password.encode("utf-8")
     salt = os.urandom(4)
     tag = _fnv32(pw_bytes + salt)
@@ -81,9 +142,25 @@ def encrypt_asp(plain: bytes, password: str) -> bytes:
     return PW_MAGIC + salt + struct.pack("<I", tag) + cipher
 
 
-def decrypt_asp(data: bytes, password: str) -> bytes:
-    if not data.startswith(PW_MAGIC):
-        return data
+def encrypt_asp(plain: bytes, password: str) -> bytes:
+    """Authenticated password protection: scrypt + ChaCha20 + HMAC-SHA256."""
+    if not password:
+        return plain
+    if len(password) < 8:
+        raise ValueError("password must be at least 8 characters")
+    salt = os.urandom(SALT_LEN)
+    nonce = os.urandom(NONCE_LEN)
+    enc_key, mac_key = _derive_keys(password, salt, SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)
+    cipher = _chacha20_xor(enc_key, nonce, plain)
+    header = (PW_MAGIC_V2 + bytes([PW_VERSION, KDF_SCRYPT,
+                                   CIPHER_CHACHA20, MAC_HMAC_SHA256,
+                                   SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P, 0]) +
+              salt + nonce)
+    tag = hmac.new(mac_key, header + cipher, hashlib.sha256).digest()
+    return header + cipher + tag
+
+
+def _decrypt_legacy(data: bytes, password: str) -> bytes:
     if len(data) < 24:
         raise SystemExit("corrupted encrypted .asp container")
     pw_bytes = (password or "").encode("utf-8")
@@ -94,6 +171,30 @@ def decrypt_asp(data: bytes, password: str) -> bytes:
     cipher = data[16:]
     ks = _prng_keystream(pw_bytes, salt, len(cipher))
     return bytes(a ^ b for a, b in zip(cipher, ks))
+
+
+def decrypt_asp(data: bytes, password: str) -> bytes:
+    if data.startswith(PW_MAGIC):
+        return _decrypt_legacy(data, password)
+    if not data.startswith(PW_MAGIC_V2):
+        return data
+    if len(data) < HDR2_LEN + TAG_LEN:
+        raise SystemExit("corrupted encrypted .asp container")
+    version, kdf, cipher_id, mac_id = data[8], data[9], data[10], data[11]
+    log_n, r, p = data[12], data[13], data[14]
+    if (version, kdf, cipher_id, mac_id) != (PW_VERSION, KDF_SCRYPT,
+                                             CIPHER_CHACHA20, MAC_HMAC_SHA256):
+        raise SystemExit("unsupported encrypted .asp format")
+    if not 12 <= log_n <= 14 or r != 8 or not 1 <= p <= 2 or 128 * (1 << log_n) * r > 32 * 1024 * 1024:
+        raise SystemExit("invalid .asp KDF parameters")
+    salt = data[16:32]
+    nonce = data[32:44]
+    mac_off = len(data) - TAG_LEN
+    enc_key, mac_key = _derive_keys(password or "", salt, log_n, r, p)
+    expected = hmac.new(mac_key, data[:mac_off], hashlib.sha256).digest()
+    if not hmac.compare_digest(expected, data[mac_off:]):
+        raise SystemExit("wrong password or damaged sound pack")
+    return _chacha20_xor(enc_key, nonce, data[HDR2_LEN:mac_off])
 
 # IMA/DVI ADPCM tables (Microsoft WAVE_FORMAT_IMA_ADPCM).
 _IMA_INDEX_TABLE = (-1, -1, -1, -1, 2, 4, 6, 8,
@@ -524,7 +625,7 @@ def unpack(asp_path: str, out_dir: str, password: str = "") -> int:
         raise SystemExit("pack file not found: %s" % asp_path)
     with open(asp_path, "rb") as fh:
         data = fh.read()
-    if data.startswith(PW_MAGIC):
+    if data.startswith((PW_MAGIC, PW_MAGIC_V2)):
         data = decrypt_asp(data, password)
     if len(data) < 16 or data[:8] != MAGIC:
         raise SystemExit("not a valid AURASP01 container: %s" % asp_path)
@@ -686,7 +787,7 @@ def main(argv) -> int:
     ap.add_argument("src", nargs="?", help="folder with .wav files (or .asp path with --unpack)")
     ap.add_argument("-o", "--output", default=None, help="output .asp path (or output folder with --unpack)")
     ap.add_argument("--scheme", default=None, help="optional sound-graph JSON file to bundle into the .asp")
-    ap.add_argument("--password", default="", help="optional password to encrypt/decrypt the .asp pack")
+    ap.add_argument("--password", default="", help="optional password (min 8 chars) for authenticated encryption/decryption")
     ap.add_argument("--unpack", action="store_true", help="unpack an .asp file into a folder")
     ap.add_argument("--rate", type=int, default=22050, help="target sample rate (default 22050)")
     ap.add_argument("--stereo", action="store_true", help="keep stereo (default mono)")
@@ -700,6 +801,8 @@ def main(argv) -> int:
     if args.unpack:
         out_dir = args.output or (args.src[:-4] if args.src.lower().endswith(".asp") else args.src + "_unpacked")
         return unpack(args.src, out_dir, args.password)
+    if args.password and len(args.password) < 8:
+        ap.error("--password must be at least 8 characters")
     adpcm = not args.pcm
     if adpcm and args.stereo:
         ap.error("--stereo cannot be combined with IMA ADPCM (ADPCM is mono)")

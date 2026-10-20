@@ -307,6 +307,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-21 (v0.10) — feat(web,editor,flasher): responsive UI, editor preload and COM sound packs
 - 2026-10-20 (v0.10) — chore(release): rebuild v0.10 artifacts and remove obsolete drawio
 - 2026-10-20 (v0.10) — security(pack): replace weak XOR with scrypt+ChaCha20+HMAC
 - 2026-10-20 (v0.10) — test(editor): verify embedded sound editor assets and browser flow

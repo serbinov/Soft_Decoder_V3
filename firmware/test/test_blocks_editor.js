@@ -604,3 +604,41 @@ test('26. Chained Start block after Delay/Logic and multi-step speed scheme (Sta
   assert.ok(speedExitToEnd, 'Speed-driven Loop transitions to End on speed band exit');
   assert.equal(speedExitToEnd.timing, 'after_sample', 'Speed exit from Loop to End uses after_sample timing');
 });
+
+test('27. Editor playback target is independent of the web UI and defaults to PC', t => {
+  const { api, context } = createEditorFixture(t);
+  context.localStorage.setItem('aura_sound_play', 'decoder');
+  assert.equal(api.soundPlayTarget(), 'pc', 'web UI decoder setting must not route editor previews');
+
+  api.togglePlayTarget();
+  assert.equal(context.localStorage.getItem('aura_blocks_play_target'), 'decoder');
+  assert.equal(api.soundPlayTarget(), 'decoder');
+
+  api.togglePlayTarget();
+  assert.equal(api.soundPlayTarget(), 'pc');
+});
+
+test('28. Simulator unlocks the PC AudioContext synchronously on open', async t => {
+  const { api, context } = createEditorFixture(t);
+  let resumed = 0;
+  context.AudioContext = class {
+    constructor() { this.state = 'suspended'; this.destination = {}; }
+    resume() { resumed++; this.state = 'running'; return Promise.resolve(); }
+  };
+
+  await api.openSimulator();
+  assert.ok(resumed >= 1, 'AudioContext.resume() must be called from the opening click');
+  api.closeSimulator();
+});
+
+test('29. Default scheme sound manifest matches the compiled default project', t => {
+  const { api } = createEditorFixture(t);
+  const expected = api.compile().files.slice().sort();
+  const manifestPath = path.join(__dirname, '..', 'sound_editor', 'default_scheme_sounds.txt');
+  const actual = fs.readFileSync(manifestPath, 'utf8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'))
+    .sort();
+  assert.deepEqual(Array.from(actual), Array.from(expected));
+});

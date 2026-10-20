@@ -46,6 +46,8 @@ static int mock_prov_close(FILE *f);
 #define fsync mock_prov_sync
 #endif
 
+#include "../../components/web/src/audio_pack.c"
+
 #define static
 #include "../../components/provision/src/provision.c"
 #undef static
@@ -458,6 +460,7 @@ void tearDown(void)
     TEST_ASSERT_EQUAL_UINT32(115200, g_baud);
     remove(PROV_AUDIO_DIR "/slot1.wav");
     remove(PROV_AUDIO_DIR "/slot99.wav");
+    remove(PROV_AUDIO_DIR "/test.wav");
 }
 
 /* ---- BEMF commands ---- */
@@ -1038,6 +1041,92 @@ static void test_provision_run_put_chunk_ack(void)
     TEST_ASSERT_TRUE(tx_has("DONE-OK"));
 }
 
+static void put16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+/* Minimal one-entry PCM16 pack: header (16) + index (16 + "test") + payload. */
+static size_t build_test_pack(uint8_t *pack)
+{
+    const uint32_t data_off = 36;
+    memcpy(pack, "AURASP01", 8);
+    put16(pack + 8, 1);
+    put16(pack + 10, 1);
+    put32(pack + 12, data_off);
+    pack[16] = 4;      /* name length */
+    pack[17] = 100;    /* volume */
+    pack[18] = 1;      /* channels */
+    pack[19] = 16;     /* PCM16 */
+    put32(pack + 20, 8000);
+    put32(pack + 24, data_off);
+    put32(pack + 28, 4); /* two PCM16 samples */
+    memcpy(pack + 32, "test", 4);
+    pack[36] = 1;
+    pack[37] = 2;
+    pack[38] = 3;
+    pack[39] = 4;
+    return 40;
+}
+
+static void test_provision_run_pack_success(void)
+{
+    uint8_t pack[64];
+    uint8_t stream[128];
+    size_t plen = build_test_pack(pack);
+    size_t n = 0;
+
+    memcpy(stream + n, "PROV-CONFIRM\n", 13); n += 13;
+    memcpy(stream + n, "PACK 40\n", 8); n += 8;
+    memcpy(stream + n, "PACK-DATA 40\n", 13); n += 13;
+    memcpy(stream + n, pack, plen); n += plen;
+    memcpy(stream + n, "DONE\n", 5); n += 5;
+    mock_uart_feed(stream, n);
+    tx_reset();
+
+    TEST_ASSERT_TRUE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PACK-READY"));
+    TEST_ASSERT_TRUE(tx_has("PACK-OK 1"));
+    TEST_ASSERT_TRUE(tx_has("DONE-OK"));
+
+    FILE *f = fopen(PROV_AUDIO_DIR "/test.wav", "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    uint8_t wav[48] = { 0 };
+    TEST_ASSERT_EQUAL_UINT32(sizeof(wav), fread(wav, 1, sizeof(wav), f));
+    fclose(f);
+    TEST_ASSERT_EQUAL_MEMORY("RIFF", wav, 4);
+    TEST_ASSERT_EQUAL_MEMORY("WAVE", wav + 8, 4);
+    TEST_ASSERT_EQUAL_MEMORY("data", wav + 36, 4);
+    TEST_ASSERT_EQUAL_UINT8(4, wav[40]);
+    TEST_ASSERT_EQUAL_UINT8(1, wav[44]);
+    TEST_ASSERT_EQUAL_UINT8(4, wav[47]);
+    TEST_ASSERT_EQUAL_INT(1, g_tracks_save_calls);
+}
+
+static void test_provision_pack_errors(void)
+{
+    feed("PROV-CONFIRM\nPACK 0\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PACK-ERR parse"));
+
+    static const uint8_t zeros[16] = { 0 };
+    feed("PROV-CONFIRM\nPACK 16\nPACK-DATA 16\n");
+    mock_uart_feed(zeros, sizeof(zeros));
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PACK-READY"));
+    TEST_ASSERT_TRUE(tx_has("PACK-ERR header"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+}
+
 static void test_provision_quiescence_failure_never_formats(void)
 {
     g_maintenance_err = ESP_ERR_TIMEOUT;
@@ -1201,6 +1290,8 @@ int main(void)
     RUN_TEST(test_provision_run_put_no_mem);
     RUN_TEST(test_provision_run_put_timeout);
     RUN_TEST(test_provision_run_put_chunk_ack);
+    RUN_TEST(test_provision_run_pack_success);
+    RUN_TEST(test_provision_pack_errors);
     RUN_TEST(test_provision_quiescence_failure_never_formats);
     RUN_TEST(test_provision_failed_put_paths_release_maintenance);
     RUN_TEST(test_provision_wav_failure_after_fw_never_selects_boot);

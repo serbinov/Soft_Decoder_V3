@@ -22,6 +22,7 @@
 #include "storage.h"
 #include "motor.h"
 #include "audio.h"
+#include "audio_pack.h"
 #include "web.h"
 #include "selftest.h"
 #include "sound.h"
@@ -33,6 +34,9 @@ static const esp_partition_t *s_pending_boot;
 #define NVS_KEY_PROV     "prov"
 #define PROV_BAUD        921600
 #define PROV_CHUNK       4096
+#define PROV_PACK_FRAME  32768
+#define PROV_PACK_CHUNK  32768
+#define PROV_PACK_MAX    (15U * 1024U * 1024U)
 #define PROV_WINDOW_MS   20000
 /* The provisioning entry point erases the external NOR, so the host must send
  * an explicit confirmation after "PROV" before anything is destroyed. */
@@ -131,7 +135,7 @@ static bool read_line(char *line, size_t maxlen, uint32_t timeout_ms)
     return false;
 }
 
-static bool read_exact(uint8_t *buf, size_t len, uint32_t timeout_ms)
+static bool uart_read_exact(uint8_t *buf, size_t len, uint32_t timeout_ms)
 {
     size_t got = 0;
     int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
@@ -157,6 +161,24 @@ static bool read_exact(uint8_t *buf, size_t len, uint32_t timeout_ms)
     return true;
 }
 
+static bool s_pack_stream_active;
+static uint8_t *s_pack_frame;
+static size_t s_pack_frame_len;
+static size_t s_pack_frame_pos;
+static uint32_t s_pack_size;
+static uint32_t s_pack_received;
+static bool pack_stream_read(uint8_t *buf, size_t len, uint32_t timeout_ms);
+
+/* During PACK installation the parser reads from acknowledged PACK-DATA
+ * frames instead of the UART. FW/PUT paths use uart_read_exact directly. */
+static bool read_exact(uint8_t *buf, size_t len, uint32_t timeout_ms)
+{
+    if (s_pack_stream_active) {
+        return pack_stream_read(buf, len, timeout_ms);
+    }
+    return uart_read_exact(buf, len, timeout_ms);
+}
+
 /* File scope (not a function-local static) so the white-box host tests can
  * observe the already-installed guard. */
 static bool s_uart_driver_installed = false;
@@ -169,7 +191,7 @@ static void ensure_uart_driver(void)
     /* The console uses the ROM-level UART driver on UART0; the standard UART
      * driver is not installed, so uart_read_bytes would fail. Install it here
      * (it coexists with the ROM console TX for printf). */
-    esp_err_t err = uart_driver_install(UART_NUM_0, 4096, 0, 0, NULL, 0);
+    esp_err_t err = uart_driver_install(UART_NUM_0, 32768, 0, 0, NULL, 0);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "uart driver install: %s", esp_err_to_name(err));
     }
@@ -186,7 +208,7 @@ static void ensure_usbjtag_driver(void)
      * esp_console REPL is started, so install it here to be able to receive
      * the provisioning commands from the native USB port. */
     usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-    cfg.rx_buffer_size = 8192;
+    cfg.rx_buffer_size = 65536;
     cfg.tx_buffer_size = 4096;
     esp_err_t err = usb_serial_jtag_driver_install(&cfg);
     if (err == ESP_OK) {
@@ -207,6 +229,59 @@ static void send_line(const char *s)
         (void)usb_serial_jtag_write_bytes((const uint8_t *)s, strlen(s), pdMS_TO_TICKS(1000));
         (void)usb_serial_jtag_write_bytes((const uint8_t *)"\n", 1, pdMS_TO_TICKS(1000));
     }
+}
+
+/* Pack parser byte source. A frame is acknowledged only when the parser has
+ * consumed all of it, which gives natural backpressure while WAV files are
+ * written to the external NOR. The last frame is covered by PACK-OK. */
+static bool pack_stream_read(uint8_t *buf, size_t len, uint32_t timeout_ms)
+{
+    size_t got = 0;
+    while (got < len) {
+        if (s_pack_frame_pos < s_pack_frame_len) {
+            size_t n = s_pack_frame_len - s_pack_frame_pos;
+            if (n > len - got) {
+                n = len - got;
+            }
+            memcpy(buf + got, s_pack_frame + s_pack_frame_pos, n);
+            s_pack_frame_pos += n;
+            s_pack_received += (uint32_t)n;
+            got += n;
+            continue;
+        }
+
+        if (s_pack_frame_len > 0) {
+            char ack[48];
+            snprintf(ack, sizeof(ack), "PACK-DATA-OK %lu", (unsigned long)s_pack_received);
+            send_line(ack);
+            s_pack_frame_len = 0;
+            s_pack_frame_pos = 0;
+        }
+
+        char line[64];
+        if (!read_line(line, sizeof(line), 30000)) {
+            send_line("PACK-ERR timeout");
+            return false;
+        }
+        if (strncmp(line, "PACK-DATA ", 10) != 0) {
+            send_line("PACK-ERR cmd");
+            return false;
+        }
+        long n = 0;
+        if (sscanf(line + 10, "%ld", &n) != 1 || n <= 0 ||
+            n > (long)PROV_PACK_FRAME ||
+            s_pack_received + (uint32_t)n > s_pack_size) {
+            send_line("PACK-ERR frame");
+            return false;
+        }
+        if (!uart_read_exact(s_pack_frame, (size_t)n, timeout_ms)) {
+            send_line("PACK-ERR timeout");
+            return false;
+        }
+        s_pack_frame_len = (size_t)n;
+        s_pack_frame_pos = 0;
+    }
+    return true;
 }
 
 /* ---- BEMF calibration over UART/USB ---------------------------------- */
@@ -499,6 +574,234 @@ static esp_err_t provision_fw(const char *cmd)
     return ESP_OK;
 }
 
+/* Parse a complete .asp stream and write every payload as an individual WAV.
+ * During PACK, read_exact() is redirected to pack_stream_read(). */
+static esp_err_t provision_pack_parse(const char *cmd)
+{
+    long size = 0;
+    if (sscanf(cmd, "PACK %ld", &size) < 1 || size < (long)AUDIO_PACK_HDR_LEN) {
+        send_line("PACK-ERR parse");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (size > (long)PROV_PACK_MAX) {
+        send_line("PACK-ERR size");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    uint8_t hdr[AUDIO_PACK_HDR_LEN];
+    audio_pack_header_t ph;
+    audio_pack_entry_t *entries = NULL;
+    uint8_t *buf = NULL;
+    esp_err_t err = ESP_OK;
+
+    if (!read_exact(hdr, sizeof(hdr), 60000)) {
+        send_line("PACK-ERR timeout");
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!audio_pack_header_parse(hdr, sizeof(hdr), &ph) ||
+        ph.data_off > (uint32_t)size) {
+        send_line("PACK-ERR header");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    entries = (audio_pack_entry_t *)calloc(ph.count, sizeof(*entries));
+    buf = (uint8_t *)malloc(PROV_PACK_CHUNK);
+    if (entries == NULL || buf == NULL) {
+        send_line("PACK-ERR mem");
+        err = ESP_ERR_NO_MEM;
+        goto done;
+    }
+
+    uint64_t pos = AUDIO_PACK_HDR_LEN;
+    for (uint32_t i = 0; i < ph.count; ++i) {
+        uint8_t eh[AUDIO_PACK_ENTRY_HDR_LEN];
+        uint8_t nlen = 0;
+        uint8_t name[AUDIO_PACK_NAME_MAX];
+        if (!read_exact(eh, sizeof(eh), 60000)) {
+            send_line("PACK-ERR timeout");
+            err = ESP_ERR_TIMEOUT;
+            goto done;
+        }
+        pos += sizeof(eh);
+        if (!audio_pack_entry_head(eh, (uint64_t)size, &entries[i], &nlen)) {
+            send_line("PACK-ERR index");
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
+        }
+        if (!read_exact(name, nlen, 60000)) {
+            send_line("PACK-ERR timeout");
+            err = ESP_ERR_TIMEOUT;
+            goto done;
+        }
+        pos += nlen;
+        if (!audio_pack_entry_name(&entries[i], name, nlen)) {
+            send_line("PACK-ERR name");
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
+        }
+    }
+    if (pos > ph.data_off) {
+        send_line("PACK-ERR index");
+        err = ESP_ERR_INVALID_ARG;
+        goto done;
+    }
+    while (pos < ph.data_off) {
+        size_t want = (size_t)(ph.data_off - pos > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : ph.data_off - pos);
+        if (!read_exact(buf, want, 60000)) {
+            send_line("PACK-ERR timeout");
+            err = ESP_ERR_TIMEOUT;
+            goto done;
+        }
+        pos += want;
+    }
+
+    unsigned wav_count = 0;
+    for (uint32_t i = 0; i < ph.count; ++i) {
+        audio_pack_entry_t *e = &entries[i];
+        if ((uint64_t)e->data_off < pos) {
+            send_line("PACK-ERR order");
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
+        }
+        while (pos < e->data_off) {
+            size_t want = (size_t)(e->data_off - pos > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : e->data_off - pos);
+            if (!read_exact(buf, want, 60000)) {
+                send_line("PACK-ERR timeout");
+                err = ESP_ERR_TIMEOUT;
+                goto done;
+            }
+            pos += want;
+        }
+
+        if (e->bits == AUDIO_PACK_BITS_SCHEME) {
+            /* The serial pack path installs sounds only; an embedded scheme is
+             * skipped (use the web pack upload if a scheme is required). */
+            uint32_t rem = e->data_len;
+            while (rem > 0U) {
+                size_t want = rem > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : rem;
+                if (!read_exact(buf, want, 60000)) {
+                    send_line("PACK-ERR timeout");
+                    err = ESP_ERR_TIMEOUT;
+                    goto done;
+                }
+                pos += want;
+                rem -= (uint32_t)want;
+            }
+            continue;
+        }
+
+        char path[128];
+        snprintf(path, sizeof(path), PROV_AUDIO_DIR "/%s.wav", e->name);
+        FILE *f = fopen(path, "wb");
+        if (f == NULL) {
+            ESP_LOGE(TAG, "provision: cannot create %s", path);
+            send_line("PACK-ERR create");
+            err = ESP_FAIL;
+            goto done;
+        }
+
+        uint8_t wh[AUDIO_PACK_WAV_HDR_MAX];
+        size_t whl = audio_pack_wav_header(wh, sizeof(wh), e->data_len,
+                                           e->sample_rate, e->channels, e->bits);
+        bool written = whl > 0U && PROV_FWRITE(wh, 1, whl, f) == whl;
+        uint32_t rem = e->data_len;
+        while (written && rem > 0U) {
+            size_t want = rem > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : rem;
+            if (!read_exact(buf, want, 60000)) {
+                send_line("PACK-ERR timeout");
+                err = ESP_ERR_TIMEOUT;
+                written = false;
+                break;
+            }
+            if (PROV_FWRITE(buf, 1, want, f) != want) {
+                send_line("PACK-ERR write");
+                err = ESP_FAIL;
+                written = false;
+                break;
+            }
+            pos += want;
+            rem -= (uint32_t)want;
+        }
+        /* No per-file fflush/fsync: 300 files would add minutes. fclose
+         * flushes and closes the file; a failed pack can be uploaded again. */
+        if (fclose(f) != 0) {
+            written = false;
+        }
+        if (!written) {
+            (void)remove(path);
+            if (err == ESP_OK) {
+                send_line("PACK-ERR write");
+                err = ESP_FAIL;
+            }
+            goto done;
+        }
+        ++wav_count;
+    }
+
+    /* Consume any trailing bytes so the next read_line starts on a command. */
+    while (pos < (uint64_t)size) {
+        size_t want = (size_t)((uint64_t)size - pos > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : (uint64_t)size - pos);
+        if (!read_exact(buf, want, 60000)) {
+            send_line("PACK-ERR timeout");
+            err = ESP_ERR_TIMEOUT;
+            goto done;
+        }
+        pos += want;
+    }
+
+    char ok[48];
+    snprintf(ok, sizeof(ok), "PACK-OK %u", wav_count);
+    send_line(ok);
+    ESP_LOGW(TAG, "Pack received (%ld bytes, %u WAV files)", size, wav_count);
+
+done:
+    free(buf);
+    free(entries);
+    return err;
+}
+
+/* Receive one complete AURA Sound Pack (.asp) as framed PACK-DATA packets and
+ * unpack it directly into /userdata/audio. A frame is acknowledged only after
+ * the parser has consumed it, so the USB/UART RX buffers cannot overflow while
+ * the pack is written once (no temporary pack copy). */
+static esp_err_t provision_pack(const char *cmd)
+{
+    long size = 0;
+    if (sscanf(cmd, "PACK %ld", &size) < 1 || size < (long)AUDIO_PACK_HDR_LEN) {
+        send_line("PACK-ERR parse");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (size > (long)PROV_PACK_MAX) {
+        send_line("PACK-ERR size");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    s_pack_frame = (uint8_t *)malloc(PROV_PACK_FRAME);
+    if (s_pack_frame == NULL) {
+        send_line("PACK-ERR mem");
+        return ESP_ERR_NO_MEM;
+    }
+    s_pack_size = (uint32_t)size;
+    s_pack_received = 0;
+    s_pack_frame_len = 0;
+    s_pack_frame_pos = 0;
+    s_pack_stream_active = true;
+    send_line("PACK-READY");
+
+    esp_err_t err = provision_pack_parse(cmd);
+    s_pack_stream_active = false;
+    if (err == ESP_OK &&
+        (s_pack_received != s_pack_size || s_pack_frame_pos != s_pack_frame_len)) {
+        send_line("PACK-ERR size");
+        err = ESP_ERR_INVALID_SIZE;
+    }
+    free(s_pack_frame);
+    s_pack_frame = NULL;
+    s_pack_frame_len = 0;
+    s_pack_frame_pos = 0;
+    return err;
+}
+
 /* Returns true only when the session completed and the restart was issued. */
 static bool provision_transfer(bool *maintenance_started)
 {
@@ -556,6 +859,14 @@ static bool provision_transfer(bool *maintenance_started)
         }
         if (strncmp(cmd, "DONE", 4) == 0) {
             break;
+        }
+        if (strncmp(cmd, "PACK ", 5) == 0) {
+            esp_err_t perr = provision_pack(cmd);
+            if (perr != ESP_OK) {
+                ESP_LOGE(TAG, "provision: PACK failed (%s), aborting", esp_err_to_name(perr));
+                return false;
+            }
+            continue;
         }
         if (strncmp(cmd, "FW ", 3) == 0) {
             esp_err_t ferr = provision_fw(cmd);

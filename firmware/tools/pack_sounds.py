@@ -682,15 +682,29 @@ def unpack(asp_path: str, out_dir: str, password: str = "") -> int:
     return 0
 
 
+def _load_only_names(path: str) -> set[str]:
+    """Read sanitized sound names (with or without .wav) for a filtered pack."""
+    names = set()
+    with open(path, "r", encoding="utf-8-sig") as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            names.add(s[:-4] if s.lower().endswith(".wav") else s)
+    return names
+
+
 def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
          default_volume: int, order: str, adpcm: bool,
-         scheme_path: str | None = None, password: str = "") -> int:
+         scheme_path: str | None = None, password: str = "",
+         only_from: str | None = None) -> int:
     if not os.path.isdir(src_dir):
         raise SystemExit("source folder not found: %s" % src_dir)
+    only = _load_only_names(only_from) if only_from else None
     files = [f for f in os.listdir(src_dir) if f.lower().endswith(".wav")]
     if not files:
         raise SystemExit("no .wav files in %s" % src_dir)
-    if len(files) > MAX_FILES:
+    if only is None and len(files) > MAX_FILES:
         raise SystemExit("too many files: %d (max %d)" % (len(files), MAX_FILES))
     if order == "mtime":
         files.sort(key=lambda f: os.path.getmtime(os.path.join(src_dir, f)))
@@ -699,11 +713,17 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
 
     overrides = _load_volume_overrides(src_dir, default_volume)
     used_names = set()
+    included_names = set()
     entries = []  # (name, volume, rate, channels, payload_bytes)
     for fname in files:
         path = os.path.join(src_dir, fname)
         base = fname[:-4] if fname.lower().endswith(".wav") else fname
         name = _unique_name(_truncate_utf8(_sanitize(base), NAME_MAX) or "sound", used_names)
+        if only is not None and name not in only:
+            continue
+        included_names.add(name)
+        if len(entries) >= MAX_FILES:
+            raise SystemExit("too many selected files (max %d)" % MAX_FILES)
         try:
             channels, src_rate, samples = _read_wav(path)
         except WavError as exc:
@@ -732,6 +752,13 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
             out_bits = 16
         vol = overrides.get(name, default_volume)
         entries.append((name, vol, out_rate, out_channels, out_bits, payload))
+
+    if only is not None:
+        missing = sorted(only - included_names)
+        if missing:
+            raise SystemExit("requested sounds not found: %s" % ", ".join(missing))
+    if not entries:
+        raise SystemExit("no selected .wav files")
 
     resolved_scheme = _find_scheme_file(src_dir, scheme_path)
     if resolved_scheme:
@@ -783,6 +810,11 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
 
 
 def main(argv) -> int:
+    # Non-ASCII sound names must not crash a cp1251 Windows console.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser(description="Pack/unpack WAV files and sound scheme in an AURA Sound Pack (.asp)")
     ap.add_argument("src", nargs="?", help="folder with .wav files (or .asp path with --unpack)")
     ap.add_argument("-o", "--output", default=None, help="output .asp path (or output folder with --unpack)")
@@ -795,6 +827,8 @@ def main(argv) -> int:
                     help="store uncompressed PCM16 instead of IMA ADPCM (~4x larger)")
     ap.add_argument("--volume", type=int, default=100, help="default per-file volume 0..100")
     ap.add_argument("--order", choices=("name", "mtime"), default="name", help="index order")
+    ap.add_argument("--only-from", default=None,
+                    help="text file with sanitized sound names (one per line) to include")
     args = ap.parse_args(argv)
     if not args.src:
         ap.error("src path is required")
@@ -808,7 +842,8 @@ def main(argv) -> int:
         ap.error("--stereo cannot be combined with IMA ADPCM (ADPCM is mono)")
     out = args.output or (args.src.rstrip("/\\") + ".asp")
     return pack(args.src, out, max(1, args.rate), args.stereo,
-                max(0, min(100, args.volume)), args.order, adpcm, args.scheme, args.password)
+                max(0, min(100, args.volume)), args.order, adpcm, args.scheme, args.password,
+                args.only_from)
 
 
 if __name__ == "__main__":

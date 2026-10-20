@@ -483,6 +483,13 @@ esp_err_t esp_netif_get_ip_info(esp_netif_t *netif, esp_netif_ip_info_t *ip_info
     return (esp_err_t)mock_netif_get_ip_ret;
 }
 
+esp_err_t esp_netif_dhcps_option(esp_netif_t *netif, esp_netif_dhcp_option_mode_t op,
+                                 esp_netif_dhcp_option_id_t id, void *val, uint32_t len)
+{
+    (void)netif; (void)op; (void)id; (void)val; (void)len;
+    return ESP_OK;
+}
+
 esp_err_t esp_netif_set_dns_info(esp_netif_t *netif, esp_netif_dns_type_t type,
                                  esp_netif_dns_info_t *dns)
 {

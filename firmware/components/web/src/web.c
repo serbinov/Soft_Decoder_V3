@@ -274,11 +274,38 @@ static esp_err_t send_json(httpd_req_t *req, const char *json)
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
-static esp_err_t send_html(httpd_req_t *req, const char *html)
+static bool request_accepts_gzip(httpd_req_t *req)
 {
+    char enc[64];
+    if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", enc, sizeof(enc)) != ESP_OK) {
+        return false;
+    }
+    return strstr(enc, "gzip") != NULL;
+}
+
+/* Root page: gzip for browsers, ETag lets a repeat open use a tiny 304
+ * instead of downloading the 150 KB page again. */
+static esp_err_t send_root_html(httpd_req_t *req)
+{
+    const bool gz = request_accepts_gzip(req);
+    httpd_resp_set_hdr(req, "ETag", WEB_HTML_ETAG);
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+
+    char inm[96];
+    if (httpd_req_get_hdr_value_str(req, "If-None-Match", inm, sizeof(inm)) == ESP_OK &&
+        (strcmp(inm, "*") == 0 || strstr(inm, WEB_HTML_HASH) != NULL)) {
+        httpd_resp_set_status(req, "304 Not Modified");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate");
-    return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
+    if (gz) {
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        return httpd_resp_send(req, (const char *)s_page_html_gz, sizeof(s_page_html_gz));
+    }
+    return httpd_resp_send(req, s_page_html, HTTPD_RESP_USE_STRLEN);
 }
 
 static bool query_encoding_valid(const char *query)
@@ -962,7 +989,7 @@ static esp_err_t outputs_init(void)
 
 static esp_err_t root_handler(httpd_req_t *req)
 {
-    return send_html(req, s_page_html);
+    return send_root_html(req);
 }
 
 static esp_err_t sound_editor_get(httpd_req_t *req)

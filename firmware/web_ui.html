@@ -257,6 +257,46 @@ label{color:var(--text);font-weight:600}
   .conn{font-size:11px;gap:5px}
   .fn-grid{grid-template-columns:repeat(auto-fill,minmax(44px,1fr))}
   .fn-grid .btn{min-height:40px;padding:8px 4px}
+  /* 16px prevents iOS from zooming the whole page on input focus. */
+  input[type=number],input[type=text],input[type=password],select{font-size:16px}
+}
+
+/* Narrow phones: the sound library gets a two-line row instead of seven
+   squeezed columns; quick CV/pack controls become single-column. */
+@media(min-width:900px){
+  .page[data-page=settings] .mobile-config{display:none!important}
+}
+
+@media(max-width:560px){
+  .lib{--lib-cols:26px minmax(0,1fr) 30px 30px}
+  .lib-row{
+    grid-template-columns:var(--lib-cols);
+    grid-template-areas:"idx nm play del" "idx vol vol vol";
+    row-gap:3px;
+  }
+  .lib-row .idx{grid-area:idx}
+  .lib-row .nm{grid-area:nm;white-space:normal;overflow-wrap:anywhere;line-height:1.2}
+  .lib-row .sz,.lib-row .vv{display:none}
+  .lib-row>input[type=range]{grid-area:vol;margin:0}
+  .lib-row>.btn:not(.lib-del){grid-area:play;justify-self:end}
+  .lib-row>.lib-del{grid-area:del;justify-self:end}
+  .lib-row .btn{width:30px;height:30px;min-height:30px}
+  .cv-quick{grid-template-columns:1fr}
+  .pack-stats{grid-template-columns:1fr}
+  .pack-item{grid-template-columns:24px minmax(0,1fr) auto}
+  .pack-item .pvol{display:none}
+}
+
+@media(max-width:420px){
+  .dir-row{grid-template-columns:1fr 1fr}
+  .speed-row{grid-template-columns:56px 1fr 3em}
+  .vol{grid-template-columns:56px 1fr 2.5em}
+  .page-tabs .nav-tab{padding:7px 6px}
+  .brand small{font-size:9px}
+}
+
+@media(min-width:1800px){
+  .shell{max-width:1800px;margin:0 auto}
 }
 </style>
 </head>
@@ -390,6 +430,23 @@ label{color:var(--text);font-weight:600}
         <button class="btn" id="mode_dc" onclick="setMode('dc')">DC</button>
       </div>
       <div class="hint" data-i18n="mode_hint">DCC — цифровое управление с рельс. DC — управление от напряжения на рельсах.</div>
+    </div>
+  </div>
+
+  <!-- On phones the sidebar is hidden; this accordion keeps the configuration
+       actions (constructor, pack import/export) reachable. Hidden on wide screens. -->
+  <div class="panel mobile-config" data-page="settings" style="display:none" id="panel_config">
+    <div class="panel-hd" id="hd_config" onclick="togglePanel('config')">
+      <h2 data-i18n="grp_sound">Конфигурация</h2>
+      <span class="chev" id="chev_config">▸</span>
+    </div>
+    <div class="bd" id="bd_config" style="display:none">
+      <div style="display:grid;gap:6px">
+        <button class="set-item" onclick="showSetting('panel_snd')" data-i18n="nav_snd">Звуки</button>
+        <button class="set-item" onclick="openSoundEditor('mix')" data-i18n="nav_schemes">Конструктор Блок Схем</button>
+        <label class="set-item" for="pack_file" data-i18n="nav_pack_import" data-i18n-title="pack_hint" title="Формат .asp — контейнер звукового пакета и звуковой схемы">Импорт звукового пакета</label>
+        <button class="set-item" onclick="exportSoundPack()" data-i18n="nav_pack_export">Экспорт звукового пакета</button>
+      </div>
     </div>
   </div>
 
@@ -603,7 +660,7 @@ hint_web:'Управление мотором и функциями — с ве�
 hint_rails:'Управление — с рельс. По умолчанию режим DCC; включите «DC», чтобы управлять от напряжения на рельсах.',
 info_title:'Информация',info_device:'Устройство',info_placeholder:'ТЕПЛОВОЗ',save:'Сохранить',
 info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Состояние',
-set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Звук',grp_settings:'Настройки',grp_service:'Сервис',
+set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Конфигурация',grp_settings:'Настройки',grp_service:'Сервис',
 nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Звуки',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_pack_import:'Импорт звукового пакета',nav_pack_export:'Экспорт звукового пакета',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
 bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',
@@ -665,7 +722,7 @@ hint_web:'Motor and function control come from the web interface.',
 hint_rails:'Control comes from the rails. DCC by default; enable «DC» to control from track voltage.',
 info_title:'Information',info_device:'Device',info_placeholder:'LOCOMOTIVE',save:'Save',
 info_fw:'Firmware version',info_addr:'Address',info_state:'State',
-set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Sound',grp_settings:'Settings',grp_service:'Service',
+set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Configuration',grp_settings:'Settings',grp_service:'Service',
 nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sounds',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_pack_import:'Import sound pack',nav_pack_export:'Export sound pack',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
 bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',
@@ -2907,7 +2964,8 @@ function init(){
   renderMode();
   loadDevice();
   loadWifi();
-  loadLibrary();
+  /* The sound library is loaded lazily by showPage('snd'). Scanning hundreds
+     of files at startup delayed the first paint and the status requests. */
   loadBemfCal();
   refreshStatus();
   startStatusPoll();

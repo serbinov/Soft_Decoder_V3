@@ -13,6 +13,7 @@
 param(
     [string]$SoundDir = "",
     [string]$Output = "",
+    [string]$OnlyList = "",
     [int]$Rate = 22050,
     [switch]$Stereo
 )
@@ -60,6 +61,18 @@ if ($wavs.Count -eq 0) {
     Write-Err "В папке нет WAV-файлов: $SoundDir"
     exit 1
 }
+if ($OnlyList) {
+    if (-not (Test-Path -LiteralPath $OnlyList -PathType Leaf)) {
+        Write-Err "Список звуков не найден: $OnlyList"
+        exit 1
+    }
+    $OnlyList = (Resolve-Path -LiteralPath $OnlyList).Path
+    $onlyCount = @(Get-Content -LiteralPath $OnlyList -Encoding UTF8 | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") }).Count
+    if ($onlyCount -eq 0) {
+        Write-Err "Список звуков пуст: $OnlyList"
+        exit 1
+    }
+}
 
 $packer = Join-Path $repo "firmware\tools\pack_sounds.py"
 if (-not (Test-Path -LiteralPath $packer -PathType Leaf)) {
@@ -79,11 +92,13 @@ $outDir = Split-Path $Output -Parent
 if ($outDir -and -not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
 
 Write-Info "Звуки : $SoundDir ($($wavs.Count) шт.)"
+if ($OnlyList) { Write-Info "Фильтр: $OnlyList ($onlyCount имён)" }
 Write-Info "Python: $($python.exe)"
 Write-Info "Сборка контейнера (.asp)..."
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 $packArgs = @($python.pre) + @($packer, $SoundDir, "-o", $Output, "--rate", $Rate)
+if ($OnlyList) { $packArgs += @("--only-from", $OnlyList) }
 if ($Stereo) { $packArgs += "--stereo" }
 & $python.exe @packArgs
 if ($LASTEXITCODE -ne 0) { Write-Err "Упаковка не удалась (код $LASTEXITCODE)."; exit $LASTEXITCODE }

@@ -91,15 +91,28 @@ function Add-Stat($rec) {
         [IO.File]::WriteAllText($script:statsPath, $json, (New-Object System.Text.UTF8Encoding($false)))
     } catch { }
 }
-function Get-RunDetails {
+function Get-RunDetails([string]$action = "") {
     $ver = (Get-FirmwareRelease -RepoRoot $repo).version
     $fwBytes = 0; $fwb = Join-Path $fwDir "firmware.bin"
     if (Test-Path -LiteralPath $fwb) { $fwBytes = (Get-Item -LiteralPath $fwb).Length }
-    $snd = 0; $sndBytes = 0
-    if ($sndDir) {
+    $snd = 0; $sndBytes = 0; $wavs = @()
+    $isScheme = ($action -eq "flash_scheme")
+    if ($isScheme) {
+        $manifest = Join-Path $repo "firmware\sound_editor\default_scheme_sounds.txt"
+        if (Test-Path -LiteralPath $manifest -PathType Leaf) {
+            $snd = @(Get-Content -LiteralPath $manifest -Encoding UTF8 |
+                Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") }).Count
+        }
+    } elseif ($sndDir) {
         $wavs = @(Get-ChildItem -LiteralPath $sndDir -Filter *.wav -ErrorAction SilentlyContinue)
         $snd = $wavs.Count
-        if ($snd) { $sndBytes = [int64](($wavs | Measure-Object Length -Sum).Sum) }
+    }
+    $packName = if ($isScheme) { "ADDITIPUS_scheme_sounds.asp" } else { "ADDITIPUS_sounds.asp" }
+    $packPath = Join-Path $repo ("release\" + $packName)
+    if (Test-Path -LiteralPath $packPath -PathType Leaf) {
+        $sndBytes = (Get-Item -LiteralPath $packPath).Length
+    } elseif ($snd -gt 0 -and $wavs.Count -gt 0) {
+        $sndBytes = [int64](($wavs | Measure-Object Length -Sum).Sum)
     }
     return @{ version = $ver; fwBytes = $fwBytes; sndBytes = $sndBytes; sounds = $snd; flasher = (Get-Flasher); esptool = (Get-EsptoolVersion); idf = (Get-IdfPath) }
 }
@@ -139,17 +152,22 @@ function Get-ActionSpec([string]$action) {
         # Does not need a ready release image.
         return @{ script = (Join-Path $web "make_sound_pack.ps1"); args = @(); needsRelease = $false }
     }
+    if ($action -eq "flash_sounds" -or $action -eq "flash_scheme") {
+        # Build .asp from SOUND\ (full or default-scheme only), flash firmware,
+        # then stream the pack over the same COM port with PACK.
+        $a = @()
+        if ($action -eq "flash_scheme") { $a = @("-DefaultScheme") }
+        return @{ script = (Join-Path $web "flash_with_sound_pack.ps1"); args = $a }
+    }
     if ((Get-EsptoolExe) -or (Get-IdfPath)) {
         # Preferred: esptool writes and self-verifies the hash.
         switch ($action) {
             "flash"        { return @{ script = $esptool; args = @() } }
-            "flash_sounds" { return @{ script = $esptool; args = @("-Sounds") } }
         }
     } else {
         # Fallback: pure-PowerShell ROM flasher (no ESP-IDF needed).
         switch ($action) {
             "flash"        { return @{ script = $standalone; args = @("-NoErase", "-NoSounds") } }
-            "flash_sounds" { return @{ script = $standalone; args = @("-NoErase") } }
         }
     }
     if ($action -eq "ota") { return @{ script = (Join-Path $web "make_ota.ps1"); args = @() } }
@@ -289,7 +307,7 @@ while ($listener.IsListening) {
                 if ($cur.done -and -not $cur.recorded) {
                     $cur.recorded = $true
                     if ($cur.action -ne "build" -and $cur.action -ne "pack") { try {
-                        $d = Get-RunDetails
+                        $d = Get-RunDetails $cur.action
                         $fin = Get-Date
                         Add-Stat ([ordered]@{
                             ts = $fin.ToString("yyyy-MM-dd HH:mm:ss")

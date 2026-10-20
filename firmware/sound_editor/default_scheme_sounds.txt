@@ -1,0 +1,33 @@
+# Sounds referenced by the built-in default project ("Тепловоз ЧМЭ3").
+# Kept in sync with blocks.html defaultProject()/compile() by test_blocks_editor.js.
+Air_Compressor_Idle.wav
+Hand_Brake_Apply.wav
+Russische-Durchsage__8-Gleis1-Vorsicht-Zug-fährt-ab.wav
+abkuppeln.wav
+ankuppeln.wav
+brake-squeal-02-loop1.4.wav
+bremse-anlegen_lokbremse.wav
+bremstaste-_1.wav
+curve-squeal-speed2-loop1.5.wav
+e-motor-deep-loop1.4.wav
+horn-low-exit.wav
+horn-low-loop.wav
+lüfter_loop_1.1.wav
+ms-end.wav
+notch_2-loop1.4.wav
+notch_3-loop1.3.wav
+notch_4-loop1.1.wav
+notch_5-loop1.3.wav
+notch_6-loop1.3.wav
+notch_7-loop1.3.wav
+notch_8-loop1.1.wav
+richtungsumschalter-vorwärts.wav
+s-loop1.1.wav
+sanden-loop1.7.wav
+schaffnerpfiff_1.wav
+switch-flange_1.wav
+turbo-loop1.1.wav
+türe-auf_führerstand.wav
+türe-zu_führerstand.wav
+vorwärts-nach-gleis_3_alexander-russian.wav
+whistle-loop1.5.wav

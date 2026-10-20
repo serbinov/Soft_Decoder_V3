@@ -21,6 +21,16 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
   body{display:flex;flex-direction:column;overflow:hidden}
+  .boot-overlay{position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(6,10,18,.72);backdrop-filter:blur(2px)}
+  .boot-overlay.hide{display:none}
+  .boot-card{width:min(430px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+  .boot-title{font-size:16px;font-weight:700;margin-bottom:6px}
+  .boot-text{font-size:12px;color:var(--muted);min-height:18px;margin-bottom:12px;overflow-wrap:anywhere}
+  .boot-track{height:10px;border:1px solid var(--line);border-radius:6px;background:var(--input,var(--panel2));overflow:hidden}
+  .boot-track i{display:block;height:100%;width:0;background:var(--accent);transition:width .18s ease}
+  .boot-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;font-size:11px;color:var(--muted)}
+  .boot-skip{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:7px;padding:6px 10px;font:inherit;font-size:11px;cursor:pointer}
+  .boot-skip:hover{border-color:var(--accent)}
   header.top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
   .hd-left{display:flex;align-items:center;gap:8px;justify-self:start;min-width:0}
   .hd-mid{display:flex;align-items:center;gap:8px;justify-self:center;flex-wrap:wrap}
@@ -160,6 +170,17 @@
 </style>
 </head>
 <body>
+<div class="boot-overlay" id="boot_overlay" role="dialog" aria-modal="true" aria-labelledby="boot_title">
+  <div class="boot-card">
+    <div class="boot-title" id="boot_title" data-i18n="boot_title">Загрузка редактора…</div>
+    <div class="boot-text" id="boot_text" data-i18n="boot_project">Подготовка проекта…</div>
+    <div class="boot-track" id="boot_track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="boot_bar"></i></div>
+    <div class="boot-meta">
+      <span id="boot_pct">0%</span>
+      <button type="button" id="boot_skip" class="boot-skip" data-i18n="boot_skip">Продолжить без загрузки</button>
+    </div>
+  </div>
+</div>
 <header class="top">
   <div class="hd-left">
     <button id="b_pal" class="mob" title="Палитра" data-i18n-title="palette">☰</button>
@@ -316,7 +337,8 @@ v_engine_entry:"Вход двигателя должен быть тихим.",v
 v_bad_aux:"Недопустимый AUX-канал.",v_bad_logic:"Недопустимая логическая операция.",v_bad_engine_port:"Связь от двигателя указывает на несуществующую градацию скорости.",v_engine_out_bind:"Выход двигателя нельзя подключить к блоку выхода: привязки выходов не поддерживают диапазон скорости.",v_need_fn:"Задайте F-клавишу или связь с блоком.",v_output_no_src:"У выхода нет источника. Подключите «Вход (Fx)» (или блок, управляемый им).",v_engine_word:"Двигатель",v_name_l:"«",v_name_r:"»",v_multiple_a:" используется несколькими блоками: ",v_link_dropped_src:"Связь из блока не поддерживается: нет завершения звука.",v_link_dropped_dst:"Связь в блок не поддерживается: у блока нет звука.",v_no_link_in:"Нет входящей связи — блок недостижим на устройстве.",v_unreachable:"Недостижимое состояние: ",v_voices_a:"Эффектов ",v_voices_b:" > 19: одновременно смогут звучать не более 19.",v_cue_empty:"У блока «Звук» не выбрана схема — он ничего не запускает.",v_logic_bind:"Прямая связь «Переменная/Задержка → Выход» не задаёт условие: выход будет управляться только F-клавишей (и гейтами направления/движения).",v_logic_bind_complex:"Условие выхода поддерживает не более двух сравнений с числом; сравнение с переменной (rhsVar) и более двух условий не переносятся.",
 mode_mix:"Миксы",mode_scheme:"Звуковые схемы",mode_hint:"Режим редактирования",
 scheme_sel:"Звуковые схемы",scheme_add:"+ Новая схема",scheme_del:"Удалить схему",scheme_rename:"Переименовать схему",scheme_name_label:"Название схемы",scheme_new:"Новая схема",scheme_empty:"Схем не задано — создайте схему.",
-scheme_device_note:"Схема запускается входящей связью (от «Вход (Fx)», выхода «Двигателя» или другого блока).",block_type:"Тип",cue_scheme:"Звуковая схема",scheme_none:"— нет —",cue_create:"Создать",back_to_editor:"← Вернуться в редактор",f_or_var:"или переменная",v_bad_id:"Некорректный id состояния: ",v_bad_effect:"Некорректный эффект: "
+scheme_device_note:"Схема запускается входящей связью (от «Вход (Fx)», выхода «Двигателя» или другого блока).",block_type:"Тип",cue_scheme:"Звуковая схема",scheme_none:"— нет —",cue_create:"Создать",back_to_editor:"← Вернуться в редактор",f_or_var:"или переменная",v_bad_id:"Некорректный id состояния: ",v_bad_effect:"Некорректный эффект: ",
+boot_title:"Загрузка редактора…",boot_project:"Подготовка проекта…",boot_assets:"Подготовка звуков…",boot_sounds:"Загрузка звуков",boot_ready:"Готово",boot_partial:"Не удалось загрузить звуков: ",boot_offline:"Устройство недоступно — звуки загрузятся по запросу",boot_skip:"Продолжить без загрузки",boot_sim:"Загрузка симулятора…",boot_files:"файлов"
 },
 en:{
 doc_title:"Block Scheme Constructor",brand_sub:"Block Scheme Constructor",palette:"Palette",
@@ -375,7 +397,8 @@ v_engine_entry:"The engine entry must be silent.",v_effect_entry:"The effect ent
 v_bad_aux:"Invalid AUX channel.",v_bad_logic:"Invalid logic operation.",v_bad_engine_port:"Engine link points to a non-existent speed band.",v_engine_out_bind:"An engine output cannot drive an output block: output bindings have no speed range.",v_need_fn:"Set an F-key or a link to a block.",v_output_no_src:"This output has no source. Connect an «Input (Fx)» (or a block driven by it).",v_engine_word:"Engine",v_name_l:"\"",v_name_r:"\"",v_multiple_a:" is used by several blocks: ",v_link_dropped_src:"Link from this block is not supported: the sound has no end event.",v_link_dropped_dst:"Link into this block is not supported: the block has no sound.",v_no_link_in:"No incoming link — the block is unreachable on the device.",v_unreachable:"Unreachable state: ",v_voices_a:"Effects ",v_voices_b:" > 19: at most 19 can sound simultaneously.",v_cue_empty:"The Sound block has no scheme selected and does nothing.",v_logic_bind:"A direct Variable/Delay → Output link has no condition: the output is controlled only by the F-key (and direction/motion gates).",v_logic_bind_complex:"An output condition supports at most two value comparisons; rhsVar and more than two conditions are not copied.",
 mode_mix:"Mixes",mode_scheme:"Sound schemes",mode_hint:"Editing mode",
 scheme_sel:"Sound schemes",scheme_add:"+ New scheme",scheme_del:"Delete scheme",scheme_rename:"Rename scheme",scheme_name_label:"Scheme name",scheme_new:"New scheme",scheme_empty:"No schemes — create one.",
-scheme_device_note:"The scheme starts from an incoming link (from Input (Fx), an Engine output, or another block).",block_type:"Type",cue_scheme:"Sound scheme",scheme_none:"— none —",cue_create:"Create",back_to_editor:"← Return to editor",f_or_var:"or variable",v_bad_id:"Invalid state id: ",v_bad_effect:"Invalid effect: "
+scheme_device_note:"The scheme starts from an incoming link (from Input (Fx), an Engine output, or another block).",block_type:"Type",cue_scheme:"Sound scheme",scheme_none:"— none —",cue_create:"Create",back_to_editor:"← Return to editor",f_or_var:"or variable",v_bad_id:"Invalid state id: ",v_bad_effect:"Invalid effect: ",
+boot_title:"Loading editor…",boot_project:"Preparing project…",boot_assets:"Preparing sounds…",boot_sounds:"Loading sounds",boot_ready:"Ready",boot_partial:"Failed to load sounds: ",boot_offline:"Device offline — sounds will load on demand",boot_skip:"Continue without loading",boot_sim:"Loading simulator…",boot_files:"files"
 }
 };
 let lang="ru";
@@ -2016,7 +2039,18 @@ async function refreshStatus(){
   try{const ax=await req("/api/aux/cfg");deviceAux=ax.aux||[];}catch(e){deviceAux=[];}
   refreshButtons();
 }
-async function fetchAssets(files,force){for(const f of files){if(!force&&assets[f])continue;if(force)delete assets[f];try{const a=await req("/api/sound/graph/asset?file="+encodeURIComponent(f));assets[f]=a.asset;}catch(e){delete assets[f];}}assetsReady=true;}
+async function fetchAssets(files,force,progress){
+  const list=Array.from(files||[]);
+  let done=0;
+  for(const f of list){
+    if(!force&&assets[f]){done++;if(progress)progress(done,list.length,f);continue;}
+    if(force)delete assets[f];
+    try{const a=await req("/api/sound/graph/asset?file="+encodeURIComponent(f));assets[f]=a.asset;}catch(e){delete assets[f];}
+    done++;
+    if(progress)progress(done,list.length,f);
+  }
+  assetsReady=true;
+}
 function refreshAssets(){try{const c=compile();fetchAssets(c.files).then(()=>render()).catch(()=>{});}catch(e){}}
 async function doValidate(){
   if(busy)return;busy=true;refreshButtons();setStatus(t("st_checking"));
@@ -2563,12 +2597,23 @@ function simulatorPayload(){
   return {payload:v.payload,title:project.name,autoFn:null,bindings:desiredBindings(),holdFns,pulseFns};
 }
 async function openSimulator(){
+  unlockSimAudio();
   const src=simulatorPayload();
   if(!src||!src.payload||!src.payload.states){setStatus(t("sim_no_graph"));return;}
   const simFiles=[...new Set((src.payload.states||[]).map(s=>s.file).filter(Boolean))];
   if(simFiles.length){
     try{await fetchAssets(simFiles);}catch(e){}
-    try{await Promise.all(simFiles.map(f=>getSimBuffer(f)));}catch(e){}
+    const missing=simFiles.filter(f=>!simBufferCache[f]);
+    if(missing.length&&getSimAudioCtx()){
+      preloadCancel=false;
+      showBootOverlay(t("boot_title"),t("boot_sim"),0,"0/"+missing.length);
+      await preloadSoundBuffers(missing,(done,total,file)=>{
+        setBootProgress(t("boot_sim"),Math.round(done/Math.max(1,total)*100),done+"/"+total+" · "+file);
+      },()=>preloadCancel);
+      if(!preloadCancel)hideBootOverlay();
+    }else{
+      try{await Promise.all(simFiles.map(f=>getSimBuffer(f)));}catch(e){}
+    }
   }
   closeSimulator();
   const p=src.payload,states=p.states||[];
@@ -2593,11 +2638,25 @@ function getSimAudioCtx(){
   try{simAudioCtx=new Ctx();}catch(e){simAudioCtx=null;}
   return simAudioCtx;
 }
+/* Must run synchronously inside a click: after an await the browser may treat
+   the gesture as expired and keep the AudioContext suspended (silent PC). */
+function unlockSimAudio(){
+  const ctx=getSimAudioCtx();
+  if(ctx&&ctx.state==="suspended"){
+    try{const p=ctx.resume();if(p&&p.catch)p.catch(()=>{});}catch(e){}
+  }
+  return ctx;
+}
 async function getSimBuffer(file){
   const ctx=getSimAudioCtx();if(!ctx||!file)return null;
   if(simBufferCache[file])return simBufferCache[file];
+  let ctrl=null,timer=null;
   try{
-    const res=await fetch("/sound-files/"+encodeURIComponent(file));
+    if(typeof AbortController!=="undefined"){
+      ctrl=new AbortController();
+      timer=setTimeout(()=>{try{ctrl.abort();}catch(e){}},20000);
+    }
+    const res=await fetch("/sound-files/"+encodeURIComponent(file),ctrl?{signal:ctrl.signal}:undefined);
     if(!res.ok)return null;
     const arr=await res.arrayBuffer();
     const buf=await ctx.decodeAudioData(arr);
@@ -2605,6 +2664,97 @@ async function getSimBuffer(file){
     if(assets[file])assets[file].durationMs=Math.max(40,Math.round(buf.duration*1000));
     return buf;
   }catch(e){return null;}
+  finally{if(timer)clearTimeout(timer);}
+}
+
+/* Small worker pool: the decoder HTTP server has few sockets, so loading all
+ * project sounds three-at-a-time is much faster than 64 parallel fetches. */
+async function preloadSoundBuffers(files,onProgress,shouldStop){
+  const list=Array.from(files||[]);
+  let next=0,done=0,failed=0;
+  async function worker(){
+    for(;;){
+      if(shouldStop&&shouldStop())return;
+      const i=next++;
+      if(i>=list.length)return;
+      const f=list[i];
+      const b=await getSimBuffer(f);
+      done++;
+      if(!b)failed++;
+      if(onProgress)onProgress(done,list.length,f);
+    }
+  }
+  await Promise.all([worker(),worker(),worker()]);
+  return {done,failed,total:list.length};
+}
+
+/* ---- boot loading overlay ------------------------------------------- */
+let bootDone=false,bootVisible=true,bootSkipped=false,preloadCancel=false;
+let bootPreloadTotal=0,bootPreloadDone=0,bootStatusTimer=null;
+function bootEl(id){return document.getElementById(id);}
+function setBootProgress(text,pct,detail){
+  const overlay=bootEl("boot_overlay"),bar=bootEl("boot_bar"),pctEl=bootEl("boot_pct"),txt=bootEl("boot_text"),track=bootEl("boot_track");
+  const p=Math.max(0,Math.min(100,Math.round(pct||0)));
+  if(bar)bar.style.width=p+"%";
+  if(pctEl)pctEl.textContent=p+"%";
+  if(track)track.setAttribute("aria-valuenow",String(p));
+  if(txt)txt.textContent=(text||"")+(detail?(" · "+detail):"");
+  if(overlay)overlay.classList.remove("hide");
+  bootVisible=true;
+}
+function showBootOverlay(title,text,pct,detail){
+  const ttl=bootEl("boot_title");
+  if(ttl)ttl.textContent=title||t("boot_title");
+  setBootProgress(text||t("boot_project"),pct||0,detail||"");
+}
+function startStatusPolling(){
+  if(!bootStatusTimer)bootStatusTimer=setInterval(refreshStatus,3000);
+}
+function hideBootOverlay(){
+  const overlay=bootEl("boot_overlay");
+  if(overlay)overlay.classList.add("hide");
+  bootVisible=false;
+  startStatusPolling();
+}
+function finishBoot(text){
+  bootDone=true;
+  setBootProgress(text||t("boot_ready"),100,"");
+  setTimeout(hideBootOverlay,350);
+  startStatusPolling();
+}
+async function startBootPreload(){
+  if(bootDone)return;
+  preloadCancel=false;
+  showBootOverlay(t("boot_title"),t("boot_project"),2,"");
+  let statusOk=false,statusTimer=null;
+  try{
+    statusOk=await Promise.race([
+      refreshStatus().then(()=>true),
+      new Promise(resolve=>{statusTimer=setTimeout(()=>resolve(false),5000);})
+    ]);
+  }catch(e){}
+  if(statusTimer)clearTimeout(statusTimer);
+  if(preloadCancel){hideBootOverlay();return;}
+  if(!statusOk&&!online){finishBoot(t("boot_offline"));return;}
+  let files=[];
+  try{files=[...new Set(compile().files||[])].filter(f=>/\.wav$/i.test(f));}catch(e){}
+  if(!files.length){finishBoot(t("boot_ready"));return;}
+  bootPreloadTotal=files.length;bootPreloadDone=0;
+  try{
+    await fetchAssets(files,false,(done,total)=>{
+      setBootProgress(t("boot_assets"),8+Math.round(done/Math.max(1,total)*22),done+"/"+total);
+    });
+  }catch(e){}
+  if(preloadCancel){hideBootOverlay();return;}
+  if(!getSimAudioCtx()){finishBoot(t("boot_ready"));return;}
+  setBootProgress(t("boot_sounds"),30,"0/"+files.length);
+  const res=await preloadSoundBuffers(files,(done,total,file)=>{
+    bootPreloadDone=done;
+    setBootProgress(t("boot_sounds"),30+Math.round(done/Math.max(1,total)*70),done+"/"+total+" · "+file);
+  },()=>preloadCancel);
+  if(preloadCancel){hideBootOverlay();return;}
+  render();
+  finishBoot(res.failed?t("boot_partial")+res.failed+" / "+files.length:t("boot_ready"));
 }
 function stopSimAudioOne(ch){
   ch.playToken=(ch.playToken|0)+1;
@@ -2625,9 +2775,8 @@ function playSimAudio(ch,st){
   const vol=sim&&sim.muted?0:Math.min(0.85,Math.max(0.02,(st.volume|0)/100*mGain*cGain*0.75));
   const nativeLoop=!!st.loop&&(st.loops||0)===0;
   ch.playing=true;ch.done=false;
-  const ctx=getSimAudioCtx();
+  const ctx=unlockSimAudio();
   if(ctx){
-    if(ctx.state==="suspended"){try{ctx.resume();}catch(e){}}
     const startWithBuf=buf=>{
       if(!sim||ch.playToken!==tok||!buf)return;
       const src=ctx.createBufferSource();
@@ -2899,6 +3048,7 @@ function simStop(update){
 }
 function simStart(){
   if(!sim)return;
+  unlockSimAudio();
   if(sim.running){simStop();return;}
   sim.running=true;sim.prevSpeed=Math.round(sim.speed*255/100);
   if(sim.autoFn!=null&&!sim.autoPressed){sim.autoPressed=true;simPress(sim.autoFn,true);}
@@ -3376,11 +3526,12 @@ function stopPreview(){
   previewName="";
   if(wasDec){try{req("/api/audio/stop",{method:"POST"}).catch(()=>{});}catch(e){}}
 }
-function soundPlayTarget(){try{return localStorage.getItem("aura_sound_play")==="decoder"?"decoder":"pc";}catch(e){return "pc";}}
+const BLOCKS_PLAY_TARGET_KEY="aura_blocks_play_target";
+function soundPlayTarget(){try{return localStorage.getItem(BLOCKS_PLAY_TARGET_KEY)==="decoder"?"decoder":"pc";}catch(e){return "pc";}}
 function togglePlayTarget(){
   stopPreview();
   const next=soundPlayTarget()==="decoder"?"pc":"decoder";
-  try{localStorage.setItem("aura_sound_play",next);}catch(e){}
+  try{localStorage.setItem(BLOCKS_PLAY_TARGET_KEY,next);}catch(e){}
   renderPlayTargetBtn();
 }
 function renderPlayTargetBtn(){
@@ -3405,7 +3556,7 @@ async function playFile(name){
       const a=new Audio("/sound-files/"+encodeURIComponent(name));a.volume=0.8;
       previewAudio=a;previewName=name;
       a.onended=()=>{if(previewAudio===a){previewAudio=null;previewName="";}};
-      a.onerror=()=>{if(previewAudio===a){previewAudio=null;previewName="";}};
+      a.onerror=()=>{if(previewAudio===a){previewAudio=null;previewName="";setStatus(t("st_not_playing")+name);}};
       await a.play();
       setStatus(t("st_playing_dev_a")+name+t("st_playing_pc_b"));
     }
@@ -4418,8 +4569,10 @@ document.querySelectorAll("header.top .tm").forEach(tm=>{
 document.addEventListener("click",()=>document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open")));
 window.addEventListener("keydown",ev=>{if(ev.key==="Escape"){document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));if(textMode){textMode=false;$("b_text").classList.remove("on");$("stage").style.cursor="";setStatus(t("ready"));}}});
 applyStatic();
-loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();refreshAssets();refreshStatus();setInterval(refreshStatus,3000);
-  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight};
+loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
+if($("boot_skip"))$("boot_skip").onclick=()=>{preloadCancel=true;bootSkipped=true;bootDone=true;hideBootOverlay();};
+startBootPreload();
+  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
 })();
 </script>
 </body>

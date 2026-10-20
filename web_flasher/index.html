@@ -104,8 +104,10 @@
       <p class="hint">Собирает <code>release\ADDITIPUS_sounds.asp</code> из папки <code>SOUND\</code> для загрузки на странице «Загрузка звуков» декодера (до 400 звуков, IMA ADPCM ~4×, реальные имена). Нужен Python 3.</p>
       <button class="big" id="btn_flash">Прошить</button>
       <p class="hint">Полная прошивка по USB (загрузчик + разделы + приложение). Настройки/NVS сохраняются.</p>
-      <button class="big" id="btn_flash_snd">Прошить + звуки</button>
-      <p class="hint">То же плюс заливка WAV из папки <code>SOUND\</code> во внешнюю память (до 20 звуков, по UART).</p>
+      <button class="big" id="btn_flash_snd">Прошить + полный пакет звуков</button>
+      <p class="hint">Собирает полный <code>release\ADDITIPUS_sounds.asp</code> из <code>SOUND\</code> (до 400 звуков, IMA ADPCM), прошивает декодер и передаёт пакет по USB/COM кадрами по 32 КБ (<code>PACK-DATA</code>) — без Wi-Fi и без отдельной заливки каждого звука. Текущие звуки на устройстве заменяются.</p>
+      <button class="big" id="btn_flash_scheme">Прошить + звуки схемы</button>
+      <p class="hint">Собирает <code>release\ADDITIPUS_scheme_sounds.asp</code> только из звуков, на которые ссылается типовой проект «Тепловоз ЧМЭ3» (список <code>firmware\sound_editor\default_scheme_sounds.txt</code>). Лишние звуки из <code>SOUND\</code> не загружаются. Затем прошивка и пакет по USB/COM, без Wi-Fi.</p>
     </section>
 
     <section>
@@ -144,10 +146,10 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + звуки", ota: "Создать OTA", pack: "Создать звуковой контейнер" };
+const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + полный пакет звуков", flash_scheme: "Прошить + звуки схемы", ota: "Создать OTA", pack: "Создать звуковой контейнер" };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function setAlert(msg, kind){ const el=$("alert"); if(!msg){el.style.display="none";el.textContent="";return;} el.className="alert "+(kind||""); el.textContent=msg; el.style.display="block"; }
-function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_pack","btn_flash","btn_flash_snd","btn_refresh"]) $(id).disabled=!on; }
+function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_pack","btn_flash","btn_flash_snd","btn_flash_scheme","btn_refresh"]) $(id).disabled=!on; }
 
 /* ---------- colored log ---------- */
 let logBuf="";
@@ -209,7 +211,7 @@ async function refreshStats(){
     const items = Array.isArray(s.items) ? s.items.slice().reverse() : [];
     for(const it of items){
       const tr = document.createElement("tr");
-      const isSnd = it.action === "flash_sounds";
+      const isSnd = it.action === "flash_sounds" || it.action === "flash_scheme";
       const sizeTxt = fmtBytes(isSnd ? ((it.fwBytes||0)+(it.sndBytes||0)) : it.fwBytes);
       const cells = [
         it.ts || "",
@@ -280,6 +282,7 @@ $("btn_ota").addEventListener("click", ()=>run("ota", ACT_LABEL.ota));
 $("btn_pack").addEventListener("click", ()=>run("pack", ACT_LABEL.pack));
 $("btn_flash").addEventListener("click", ()=>run("flash", ACT_LABEL.flash));
 $("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds", ACT_LABEL.flash_sounds));
+$("btn_flash_scheme").addEventListener("click", ()=>run("flash_scheme", ACT_LABEL.flash_scheme));
 window.addEventListener("load", ()=>{ refreshStatus(); refreshStats(); ping(); setInterval(ping, 3000); });
 function ping(){ try{ fetch("/api/ping",{cache:"no-store"}).catch(()=>{}); }catch(e){} }
 </script>

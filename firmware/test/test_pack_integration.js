@@ -250,6 +250,20 @@ function lastXhr(ctx) {
   return xhrs;
 }
 
+test('Python pack --only-from keeps only requested sounds', () => {
+  const src = tmpDir('only-src');
+  writePcmWav(path.join(src, 'Keep.wav'), 22050, 1, 64);
+  writePcmWav(path.join(src, 'Drop.wav'), 22050, 1, 64);
+  const list = path.join(src, 'only.txt');
+  fs.writeFileSync(list, '# filtered pack\nKeep.wav\n', 'utf8');
+  const asp = path.join(tmpDir('only-asp'), 'only.asp');
+  runPython([src, '--only-from', list, '-o', asp]);
+  const out = tmpDir('only-unpack');
+  runPython([asp, '--unpack', '-o', out]);
+  assert.ok(fs.existsSync(path.join(out, 'Keep.wav')), 'selected sound is packed');
+  assert.ok(!fs.existsSync(path.join(out, 'Drop.wav')), 'unselected sound is not packed');
+});
+
 test('JS export -> Python unpack: real files, scheme manifest and volumes', async t => {
   const dir = tmpDir('export');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

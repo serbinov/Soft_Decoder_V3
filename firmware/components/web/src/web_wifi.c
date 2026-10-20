@@ -22,6 +22,8 @@
 
 static bool s_wifi_started;
 static char s_ap_ip[16];
+/* Must stay valid for the whole DHCP server lifetime (option 114 copies it). */
+static char s_captive_uri[32];
 static uint8_t s_ap_ip_bytes[4];
 static uint32_t s_autooff_iter_cap;
 static uint32_t s_dns_iter_cap;
@@ -107,8 +109,10 @@ static uint8_t wifi_pick_channel(void)
 {
     wifi_scan_config_t sc = { 0 };
     sc.show_hidden = true;
-    sc.scan_time.active.min = 80;
-    sc.scan_time.active.max = 200;
+    /* Quick scan: the AP must come up fast after power-on. A full 13-channel
+     * 80..200 ms scan delayed association and DHCP by several seconds. */
+    sc.scan_time.active.min = 20;
+    sc.scan_time.active.max = 60;
     if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
         return 1;
     }
@@ -277,6 +281,18 @@ esp_err_t wifi_start(const settings_config_t *cfg)
         dns.ip.u_addr.ip4.addr = ap_addr.addr;
         err = esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns);
         if (err != ESP_OK) return err;
+
+        /* DHCP option 114 (RFC 8910): Windows 10/11 and Android use this URI
+         * for the "Sign in to network" / captive portal page. This makes the
+         * decoder page open instead of the NCSI msftconnecttest redirect. */
+        snprintf(s_captive_uri, sizeof(s_captive_uri), "http://" IPSTR "/",
+                 IP2STR(&ap_addr));
+        err = esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
+                                     ESP_NETIF_CAPTIVEPORTAL_URI,
+                                     s_captive_uri, (uint32_t)strlen(s_captive_uri));
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "DHCP captive portal URI option failed: %s", esp_err_to_name(err));
+        }
     }
 
     err = esp_wifi_start();

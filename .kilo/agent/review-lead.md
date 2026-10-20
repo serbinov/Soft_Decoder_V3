@@ -21,7 +21,8 @@ Workflow:
    file:line. Drop or downgrade anything not reproducible in the code; mark
    verified vs unverified.
 3. Deduplicate (the same defect often appears in two domains; keep the most
-   specific location). Do not re-report FIX-6..FIX-11 from FIXES_LOG.md as new.
+   specific location). Do not re-report known issues listed in
+   firmware/docs/known_issues.md as new.
 4. Produce one report: a table sorted by severity
    (ID | severity | file:line | issue | verified), then per-finding evidence
    and suggested fix. End with a short "coverage / areas OK" note and any

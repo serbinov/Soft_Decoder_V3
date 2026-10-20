@@ -182,7 +182,7 @@ void motor_bemf_diag(motor_bemf_diag_t *d)
     d->error = -5;
 }
 
-void motor_bemf_adc_dump(uint16_t *b1, uint16_t *b2, uint16_t *rail)
+esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1, uint16_t *b2, uint16_t *rail)
 {
     if (b1) {
         *b1 = 1;
@@ -193,11 +193,6 @@ void motor_bemf_adc_dump(uint16_t *b1, uint16_t *b2, uint16_t *rail)
     if (rail) {
         *rail = 3;
     }
-}
-
-esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1, uint16_t *b2, uint16_t *rail)
-{
-    motor_bemf_adc_dump(b1, b2, rail);
     return g_adc_err;
 }
 
@@ -244,11 +239,6 @@ void motor_emergency_stop(void)
 void audio_stop_all(void)
 {
     g_audio_stop_calls++;
-}
-
-bool web_fs_busy(void)
-{
-    return g_web_busy != 0;
 }
 
 esp_err_t settings_cv_write(uint16_t idx, uint8_t val)
@@ -722,10 +712,12 @@ static void test_provision_run_put_write_fail(void)
 static void test_ensure_uart_driver_idempotent(void)
 {
     s_uart_driver_installed = false;
+    mock_uart_driver_install_calls = 0;
     ensure_uart_driver();
     ensure_uart_driver(); /* second call returns on the installed guard */
+    TEST_ASSERT_EQUAL_INT(1, mock_uart_driver_install_calls);
+    TEST_ASSERT_TRUE(s_uart_driver_installed);
     s_uart_driver_installed = false;
-    TEST_PASS();
 }
 
 static void test_provision_run_bad_put_slot(void)
@@ -772,9 +764,12 @@ static void test_provision_try_paths(void)
 
 static void test_provision_listener_start(void)
 {
+    int before = mock_task_create_calls;
     provision_listener_start();
+    TEST_ASSERT_EQUAL_INT(before + 1, mock_task_create_calls);
     mock_task_create_ok = 0;
     provision_listener_start(); /* task-create failure branch */
+    TEST_ASSERT_EQUAL_INT(before + 2, mock_task_create_calls);
     mock_task_create_ok = 1;
 }
 
@@ -947,10 +942,12 @@ static void test_uart_driver_install_failure_logged(void)
 {
     s_uart_driver_installed = false; /* force the install path */
     mock_uart_driver_install_err = ESP_FAIL;
+    mock_uart_driver_install_calls = 0;
     provision_listener_start(); /* covers the ESP_LOGW branch */
+    TEST_ASSERT_EQUAL_INT(1, mock_uart_driver_install_calls);
+    TEST_ASSERT_FALSE(s_uart_driver_installed); /* failed install is retried */
     mock_uart_driver_install_err = 0;
-    /* The failed install does not set the installed flag; mark it so later
-     * tests do not retry the (now mocked) driver install. */
+    /* Mark it so later tests do not retry the (now mocked) driver install. */
     s_uart_driver_installed = true;
 }
 

@@ -394,8 +394,8 @@ void app_main(void)
 
     /* Restore manifest metadata BEFORE web_init(): web_init() caches the
      * categories and the function map in RAM, so recovering afterwards would
-     * leave the defaults active for the whole session. web_log_event() is safe
-     * before web_init() (it buffers into the journal). */
+     * leave the defaults active for the whole session. web_log_event() is a
+     * no-op before web_init(), so recovery messages are not journaled. */
     recover_tracks_from_storage();
 
     {

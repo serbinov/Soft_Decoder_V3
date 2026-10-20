@@ -1,17 +1,43 @@
 ﻿# Журнал изменений (Soft_Decoder_V3)
 
 Хронология проекта. Текущая версия — в `firmware/version.txt`;
-устройство и архитектура — в `firmware/ARCHITECTURE.md`. Ранее отдельные логи
-(`firmware/BUGFIX.md`, `firmware/FIXES.md`, `Отчет_изменения_2026-08-27.md`)
-объединены сюда.
+устройство и архитектура — в `firmware/ARCHITECTURE.md`.
 
 ## Сборка
 
 Проект собирается через **ESP-IDF 6.0** (`idf.py`; см. `README.md` и
-`firmware/ARCHITECTURE.md` §4). PlatformIO больше не используется — упоминания
-`pio run` в исторических записях ниже относятся к версиям до перехода на ESP-IDF.
+`firmware/ARCHITECTURE.md` §4). Исторические записи ниже могут упоминать прежнюю
+систему сборки.
 
 ## Релизы
+
+### 2026-10-20 — очистка мёртвого кода, зависимостей и документации
+
+- Удалены неиспользуемые API: `settings_active_scheme_*`, `sound_engine_is_on`,
+  `sound_graph_file_used`, `web_get_function_state`, `web_fs_busy`,
+  `audio_voice_alloc/release`, `audio_voice_set_rate/is_active/position`,
+  `audio_play/audio_stop`, `auxio_set_output`, `motor_bemf_adc_dump`,
+  `motor_set_bemf_max_fraction`, `storage_ext_available`, `settings_func_bind_find`.
+- Удалены мёртвые поля Wi-Fi-конфига (`sta_ssid`, `sta_password`, `port`, `hold`)
+  и неиспользуемые макросы; AP остаётся единственным режимом.
+- Удалены исторические `CODE_REVIEW_REPORT.md`, `FIXES_LOG.md`,
+  `SOUND_ENGINE_IMPLEMENTATION.md`, `SOUND_ENGINE_ROADMAP.md`. Актуальные
+  ограничения и открытые дефекты перенесены в `firmware/docs/known_issues.md`;
+  `BEMF_DIAGNOSTICS.md` переписан под текущую прошивку.
+- Удалены все упоминания прежней системы сборки и дублирующие bat-обёртки
+  `build_idf`, `flash_idf`, `flash_firmware`, `build_ota_bin`,
+  `build_flash_tool_files`. Канонические команды — `idf_build.ps1` и
+  `build_firmware.bat`.
+- Убраны неиспользуемые REQUIRES: `audio`/`sound`/`storage` — `esp_timer`,
+  `storage` — `nvs_flash`, `web` — `esp_driver_gpio`/`pinmap`; добавлены
+  недостающие прямые зависимости `track` и `provision`.
+- Обновлены `esp_littlefs` 1.22.3 → 1.23.0 и upstream `littlefs` 2.11.3.
+- Усилены host-тесты: добавлены проверки ADPCM-воспроизведения, live volume,
+  emergency endpoint, graph GET, Wi-Fi fallback; fuzz-тесты проверяют инварианты.
+- Проверка: 800 C-тестов и 68 JS/Python-тестов PASS, чистая сборка ESP-IDF
+  успешна, покрытие host-строк 92,9 % (8266/8893), ветвей — 76,2 % (6449/8468).
+- Добавлены branch-тесты парсеров `ima_adpcm`, `sound_graph`, `settings` и
+  error-path `web.c`; CI-workflow запускает host-тесты и ASan+UBSan.
 
 ### 2026-10-17 — редактор: два раздела, простой двигатель и вход Старта
 
@@ -68,7 +94,7 @@
   описан шаг проверки/встраивания офлайн-редактора блоков.
 - Повторное код-ревью 2026-10-17: 0 CRITICAL, 1 HIGH (REV-W36 — рассогласование
   политики имён WAV), 4 MEDIUM (W37, S29, W38, W39), 4 LOW; исправления не
-  применялись, полный отчёт — `firmware/CODE_REVIEW_REPORT.md` §6.
+  применялись; исторический отчёт доступен в истории git.
 - Проверка: host-наборы `ALL TEST SUITES PASSED` (790 C-тестов, 18 наборов),
   `node --test test/test_web_ui.js` — 27 PASS, покрытие host-строк —
   92,8 % (8237/8875), Python-проверки `test_release_artifacts.py` (7) и
@@ -240,6 +266,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-20 (v0.10) — chore(cleanup): remove dead code, update deps/docs and add CI test gates
 - 2026-10-20 (v0.10) — feat(sound,web): sound pack import/export, ADPCM compression and scheme editor sync
 - 2026-10-19 (v0.10) — feat(sound,sound-editor): brake scheme port, simulator UI, block legends, F-key lock, scheme creation and raised graph limits
 - 2026-10-19 (v0.10) — feat(web,sound-editor): flowchart export, UI cleanup, inspector and CV/sound filters
@@ -281,7 +308,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 - 2026-09-30 (v0.9) — feat(flasher): reliable esptool flashing, web control panel, cleanup
 - 2026-09-30 (v0.9) — fix: resolve review CRITICAL/HIGH (REV-A2/S1/W1/M2/M3)
 - 2026-09-30 (v0.9) — docs: verify and fix partition/dependency references
-- 2026-09-30 (v0.9) — chore(build): migrate to ESP-IDF 6.0, drop PlatformIO, add VS Code setup
+- 2026-09-30 (v0.9) — chore(build): migrate to ESP-IDF 6.0, add VS Code setup
 - 2026-09-28 (v0.8) — feat(web): check device online every 5 s; freeze uptime when offline
 - 2026-09-27 (v0.8) — docs: refresh stale data; release v0.8
 - 2026-09-27 (v0.8) — feat(web): show Additipus as the CV8 manufacturer name
@@ -316,7 +343,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 
 ## 2026-09-25 — Ревью архитектуры, safety-фиксы, самотест/HIL
 
-Версия прошивки: **0.7** (`version.txt`). Подробности — `firmware/FIXES_LOG.md`.
+Версия прошивки: **0.7** (`version.txt`). Исторический журнал доступен в истории git.
 
 ### Исправления (по итогам ревью)
 - **FIX-1**: service-mode ACK вынесен в отдельную задачу `dcc_ack` — задача
@@ -398,7 +425,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Дата: 2026-09-18.
 
 Результат проверки после правок:
-- Сборка `platformio run -e esp32-s3-devkitc-1` — **SUCCESS** (RAM 13.8%, Flash 89.7%).
+- Сборка прошивки — **SUCCESS** (RAM 13.8%, Flash 89.7%).
 - Нативные тесты (`test/run_tests.ps1`) — **все наборы PASSED** (в т.ч. `test_settings` 32/32, `test_web_util` 23/23).
 
 Ниже — список найденных проблем и что сделано по каждой.
@@ -602,8 +629,8 @@ Wi-Fi и несёт риск регрессии звука, который не�
 Проект: DCC-декодер (ESP32-S3), прошивка `firmware/`
 
 Статус проверки на момент записи:
-- Сборка прошивки `platformio run -e esp32-s3-devkitc-1` — **SUCCESS**.
-- Нативные тесты `platformio test -e test_native` — **35/35 PASSED** (`test_dcc` 25, `test_settings` 10).
+- Сборка прошивки — **SUCCESS**.
+- Нативные тесты — **35/35 PASSED** (`test_dcc` 25, `test_settings` 10).
 
 ---
 
@@ -784,11 +811,11 @@ Wi-Fi и несёт риск регрессии звука, который не�
 
 **Причины и решения.**
 - **Нет host-компилятора** → установлен GCC 15.2.0 (`scoop install gcc`).
-- **`InvalidSchema: Missing dependencies for SOCKS support`** — в системе SOCKS-прокси, в venv PlatformIO не было PySocks → установлен `pysocks` в venv (офлайн-колесо).
-- **`-Dstatic=` ломал `static inline` в заголовках MinGW** (`multiple definition of sscanf/printf`) → флаг убран из `platformio.ini`; снятие `static` ограничено белым ящиком (`#define static` / `#undef static` вокруг `#include .../dcc.c` и `.../settings.c` в тестах).
+- **`InvalidSchema: Missing dependencies for SOCKS support`** — в системе SOCKS-прокси, в Python venv не было PySocks → установлен `pysocks` в venv (офлайн-колесо).
+- **`-Dstatic=` ломал `static inline` в заголовках MinGW** (`multiple definition of sscanf/printf`) → флаг убран из конфигурации сборки; снятие `static` ограничено белым ящиком (`#define static` / `#undef static` вокруг `#include .../dcc.c` и `.../settings.c` в тестах).
 - В `test_libs/teststubs/include/freertos/FreeRTOS.h` добавлены no-op `portMUX_TYPE`, `portENTER_CRITICAL`, `portEXIT_CRITICAL` для сборки `dcc_reload_config` в тестах.
 
-**Файлы.** `platformio.ini`, `test/test_dcc/test_dcc.c`, `test/test_settings/test_settings.c`, `test_libs/teststubs/include/freertos/FreeRTOS.h`.
+**Файлы.** `test/test_dcc/test_dcc.c`, `test/test_settings/test_settings.c`, `test_libs/teststubs/include/freertos/FreeRTOS.h`.
 
 ---
 
@@ -809,7 +836,6 @@ Wi-Fi и несёт риск регрессии звука, который не�
 - `components/web/include/web.h`, `components/web/src/web.c`, `components/web/CMakeLists.txt`
 - `components/settings/include/settings.h`, `components/settings/src/settings.c`
 - `web_ui.html` (генерирует `components/web/include/web_html.h`)
-- `platformio.ini`
 - `test/test_dcc/test_dcc.c`, `test/test_settings/test_settings.c`
 - `test_libs/teststubs/include/freertos/FreeRTOS.h`
 
@@ -825,7 +851,7 @@ Wi-Fi и несёт риск регрессии звука, который не�
 функции F0–F28, защита по току (аппаратная), таймаут потери сигнала,
 контрольная сумма CV и сервисные входы. Прошивка остаётся минимальной.
 
-Сборка: `pio run -e esp32-s3-devkitc-1` → SUCCESS (чистая сборка).
+Сборка: `idf.py build` → SUCCESS (чистая сборка).
 RAM 15.8% (51 908 / 327 680 байт), Flash 83.7% (767 665 / 917 504 байт).
 
 ---
@@ -951,7 +977,7 @@ settings.json-парсер, zip_extract), которых в V3 нет — не �
 - `test/test_settings/test_settings.c` — 8 тестов CV-хранилища (FNV-1a CRC,
   заводские по умолчанию, read-only CV7, factory reset через CV8=8, границы).
 - `test/run_tests.ps1` — запуск через TCC + Unity (как в V0).
-- `platformio.ini` — окружение `test_native`.
+- нативные тесты запускаются через `test/run_tests.ps1`.
 
 Запуск:
 
@@ -1061,9 +1087,8 @@ F1 — на AUX1 (GPIO41) вместо заднего света.
 
 Версия ПО — **v0.3** (отображается в веб-интерфейсе: `<title>` и бренд).
 
-- `firmware/flash_uart.bat [COMx]` — сборка и прошивка МК по UART
-  (`pio run -e esp32-s3-devkitc-1 -t upload --upload-port COMx`),
-  по умолчанию `COM3`.
+- `firmware/idf_build.ps1 -Flash` — сборка и прошивка МК по UART/USB-JTAG,
+  порт определяется автоматически.
 - `firmware/build_ota_bin.bat` — сборка и копирование образа приложения в
   `release/ADDITIPUS_v0.3.bin` для обновления по OTA (через веб-интерфейс).
 - `firmware/build_flash_tool_files.bat` — сборка и копирование файлов для

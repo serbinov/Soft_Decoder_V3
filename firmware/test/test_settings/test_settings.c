@@ -317,9 +317,6 @@ static void test_config_defaults(void)
     TEST_ASSERT_EQUAL_UINT8(1, cfg.wifi_mode);
     TEST_ASSERT_EQUAL_STRING("ADDITIPUS AURA-X", cfg.ap_ssid);
     TEST_ASSERT_EQUAL_STRING("", cfg.ap_password);
-    TEST_ASSERT_EQUAL_STRING("", cfg.sta_ssid);
-    TEST_ASSERT_EQUAL_UINT16(80, cfg.port);
-    TEST_ASSERT_EQUAL_UINT8(1, cfg.hold);
     TEST_ASSERT_EQUAL_UINT8(0, cfg.auto_off_min);
     TEST_ASSERT_EQUAL_UINT8(20, cfg.master_volume);
     TEST_ASSERT_EQUAL_UINT8(20, cfg.engine_volume);
@@ -333,13 +330,9 @@ static void test_config_roundtrip(void)
 {
     settings_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.wifi_mode = 3;
+    cfg.wifi_mode = 1;
     strncpy(cfg.ap_ssid, "MyAP", sizeof(cfg.ap_ssid) - 1);
     strncpy(cfg.ap_password, "secret123", sizeof(cfg.ap_password) - 1);
-    strncpy(cfg.sta_ssid, "Home", sizeof(cfg.sta_ssid) - 1);
-    strncpy(cfg.sta_password, "wpa2pass", sizeof(cfg.sta_password) - 1);
-    cfg.port = 8080;
-    cfg.hold = 0;
     cfg.auto_off_min = 15;
     cfg.master_volume = 55;
     cfg.engine_volume = 70;
@@ -356,10 +349,6 @@ static void test_config_roundtrip(void)
     TEST_ASSERT_EQUAL_UINT8(cfg.wifi_mode, got.wifi_mode);
     TEST_ASSERT_EQUAL_STRING(cfg.ap_ssid, got.ap_ssid);
     TEST_ASSERT_EQUAL_STRING(cfg.ap_password, got.ap_password);
-    TEST_ASSERT_EQUAL_STRING(cfg.sta_ssid, got.sta_ssid);
-    TEST_ASSERT_EQUAL_STRING(cfg.sta_password, got.sta_password);
-    TEST_ASSERT_EQUAL_UINT16(cfg.port, got.port);
-    TEST_ASSERT_EQUAL_UINT8(cfg.hold, got.hold);
     TEST_ASSERT_EQUAL_UINT8(cfg.auto_off_min, got.auto_off_min);
     TEST_ASSERT_EQUAL_UINT8(cfg.master_volume, got.master_volume);
     TEST_ASSERT_EQUAL_UINT8(cfg.engine_volume, got.engine_volume);
@@ -663,6 +652,66 @@ static void test_bemf_use_null_arg(void)
 
 /* ---- Factory reset ---- */
 
+static void test_store_api_invalid_args(void)
+{
+    settings_track_t tr[1] = {{0}};
+    uint8_t cats[1] = {0};
+    settings_func_map_t map[1] = {{0}};
+    settings_aux_cfg_t aux[1] = {{0}};
+    settings_bemf_cal_t cal = {0};
+    size_t n = 0;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_load(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_save(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_tracks_load(NULL, &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_tracks_load(tr, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_tracks_save(NULL, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_tracks_save(tr, SETTINGS_MAX_TRACKS + 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_track_cats_load(NULL, &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_track_cats_load(cats, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_track_cats_save(NULL, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_track_cats_save(cats, SETTINGS_MAX_TRACKS + 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_map_load(NULL, &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_map_load(map, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_map_save(NULL, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_map_save(map, SETTINGS_FUNC_MAP_COUNT + 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_aux_cfg_load(NULL, &n));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_aux_cfg_load(aux, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_aux_cfg_save(NULL, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_aux_cfg_save(aux, SETTINGS_AUX_COUNT + 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_load(NULL));
+    TEST_ASSERT_FALSE(settings_bemf_cal_validate(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_save(NULL));
+    settings_flush_status(NULL); /* no-op */
+    (void)cal;
+}
+
+static void test_store_api_io_errors(void)
+{
+    settings_track_t tr = {0};
+    uint8_t cats = 0;
+    settings_func_map_t map = {0};
+    settings_aux_cfg_t aux = {0};
+
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_tracks_save(&tr, 1));
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_track_cats_save(&cats, 1));
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_func_map_save(&map, 1));
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_aux_cfg_save(&aux, 1));
+    g_set_error = ESP_OK;
+
+    g_commit_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_tracks_save(&tr, 1));
+    g_commit_error = ESP_OK;
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_tracks_save(&tr, 1));
+    mock_sem_take_fail = 0;
+}
+
 static void test_factory_reset(void)
 {
     /* Change a CV and store a calibration, then wipe everything. */
@@ -700,8 +749,7 @@ static void test_factory_reset_clears_all_stores(void)
 {
     settings_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.wifi_mode = 2;
-    cfg.port = 9000;
+    cfg.wifi_mode = 0;
     strncpy(cfg.device_name, "X", sizeof(cfg.device_name) - 1);
     (void)settings_save(&cfg);
 
@@ -722,7 +770,6 @@ static void test_factory_reset_clears_all_stores(void)
     settings_config_t got;
     TEST_ASSERT_EQUAL(ESP_OK, settings_load(&got));
     TEST_ASSERT_EQUAL_UINT8(1, got.wifi_mode);
-    TEST_ASSERT_EQUAL_UINT16(80, got.port);
     TEST_ASSERT_EQUAL_STRING("DECODER", got.device_name);
 
     settings_track_t tracks[SETTINGS_MAX_TRACKS];
@@ -743,6 +790,22 @@ static void test_nvs_read_u8_error(void)
     uint8_t v = 0;
     mock_nvs_get_u8_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, nvs_read_u8("k", &v, 0));
+    mock_nvs_get_u8_err = 0;
+}
+
+static void test_settings_load_error_paths(void)
+{
+    settings_config_t cfg;
+    s_cfg_valid = false;
+
+    mock_nvs_get_u8_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_load(&cfg));
+    mock_nvs_get_u8_err = ESP_ERR_NVS_INVALID_LENGTH;
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_INVALID_LENGTH, settings_load(&cfg));
+    mock_nvs_get_u8_err = ESP_ERR_NVS_NOT_FOUND; /* defaults are valid */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(1, cfg.wifi_mode);
+    TEST_ASSERT_EQUAL_STRING("ADDITIPUS AURA-X", cfg.ap_ssid);
     mock_nvs_get_u8_err = 0;
 }
 
@@ -967,7 +1030,6 @@ static void test_func_bind_roundtrip(void)
     /* Lock timeout paths. */
     mock_sem_take_fail = 1;
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_func_bind_save(b, 1));
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_active_scheme_set("x"));
     mock_sem_take_fail = 0;
 }
 
@@ -1025,7 +1087,7 @@ static void test_func_bind_legacy_convert(void)
     TEST_ASSERT_EQUAL_UINT32(FUNC_BIND_MAX, n);
 }
 
-static void test_func_bind_add_remove_find(void)
+static void test_func_bind_add_remove(void)
 {
     func_binding_t list[FUNC_BIND_MAX];
     memset(list, 0, sizeof(list));
@@ -1037,20 +1099,13 @@ static void test_func_bind_add_remove_find(void)
     b.target_type = FUNC_TARGET_SOUND;
     b.target_id = 4;
 
-    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(list, n, &b));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_add(NULL, &n, &b));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_add(list, NULL, &b));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_add(list, &n, NULL));
 
     TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_add(list, &n, &b));
     TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL(0, settings_func_bind_find(list, n, &b));
-
-    func_binding_t c = b;
-    c.target_id = 9;
-    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(list, n, &c));
-    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(NULL, n, &b));
-    TEST_ASSERT_EQUAL(-1, settings_func_bind_find(list, n, NULL));
+    TEST_ASSERT_EQUAL_UINT8(b.target_id, list[0].target_id);
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_remove(NULL, &n, 0));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_remove(list, NULL, 0));
@@ -1061,27 +1116,10 @@ static void test_func_bind_add_remove_find(void)
     TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_add(list, &n, &b2));
     TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_remove(list, &n, 0)); /* shifts b2 down */
     TEST_ASSERT_EQUAL_UINT32(1, n);
-    TEST_ASSERT_EQUAL(0, settings_func_bind_find(list, n, &b2));
+    TEST_ASSERT_EQUAL_UINT8(b2.target_id, list[0].target_id);
 
     n = FUNC_BIND_MAX;
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, settings_func_bind_add(list, &n, &b));
-}
-
-/* ---- active scheme pointer (R1) ---- */
-
-static void test_active_scheme(void)
-{
-    char buf[64];
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_active_scheme_get(NULL, sizeof(buf)));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_active_scheme_get(buf, 0));
-
-    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, settings_active_scheme_get(buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL_STRING("", buf);
-
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_active_scheme_set(NULL));
-    TEST_ASSERT_EQUAL(ESP_OK, settings_active_scheme_set("diesel"));
-    TEST_ASSERT_EQUAL(ESP_OK, settings_active_scheme_get(buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL_STRING("diesel", buf);
 }
 
 static void test_rev_s20_deferred_is_ram_only(void)
@@ -1107,8 +1145,8 @@ static void test_rev_s21_all_config_setter_failures_retry(void)
 {
     settings_config_t cfg;
     TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
-    cfg.port = 8181;
-    for (unsigned failed = 1; failed <= 15U; ++failed) {
+    cfg.master_volume = 81;
+    for (unsigned failed = 1; failed <= 11U; ++failed) {
         g_set_calls = g_commit_calls = 0;
         g_set_error = ESP_FAIL;
         g_fail_at = failed;
@@ -1125,9 +1163,9 @@ static void test_rev_s21_all_config_setter_failures_retry(void)
     settings_flush_status_t state;
     settings_flush_status(&state);
     TEST_ASSERT_FALSE(state.config_pending);
-    uint16_t port = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u16(s_h, "port", &port));
-    TEST_ASSERT_EQUAL_UINT16(8181, port);
+    uint8_t volume = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u8(s_h, "mvol", &volume));
+    TEST_ASSERT_EQUAL_UINT8(81, volume);
 }
 
 static void test_rev_s21_cv_failure_retains_dirty_bounded_retry(void)
@@ -1481,6 +1519,8 @@ int main(void)
     RUN_TEST(test_func_map_defaults);
     RUN_TEST(test_func_map_roundtrip);
     RUN_TEST(test_func_map_stale_blob_uses_defaults);
+    RUN_TEST(test_store_api_invalid_args);
+    RUN_TEST(test_store_api_io_errors);
     RUN_TEST(test_aux_cfg_defaults);
     RUN_TEST(test_aux_cfg_roundtrip);
     RUN_TEST(test_aux_cfg_stale_blob_uses_defaults);
@@ -1492,6 +1532,7 @@ int main(void)
     RUN_TEST(test_factory_reset);
     RUN_TEST(test_factory_reset_clears_all_stores);
     RUN_TEST(test_nvs_read_u8_error);
+    RUN_TEST(test_settings_load_error_paths);
     RUN_TEST(test_settings_init_branches);
     RUN_TEST(test_settings_init_loads_valid_cv);
     RUN_TEST(test_settings_save_deferred_and_flush);
@@ -1503,8 +1544,7 @@ int main(void)
     RUN_TEST(test_cv7_migrated_from_old_blob);
     RUN_TEST(test_func_bind_roundtrip);
     RUN_TEST(test_func_bind_legacy_convert);
-    RUN_TEST(test_func_bind_add_remove_find);
-    RUN_TEST(test_active_scheme);
+    RUN_TEST(test_func_bind_add_remove);
     RUN_TEST(test_rev_s20_deferred_is_ram_only);
     RUN_TEST(test_rev_s21_all_config_setter_failures_retry);
     RUN_TEST(test_rev_s21_cv_failure_retains_dirty_bounded_retry);

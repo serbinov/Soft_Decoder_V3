@@ -26,7 +26,7 @@ void storage_maintenance_end(void);
 bool storage_is_quiescent(void);
 storage_backend_t storage_get_backend(void);
 bool storage_is_mounted(void);
-bool storage_ext_available(void);
+
 esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes);
 const char *storage_get_root(void);
 

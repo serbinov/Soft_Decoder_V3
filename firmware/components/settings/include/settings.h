@@ -52,7 +52,7 @@
 
 /* The legacy func-map direction/speed values are copied directly into the
  * canonical binding dir/state fields during migration, so the two families
- * must stay numerically identical (SOUND_ENGINE_ROADMAP.md R2). Locking this
+ * must stay numerically identical. Locking this
  * at compile time prevents silent direction/state misrouting. */
 _Static_assert(SETTINGS_FUNC_DIR_NONE == FUNC_DIR_ANY, "dir enum drift");
 _Static_assert(SETTINGS_FUNC_DIR_FWD == FUNC_DIR_FWD, "dir enum drift");
@@ -70,14 +70,10 @@ typedef struct {
 } settings_func_map_t;
 
 typedef struct {
-    uint8_t wifi_mode;          /* 0=off, 1=AP, 2=STA, 3=APSTA */
+    uint8_t wifi_mode;          /* 0=off, nonzero=AP (AP-only firmware) */
     char ap_ssid[SETTINGS_SSID_MAX];
     char ap_password[SETTINGS_PASS_MAX];
     char ap_ip[SETTINGS_IP_MAX]; /* access point address, default 192.168.100.1 */
-    char sta_ssid[SETTINGS_SSID_MAX];
-    char sta_password[SETTINGS_PASS_MAX];
-    uint16_t port;
-    uint8_t hold;               /* answer captive probes with 204 */
     uint8_t auto_off_min;       /* wifi auto-off timeout (0=off) */
     uint8_t master_volume;
     uint8_t engine_volume;
@@ -160,8 +156,8 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count);
 esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count);
 esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count);
 
-/* Canonical function bindings (many-to-many, SOUND_ENGINE_IMPLEMENTATION.md
- * section 8.4). Missing returns NOT_FOUND; a valid empty store returns OK and
+/* Canonical function bindings (many-to-many). Missing returns NOT_FOUND; a
+ * valid empty store returns OK and
  * count = 0. Migrate the legacy map only on NOT_FOUND, never on count alone. */
 esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count);
 esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count);
@@ -171,15 +167,9 @@ esp_err_t settings_func_bind_legacy_convert(const settings_func_map_t *map, size
 
 /* Array helpers over a caller-owned binding list of capacity FUNC_BIND_MAX.
  * add appends and returns ESP_ERR_NO_MEM when full; remove shifts the tail
- * down; find returns the index of an exact match or -1. */
+ * down. */
 esp_err_t settings_func_bind_add(func_binding_t *bind, size_t *count, const func_binding_t *b);
 esp_err_t settings_func_bind_remove(func_binding_t *bind, size_t *count, size_t idx);
-int settings_func_bind_find(const func_binding_t *bind, size_t count, const func_binding_t *b);
-
-/* Name of the active sound scheme (a .mds file under <root>/projects). Empty
- * when no scheme is selected. */
-esp_err_t settings_active_scheme_get(char *out, size_t cap);
-esp_err_t settings_active_scheme_set(const char *name);
 
 /* Metadata manifest stored next to the sounds on the external storage
  * (/userdata/audio/tracks.txt). It survives a full NVS reset, so the track

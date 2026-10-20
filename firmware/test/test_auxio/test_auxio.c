@@ -269,9 +269,10 @@ static void test_firebox_initializes_at_large_uptime_and_wraps(void)
 
 /* ---- configuration API / validation ---- */
 
-static void test_auxio_set_output_applies_duty(void)
+static void test_auxio_steady_output_applies_duty(void)
 {
-    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_output(0, true, 100));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(0, 100, 0, AUXIO_EFFECT_STEADY, 800));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(0, true));
     TEST_ASSERT_TRUE(s_ch[0].enabled);
     TEST_ASSERT_EQUAL_UINT8(100, s_ch[0].pwm_on);
     TEST_ASSERT_EQUAL_UINT8(AUXIO_EFFECT_STEADY, s_ch[0].mode);
@@ -279,14 +280,14 @@ static void test_auxio_set_output_applies_duty(void)
     TEST_ASSERT_EQUAL_UINT32(100, mock_ledc_duty[LEDC_CHANNEL_2]);
 
     /* AUX5..AUX7 are MCPWM-backed. */
-    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_output(8, true, 255));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(8, 255, 0, AUXIO_EFFECT_STEADY, 800));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(8, true));
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, mock_mcpwm_duty[2]);
 }
 
 static void test_auxio_set_enabled_validation(void)
 {
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, auxio_set_enabled(AUXIO_CH_COUNT, true));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, auxio_set_output(AUXIO_CH_COUNT, true, 1));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
                       auxio_set_effect(AUXIO_CH_COUNT, true, 1, 0, AUXIO_EFFECT_STEADY, 800));
 }
@@ -351,7 +352,6 @@ static void test_apply_now_and_api_timeouts(void)
     mock_sem_take_fail = 1;
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, apply_now(0));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_set_enabled(0, true));
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_set_output(0, true, 10));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT,
                       auxio_set_effect(0, true, 10, 0, AUXIO_EFFECT_MARS, 800));
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, auxio_config(0, 10, 0, AUXIO_EFFECT_BEACON, 800));
@@ -434,7 +434,7 @@ int main(void)
     RUN_TEST(test_ch_step_firebox_flicker_range);
     RUN_TEST(test_incandescent_scales_brightness_once);
     RUN_TEST(test_firebox_initializes_at_large_uptime_and_wraps);
-    RUN_TEST(test_auxio_set_output_applies_duty);
+    RUN_TEST(test_auxio_steady_output_applies_duty);
     RUN_TEST(test_auxio_set_enabled_validation);
     RUN_TEST(test_auxio_set_effect_validation);
     RUN_TEST(test_auxio_config_validation_and_state);

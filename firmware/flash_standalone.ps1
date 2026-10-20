@@ -2,7 +2,7 @@
 #  ADDITIPUS AURA-X standalone flasher (no dependencies)
 #  Pure PowerShell: enters download mode, erases the internal flash,
 #  flashes firmware (bootloader + partitions + ota_data + app) and uploads
-#  sounds. No Python / esptool / PlatformIO required.
+#  sounds. No Python / esptool required.
 #
 #  Usage:
 #    .\flash_standalone.ps1

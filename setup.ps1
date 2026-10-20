@@ -1,4 +1,4 @@
-# One-time environment setup for Soft Decoder V3 (ESP-IDF 6.0, no PlatformIO).
+# One-time environment setup for Soft Decoder V3 (ESP-IDF 6.0).
 #
 #   .\setup.ps1                  # find ESP-IDF, write firmware\.idf_path, first build
 #   .\setup.ps1 -IdfPath C:\esp\v6.0\esp-idf

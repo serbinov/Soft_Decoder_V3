@@ -215,7 +215,16 @@ static void test_manifest_roundtrip_categories(void)
     memset(cats, 0, sizeof(cats));
     cats[0] = 1; /* slot 1 -> effects */
     cats[2] = 0; /* slot 3 -> engine */
-    TEST_ASSERT_EQUAL(ESP_OK, settings_track_cats_save(cats, SETTINGS_MAX_TRACKS));
+    /* Windows scanners can briefly hold the just-written manifest; the
+     * production path retries a failed sync, so the test does the same. */
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 5 && err != ESP_OK; ++attempt) {
+        err = settings_track_cats_save(cats, SETTINGS_MAX_TRACKS);
+#ifdef _WIN32
+        if (err != ESP_OK) Sleep(20);
+#endif
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, err);
 
     mock_nvs_reset();
     TEST_ASSERT_EQUAL(ESP_OK, settings_manifest_load());

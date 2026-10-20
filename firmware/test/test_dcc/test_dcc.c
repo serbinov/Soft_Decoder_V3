@@ -1106,7 +1106,10 @@ static void test_fuzz_random_bits(void)
         seed = seed * 1103515245u + 12345u;
         consume_bit((uint8_t)(seed >> 31));
     }
-    TEST_ASSERT_TRUE(true);
+    /* Parser invariants must hold after arbitrary input. */
+    TEST_ASSERT_TRUE(s_pending_half >= DCC_HALF_NONE && s_pending_half <= DCC_HALF_ZERO);
+    TEST_ASSERT_TRUE(s_cur_byte_bits < 8U);
+    TEST_ASSERT_TRUE(s_packet_len <= DCC_PACKET_MAX);
 }
 
 static void test_address_partitions_and_signal_clock(void)

@@ -679,22 +679,6 @@ void audio_stop_all(void)
     }
 }
 
-esp_err_t audio_voice_set_rate(uint8_t voice, uint16_t permille)
-{
-    if (voice >= AUDIO_MAX_VOICES) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    voice_t *vo = &s_voice[voice];
-    if (s_req_mutex != NULL) {
-        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-    }
-    vo->req_rate = rate_clamp(permille);
-    if (s_req_mutex != NULL) {
-        xSemaphoreGive(s_req_mutex);
-    }
-    return ESP_OK;
-}
-
 esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume)
 {
     if (voice >= AUDIO_MAX_VOICES) {
@@ -710,67 +694,6 @@ esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume)
         xSemaphoreGive(s_req_mutex);
     }
     return ESP_OK;
-}
-
-bool audio_voice_is_active(uint8_t voice)
-{
-    if (voice >= AUDIO_MAX_VOICES) {
-        return false;
-    }
-    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
-    bool active = s_voice[voice].published_active;
-    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
-    return active;
-}
-
-uint32_t audio_voice_position(uint8_t voice)
-{
-    if (voice >= AUDIO_MAX_VOICES) {
-        return 0U;
-    }
-    if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
-    uint32_t played = s_voice[voice].published_position;
-    if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
-    return played;
-}
-
-uint8_t audio_voice_alloc(void)
-{
-    uint8_t found = AUDIO_VOICE_NONE;
-    if (s_req_mutex != NULL) {
-        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-    }
-    for (int v = 0; !s_inhibited && v < AUDIO_DYNAMIC_VOICES; ++v) {
-        if (!s_busy[v] && !s_voice[v].file_open && !s_voice[v].req_play &&
-            !s_voice[v].req_stop) {
-            s_busy[v] = true;
-            next_generation(&s_voice[v]);
-            found = (uint8_t)v;
-            break;
-        }
-    }
-    if (s_req_mutex != NULL) {
-        xSemaphoreGive(s_req_mutex);
-    }
-    return found;
-}
-
-void audio_voice_release(uint8_t voice)
-{
-    if (voice >= AUDIO_MAX_VOICES) {
-        return;
-    }
-    if (s_req_mutex != NULL) {
-        xSemaphoreTake(s_req_mutex, portMAX_DELAY);
-    }
-    s_busy[voice] = false;
-    s_voice[voice].req_play = false;
-    s_voice[voice].req_stop = true;
-    s_voice[voice].state = AUDIO_VOICE_FINISHED;
-    next_generation(&s_voice[voice]);
-    if (s_req_mutex != NULL) {
-        xSemaphoreGive(s_req_mutex);
-    }
 }
 
 esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out)
@@ -919,15 +842,4 @@ bool audio_is_playing(void)
     }
     if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
     return playing;
-}
-
-esp_err_t audio_play(const char *path)
-{
-    return audio_voice_play(0, path, false, 100);
-}
-
-esp_err_t audio_stop(void)
-{
-    audio_stop_all();
-    return ESP_OK;
 }

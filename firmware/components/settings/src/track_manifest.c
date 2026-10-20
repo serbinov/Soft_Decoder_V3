@@ -205,7 +205,15 @@ static esp_err_t manifest_sync_owned(void)
         /* LittleFS rename replaces atomically. Never unlink the valid live
          * copy on any target failure. Windows uses its host-only replace API. */
 #if defined(_WIN32) && !defined(ESP_PLATFORM)
-        if (!MoveFileExA(tmp, MANIFEST_PATH, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return ESP_FAIL;
+        /* Host tests only: virus scanners/indexers can briefly hold the
+         * just-written temp file, so retry the replace a few times. */
+        bool moved = false;
+        for (int attempt = 0; attempt < 5 && !moved; ++attempt) {
+            moved = MoveFileExA(tmp, MANIFEST_PATH,
+                                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+            if (!moved) Sleep(10);
+        }
+        if (!moved) return ESP_FAIL;
 #else
         return ESP_FAIL;
 #endif

@@ -37,4 +37,4 @@ Output format (concise, no preamble): findings list, each
 - Evidence: short exact snippet + concrete failure scenario.
 - Suggested fix: one or two sentences.
 End with "Areas reviewed and found OK". Cite line numbers accurately. Do not
-re-report FIX-6..FIX-11 from firmware/FIXES_LOG.md as new findings.
+re-report known issues listed in firmware/docs/known_issues.md as new findings.

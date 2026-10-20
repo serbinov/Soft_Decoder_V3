@@ -36,7 +36,6 @@ void sound_graph_prime_functions(uint32_t levels);
 esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t revision);
 void sound_graph_deactivate(void);
 void sound_graph_status_get(sound_graph_status_t *out);
-bool sound_graph_file_used(const char *file);
 
 esp_err_t sound_init(void);
 
@@ -48,7 +47,6 @@ void sound_request_stop(void);
  * Release does not resurrect engine/keys; sync-motion needs a new speed edge.
  * Pair with audio inhibition and bounded audio_is_quiescent() before format. */
 esp_err_t sound_set_inhibited(bool inhibited);
-bool sound_engine_is_on(void);
 
 /* Current value of a graph variable by index (built-ins are resolved from the
  * live motion/engine state). Used by conditional output/logic bindings. */

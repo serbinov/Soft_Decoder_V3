@@ -1,4 +1,4 @@
-# Native ESP-IDF build/flash for Soft Decoder V3 - no PlatformIO required.
+# Native ESP-IDF build/flash for Soft Decoder V3.
 #
 #   .\idf_build.ps1                     # build
 #   .\idf_build.ps1 -Flash              # build + flash (COM auto-detect)

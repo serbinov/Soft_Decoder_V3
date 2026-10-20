@@ -39,9 +39,6 @@ esp_err_t auxio_init(void);
 /* Enable/disable an output without changing its configured effect/PWM. */
 esp_err_t auxio_set_enabled(uint8_t channel, bool enabled);
 
-/* Steady output: enabled + PWM level 0..255. */
-esp_err_t auxio_set_output(uint8_t channel, bool enabled, uint8_t pwm);
-
 /* Effect output: blink/breath between pwm_off and pwm_on, period in ms. */
 esp_err_t auxio_set_effect(uint8_t channel, bool enabled,
                            uint8_t pwm_on, uint8_t pwm_off,

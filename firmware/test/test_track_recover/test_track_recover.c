@@ -35,6 +35,7 @@ static settings_track_t g_tracks[SETTINGS_MAX_TRACKS];
 static size_t g_count;
 static bool g_manifest_ok;
 static int g_save_calls;
+static int g_load_calls;
 static bool g_tracks_present;
 static bool g_recovery_pending;
 static esp_err_t g_manifest_error;
@@ -45,6 +46,7 @@ esp_err_t settings_recovery_pending(bool *out) { *out = g_recovery_pending; retu
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 {
+    g_load_calls++;
     if (tracks == NULL || count == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -257,8 +259,11 @@ static void test_recover_missing_dir(void)
 
 static void test_recover_null_out(void)
 {
-    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, NULL); /* no crash */
-    TEST_ASSERT_TRUE(true);
+    g_load_calls = 0;
+    g_save_calls = 0;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, NULL); /* no crash/no storage access */
+    TEST_ASSERT_EQUAL_INT(0, g_load_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_save_calls);
 }
 
 /* ---- root-dir fallback when the audio dir is empty ---- */

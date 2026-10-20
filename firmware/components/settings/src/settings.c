@@ -98,8 +98,8 @@ static void cv_set_defaults(void)
     s_cv[54] = 128;   /* BEMF Kp (~1.05) */
     s_cv[55] = 60;    /* BEMF Ki (~0.07) */
     s_cv[56] = 32;    /* BEMF Kd (~0.10) */
-    /* Sound rates (SOUND_ENGINE_ROADMAP.md R6.1): chuff/exhaust, bell and
-     * dynamic-brake playback rate, 0..255 (51 = 1.0x, see sound_cv_rate). */
+    /* Reserved legacy sound rates: chuff/exhaust, bell and dynamic-brake
+     * playback rate, 0..255 (51 = 1.0x). The graph engine does not read them. */
     s_cv[114] = 57;   /* chuff / exhaust rate */
     s_cv[115] = 5;    /* bell ring rate */
     s_cv[116] = 30;   /* dynamic brake rate */
@@ -261,9 +261,6 @@ esp_err_t settings_load(settings_config_t *cfg)
     LOAD(nvs_read_str("ap_ssid", cfg->ap_ssid, sizeof(cfg->ap_ssid), "ADDITIPUS AURA-X"));
     LOAD(nvs_read_str("ap_pass", cfg->ap_password, sizeof(cfg->ap_password), ""));
     LOAD(nvs_read_str("ap_ip", cfg->ap_ip, sizeof(cfg->ap_ip), "192.168.100.1"));
-    LOAD(nvs_read_str("sta_ssid", cfg->sta_ssid, sizeof(cfg->sta_ssid), ""));
-    LOAD(nvs_read_str("sta_pass", cfg->sta_password, sizeof(cfg->sta_password), ""));
-    LOAD(nvs_read_u8("hold", &cfg->hold, 1));
     LOAD(nvs_read_u8("auto_off", &cfg->auto_off_min, 0));
     LOAD(nvs_read_u8("mvol", &cfg->master_volume, 20));
     LOAD(nvs_read_u8("evol", &cfg->engine_volume, 20));
@@ -273,10 +270,6 @@ esp_err_t settings_load(settings_config_t *cfg)
     LOAD(nvs_read_str("dev_name", cfg->device_name, sizeof(cfg->device_name), "DECODER"));
 #undef LOAD
 
-    uint16_t port = 80;
-    err = nvs_get_u16(s_h, "port", &port);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) { xSemaphoreGive(s_lock); return err; }
-    cfg->port = port;
     s_cfg = *cfg;
     s_cfg_valid = true;
     portENTER_CRITICAL(&s_cv_mux);
@@ -296,10 +289,6 @@ static esp_err_t settings_store_locked(const settings_config_t *cfg)
     STORE(nvs_set_str(s_h, "ap_ssid", cfg->ap_ssid));
     STORE(nvs_set_str(s_h, "ap_pass", cfg->ap_password));
     STORE(nvs_set_str(s_h, "ap_ip", cfg->ap_ip));
-    STORE(nvs_set_str(s_h, "sta_ssid", cfg->sta_ssid));
-    STORE(nvs_set_str(s_h, "sta_pass", cfg->sta_password));
-    STORE(nvs_set_u16(s_h, "port", cfg->port));
-    STORE(nvs_set_u8(s_h, "hold", cfg->hold));
     STORE(nvs_set_u8(s_h, "auto_off", cfg->auto_off_min));
     STORE(nvs_set_u8(s_h, "mvol", cfg->master_volume));
     STORE(nvs_set_u8(s_h, "evol", cfg->engine_volume));
@@ -397,8 +386,8 @@ esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
     }
     if (idx == 63U) {
         /* CV63 aliases the persisted master volume so the sound UI can drive it
-         * through the normal CV path (SOUND_ENGINE_ROADMAP.md R6.1). "mvol" is
-         * stored as 0..100 %; report it on the CV 0..255 scale. */
+         * through the normal CV path. "mvol" is stored as 0..100 %; report it
+         * on the CV 0..255 scale. */
         portENTER_CRITICAL(&s_cv_mux);
         uint8_t vol = s_master_volume;
         if (vol > 100U) {
@@ -441,8 +430,8 @@ esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
         return ESP_ERR_INVALID_ARG;
     }
     if (idx == 63U) {
-        /* CV63 aliases the master volume (SOUND_ENGINE_ROADMAP.md R6.1). The
-         * value is 0..255; "mvol" is stored as 0..100 %. The live volume and the
+        /* CV63 aliases the master volume. The value is 0..255; "mvol" is
+         * stored as 0..100 %. The live volume and the
          * cached config are updated by the caller (web_master_volume_changed). */
         uint8_t vol = (uint8_t)((uint16_t)value * 100U / 255U);
         if (xSemaphoreTake(s_lock, 0) != pdTRUE) {
@@ -830,58 +819,6 @@ esp_err_t settings_func_bind_remove(func_binding_t *bind, size_t *count, size_t 
     (*count)--;
     memset(&bind[*count], 0, sizeof(bind[0]));
     return ESP_OK;
-}
-
-static bool func_bind_same(const func_binding_t *a, const func_binding_t *b)
-{
-    return a->used == b->used && a->fn == b->fn && a->target_type == b->target_type &&
-           a->target_id == b->target_id && a->dir == b->dir && a->state == b->state &&
-           a->mode == b->mode && a->flags == b->flags &&
-           a->short_table == b->short_table && a->short_ms == b->short_ms &&
-           a->min_ms == b->min_ms && a->fade_ms == b->fade_ms;
-}
-
-int settings_func_bind_find(const func_binding_t *bind, size_t count, const func_binding_t *b)
-{
-    if (bind == NULL || b == NULL) {
-        return -1;
-    }
-    for (size_t i = 0; i < count && i < FUNC_BIND_MAX; ++i) {
-        if (func_bind_same(&bind[i], b)) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
-esp_err_t settings_active_scheme_get(char *out, size_t cap)
-{
-    if (out == NULL || cap == 0U) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    size_t len = cap;
-    esp_err_t err = nvs_get_str(s_h, "active_scheme", out, &len);
-    if (err != ESP_OK) {
-        out[0] = '\0';
-        return err;
-    }
-    return ESP_OK;
-}
-
-esp_err_t settings_active_scheme_set(const char *name)
-{
-    if (name == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-    esp_err_t err = nvs_set_str(s_h, "active_scheme", name);
-    if (err == ESP_OK) {
-        err = nvs_commit(s_h);
-    }
-    xSemaphoreGive(s_lock);
-    return err;
 }
 
 esp_err_t settings_aux_cfg_load(settings_aux_cfg_t *cfg, size_t *count)

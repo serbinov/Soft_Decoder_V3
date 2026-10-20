@@ -46,7 +46,7 @@ $sb = New-Object System.Text.StringBuilder
 [void]$sb.AppendLine(" Прошивка ADDITIPUS (ESP32-S3, Flash 4 МБ)")
 [void]$sb.AppendLine("================================================================")
 [void]$sb.AppendLine("")
-[void]$sb.AppendLine("Файлы создаются скриптом: firmware\build_flash_tool_files.bat")
+[void]$sb.AppendLine("Файлы создаются скриптом: build_firmware.bat")
 [void]$sb.AppendLine("Этот README генерируется из partitions.csv (tools\gen_flash_readme.ps1).")
 [void]$sb.AppendLine("")
 [void]$sb.AppendLine("Загрузите в Flash Download Tool следующие файлы (в указанном порядке):")

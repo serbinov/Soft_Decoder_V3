@@ -123,7 +123,7 @@ bool motor_get_bemf_enabled(void);
  * is the existing 85% rail-clamp heuristic, not a physical freewheel detector.
  * Targets never exceed this ceiling; increase only from measured hardware data.
  * Runtime-only: caller owns persistence if a setting is exposed. */
-esp_err_t motor_set_bemf_max_fraction(uint16_t fraction1024);
+
 
 /* Raw BEMF measurement diagnostics for debugging the calibration / PID. */
 typedef struct {
@@ -146,7 +146,6 @@ typedef struct {
 void motor_bemf_diag(motor_bemf_diag_t *d);
 
 /* Direct raw ADC read of the BEMF and rail sense pins (diagnostics). */
-void motor_bemf_adc_dump(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw);
 esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw);
 /* Force a coast window and read the BEMF terminals in mV (diagnostics). */
 void motor_bemf_coast_read(uint16_t *b1_mv, uint16_t *b2_mv);

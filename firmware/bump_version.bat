@@ -14,6 +14,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Done. Next: run build_ota_bin.bat to produce the new .bin
+echo Done. Next: run build_firmware.bat (repo root) to produce the new images
 pause
 endlocal

@@ -9,7 +9,6 @@
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_partition.h"
-#include "esp_timer.h"
 #include "esp_vfs.h"
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
@@ -221,11 +220,6 @@ bool storage_is_mounted(void)
     bool mounted = s_mounted;
     portEXIT_CRITICAL(&s_lifecycle_mux);
     return mounted;
-}
-
-bool storage_ext_available(void)
-{
-    return s_ext_flash != NULL && s_ext_partition != NULL;
 }
 
 const char *storage_get_root(void)

@@ -54,8 +54,8 @@ typedef void (*func_eval_cb_t)(void *ctx, uint8_t target_type, uint8_t target_id
  * closed. */
 typedef bool (*func_var_get_t)(void *ctx, uint8_t index, int32_t *out);
 
-/* Pure evaluator over the canonical binding list (SOUND_ENGINE_IMPLEMENTATION.md
- * section 8.5): returns the output mask (SETTINGS_FUNC_OUT_* bits) that the
+/* Pure evaluator over the canonical binding list: returns the output mask
+ * (SETTINGS_FUNC_OUT_* bits) that the
  * given function must drive for the current `state` (FUNC_STATE_*) and `dir`
  * (FUNC_DIR_*), and invokes `cb` for each matching sound/slot/logic target.
  * `vars`/`var_ctx` resolve FUNC_FLAG_COND conditions; pass NULL to ignore

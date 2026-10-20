@@ -1084,6 +1084,7 @@ char mock_uart_tx[65536];
 size_t mock_uart_tx_len = 0;
 
 int mock_uart_driver_install_err = 0;
+int mock_uart_driver_install_calls = 0;
 int mock_usbjtag_install_ok = 0; /* 0 -> USB-Serial-JTAG driver unavailable */
 int mock_usbjtag_byte = -1;      /* >=0 -> one byte available on the USB port */
 int mock_ota_begin_err = 0;
@@ -1118,6 +1119,7 @@ void mock_uart_feed(const void *data, size_t n)
 
 esp_err_t uart_driver_install(uart_port_t uart_num, int rx, int tx, int q, void *queue, int flags)
 {
+    mock_uart_driver_install_calls++;
     (void)uart_num;
     (void)rx;
     (void)tx;

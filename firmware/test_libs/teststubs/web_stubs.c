@@ -1260,18 +1260,6 @@ bool audio_is_playing(void)
     return mock_audio_is_playing != 0;
 }
 
-esp_err_t audio_play(const char *path)
-{
-    (void)path;
-    return ESP_OK;
-}
-
-esp_err_t audio_stop(void)
-{
-    mock_audio_stop_calls++;
-    return ESP_OK;
-}
-
 /* ====================================================================== */
 /* motor                                                                   */
 /* ====================================================================== */
@@ -1442,14 +1430,6 @@ esp_err_t auxio_get_enabled(uint8_t channel, bool *out_enabled)
     return ESP_OK;
 }
 
-esp_err_t auxio_set_output(uint8_t channel, bool enabled, uint8_t pwm)
-{
-    (void)channel;
-    (void)enabled;
-    (void)pwm;
-    return ESP_OK;
-}
-
 esp_err_t auxio_set_effect(uint8_t channel, bool enabled, uint8_t pwm_on, uint8_t pwm_off,
                            auxio_effect_t mode, uint16_t period_ms)
 {
@@ -1573,6 +1553,7 @@ const sound_editor_asset_t sound_editor_assets[] = {
 const size_t sound_editor_asset_count = sizeof(sound_editor_assets) / sizeof(sound_editor_assets[0]);
 char mock_graph_json[SG_MAX_JSON + 1];
 uint32_t mock_graph_revision;
+esp_err_t mock_graph_list_err;
 esp_err_t mock_graph_save_err, mock_graph_read_err, mock_graph_select_err;
 esp_err_t mock_graph_assets_err, mock_graph_prepare_err, mock_graph_reference_err;
 bool mock_graph_referenced;
@@ -1583,7 +1564,6 @@ struct sound_graph_prepared { char id[SG_ID_CAP]; uint32_t revision; };
 bool sound_graph_active(void) { return mock_graph_status.active; }
 void sound_graph_status_get(sound_graph_status_t *out) { *out = mock_graph_status; }
 void sound_graph_deactivate(void) { mock_graph_status.active = false; }
-bool sound_graph_file_used(const char *file) { (void)file; return mock_graph_referenced; }
 esp_err_t sound_graph_prepare(const sg_graph_t *graph, const char *id, uint32_t revision, sound_graph_prepared_t **out)
 {
     (void)graph; *out = NULL;
@@ -1631,6 +1611,7 @@ esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *l
 esp_err_t sg_store_list(sg_store_descriptor_t *out, size_t capacity, size_t *count)
 {
     (void)capacity; *count = 0;
+    if (mock_graph_list_err != ESP_OK) return mock_graph_list_err;
     if (!mock_graph_revision) return ESP_OK;
     snprintf(out[0].id, sizeof(out[0].id), "demo");
     snprintf(out[0].name, sizeof(out[0].name), "Demo");
@@ -1678,7 +1659,7 @@ esp_err_t sg_store_file_referenced_except(const char *except_id, const char *fil
  * web.c module state so each Unity test starts from a known baseline. */
 void mock_web_reset(void)
 {
-    mock_graph_json[0] = '\0'; mock_graph_revision = 0;
+    mock_graph_json[0] = '\0'; mock_graph_revision = 0; mock_graph_list_err = ESP_OK;
     mock_graph_save_err = mock_graph_read_err = mock_graph_select_err = ESP_OK;
     mock_graph_delete_calls = 0;
     mock_graph_delete_err = ESP_OK;
@@ -1777,7 +1758,6 @@ void mock_web_reset(void)
 
     memset(&mock_settings_cfg, 0, sizeof(mock_settings_cfg));
     mock_settings_cfg.wifi_mode = 1;
-    mock_settings_cfg.port = 80;
     mock_settings_load_ret = 0;
     mock_settings_load_calls = 0;
     mock_settings_save_ret = 0;
@@ -1920,7 +1900,6 @@ void mock_web_reset(void)
     s_progress_server = NULL;
     s_ap_ip[0] = '\0';
     memset(s_ap_ip_bytes, 0, sizeof(s_ap_ip_bytes));
-    s_sta_ip[0] = '\0';
     s_ap_sta_count = 0;
     s_ap_started_us = 0;
     s_last_client_us = 0;

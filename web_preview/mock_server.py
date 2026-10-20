@@ -437,9 +437,7 @@ def _new_state():
         "device_name": "ТЕПЛОВОЗ",
         "wifi": {
             "mode": 1, "ap_ssid": "AURA-X", "ap_password": "12345678",
-            "sta_ssid": "", "sta_password": "", "port": 80, "auto_off_min": 0,
-            "hold": 0, "status": "ap_running", "ap_ip": "192.168.100.1",
-            "sta_ip": "0.0.0.0",
+            "auto_off_min": 0, "status": "ap_running", "ap_ip": "192.168.100.1",
         },
         "bemf": {"active": False, "progress": 0, "total": 10, "valid": True,
                  "stored": True, "use": False, "runId": 1, "result": "idle",
@@ -597,9 +595,7 @@ def aux_json():
 def wifi_json():
     w = STATE["wifi"]
     return ok(mode=w["mode"], ap_ssid=w["ap_ssid"], ap_password=w["ap_password"],
-              sta_ssid=w["sta_ssid"], sta_password=w["sta_password"],
-              port=w["port"], auto_off_min=w["auto_off_min"], hold=w["hold"],
-              status=w["status"], ap_ip=w["ap_ip"], sta_ip=w["sta_ip"])
+              auto_off_min=w["auto_off_min"], status=w["status"], ap_ip=w["ap_ip"])
 
 
 def log_json(query):

@@ -630,11 +630,11 @@ static void test_motor_bemf_adc_dump(void)
     mock_adc_raw[PIN_BEMF2 - 1] = 222;
     mock_adc_raw[PIN_RAIL_SENSE - 1] = 333;
     uint16_t b1 = 0, b2 = 0, rail = 0;
-    motor_bemf_adc_dump(&b1, &b2, &rail);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_adc_dump_checked(&b1, &b2, &rail));
     TEST_ASSERT_EQUAL_UINT16(111, b1);
     TEST_ASSERT_EQUAL_UINT16(222, b2);
     TEST_ASSERT_EQUAL_UINT16(333, rail);
-    motor_bemf_adc_dump(NULL, NULL, NULL); /* must not crash */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_bemf_adc_dump_checked(NULL, NULL, NULL));
 }
 
 static void test_motor_bemf_coast_read(void)
@@ -754,8 +754,12 @@ static void test_speed_duty_table_branch(void)
 
 static void test_bemf_sample_window_lock_fails(void)
 {
+    memset(mock_ledc_duty, 0, sizeof(mock_ledc_duty));
     mock_sem_take_fail = 1;
-    bemf_sample_window(); /* motor_bemf_lock() false -> early return */
+    TEST_ASSERT_FALSE(bemf_sample_window()); /* motor_bemf_lock() false -> early return */
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, s_bemf_sample_error);
+    TEST_ASSERT_FALSE(s_bemf_valid);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]); /* no coast window without the lock */
     mock_sem_take_fail = 0;
 }
 
@@ -898,9 +902,14 @@ static void test_motor_tick_pid(void)
 
 static void test_motor_boot_safe_and_task(void)
 {
+    mock_gpio_set_level_count = 0;
+    memset(mock_ledc_duty, 0, sizeof(mock_ledc_duty));
     motor_boot_safe();
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count); /* IN1/IN2 driven low */
     s_motor_iter_cap = 1;
-    motor_task(NULL); /* one tick */
+    motor_task(NULL); /* one tick at speed 0 */
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_1]);
     s_motor_iter_cap = 0;
 }
 
@@ -992,18 +1001,18 @@ static void test_motor_bemf_adc_dump_and_coast_read(void)
 {
     uint16_t b1 = 0, b2 = 0, rail = 0;
     s_bemf_adc_ready = false;
-    motor_bemf_adc_dump(&b1, &b2, &rail); /* early return */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_bemf_adc_dump_checked(&b1, &b2, &rail));
     motor_bemf_coast_read(&b1, &b2);      /* early return */
 
     s_bemf_adc_ready = true;
     mock_adc_raw[PIN_BEMF1 - 1] = 111;
     mock_adc_raw[PIN_BEMF2 - 1] = 222;
     mock_adc_raw[PIN_RAIL_SENSE - 1] = 333;
-    motor_bemf_adc_dump(&b1, &b2, &rail);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_adc_dump_checked(&b1, &b2, &rail));
     TEST_ASSERT_EQUAL_UINT16(111, b1);
     TEST_ASSERT_EQUAL_UINT16(222, b2);
     TEST_ASSERT_EQUAL_UINT16(333, rail);
-    motor_bemf_adc_dump(NULL, NULL, NULL); /* null args, no crash */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_bemf_adc_dump_checked(NULL, NULL, NULL));
 
     motor_bemf_coast_read(&b1, &b2);
     motor_bemf_coast_read(NULL, NULL);
@@ -1425,9 +1434,7 @@ static void test_bemf_ceiling_bounds_fallback_and_accepts_measured_high(void)
     s_was_stopped = false;
     motor_tick();
     TEST_ASSERT_TRUE(s_last_target <= 850.0f);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_set_bemf_max_fraction(1025));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_set_bemf_max_fraction(81));
-    TEST_ASSERT_EQUAL(ESP_OK, motor_set_bemf_max_fraction(973));
+    s_bemf_max_fraction = 973.0f / 1024.0f;
     mock_adc_raw[PIN_BEMF1 - 1] = 1189; /* 900mV > old85%, < measured95% */
     motor_tick();
     TEST_ASSERT_TRUE(s_bemf_valid);

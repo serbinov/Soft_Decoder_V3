@@ -1,0 +1,44 @@
+name: host-tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    name: Host tests (C + JS/Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: C host tests
+        run: |
+          chmod +x test/run_tests.sh
+          test/run_tests.sh
+      - name: JS tests
+        run: |
+          node --test test/test_web_ui.js
+          node --test test/test_blocks_editor.js
+          node --test test/test_pack_integration.js
+      - name: Python tests
+        run: |
+          python test/test_sound_editor_assets.py
+          python test/test_release_artifacts.py
+
+  sanitizers:
+    name: Host tests (ASan + UBSan)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: C host tests under ASan/UBSan
+        run: |
+          chmod +x test/run_tests.sh
+          test/run_tests.sh --sanitize

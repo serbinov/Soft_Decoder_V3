@@ -89,7 +89,6 @@ static void test_storage_init_ok(void)
 {
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_EXTERNAL_NOR, storage_get_backend());
-    TEST_ASSERT_TRUE(storage_ext_available());
     TEST_ASSERT_EQUAL_STRING(STORAGE_MOUNT_POINT, storage_get_root());
 }
 
@@ -98,7 +97,6 @@ static void test_storage_init_spi_fail(void)
     mock_spi_bus_init_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
-    TEST_ASSERT_FALSE(storage_ext_available());
 }
 
 static void test_storage_init_add_device_fail(void)
@@ -106,7 +104,6 @@ static void test_storage_init_add_device_fail(void)
     mock_spi_add_flash_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
-    TEST_ASSERT_FALSE(storage_ext_available());
 }
 
 static void test_storage_init_flash_fail(void)
@@ -121,7 +118,6 @@ static void test_storage_init_register_fail(void)
     mock_partition_register_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
-    TEST_ASSERT_FALSE(storage_ext_available());
 }
 
 /* The registered partition must not exceed the detected chip size. */
@@ -138,7 +134,6 @@ static void test_storage_init_size_probe_fail(void)
     mock_flash_size = 0;
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
-    TEST_ASSERT_FALSE(storage_ext_available());
 }
 
 /* ---- mount ---- */

@@ -3,7 +3,7 @@
  Прошивка ADDITIPUS (ESP32-S3, Flash 4 МБ)
 ================================================================
 
-Файлы создаются скриптом: firmware\build_flash_tool_files.bat
+Файлы создаются скриптом: build_firmware.bat
 Этот README генерируется из partitions.csv (tools\gen_flash_readme.ps1).
 
 Загрузите в Flash Download Tool следующие файлы (в указанном порядке):

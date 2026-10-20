@@ -90,7 +90,7 @@ $files = @{
 foreach ($k in $files.Keys) {
     if (-not (Test-Path -LiteralPath $files[$k])) {
         Write-Err ("missing file: {0}" -f $files[$k])
-        Write-Warn "  build it first: firmware\build_flash_tool_files.bat"
+        Write-Warn "  build it first: build_firmware.bat"
         exit 1
     }
 }

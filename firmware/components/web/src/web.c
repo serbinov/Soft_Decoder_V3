@@ -31,7 +31,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
-#include "driver/gpio.h"
 #include "lwip/sockets.h"
 
 #include "audio.h"
@@ -54,7 +53,6 @@ static const char *TAG = "web";
 #ifndef WEB_AUDIO_DIR
 #define WEB_AUDIO_DIR WEB_USERDATA_DIR "/audio"
 #endif
-#define AUDIO_DIR WEB_AUDIO_DIR
 #define UPLOAD_MAX (2 * 1024 * 1024)
 #define WEB_QUERY_MAX 1400
 
@@ -82,7 +80,6 @@ static httpd_handle_t s_server;
 static httpd_handle_t s_progress_server;
 static esp_err_t (*s_route_handlers[64])(httpd_req_t *);
 static size_t s_route_count;
-static char s_sta_ip[16];
 
 /* In-flight progress for the single asynchronous transfer worker. Port 81
  * remains a read-only progress endpoint alongside the responsive main server. */
@@ -105,8 +102,8 @@ static settings_config_t s_cfg;
 static uint8_t s_track_cat[SETTINGS_MAX_TRACKS];
 static bool s_track_cat_loaded;
 static settings_func_map_t s_func_map[SETTINGS_FUNC_MAP_COUNT];
-/* Canonical function bindings (SOUND_ENGINE_IMPLEMENTATION.md section 8.4).
- * Only a missing store is migrated from s_func_map. A present empty list is
+/* Canonical function bindings. Only a missing store is migrated from
+ * s_func_map. A present empty list is
  * authoritative and must not resurrect legacy outputs or bindings. */
 static func_binding_t s_func_bind[FUNC_BIND_MAX];
 static size_t s_func_bind_count;
@@ -160,9 +157,6 @@ static esp_err_t control_mutex_init(void)
 
 /* Heap size of the /api/audio/tracks JSON frame (was a 8 KB stack buffer). */
 #define WEB_TRACKS_JSON_MAX 8192
-/* Heap size of the sound-scheme project list (up to 64 names). */
-#define WEB_PROJECTS_JSON_MAX 8192
-#define WEB_PROJECTS_MAX 64
 
 /* ---------- event log (web journal) ---------- */
 /* Ring buffer of control events (F commands, AUX, sounds, direction, speed,
@@ -337,22 +331,6 @@ static esp_err_t close_rejected_body(httpd_req_t *req, esp_err_t response)
 }
 
 /* ---------- function outputs ---------- */
-
-bool web_get_function_state(uint8_t fn)
-{
-    if (fn >= WEB_FN_COUNT) {
-        return false;
-    }
-    bool state;
-    if (s_func_mutex != NULL) {
-        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
-    }
-    state = s_fn[fn];
-    if (s_func_mutex != NULL) {
-        xSemaphoreGive(s_func_mutex);
-    }
-    return state;
-}
 
 bool web_control_is_rails(void)
 {
@@ -538,11 +516,6 @@ void web_maintenance_end(void)
     portEXIT_CRITICAL(&s_control_state_mux);
     ++s_control_generation;
     xSemaphoreGive(s_control_mutex);
-}
-
-bool web_fs_busy(void)
-{
-    return s_up_active || web_maintenance_active();
 }
 
 uint8_t web_get_voice_volume(uint8_t fn)
@@ -3139,21 +3112,16 @@ static esp_err_t cv_write_post(httpd_req_t *req)
 static esp_err_t wifi_get(httpd_req_t *req)
 {
     char ap_ssid[SETTINGS_SSID_MAX * 2];
-    char sta_ssid[SETTINGS_SSID_MAX * 2];
     json_escape(s_cfg.ap_ssid, ap_ssid, sizeof(ap_ssid));
-    json_escape(s_cfg.sta_ssid, sta_ssid, sizeof(sta_ssid));
 
-    char json[512];
+    char json[384];
     snprintf(json, sizeof(json),
              "{\"ok\":true,\"mode\":%u,\"ap_ssid\":\"%s\",\"ap_password\":\"%s\","
-             "\"sta_ssid\":\"%s\",\"sta_password\":\"%s\",\"port\":%u,"
-             "\"auto_off_min\":%u,\"hold\":%u,\"status\":\"%s\",\"ap_ip\":\"%s\",\"sta_ip\":\"%s\"}",
+             "\"auto_off_min\":%u,\"status\":\"%s\",\"ap_ip\":\"%s\"}",
              (unsigned)s_cfg.wifi_mode, ap_ssid,
              s_cfg.ap_password[0] ? "********" : "",
-             sta_ssid, s_cfg.sta_password[0] ? "********" : "",
-             (unsigned)s_cfg.port,
-             (unsigned)s_cfg.auto_off_min, (unsigned)s_cfg.hold,
-             web_wifi_is_started() ? "ap_running" : "off", s_cfg.ap_ip, s_sta_ip);
+             (unsigned)s_cfg.auto_off_min,
+             web_wifi_is_started() ? "ap_running" : "off", s_cfg.ap_ip);
     return send_json(req, json);
 }
 
@@ -3208,11 +3176,8 @@ static esp_err_t wifi_post(httpd_req_t *req)
         strncpy(next.ap_ip, buf, sizeof(next.ap_ip) - 1);
         next.ap_ip[sizeof(next.ap_ip) - 1] = '\0';
     }
-    /* HTTP port is fixed at 80; STA fields are gone (AP is the only mode). */
-    next.port = 80;
+    /* AP-only: the HTTP port is fixed at 80 and the captive portal is always on. */
     parse_u8(query, "auto_off_min", &next.auto_off_min);
-    /* Captive-portal redirect is always on so the phone opens the page. */
-    next.hold = 0;
 
     if (web_maintenance_begin(false) != ESP_OK)
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
@@ -3237,8 +3202,6 @@ static esp_err_t wifi_reset_post(httpd_req_t *req)
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
     settings_config_t def = { 0 };
     def.wifi_mode = 1;
-    def.port = 80;
-    def.hold = 0;
     strncpy(def.ap_ip, AP_IP_DEFAULT, sizeof(def.ap_ip) - 1);
     strncpy(def.ap_ssid, "ADDITIPUS AURA-X", sizeof(def.ap_ssid) - 1);
     def.master_volume = 20;
@@ -4662,12 +4625,15 @@ static void register_route(const char *uri, httpd_method_t method,
                            esp_err_t (*handler)(httpd_req_t *))
 {
     if (s_route_count >= 64U) return;
-    s_route_handlers[s_route_count] = handler;
+    size_t slot = s_route_count;
+    s_route_handlers[slot] = handler;
     httpd_uri_t u = { .uri = uri, .method = method,
         .handler = method == HTTP_POST ? mutation_dispatch : handler,
-        .user_ctx = &s_route_handlers[s_route_count++] };
+        .user_ctx = &s_route_handlers[slot] };
     esp_err_t err = httpd_register_uri_handler(s_server, &u);
-    if (err != ESP_OK) {
+    if (err == ESP_OK) {
+        s_route_count++;
+    } else {
         ESP_LOGE(TAG, "route %s registration failed: %s", uri, esp_err_to_name(err));
     }
 }

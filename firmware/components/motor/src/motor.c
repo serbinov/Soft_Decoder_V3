@@ -1499,23 +1499,6 @@ bool motor_get_bemf_enabled(void)
     return enabled;
 }
 
-esp_err_t motor_set_bemf_max_fraction(uint16_t fraction1024)
-{
-    if (fraction1024 < 82U ||
-        fraction1024 > BEMF_CAL_FRAC_SCALE) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    portENTER_CRITICAL(&s_output_mux);
-    s_bemf_max_fraction = (float)fraction1024 / BEMF_CAL_FRAC_SCALE;
-    s_reset_requested = true;
-    portEXIT_CRITICAL(&s_output_mux);
-    xSemaphoreGive(s_control_mutex);
-    return ESP_OK;
-}
-
 void motor_bemf_diag(motor_bemf_diag_t *d)
 {
     if (d == NULL) {
@@ -1576,11 +1559,6 @@ esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1_raw, uint16_t *b2_raw, uint16
     if (b2_raw != NULL) { *b2_raw = (uint16_t)b2; }
     if (rail_raw != NULL) { *rail_raw = (uint16_t)rail; }
     return ESP_OK;
-}
-
-void motor_bemf_adc_dump(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw)
-{
-    (void)motor_bemf_adc_dump_checked(b1_raw, b2_raw, rail_raw);
 }
 
 /* Diagnostic: force a coast window and read the BEMF terminals (in mV). */

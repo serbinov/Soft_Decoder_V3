@@ -11,7 +11,7 @@ if (-not $info.ready) { throw ($info.errors -join "; ") }
 $src = Join-Path $repo "release\flash_download_tool\firmware.bin"
 if (-not (Test-Path -LiteralPath $src)) {
     Write-Host "[ERROR] нет release\flash_download_tool\firmware.bin"
-    Write-Host "        сначала соберите: firmware\build_flash_tool_files.bat"
+    Write-Host "        сначала соберите: build_firmware.bat"
     exit 1
 }
 

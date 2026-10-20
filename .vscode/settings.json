@@ -7,8 +7,7 @@
         "*.h": "c"
     },
     "files.exclude": {
-        "**/build": true,
-        "**/.pio": true
+        "**/build": true
     },
     "search.exclude": {
         "**/build": true

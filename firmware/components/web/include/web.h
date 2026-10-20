@@ -12,9 +12,6 @@ esp_err_t web_init(void);
  * /api/log). Safe to call from any task; text is truncated if too long. */
 void web_log_event(const char *tag, const char *fmt, ...);
 
-/* Function output states (F0..F28), shared with the DCC decoder. */
-bool web_get_function_state(uint8_t fn);
-
 /* True only when rails control is ready and maintenance is inactive. */
 bool web_control_is_rails(void);
 /* Non-blocking source check for safety callbacks: does not take the control
@@ -53,8 +50,5 @@ bool web_func_map_set(uint8_t fn, uint8_t slot_a, uint8_t slot_b, uint16_t aux,
  * config, the live audio volume and persists it. Called from the CV path so a
  * CV63 write does not desync from /api/audio/volume. */
 void web_master_volume_changed(uint8_t vol0_100);
-
-/* Includes maintenance admission, not just the body-receive interval. */
-bool web_fs_busy(void);
 
 #endif

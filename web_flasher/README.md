@@ -10,8 +10,6 @@
 1. Соберите **`build_firmware.bat`** в корне проекта **или** нажмите
    **«Собрать прошивку»** прямо в панели. Он публикует и проверяет
    `release\flash_download_tool\` (4 файла) и versioned raw/OTA images в `release\`.
-   Старые `firmware\build_flash_tool_files.bat` / `build_ota_bin.bat` также
-   используют общую проверенную публикацию.
 2. Запустите **`web_flasher\start_flasher.bat`** (двойной клик). Он поднимает
    локальный сервер на встроенном PowerShell (**ничего устанавливать не нужно**)
    и открывает браузер.

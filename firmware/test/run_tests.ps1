@@ -1,4 +1,4 @@
-# Run the host (native) unit test suites without PlatformIO.
+# Run the host (native) unit test suites.
 # Uses the portable Tiny C Compiler (TCC) + Unity, matching the V0 setup.
 #
 # Compiler discovery order:
@@ -119,6 +119,12 @@ if ($node) {
     if ($python) {
         Write-Host "=== test_pack_integration (Node.js + Python) ===" -ForegroundColor Cyan
         & $node.Source --test "$root\test\test_pack_integration.js"
+        if ($LASTEXITCODE -ne 0) { $failed++ }
+        Write-Host "=== test_sound_editor_assets (Python) ===" -ForegroundColor Cyan
+        & $python.Source "$root\test\test_sound_editor_assets.py"
+        if ($LASTEXITCODE -ne 0) { $failed++ }
+        Write-Host "=== test_release_artifacts (Python) ===" -ForegroundColor Cyan
+        & $python.Source "$root\test\test_release_artifacts.py"
         if ($LASTEXITCODE -ne 0) { $failed++ }
     } else {
         Write-Warning "Python not found: real .asp import/export tests were NOT run."

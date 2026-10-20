@@ -512,15 +512,26 @@ static void test_fuzz_random_inputs(void)
 
         uint8_t u8 = 0;
         uint16_t u16 = 0;
-        (void)parse_query(q, key, out, sizeof(out));
+        memset(out, 0xA5, sizeof(out));
+        if (parse_query(q, key, out, sizeof(out))) {
+            TEST_ASSERT_NOT_NULL(memchr(out, '\0', sizeof(out)));
+        }
         (void)parse_query(q, key, out, 0);
         (void)parse_u8(q, key, &u8);
         (void)parse_u16(q, key, &u16);
         (void)parse_bool(q, key, true);
+        memset(out, 0xA5, sizeof(out));
         (void)json_escape(q, out, sizeof(out));
-        (void)json_escape(q, out, 0);
+        TEST_ASSERT_NOT_NULL(memchr(out, '\0', sizeof(out)));
+        memset(out, 0xA5, sizeof(out));
+        (void)json_escape(q, out, 0); /* must not write a zero-capacity buffer */
+        TEST_ASSERT_EQUAL_UINT8(0xA5, (uint8_t)out[0]);
+        memset(out, 0xA5, sizeof(out));
         (void)url_decode(q, out, sizeof(out));
+        TEST_ASSERT_NOT_NULL(memchr(out, '\0', sizeof(out)));
+        memset(out, 0xA5, sizeof(out));
         (void)sanitize_name(q, out, sizeof(out));
+        TEST_ASSERT_NOT_NULL(memchr(out, '\0', sizeof(out)));
 
         uint8_t bytes[64];
         size_t blen = seed % sizeof(bytes);
@@ -528,15 +539,22 @@ static void test_fuzz_random_inputs(void)
             seed = seed * 1103515245u + 12345u;
             bytes[i] = (uint8_t)(seed >> 16);
         }
-        uint8_t resp[128];
+        uint8_t resp[DNS_MSG_MAX];
         const uint8_t ip[4] = { 1, 2, 3, 4 };
-        (void)dns_build_response(bytes, (int)blen, resp, ip);
+        size_t rlen = dns_build_response(bytes, (int)blen, resp, ip);
+        TEST_ASSERT_TRUE(rlen <= sizeof(resp));
         ota_container_hdr_t ch;
         ota_file_hdr_t fh;
-        (void)ota_container_parse(bytes, blen, &ch);
-        (void)ota_file_hdr_parse(bytes, blen, &fh);
+        if (ota_container_parse(bytes, blen, &ch)) {
+            TEST_ASSERT_TRUE(ch.fw_len > 0U);
+            TEST_ASSERT_TRUE(ch.n_files <= 64U);
+        }
+        if (ota_file_hdr_parse(bytes, blen, &fh)) {
+            TEST_ASSERT_TRUE(fh.name_len > 0U && fh.name_len <= OTA_FILE_NAME_MAX);
+            TEST_ASSERT_TRUE(fh.label_len <= OTA_FILE_LABEL_MAX);
+            TEST_ASSERT_TRUE(fh.data_len > 0U);
+        }
     }
-    TEST_ASSERT_TRUE(true);
 }
 
 /* ---- func_eval ---- */

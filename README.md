@@ -5,14 +5,8 @@
 
 Полное техническое описание — [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md).
 История изменений — [`CHANGELOG.md`](CHANGELOG.md).
-Исправления по код-ревью — [`firmware/FIXES_LOG.md`](firmware/FIXES_LOG.md) и
-[`firmware/CODE_REVIEW_REPORT.md`](firmware/CODE_REVIEW_REPORT.md)
-(актуальное ревью 2026-10-17 — §6).
-Проверка нестабильных оборотов и программные исправления BEMF (2026-10-02) —
-[`firmware/BEMF_DIAGNOSTICS.md`](firmware/BEMF_DIAGNOSTICS.md).
-Проектирование звукового движка — исторические
-[`firmware/SOUND_ENGINE_ROADMAP.md`](firmware/SOUND_ENGINE_ROADMAP.md) и
-[`firmware/SOUND_ENGINE_IMPLEMENTATION.md`](firmware/SOUND_ENGINE_IMPLEMENTATION.md).
+Диагностика и калибровка BEMF — [`firmware/BEMF_DIAGNOSTICS.md`](firmware/BEMF_DIAGNOSTICS.md).
+Актуальные ограничения и открытые вопросы — [`firmware/docs/known_issues.md`](firmware/docs/known_issues.md).
 
 ## Возможности
 
@@ -70,7 +64,7 @@
 - OTA-обновление прошивки и звуков (в т.ч. одним файлом).
 - Wi-Fi: только точка доступа SoftAP (без пароля, пока пользователь не задаст);
   встроенный веб-сервер, captive portal (перехват DNS). Режим подключения
-  к роутеру не реализован: сохранённые STA/APSTA-настройки игнорируются.
+  к роутеру (STA/APSTA) не реализован.
 
 **Сервис**
 - Программирование CV в сервисном режиме DCC, сброс CV (CV8=8).
@@ -79,7 +73,7 @@
 
 ## Установка с нуля
 
-Проект собирается через **ESP-IDF 6.0** (`idf.py`); PlatformIO не используется.
+Проект собирается через **ESP-IDF 6.0** (`idf.py`).
 Для чистой машины нужны:
 
 | Требование | Зачем |
@@ -130,7 +124,7 @@ cd firmware
 с версией, адресами и SHA256. Этот комплект использует `web_flasher`.
 Для автоматизации: `build_firmware.bat --no-pause`. Полная офлайн-проверка:
 `python firmware/tools/release_artifacts.py verify --release release`
-(на 2026-10-17 проверены все 6 BIN, версия 0.10).
+(проверка обязательна после `build_firmware.bat`).
 
 Из каталога `firmware/`. Путь к ESP-IDF 6.0 задаётся через `-IdfPath`,
 переменную `$env:IDF_PATH` или файл `firmware\.idf_path`:
@@ -142,15 +136,12 @@ cd firmware
 .\idf_build.ps1 -Flash -Monitor     # + монитор порта
 .\idf_build.ps1 -Erase -Flash       # полное стирание чипа + прошивка
 .\idf_build.ps1 -Clean              # fullclean
-.\build_idf.bat / .\flash_idf.bat   # то же из cmd.exe
 ```
 
 Готовые образы и вспомогательные скрипты:
 
 ```powershell
-flash_firmware.bat [COMx] [erase]                   # сборка + прошивка (автопоиск порта)
-build_ota_bin.bat                                   # OTA-образ в release/
-build_flash_tool_files.bat                          # файлы для Espressif Flash Download Tool
+build_firmware.bat                                  # сборка + публикация release/ (из корня)
 build_ota_with_sounds.ps1                           # составной OTA (прошивка + звуки)
 ```
 
@@ -192,7 +183,7 @@ firmware/            исходники прошивки и документац
                      settings, storage, pinmap, provision, selftest
   main/              app_main.c
   docs/              sound_scheme.md, sound_pack.md, sound_blocks_editor.md,
-                     cv_sound.md
+                     cv_sound.md, known_issues.md
   sound_editor/      исходник и собранный офлайн-редактор блоков
                      (public/ + scripts/, dist/ коммитится)
   test/              host-тесты (Unity + gcc), test/sound_editor_assets.py,
@@ -218,27 +209,29 @@ setup.ps1            автонастройка окружения (ESP-IDF, .id
 Команды выполняются из каталога `firmware/`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File test\run_tests.ps1   # host-наборы (Unity + TCC/gcc)
+powershell -ExecutionPolicy Bypass -File test\run_tests.ps1   # C + JS/Python suites (Unity + TCC/gcc)
+bash test/run_tests.sh                                        # Linux/CI C suites
+bash test/run_tests.sh --sanitize                             # ASan + UBSan (CI)
 powershell -ExecutionPolicy Bypass -File test\coverage.ps1    # покрытие строк host-сборок (gcov)
 ```
 
-Итоговый прогон 2026-10-17: **18 C-наборов, 790 тестов PASS**
-и **27 JavaScript-тестов PASS**. Для JS нужен Node.js (проверено с 22.18);
-без него runner выдаёт предупреждение, а JS не считается проверенным.
-Исходный прогон до исправлений: 15 наборов / 534 PASS; временные FAIL тогда
-выявили дефекты и позднее заменены постоянными регрессиями.
+CI (`.github/workflows/host-tests.yml`) запускает C-наборы, JS/Python-тесты и
+отдельный job с ASan+UBSan.
+
+Итоговый прогон 2026-10-20: **18 C-наборов, 800 тестов PASS**
+и **68 JavaScript/Python-тестов PASS** (36 web UI, 13 block editor,
+8 pack integration, 11 Python asset/release). Для JS нужен Node.js (проверено
+с 22.18); без него runner выдаёт предупреждение, а JS не считается проверенным.
 
 ```powershell
 node --test test\test_web_ui.js
 ```
 
-Покрытие 2026-10-17 (`test\coverage.ps1`): **92,8 % (8237/8875 строк)** —
+Покрытие (`test\coverage.ps1`, 2026-10-20): **92,9 % (8266/8893 строк)** —
 union исполняемых строк first-party исходников (`components/` + `main/`),
 попавших в gcov из host-сборок. Это не покрытие всех ветвей, всего кода или
-физического поведения устройства; `web.c` — 83,8 %, `sound_graph_store.c` —
-96,0 %, `web_wifi.c` — 100 %. `sound.c` (RTOS-обвязка) в host-gcov не входит.
-Ранее сообщавшиеся 100 % относились к другому, меньшему набору строк и здесь не
-переиспользуются.
+физического поведения устройства; RTOS/аппаратная обвязка в host-gcov не входит.
+Ветвевое покрытие gcov — **76,2 % (6449/8468)**; см. `ARCHITECTURE.md` §4.4.
 
 Первый запуск скачает Unity (нужен Git/интернет). Компилятор ищется так:
 `$env:DCC_TEST_CC` → портативный TCC в `%TEMP%\tcc` → `gcc`/`clang` в PATH.

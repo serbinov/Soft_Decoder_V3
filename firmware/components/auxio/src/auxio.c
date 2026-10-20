@@ -318,26 +318,6 @@ esp_err_t auxio_set_enabled(uint8_t channel, bool enabled)
     return apply_now(channel);
 }
 
-esp_err_t auxio_set_output(uint8_t channel, bool enabled, uint8_t pwm)
-{
-    if (channel >= AUXIO_CH_COUNT) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (s_lock == NULL || xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-    s_ch[channel].enabled = enabled;
-    s_ch[channel].pwm_on = pwm;
-    s_ch[channel].pwm_off = 0;
-    s_ch[channel].mode = AUXIO_EFFECT_STEADY;
-    s_ch[channel].period_ms = 800;
-    s_ch[channel].cur = 0;
-    s_ch[channel].fx_next_ms = 0;
-    s_ch[channel].fx_scheduled = false;
-    xSemaphoreGive(s_lock);
-    return apply_now(channel);
-}
-
 esp_err_t auxio_set_effect(uint8_t channel, bool enabled,
                            uint8_t pwm_on, uint8_t pwm_off,
                            auxio_effect_t mode, uint16_t period_ms)

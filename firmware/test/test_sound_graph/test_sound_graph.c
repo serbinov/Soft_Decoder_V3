@@ -60,6 +60,182 @@ static void reject_editor(const char *editor)
     memcpy(json,minimal,prefix); snprintf(json+prefix,SG_MAX_JSON-prefix,"\"editor\":%s}",editor);
     TEST_ASSERT_NOT_EQUAL(ESP_OK,sg_parse(json,strlen(json),g,&diagnostic)); free(json);
 }
+static void accept_editor(const char *editor)
+{
+    char *json = malloc(SG_MAX_JSON + 1); TEST_ASSERT_NOT_NULL(json);
+    const char *at = strstr(minimal,"\"editor\":"); size_t prefix = (size_t)(at-minimal);
+    memcpy(json,minimal,prefix); snprintf(json+prefix,SG_MAX_JSON-prefix,"\"editor\":%s}",editor);
+    TEST_ASSERT_EQUAL(ESP_OK,sg_parse(json,strlen(json),g,&diagnostic)); free(json);
+}
+static void reject_json(const char *json, size_t len)
+{
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_parse(json, len, g, &diagnostic));
+}
+static void reset_model(void)
+{
+    memset(g, 0, sizeof(*g));
+    TEST_ASSERT_EQUAL(ESP_OK, sg_parse(minimal, strlen(minimal), g, &diagnostic));
+}
+static void add_asset(const char *file, const char *crc, uint32_t size)
+{
+    sg_asset_t *a = &g->assets[g->asset_count++];
+    snprintf(a->file, sizeof(a->file), "%s", file);
+    snprintf(a->crc32, sizeof(a->crc32), "%s", crc);
+    a->size = size; a->sampleRate = 8000; a->channels = 1; a->bits = 16;
+}
+static void add_effect(const char *id, const char *entry, uint8_t fn)
+{
+    sg_effect_t *e = &g->effects[g->effect_count++];
+    snprintf(e->id, sizeof(e->id), "%s", id);
+    snprintf(e->entry, sizeof(e->entry), "%s", entry);
+    e->fn = fn;
+}
+static void test_parse_valid_token_edges(void)
+{
+    /* Uppercase/lowercase hex, surrogate pair, number forms, literals/arrays. */
+    accept_editor("{\"n\":-1.5e+2,\"m\":1E-2,\"u\":\"\\u00E9\\u00e9\\u20AC\\ud83d\\ude00\","
+                  "\"l\":[true,false,null],\"o\":{\"k\":1.0}}");
+    /* Raw 2/3/4-byte UTF-8 and all JSON escapes. */
+    accept_editor("{\"s\":\"\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80\","
+                  "\"e\":\"\\\"\\\\\\/\\b\\f\\n\\r\\t\"}");
+}
+static void test_parse_rejects_malformed_token_edges(void)
+{
+    const char *bad[] = {
+        "", "{", "[]", "{1:2}", "{\"a\" 1}", "{\"a\":1} x", "{\"a\":1,}",
+        "{\"a\":-}", "{\"a\":1.}", "{\"a\":1e}", "{\"a\":1e+}", "{\"a\":+1}",
+        "{\"a\":tru}", "{\"a\":fals}", "{\"a\":nul}",
+        "{\"a\":\"\\q\"}", "{\"a\":\"\\u12\"}", "{\"a\":\"\\uZZZZ\"}",
+        "{\"a\":\"\\ud800\"}", "{\"a\":\"\\ud800\\u0041\"}", "{\"a\":\"\\udc00\"}",
+        "{\"a\":\"\xC0\xAF\"}", "{\"a\":\"\xE2\x28\xA1\"}", "{\"a\":\"\xF0\x80\x80\xAF\"}",
+    };
+    for (size_t i = 0; i < sizeof(bad)/sizeof(bad[0]); ++i) {
+        reject_json(bad[i], strlen(bad[i]));
+    }
+    const char ctrl[] = { '{','"','a','"',':','"',1,'"','}',0 };
+    reject_json(ctrl, sizeof(ctrl) - 1);
+}
+static void test_validator_error_matrix(void)
+{
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(NULL, &diagnostic));
+
+    reset_model(); g->state_count = 0;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->state_count = SG_MAX_STATES + 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->transition_count = SG_MAX_TRANSITIONS + 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->effect_count = SG_MAX_EFFECTS + 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->asset_count = SG_MAX_ASSETS + 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->variable_count = SG_MAX_VARIABLES + 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+
+    reset_model(); snprintf(g->id, sizeof(g->id), " bad");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); snprintf(g->name, sizeof(g->name), "\xC0");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->engine_fn = 29;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->hysteresis = 33;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+
+    reset_model(); g->states[0].file[0] = 'x';
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* engine entry must be silent */
+
+    reset_model(); state("run", "run.wav", true); g->states[1].volume = 101;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); g->states[1].rate = 499;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); g->states[1].id[0] = ' ';
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); state("run", "x.wav", false);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* duplicate ID */
+    reset_model(); state("run", "../x.wav", false);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* bad basename */
+
+    reset_model(); g->variable_count = 2;
+    snprintf(g->variables[0].name, sizeof(g->variables[0].name), "v");
+    snprintf(g->variables[1].name, sizeof(g->variables[1].name), "v");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->variable_count = 1; g->variables[0].kind = SG_VAR_ENGINE;
+    g->variables[0].init = 1;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); g->variable_count = 1; snprintf(g->variables[0].name, sizeof(g->variables[0].name), "v");
+    g->variables[0].kind = (sg_var_kind_t)(SG_VAR_ENGINE + 1);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+
+    reset_model(); add_asset("run.wav", "00000000", 1);
+    TEST_ASSERT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); add_asset("run.wav", "0000000G", 1);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); add_asset("run.wav", "00000000", 0);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); add_asset("run.wav", "00000000", 1); add_asset("run.wav", "00000001", 1);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+
+    reset_model(); add_effect("fx", "off", 1);
+    TEST_ASSERT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); add_effect("fx", "off", 29);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); add_effect(" bad", "off", 1);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); add_effect("fx", "run", 1);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); add_effect("fx", "off", 1); add_effect("fx", "off", 2);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    TEST_ASSERT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, (sg_timing_t)99);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, (sg_condition_type_t)99, 0, SG_IMMEDIATE);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    g->transitions[0].condition.has_fn = true;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_SPEED, 0, SG_IMMEDIATE);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* missing range */
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_RANDOM, 0, SG_IMMEDIATE);
+    g->transitions[0].condition.has_min = true; g->transitions[0].condition.min = 101;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_TIMEOUT, 0, SG_IMMEDIATE);
+    g->transitions[0].condition.has_max = true; g->transitions[0].condition.max = 2;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_SPEED, 0, SG_IMMEDIATE);
+    g->transitions[0].condition.has_min = g->transitions[0].condition.has_max = true;
+    g->transitions[0].condition.min = 20; g->transitions[0].condition.max = 10;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_VAR_CMP, 0, SG_IMMEDIATE);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* missing variable */
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    g->transitions[0].condition.has_var = true;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* unexpected variable */
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    strcpy(g->transitions[0].id, " bad");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic));
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    edge("off", "run", 1, SG_ENGINE_OFF, 0, SG_IMMEDIATE);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* duplicate source priority */
+    reset_model(); state("run", "run.wav", true); edge("off", "run", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    edge("off", "run", 2, SG_ENGINE_OFF, 0, SG_IMMEDIATE); strcpy(g->transitions[1].id, "e0");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* duplicate ID */
+
+    reset_model(); state("a", "", false); state("b", "", false);
+    edge("a", "b", 1, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    edge("b", "a", 2, SG_ENGINE_ON, 0, SG_IMMEDIATE);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* silent cycle */
+    reset_model(); state("island", "", false);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(g, &diagnostic)); /* unreachable */
+
+    reset_model(); state("run", "run.wav", true);
+    g->state_count = SG_MAX_STATES + 1;
+    TEST_ASSERT_FALSE(sg_file_used(g, "run.wav"));
+    TEST_ASSERT_FALSE(sg_file_used(NULL, "run.wav"));
+    TEST_ASSERT_FALSE(sg_file_used(g, ""));
+}
+
 static void test_parse_minimal_and_draft(void)
 {
     TEST_ASSERT_EQUAL_STRING("test",g->id); TEST_ASSERT_EQUAL_UINT8(0,g->engine_entry_index);
@@ -619,6 +795,7 @@ static void test_condition_json_rejections(void)
 int main(void)
 {
     UNITY_BEGIN(); RUN_TEST(test_parse_minimal_and_draft); RUN_TEST(test_parse_engine_no_fkey_and_hold); RUN_TEST(test_duplicate_keys_and_malformed_json);
+    RUN_TEST(test_parse_valid_token_edges); RUN_TEST(test_parse_rejects_malformed_token_edges); RUN_TEST(test_validator_error_matrix);
     RUN_TEST(test_utf8_and_unicode_escapes); RUN_TEST(test_parser_size_depth_and_string_bounds);
     RUN_TEST(test_exact_body_limit_and_token_limit);
     RUN_TEST(test_ids_filenames_and_direct_model_bounds); RUN_TEST(test_validator_references_ranges_priorities);

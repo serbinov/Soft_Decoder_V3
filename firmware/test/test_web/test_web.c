@@ -14,7 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <direct.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -22,6 +21,12 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#define RMDIR(p) _rmdir(p)
+#else
+#define MKDIR(p) mkdir((p), 0777)
+#define RMDIR(p) rmdir(p)
 #endif
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
@@ -56,9 +61,6 @@ esp_err_t test_metadata_sync(void);
 int test_atomic_rename(const char *from, const char *to);
 int test_binary_open(const char *path, int flags, int mode);
 esp_err_t httpd_resp_send_chunk(httpd_req_t *req, const char *buf, ssize_t len);
-
-#define MKDIR(p) _mkdir(p)
-#define RMDIR(p) _rmdir(p)
 
 /* Keep the filesystem writes inside the repository working tree. */
 #define WEB_USERDATA_DIR "web_tmp"
@@ -353,21 +355,55 @@ static void test_web_log_event_utf8_and_truncation(void)
     TEST_ASSERT_EQUAL_STRING("\xd0\xb0\xd0\xb1\xd0\xb2", s_evlog[1].text);
 }
 
-/* ---------- function state ---------- */
-
-static void test_get_function_state_bounds(void)
-{
-    s_fn[3] = true;
-    TEST_ASSERT_TRUE(web_get_function_state(3));
-    TEST_ASSERT_FALSE(web_get_function_state(WEB_FN_COUNT));
-}
+/* ---------- control source ---------- */
 
 static void test_control_is_rails(void)
 {
     s_cfg.control_source = 0;
+    s_actuation_ready = true;
     TEST_ASSERT_TRUE(web_control_is_rails());
+    TEST_ASSERT_TRUE(web_control_source_is_rails());
+    s_actuation_ready = false;
+    TEST_ASSERT_FALSE(web_control_source_is_rails());
+    s_actuation_ready = true;
     s_cfg.control_source = 1;
     TEST_ASSERT_FALSE(web_control_is_rails());
+    TEST_ASSERT_FALSE(web_control_source_is_rails());
+    s_cfg.control_source = 0;
+}
+
+static void test_emergency_post_cuts_all_and_clears_functions(void)
+{
+    httpd_req_t req = make_req(0);
+    s_fn[1] = true;
+    s_fn[2] = true;
+    mock_motor_emergency_stop_calls = 0;
+    mock_audio_stop_calls = 0;
+    mock_sound_stop_all_calls = 0;
+    uint32_t generation = s_control_generation;
+    reset_resp();
+
+    TEST_ASSERT_EQUAL(ESP_OK, emergency_post(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_motor_emergency_stop_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_audio_stop_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_stop_all_calls);
+    TEST_ASSERT_EQUAL_UINT32(generation + 1U, s_control_generation);
+    TEST_ASSERT_FALSE(s_fn[1]);
+    TEST_ASSERT_FALSE(s_fn[2]);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+
+    /* A blocked control mutex must not refuse the emergency action. */
+    s_fn[1] = true;
+    generation = s_control_generation;
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, emergency_post(&req));
+    TEST_ASSERT_EQUAL_UINT32(generation + 1U, s_control_generation);
+    TEST_ASSERT_TRUE(s_fn[1]); /* function mutex also failed: best effort */
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    mock_sem_take_fail = 0;
+    s_fn[1] = false;
+    s_actuation_ready = true;
 }
 
 /* ---------- wifi event handler ---------- */
@@ -460,8 +496,11 @@ static void test_wifi_pick_channel_scores(void)
 
 static void test_web_apply_function_bounds(void)
 {
+    /* Out-of-range function keys must be ignored without touching s_fn[]. */
     web_apply_function(SETTINGS_FUNC_MAP_COUNT, true);
-    TEST_ASSERT_FALSE(web_get_function_state(SETTINGS_FUNC_MAP_COUNT));
+    for (size_t i = 0; i < WEB_FN_COUNT; ++i) {
+        TEST_ASSERT_FALSE(s_fn[i]);
+    }
 }
 
 static void test_web_apply_function_mutex_null(void)
@@ -658,6 +697,8 @@ static void test_wifi_start_off(void)
     memset(&cfg, 0, sizeof(cfg));
     cfg.wifi_mode = 0;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_FALSE(s_wifi_started);
+    TEST_ASSERT_EQUAL_INT(0, mock_wifi_init_calls);
 }
 
 static void test_wifi_start_full(void)
@@ -668,6 +709,8 @@ static void test_wifi_start_full(void)
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
     TEST_ASSERT_TRUE(s_wifi_started);
     TEST_ASSERT_EQUAL_INT(1, mock_netif_dhcps_start_calls);
+    TEST_ASSERT_EQUAL(WIFI_AUTH_WPA2_PSK, test_ap_config.ap.authmode);
+    TEST_ASSERT_EQUAL_STRING("supersecret", (const char *)test_ap_config.ap.password);
     TEST_ASSERT_EQUAL_INT(1, mock_netif_set_dns_calls);
 }
 
@@ -676,6 +719,8 @@ static void test_wifi_start_short_password(void)
     settings_config_t cfg = make_wifi_cfg();
     snprintf(cfg.ap_password, sizeof(cfg.ap_password), "123");
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL(WIFI_AUTH_OPEN, test_ap_config.ap.authmode);
+    TEST_ASSERT_EQUAL_UINT8(0, test_ap_config.ap.password[0]);
 }
 
 static void test_wifi_start_init_fail(void)
@@ -683,6 +728,8 @@ static void test_wifi_start_init_fail(void)
     settings_config_t cfg = make_wifi_cfg();
     mock_wifi_init_ret = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, wifi_start(&cfg));
+    TEST_ASSERT_FALSE(s_wifi_started);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_init_calls);
 }
 
 static void test_wifi_start_init_invalid_state(void)
@@ -690,6 +737,8 @@ static void test_wifi_start_init_invalid_state(void)
     settings_config_t cfg = make_wifi_cfg();
     mock_wifi_init_ret = ESP_ERR_INVALID_STATE;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_TRUE(s_wifi_started);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_init_calls);
 }
 
 static void test_wifi_start_no_sta_netif(void)
@@ -697,6 +746,7 @@ static void test_wifi_start_no_sta_netif(void)
     settings_config_t cfg = make_wifi_cfg();
     mock_sta_netif_null = 1;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_TRUE(s_wifi_started);
 }
 
 static void test_wifi_start_sta_mode_fail(void)
@@ -704,6 +754,7 @@ static void test_wifi_start_sta_mode_fail(void)
     settings_config_t cfg = make_wifi_cfg();
     mock_wifi_mode_sta_ret = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_TRUE(s_wifi_started);
 }
 
 static void test_wifi_start_sta_start_fail(void)
@@ -711,6 +762,7 @@ static void test_wifi_start_sta_start_fail(void)
     settings_config_t cfg = make_wifi_cfg();
     mock_wifi_start_first_ret = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_TRUE(s_wifi_started);
 }
 
 static void test_wifi_start_channel_chosen(void)
@@ -726,6 +778,7 @@ static void test_wifi_start_channel_chosen(void)
     mock_scan_records[1].rssi = -40;
     mock_scan_records[1].primary = 1;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(6, test_ap_config.ap.channel);
 }
 
 static void test_wifi_start_ap_netif_null(void)
@@ -882,6 +935,41 @@ static void test_control_source_post(void)
     TEST_ASSERT_EQUAL_INT(1, mock_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(1, mock_cv_commit_calls);
     TEST_ASSERT_EQUAL_INT(3, mock_motor_emergency_stop_calls);
+}
+
+static void test_control_source_post_errors(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.control_source = 0;
+    s_maintenance_owner = (TaskHandle_t)2;
+    set_query("source=web");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "maintenance"));
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.control_source);
+    s_maintenance_owner = NULL;
+
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control busy"));
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.control_source);
+    mock_sem_take_fail = 0;
+
+    mock_settings_save_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.control_source);
+    mock_settings_save_ret = 0;
+
+    mock_cv_write_ret = ESP_FAIL;
+    set_query("source=rails");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "mode save failed"));
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.control_source);
+    mock_cv_write_ret = 0;
 }
 
 static void test_mode_get(void)
@@ -2306,12 +2394,14 @@ static void test_captive_handler(void)
 
 static void test_start_dns_hijack(void)
 {
+    int before = mock_task_create_calls;
     mock_task_create_ok = 1;
     start_dns_hijack();
+    TEST_ASSERT_EQUAL_INT(before + 1, mock_task_create_calls);
     mock_task_create_ok = 0;
     start_dns_hijack();
+    TEST_ASSERT_EQUAL_INT(before + 2, mock_task_create_calls); /* failed create still attempted */
     mock_task_create_ok = 1;
-    TEST_PASS();
 }
 
 static void test_stream_idle_retry(void)
@@ -2397,22 +2487,16 @@ static void test_wifi_get(void)
     s_cfg.wifi_mode = 1;
     snprintf(s_cfg.ap_ssid, sizeof(s_cfg.ap_ssid), "AP");
     snprintf(s_cfg.ap_password, sizeof(s_cfg.ap_password), "secret123");
-    snprintf(s_cfg.sta_ssid, sizeof(s_cfg.sta_ssid), "STA");
-    snprintf(s_cfg.sta_password, sizeof(s_cfg.sta_password), "stapass1");
-    s_cfg.port = 80;
     s_cfg.auto_off_min = 5;
-    s_cfg.hold = 0;
     snprintf(s_cfg.ap_ip, sizeof(s_cfg.ap_ip), "10.0.0.1");
-    snprintf(s_sta_ip, sizeof(s_sta_ip), "10.0.0.9");
     s_wifi_started = true;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ap_password\":\"********\""));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"ap_running\""));
-    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_ip\":\"10.0.0.9\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ap_ip\":\"10.0.0.1\""));
 
     reset_resp();
     s_cfg.ap_password[0] = '\0';
-    s_cfg.sta_password[0] = '\0';
     s_wifi_started = false;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"off\""));
@@ -2560,15 +2644,6 @@ static void test_log_get(void)
     TEST_ASSERT_EQUAL(ESP_OK, log_get(&req));
 }
 
-static void test_web_fs_busy(void)
-{
-    s_up_active = false;
-    TEST_ASSERT_FALSE(web_fs_busy());
-    s_up_active = true;
-    TEST_ASSERT_TRUE(web_fs_busy());
-    s_up_active = false;
-}
-
 static void test_progress_handler(void)
 {
     httpd_req_t req = make_req(0);
@@ -2590,10 +2665,13 @@ static void test_progress_handler(void)
 
 static void test_register_route_failure(void)
 {
+    int before_calls = mock_httpd_register_calls;
+    uint32_t before_routes = s_route_count;
     mock_httpd_register_err = ESP_FAIL;
     register_route("/x", HTTP_GET, root_handler);
+    TEST_ASSERT_EQUAL_INT(before_calls + 1, mock_httpd_register_calls);
+    TEST_ASSERT_EQUAL_UINT32(before_routes, s_route_count); /* failed route not counted */
     mock_httpd_register_err = 0;
-    TEST_PASS();
 }
 
 static void test_start_servers(void)
@@ -4155,6 +4233,56 @@ static void test_graph_factory_reset_selection_and_failure(void)
     TEST_ASSERT_TRUE(mock_audio_inhibited);
 }
 
+static void test_graph_projects_and_state_get(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_graph_revision = 0;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_projects_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"projects\":[]"));
+
+    mock_graph_revision = 7;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_projects_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"id\":\"demo\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"name\":\"Demo\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"revision\":7"));
+
+    memset(&mock_graph_status, 0, sizeof(mock_graph_status));
+    mock_graph_status.active = true;
+    mock_graph_status.engine = true;
+    mock_graph_status.armed = true;
+    mock_graph_status.fault = true;
+    snprintf(mock_graph_status.id, sizeof(mock_graph_status.id), "demo");
+    mock_graph_status.revision = 7;
+    mock_graph_status.speed = 42;
+    mock_graph_status.states[0] = 3;
+    mock_graph_status.states[1] = 4;
+    mock_graph_status.failed_channels = 2;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_state_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"active\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"id\":\"demo\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"revision\":7"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"engine\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"armed\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"failedChannels\":2"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"states\":[3,4"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":42"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"fault\":true"));
+}
+
+static void test_graph_projects_get_error(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_graph_list_err = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_projects_get(&req));
+    TEST_ASSERT_EQUAL_STRING("500 Internal Server Error", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    mock_graph_list_err = ESP_OK;
+}
+
 static void test_graph_query_values_are_not_truncated_or_ambiguous(void)
 {
     char value[SG_ID_CAP];
@@ -4174,6 +4302,8 @@ int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     UNITY_BEGIN();
+    RUN_TEST(test_graph_projects_and_state_get);
+    RUN_TEST(test_graph_projects_get_error);
     RUN_TEST(test_graph_query_values_are_not_truncated_or_ambiguous);
     RUN_TEST(test_graph_save_validate_do_not_actuate);
     RUN_TEST(test_graph_body_bounds_mime_and_eof);
@@ -4217,8 +4347,8 @@ int main(void)
     RUN_TEST(test_web_log_event_null_mutex);
     RUN_TEST(test_web_log_event_stores);
     RUN_TEST(test_web_log_event_utf8_and_truncation);
-    RUN_TEST(test_get_function_state_bounds);
     RUN_TEST(test_control_is_rails);
+    RUN_TEST(test_emergency_post_cuts_all_and_clears_functions);
     RUN_TEST(test_wifi_event_handler);
     RUN_TEST(test_wifi_pick_channel_scan_fail);
     RUN_TEST(test_wifi_pick_channel_no_aps);
@@ -4258,6 +4388,7 @@ int main(void)
     RUN_TEST(test_root_handler);
     RUN_TEST(test_control_source_get);
     RUN_TEST(test_control_source_post);
+    RUN_TEST(test_control_source_post_errors);
     RUN_TEST(test_mode_get);
     RUN_TEST(test_mode_post);
     RUN_TEST(test_bemf_cal_get);
@@ -4331,7 +4462,6 @@ int main(void)
     RUN_TEST(test_task_inputs_and_clientlog);
     RUN_TEST(test_log_get);
     RUN_TEST(test_progress_handler);
-    RUN_TEST(test_web_fs_busy);
     RUN_TEST(test_register_route_failure);
     RUN_TEST(test_start_servers);
     RUN_TEST(test_web_init_wifi_off);

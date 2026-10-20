@@ -1,4 +1,4 @@
-/* Graph sound engine (SOUND_ENGINE_ROADMAP.md).
+/* Graph sound engine (ARCHITECTURE.md §12, docs/sound_scheme.md).
  *
  * The graph is the single sound behaviour model: the semantic runner in
  * sound_graph_runner.c decides *what* to play from the active graph, and this
@@ -125,14 +125,6 @@ static void sound_unlock(void)
 /* ------------------------------------------------------------------ */
 /* runtime inputs                                                     */
 /* ------------------------------------------------------------------ */
-
-bool sound_engine_is_on(void)
-{
-    sound_lock();
-    bool on = s_graph_runner ? s_graph_runner->engine_on : false;
-    sound_unlock();
-    return on;
-}
 
 bool sound_variable_get(uint8_t index, int32_t *out)
 {
@@ -331,11 +323,6 @@ void sound_graph_status_get(sound_graph_status_t *out)
     }
     sound_unlock();
 }
-bool sound_graph_file_used(const char *file)
-{
-    sound_lock(); bool used = sg_file_used(s_graph,file); sound_unlock(); return used;
-}
-
 esp_err_t sound_set_inhibited(bool inhibited)
 {
     if (s_lock == NULL) { return ESP_ERR_INVALID_STATE; }

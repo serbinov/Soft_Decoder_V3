@@ -1,7 +1,6 @@
 # web_html.h is generated from web_ui.html (and version.txt) before web.c is
-# compiled. This used to be a PlatformIO pre-build script; generating it from
-# CMake lets the project build with plain ESP-IDF (idf.py) as well, and keeps a
-# single source of truth for both build systems.
+# compiled. Generating it from CMake keeps a single source of truth for the
+# plain ESP-IDF (idf.py) build.
 
 set(WEB_DIR        "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(WEB_UI_HTML    "${WEB_DIR}/web_ui.html")
@@ -63,4 +62,4 @@ endif()
 idf_component_register(SRCS "src/web.c" "src/web_util.c" "src/audio_pack.c" "src/web_wifi.c" "${EDITOR_SOURCE}"
                        INCLUDE_DIRS "include"
                        REQUIRES esp_http_server esp_wifi esp_netif esp_event esp_timer app_update
-                                 nvs_flash esp_driver_gpio audio auxio motor settings storage pinmap dcc sound)
+                                 nvs_flash audio auxio motor settings storage dcc sound)

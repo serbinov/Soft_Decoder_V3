@@ -8,7 +8,7 @@
 
 #define AUDIO_MAX_VOICES 20
 
-/* "No free voice" result of audio_voice_alloc(). */
+/* Sentinel for an unassigned voice handle. */
 #define AUDIO_VOICE_NONE 0xFF
 #define AUDIO_DYNAMIC_VOICES 19 /* voice 19 belongs exclusively to the sound engine */
 
@@ -49,8 +49,7 @@ bool audio_is_quiescent(void);
 
 /* Atomic ownership API. alloc excludes 18/19. play updates the handle to the
  * new playback generation; stale play/release cannot affect another owner.
- * EOF frees the allocator slot, so callers must query/reallocate before replay.
- * Index APIs below remain for legacy callers, without ownership guarantees. */
+ * EOF frees the allocator slot, so callers must query/reallocate before replay. */
 esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out);
 esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
                                 bool loop, uint8_t volume);
@@ -69,29 +68,13 @@ esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t v
 esp_err_t audio_voice_stop(uint8_t voice);
 void audio_stop_all(void);
 
-/* Per-voice playback rate (resampling speed), clipped to AUDIO_RATE_MIN..MAX.
- * Applied live to a playing voice; 1000 keeps the original pitch. */
-esp_err_t audio_voice_set_rate(uint8_t voice, uint16_t permille);
-
 /* Live per-voice volume override (0..100) applied to an already-playing voice.
  * Cleared on the next play request, so it never leaks into a new playback.
  * Used by the sound engine to duck the engine voice under effects. */
 esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume);
 
-/* Voice state queries, safe to call from any task. */
-bool audio_voice_is_active(uint8_t voice);
-uint32_t audio_voice_position(uint8_t voice); /* output samples produced */
-
-/* Simple voice allocator: returns a free voice index or AUDIO_VOICE_NONE. */
-uint8_t audio_voice_alloc(void);
-void audio_voice_release(uint8_t voice);
-
 void audio_set_volume(uint8_t vol);
 uint8_t audio_get_volume(void);
 bool audio_is_playing(void);
-
-/* Convenience wrappers used by the web UI (single one-shot voice). */
-esp_err_t audio_play(const char *path);
-esp_err_t audio_stop(void);
 
 #endif

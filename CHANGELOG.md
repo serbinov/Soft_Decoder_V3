@@ -307,6 +307,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-20 (v0.10) — chore(release): rebuild v0.10 artifacts and remove obsolete drawio
 - 2026-10-20 (v0.10) — security(pack): replace weak XOR with scrypt+ChaCha20+HMAC
 - 2026-10-20 (v0.10) — test(editor): verify embedded sound editor assets and browser flow
 - 2026-10-20 (v0.10) — perf(audio): compile mixer hot path with -O2

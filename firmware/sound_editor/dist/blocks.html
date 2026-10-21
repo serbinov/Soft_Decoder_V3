@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRleHQgeD0iMzIiIHk9IjU0IiBmb250LWZhbWlseT0iQXJpYWwsSGVsdmV0aWNhLHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZvbnQtc2l6ZT0iNjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyNTYzZWIiPkE8L3RleHQ+PC9zdmc+" />
 <title>Конструктор Блок Схем</title>
 <style>
@@ -20,7 +20,7 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
-  body{display:flex;flex-direction:column;overflow:hidden}
+  body{display:flex;flex-direction:column;overflow:hidden;height:100dvh;overscroll-behavior:none;-webkit-text-size-adjust:100%}
   .boot-overlay{position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(6,10,18,.72);backdrop-filter:blur(2px)}
   .boot-overlay.hide{display:none}
   .boot-card{width:min(430px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
@@ -31,7 +31,7 @@
   .boot-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;font-size:11px;color:var(--muted)}
   .boot-skip{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:7px;padding:6px 10px;font:inherit;font-size:11px;cursor:pointer}
   .boot-skip:hover{border-color:var(--accent)}
-  header.top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header.top{position:relative;z-index:70;flex:0 0 auto;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
   .hd-left{display:flex;align-items:center;gap:8px;justify-self:start;min-width:0}
   .hd-mid{display:flex;align-items:center;gap:8px;justify-self:center;flex-wrap:wrap}
   .hd-right{display:flex;align-items:center;gap:8px;justify-self:end}
@@ -48,6 +48,8 @@
   button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   button:disabled{opacity:.45;cursor:not-allowed}
   button.sm{padding:3px 7px;font-size:12px}
+  .zoom-group{display:inline-flex;align-items:center;gap:4px}
+  .zoom-btn{min-width:26px;padding:6px 7px;font-weight:700}
   .sep{width:1px;height:22px;background:var(--line);margin:0 2px}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;flex:0 0 auto}
   .seg button{border:none;border-radius:0;background:transparent;padding:6px 10px}
@@ -94,7 +96,7 @@
   .pal button{display:block;width:100%;text-align:left;margin-bottom:5px}
   .pal button b{display:block;font-weight:600}
   .pal button small{color:var(--muted)}
-  #stage{position:relative;flex:1;overflow:hidden;background:var(--stage);--gstep:20px;--gx:0px;--gy:0px}
+  #stage{position:relative;flex:1;overflow:hidden;background:var(--stage);--gstep:20px;--gx:0px;--gy:0px;touch-action:none}
   #stage.grid-bg{background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:var(--gstep) var(--gstep);background-position:var(--gx) var(--gy)}
   #marquee{position:absolute;border:1px solid var(--accent);background:rgba(74,158,255,.15);pointer-events:none;z-index:6;display:none}
   #world{position:absolute;left:0;top:0;transform-origin:0 0;width:6000px;height:6000px}
@@ -155,17 +157,36 @@
   .hidden{display:none}
   .mob{display:none}
   @media (max-width:760px){
-    aside{position:fixed;top:0;bottom:0;z-index:30;width:86%;max-width:330px;box-shadow:0 0 30px #000a;transition:transform .18s}
+    header.top{display:flex;flex-wrap:wrap;gap:6px;padding:calc(6px + env(safe-area-inset-top,0px)) 8px 6px}
+    .hd-left{flex:1 1 auto;min-width:0;gap:6px}
+    .hd-right{order:1;flex:0 0 auto;margin-left:auto}
+    .hd-mid{order:2;flex:1 1 100%;justify-content:flex-start;flex-wrap:nowrap;gap:6px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .hd-mid::-webkit-scrollbar{display:none}
+    .hd-mid>button,.hd-mid>.tm,.hd-mid>.zoom-group{flex:0 0 auto}
+    .hd-mid button{padding:6px 8px;min-height:36px}
+    .hd-left>.mob,.hd-right>.mob{min-width:36px;min-height:36px}
+    .zoom-btn{min-width:28px;padding:6px 8px}
+    .mob{display:inline-block}
+    .brand span{display:none}
+    .status{font-size:11px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+    main{position:relative;overflow:hidden}
+    aside{position:absolute;top:0;bottom:0;z-index:30;width:86%;max-width:330px;box-shadow:0 0 30px #000a;transition:transform .18s;overscroll-behavior:contain;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
     aside.left{left:0;border-right:1px solid var(--line);transform:translateX(-105%)}
     aside.right{right:0;transform:translateX(105%)}
     body.show-pal aside.left{transform:none}
     body.show-insp aside.right{transform:none}
-    .mob{display:inline-block}
-    .brand span{display:none}
-    header.top{display:flex;flex-wrap:wrap}
-    .hd-left{flex:1 1 auto}
-    .hd-right{order:1}
-    .hd-mid{order:2;flex:1 1 100%;justify-content:flex-start}
+    body.show-pal #b_pal,body.show-insp #b_insp{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+    main::after{content:"";position:absolute;inset:0;z-index:20;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .18s}
+    body.show-pal main::after,body.show-insp main::after{opacity:1;pointer-events:auto}
+    .tm-panel{position:fixed;left:8px!important;right:8px!important;top:auto;bottom:calc(8px + env(safe-area-inset-bottom,0px));min-width:0;max-height:60vh;overflow:auto;border-radius:12px;z-index:80}
+    .tm-panel button{padding:10px 12px;font-size:15px}
+    aside input,aside select{font-size:16px}
+  }
+  @media (max-width:480px){
+    .hd-mid{gap:5px}
+    .hd-mid button{padding:6px 7px;font-size:13px}
+    .zoom-btn{min-width:26px;padding:6px 7px}
+    .status{max-width:72px}
   }
 </style>
 </head>
@@ -218,6 +239,11 @@
   </div>
   <button id="b_save" disabled data-i18n="save">Сохранить</button>
   <button id="b_sim_top" data-i18n="simulator">Симулятор</button>
+  <span class="zoom-group" role="group" aria-label="Масштаб" data-i18n-aria="zoom_group">
+    <button type="button" id="b_zoom_out" class="zoom-btn" title="Уменьшить масштаб" data-i18n-title="zoom_out" aria-label="Уменьшить масштаб" data-i18n-aria="zoom_out">−</button>
+    <button type="button" id="b_zoom_in" class="zoom-btn" title="Увеличить масштаб" data-i18n-title="zoom_in" aria-label="Увеличить масштаб" data-i18n-aria="zoom_in">+</button>
+    <button type="button" id="b_zoom_fit" class="zoom-btn" title="Вписать в экран" data-i18n-title="zoom_fit" aria-label="Вписать в экран" data-i18n-aria="zoom_fit">A</button>
+  </span>
   <button id="b_exit" onclick="exitEditor()"><span data-i18n="to_decoder">Выйти</span></button>
   <input type="file" id="f_import" accept=".json,application/json" class="hidden" />
   </div>
@@ -226,7 +252,7 @@
   </div>
 </header>
 
-<main>
+<main id="main">
   <aside class="left">
     <div class="mode-switch-wrap">
       <div class="seg" id="mode_switch" data-i18n-title="mode_hint">
@@ -288,9 +314,9 @@ snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",play_target_a:"Вос
 undo_tip:"Отменить (Ctrl+Z)",redo_tip:"Повторить (Ctrl+Y)",dup_tip:"Дублировать (Ctrl+D)",
 text_tip:"Добавить текст на поле",text_default:"Текст",text_adding:"Кликните по полю, чтобы добавить текст",text_label:"Текст",text_size:"Размер",text_color:"Цвет",text_hint:"Перетащите подпись; двойной клик — редактирование на поле.",bt_texts:"== Подписи ==",
 scheme_tip:"Схема и таблица связей",scheme_aria:"Схема и связи",
-test:"▶ Тест",validate:"Проверить",save:"Сохранить",simulator:"Симулятор",sim_start:"Старт / Стоп",sim_reset:"Сброс",sim_speed:"Скорость",sim_dir:"Направление",sim_engine:"Двигатель",sim_idle:"Холостой ход",sim_engine_auto:"При наличии скорости двигатель работает",sim_idle_hint:"Двигатель на холостом ходу",sim_log:"События",sim_running:"работает",sim_stopped:"остановлен",sim_no_graph:"Нет графа для симуляции.",sim_outputs:"Выходы",sim_logic:"Логика",outputs:"Выходы",m_outputs:"Выходы",out_write:"⬆ Записать в устройство",out_read:"⬇ Считать с устройства",outputs_tip:"Записать привязки выходов/логики и настройки AUX в устройство",
+test:"▶ Тест",validate:"Проверить",save:"Сохранить",simulator:"Симулятор",sim_start:"Старт / Стоп",sim_reset:"Сброс",sim_speed:"Скорость",sim_dir:"Направление",sim_engine:"Двигатель",sim_idle:"Холостой ход",sim_engine_auto:"При наличии скорости двигатель работает",sim_idle_hint:"Двигатель на холостом ходу",sim_log:"События",sim_running:"работает",sim_stopped:"остановлен",sim_no_graph:"Нет графа для симуляции.",sim_outputs:"Выходы",sim_logic:"Логика",sim_resize:"Изменить размер",sim_effect:"эффект",sim_notch:"позиция ",outputs:"Выходы",m_outputs:"Выходы",out_write:"⬆ Записать в устройство",out_read:"⬇ Считать с устройства",outputs_tip:"Записать привязки выходов/логики и настройки AUX в устройство",
 impout_tip:"Считать привязки выходов/логики с устройства и создать блоки",impout:"Импорт выходов",apply:"Применить",
-to_decoder:"Выйти",theme_tip:"Светлая / тёмная тема",insp_tip:"Настройки",lang_tip:"Switch to English",
+to_decoder:"Выйти",theme_tip:"Светлая / тёмная тема",insp_tip:"Настройки",lang_tip:"Switch to English",zoom_group:"Масштаб",zoom_out:"Уменьшить масштаб",zoom_in:"Увеличить масштаб",zoom_fit:"Вписать в экран",
 ready_blocks:"Готовые блоки",palette_blocks:"Блоки",block_setup:"Настройка блока",check:"Проверка",
 select_hint:"Выберите блок на холсте или добавьте новый слева.",
 scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Экспорт блок-схемы в JPG",download_txt:"Экспорт блок-схемы в TXT",ready:"Готово",
@@ -348,9 +374,9 @@ snap_a:"Grid: ",snap_on:"on",snap_off:"off",play_target_a:"Playback: ",play_pc_s
 undo_tip:"Undo (Ctrl+Z)",redo_tip:"Redo (Ctrl+Y)",dup_tip:"Duplicate (Ctrl+D)",
 text_tip:"Add text to the canvas",text_default:"Text",text_adding:"Click the canvas to add text",text_label:"Text",text_size:"Size",text_color:"Color",text_hint:"Drag the label; double-click to edit it on the canvas.",bt_texts:"== Labels ==",
 scheme_tip:"Diagram and link table",scheme_aria:"Diagram and links",
-test:"▶ Test",validate:"Validate",save:"Save",simulator:"Simulator",sim_start:"Start / Stop",sim_reset:"Reset",sim_speed:"Speed",sim_dir:"Direction",sim_engine:"Engine",sim_idle:"Idle",sim_engine_auto:"Engine runs whenever the locomotive moves",sim_idle_hint:"Engine idling",sim_log:"Events",sim_running:"running",sim_stopped:"stopped",sim_no_graph:"No graph to simulate.",sim_outputs:"Outputs",sim_logic:"Logic",outputs:"Outputs",m_outputs:"Outputs",out_write:"⬆ Write to device",out_read:"⬇ Read from device",outputs_tip:"Write output/logic bindings and AUX settings to the device",
+test:"▶ Test",validate:"Validate",save:"Save",simulator:"Simulator",sim_start:"Start / Stop",sim_reset:"Reset",sim_speed:"Speed",sim_dir:"Direction",sim_engine:"Engine",sim_idle:"Idle",sim_engine_auto:"Engine runs whenever the locomotive moves",sim_idle_hint:"Engine idling",sim_log:"Events",sim_running:"running",sim_stopped:"stopped",sim_no_graph:"No graph to simulate.",sim_outputs:"Outputs",sim_logic:"Logic",sim_resize:"Resize",sim_effect:"effect",sim_notch:"notch ",outputs:"Outputs",m_outputs:"Outputs",out_write:"⬆ Write to device",out_read:"⬇ Read from device",outputs_tip:"Write output/logic bindings and AUX settings to the device",
 impout_tip:"Read output/logic bindings from the device and create blocks",impout:"Import outputs",apply:"Apply",
-to_decoder:"Exit",theme_tip:"Light / dark theme",insp_tip:"Settings",lang_tip:"Переключить на русский",
+to_decoder:"Exit",theme_tip:"Light / dark theme",insp_tip:"Settings",lang_tip:"Переключить на русский",zoom_group:"Zoom",zoom_out:"Zoom out",zoom_in:"Zoom in",zoom_fit:"Fit to screen",
 ready_blocks:"Ready blocks",palette_blocks:"Blocks",block_setup:"Block settings",check:"Validation",
 select_hint:"Select a block on the canvas or add a new one on the left.",
 scheme_title:"Diagram and link table",close_tip:"Close",download_png:"Export scheme to JPG",download_txt:"Export scheme to TXT",ready:"Ready",
@@ -413,6 +439,7 @@ function tr(v){if(v&&typeof v==="object")return (v[lang]!=null)?v[lang]:v.ru;ret
 const LIMITS={states:128,soundStates:96,silentStates:64,transitions:250,effects:32,assets:64,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
 const GRID=20;const NODE_W=240;const NODE_H=80;const SPEED_STEP=25;const SPEED_HYST=1;
+const ZOOM_MIN=0.05,ZOOM_MAX=2.5,ZOOM_FIT_MAX=1.5;
 function nodeHeight(b){return (b&&b.type==="engine")?Math.max(NODE_H,40+(engineRuns(b).length+2)*20):NODE_H;}
 
 /* ---- catalogs -------------------------------------------------------- */
@@ -546,6 +573,84 @@ const BLOCK_LEGENDS={
     use:{ru:"Подключите к выходу блока «Цикл» или «Старт» в «Звуковых схемах» (выходных связей у блока «Конец» нет).",en:"Connect to the output of a Loop or Start block in Sound schemes (End has no output ports)."}
   }
 };
+/* Names from the built-in locomotive template are stored inside a project as
+ * plain strings. Keep their RU/EN pairs so switching the editor language also
+ * re-localizes an existing project instead of leaving mixed-language labels.
+ * Only known built-in names are translated; user names are left untouched. */
+const NAME_I18N_KEYS=["default_project","default_project_name","default_horn_scheme","default_whistle_scheme","default_bell_scheme","default_compressor_scheme","default_coupler_scheme","default_uncoupler_scheme","default_sander_scheme","default_fan_scheme","default_vent_scheme","default_door_open_scheme","default_door_close_scheme","default_brake_scheme","new_scheme_name","scheme_new","s_engine_idle"];
+const NAME_PAIRS=[
+  ["F0 Буферные фонари","F0 Headlights"],["F1 Свисток","F1 Whistle"],["F2 Тифон","F2 Horn"],
+  ["F3 Свет в кабине","F3 Cab light"],["F4 Прожектор / Маяк","F4 Beacon"],
+  ["F5 Радиостанция","F5 Shunting radio"],["F6 Компрессор","F6 Compressor"],
+  ["F7 Автосцепка","F7 Coupler"],["F8 Песочница","F8 Sander"],["F9 Позиция +","F9 Notch +"],
+  ["F10 Позиция −","F10 Notch −"],["F11 Строб маневровый","F11 Strobe"],
+  ["F12 Дверь кабины откр.","F12 Cab door open"],["F13 Дверь кабины закр.","F13 Cab door close"],
+  ["F14 Холодильник ЧМЭ3","F14 Cooling fan"],["F15 Расцепка СА-3","F15 Uncoupler"],
+  ["F16 Турбокомпрессор","F16 Turbocharger"],["F17 Скрип в кривых","F17 Curve squeal"],
+  ["F18 Перестук на стрелках","F18 Switch clank"],["F19 Выпуск воздуха","F19 Air release"],
+  ["F20 Свисток составителя","F20 Shunter whistle"],["F21 Вокзал: объявление","F21 Station PA"],
+  ["F22 Ручной тормоз","F22 Handbrake"],["F23 Реверсор","F23 Reverser"],
+  ["F24 ТЭД + Удержание хода","F24 Traction + Drive hold"],
+  ["F25 Визг тормозов + Выбег","F25 Brake squeal + Coast"],
+  ["F26 Динамический тормоз","F26 Dynamic brake"],["F27 Глушение / Mute","F27 Engine stop / Mute"],
+  ["F28 Освещение экипажа","F28 Underframe light"],
+  ["Турбокомпрессор ЧМЭ3","ChME3 Turbocharger"],["Скрип колёс в кривых","Curve flange squeal"],
+  ["Перестук колёс и стрелки","Rail joints & switches"],["Свисток составителя","Shunter whistle"],
+  ["Вокзал: объявление поезда","Station announcement"],["Ручной тормоз","Handbrake"],
+  ["Реверсор кабины","Cab reverser"],["Тяговые электродвигатели (ТЭД)","Traction motors"],
+  ["Визг тормозов","Brake squeal"],["Дизель: выбег при глушении","Diesel: shutdown"],
+  ["Дизель 0–14% (Поз. 2)","Diesel 0–14% (Notch 2)"],["Дизель 14–28% (Поз. 3)","Diesel 14–28% (Notch 3)"],
+  ["Дизель 28–42% (Поз. 4)","Diesel 28–42% (Notch 4)"],["Дизель 42–57% (Поз. 5)","Diesel 42–57% (Notch 5)"],
+  ["Дизель 57–71% (Поз. 6)","Diesel 57–71% (Notch 6)"],["Дизель 71–85% (Поз. 7)","Diesel 71–85% (Notch 7)"],
+  ["Дизель 85–100% (Поз. 8)","Diesel 85–100% (Notch 8)"],
+  ["Фары (буферные)","Headlights"],["AUX1 Освещение кабины","AUX1 Cab light"],
+  ["AUX2 Прожектор / Маяк","AUX2 Beacon"],["AUX3 Строб","AUX3 Strobe"],
+  ["AUX5 Подсветка ходовой","AUX5 Underframe light"],["AUX4 Жалюзи холодильника","AUX4 Shutter"],
+  ["Набор позиции","Notch up"],["Сброс позиции","Notch down"],["Удержание хода","Drive hold"],
+  ["Выбег (Coast)","Coast"],["Динамический тормоз","Dynamic brake"],
+  ["Mute (на стоянке)","Mute (stopped)"],["Mute (в движении)","Mute (moving)"],
+  ["Холодильник: скорость > 20%","Fan: speed > 20%"]
+];
+const NAME_INDEX=new Map();
+function addNamePair(ru,en){
+  if(!ru||!en||ru===en)return;
+  const pair={ru,en};
+  NAME_INDEX.set(ru,pair);NAME_INDEX.set(en,pair);
+}
+CATALOG.forEach(c=>addNamePair(c.name.ru,c.name.en));
+NAME_I18N_KEYS.forEach(k=>addNamePair(I18N.ru[k],I18N.en[k]));
+NAME_PAIRS.forEach(p=>addNamePair(p[0],p[1]));
+const NAME_PREFIX_PAIRS=[["Новая схема тепловоза","New locomotive scheme"],["Новая схема","New scheme"]];
+function localizeName(value){
+  if(typeof value!=="string"||!value)return value;
+  const pair=NAME_INDEX.get(value);
+  if(pair)return pair[lang]||value;
+  for(const p of NAME_PREFIX_PAIRS){
+    const from=lang==="en"?p[0]:p[1],to=lang==="en"?p[1]:p[0];
+    if(value.startsWith(from))return to+value.slice(from.length);
+  }
+  return value;
+}
+function localizeGraphNames(g){
+  if(!g||!Array.isArray(g.blocks))return;
+  for(const b of g.blocks){
+    if(!b||typeof b.name!=="string")continue;
+    const cat=BY_TYPE[b.type];
+    if(cat&&(b.name===cat.name.ru||b.name===cat.name.en))continue;
+    b.name=localizeName(b.name);
+  }
+}
+function localizeProjectNames(p){
+  if(!p||typeof p!=="object")return p;
+  if(typeof p.name==="string")p.name=localizeName(p.name);
+  localizeGraphNames(p.mix);
+  (p.schemes||[]).forEach(s=>{
+    if(!s||typeof s!=="object")return;
+    if(typeof s.name==="string")s.name=localizeName(s.name);
+    localizeGraphNames(s);
+  });
+  return p;
+}
 function normalizeGraph(g){
   if(!Array.isArray(g.blocks))g.blocks=[];
   if(!Array.isArray(g.links))g.links=[];
@@ -618,6 +723,7 @@ function normalizeProject(p){
   p.schemes.forEach(s=>normalizeGraph(s));
   /* Engine and Volume are fixed device settings and live in Mixes only. */
   withMix(()=>{if(!p.mix.blocks.some(b=>b.type==="engine"))addBlockTo(p,"engine");if(!p.mix.blocks.some(b=>b.type==="volume"))addBlockTo(p,"volume");});
+  localizeProjectNames(p);
   /* Migrate legacy standalone Brake blocks in Mixes into a Sound scheme + Sound cue connected to the Engine's Brake port. */
   const engBlk=p.mix.blocks.find(b=>b.type==="engine");
   const legacyBrakes=p.mix.blocks.filter(b=>b&&b.type==="brake");
@@ -655,7 +761,7 @@ const PENCIL='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke
 /* ---- state ----------------------------------------------------------- */
 let project=null;
 let selected="",selectedIds=new Set(),marquee=null;
-let dragging=null,panning=null,linking=null;
+let dragging=null,panning=null,linking=null,pinch=null;
 let textMode=false,draggingText=null,editingText="";
 let online=false,busy=false,revision=0,savedId="";
 let soundFiles=[],diagnostics=[],assets={},assetsReady=false;
@@ -694,8 +800,8 @@ function withMix(fn){const s=viewMode;viewMode="mix";try{return fn();}finally{vi
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const labelKey=s=>String(s||"").toLowerCase().replace(/[^a-zа-яё0-9]+/gi,"");
 const sameLabel=(a,b)=>labelKey(a)===labelKey(b);
-const blockName=b=>{if(!b)return "";const cat=BY_TYPE[b.type];if(!b.name)return cat?tr(cat.name):"";if(cat&&(b.name===cat.name.ru||b.name===cat.name.en))return tr(cat.name);return b.name;};
-const schemeName=()=>{const n=project&&project.name;if(n===I18N.ru.new_scheme_name||n===I18N.en.new_scheme_name)return t("new_scheme_name");return n||(project&&project.id)||"";};
+const blockName=b=>{if(!b)return "";const cat=BY_TYPE[b.type];if(!b.name)return cat?tr(cat.name):"";if(cat&&(b.name===cat.name.ru||b.name===cat.name.en))return tr(cat.name);return localizeName(b.name);};
+const schemeName=()=>{const n=localizeName(project&&project.name);if(n===I18N.ru.new_scheme_name||n===I18N.en.new_scheme_name)return t("new_scheme_name");return n||(project&&project.id)||"";};
 const hexA=(hex,a)=>{const h=hex.replace("#","");const n=parseInt(h.length===3?h.split("").map(x=>x+x).join(""):h,16);return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";};
 const pctSpeed=p=>Math.max(0,Math.min(255,Math.round((Number(p)||0)*255/100)));
 const snap=v=>project.editor.snap?Math.round(v/GRID)*GRID:Math.round(v);
@@ -2581,7 +2687,7 @@ function simulatorPayload(){
       blocks.push({id:"sim_fx",type:"fx_in",name:"F0",fn:0,trigger:"auto",volume:80,rate:1000,level:100,files:{},fxMode:"toggle",x:40,y:40,outEvent:"finish",outDelay:0,shortMs:400});
       targets.forEach((tb,i)=>links.push({id:"sim_l"+i,from:"sim_fx",to:tb.id,kind:"after",cond:"out"}));
     }
-    const tmp={format:"sound-blocks",schemaVersion:2,id:"sim",name:s.name||"Sim",vars:project.vars||[],
+    const tmp={format:"sound-blocks",schemaVersion:2,id:"sim",name:s.name||t("scheme_new"),vars:project.vars||[],
       blocks:blocks,links:links,texts:[],
       mix:{blocks,links,texts:[]},schemes:[],editor:{viewport:{x:0,y:0,zoom:1},snap:true,mode:"mix",activeScheme:""}};
     const real=project;
@@ -2847,7 +2953,7 @@ function simEnter(ch,target){
     sim.fnLevels[ch.effect.fn]=false;
     sim.fnRelease|=(1<<ch.effect.fn);
   }
-  const name=ch.engine?("ENGINE → "+st.name):((ch.effect&&ch.effect.id)?(ch.effect.id+" → "+st.name):st.name);
+  const name=ch.engine?(t("sim_engine")+" → "+st.name):((ch.effect&&ch.effect.id)?(ch.effect.id+" → "+st.name):st.name);
   sim.log.push({t:Date.now(),text:name});if(sim.log.length>60)sim.log.shift();
 }
 function simReplay(ch,st){
@@ -3072,7 +3178,7 @@ function buildSimPanel(){
   if(sim.payload.engine&&sim.payload.engine.fn<=28)fns.add(sim.payload.engine.fn);
   (sim.bindings||[]).forEach(b=>{if(b.fn>=0&&b.fn<=28)fns.add(b.fn);});
   const fnList=[...fns].sort((a,b)=>a-b);
-  el.innerHTML='<div id="sim_resize" title="Изменить размер" style="position:absolute;left:0;top:0;width:16px;height:16px;cursor:nwse-resize;z-index:3;background:linear-gradient(135deg,var(--accent) 0 4px,transparent 4px)"></div>'+
+  el.innerHTML='<div id="sim_resize" title="'+esc(t("sim_resize"))+'" style="position:absolute;left:0;top:0;width:16px;height:16px;cursor:nwse-resize;z-index:3;background:linear-gradient(135deg,var(--accent) 0 4px,transparent 4px)"></div>'+
     '<div id="sim_hdr" style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);font-size:16px;cursor:move;user-select:none"><b>'+esc(t("simulator"))+': '+esc(sim.title)+'</b><button id="sim_close">✕</button></div>'+
     '<div id="sim_body" style="flex:1 1 auto;min-height:0;overflow:auto;padding:12px 14px">'+
       '<div id="sim_status" class="hint" style="margin-bottom:8px;font-size:13px"></div>'+
@@ -3156,7 +3262,7 @@ function renderSim(){
     if(!ch.engine){
       const ef=ch.effect||{};
       const fnPrefix=ef.hasFn?("F"+ef.fn+" "):"";
-      label=fnPrefix+(ef.label||ef.id||"effect");
+      label=fnPrefix+(ef.label||ef.id||t("sim_effect"));
     }
     return '<div style="padding:2px 0"><b>'+esc(label)+'</b>: '+esc(st.name||"?")+(st.file?' · '+esc(st.file):'')+(ch.playing?' ▶':'')+'</div>';
   }).join("");
@@ -3169,7 +3275,7 @@ function renderSim(){
   for(let i=0;i<outNames.length;i++)if(sim.outMask&(1<<i))active.push(outNames[i]);
   $("sim_outputs").textContent=t("sim_outputs")+": "+(active.length?active.join(", "):"—");
   const logic=sim.logicActive.map(id=>{const x=LOGIC_TARGETS.find(l=>l.v===id);return x?tr(x.n):("L"+id);});
-  if(sim.notchOffset)logic.push("notch "+(sim.notchOffset>0?"+":"")+sim.notchOffset);
+  if(sim.notchOffset)logic.push(t("sim_notch")+(sim.notchOffset>0?"+":"")+sim.notchOffset);
   $("sim_logic").textContent=t("sim_logic")+": "+(logic.length?logic.join(", "):"—");
   const vs=Object.keys(sim.vars||{}).map(k=>k+"="+sim.vars[k]).join("  ");
   $("sim_vars").textContent=vs;
@@ -4180,6 +4286,8 @@ function finishLink(ev){
 }
 $("stage").addEventListener("contextmenu",ev=>ev.preventDefault());
 $("stage").addEventListener("pointerdown",ev=>{const tgt=ev.target;
+  document.body.classList.remove("show-pal","show-insp");
+  if(pinch)return;
   if(!(tgt===$("stage")||tgt.id==="world"||tgt.id==="links"||tgt.id==="linkLayer"))return;
   if(textMode&&ev.button===0&&ev.pointerType!=="touch"){
     const p=worldPoint(ev);const item=addTextAt(project,p.x,p.y,t("text_default"));
@@ -4194,6 +4302,7 @@ $("stage").addEventListener("pointerdown",ev=>{const tgt=ev.target;
   marquee={c0:{x:ev.clientX,y:ev.clientY},c1:{x:ev.clientX,y:ev.clientY},add:mod,base:mod?new Set(selectedIds):new Set()};
   renderMarquee();});
 window.addEventListener("pointermove",ev=>{
+  if(pinch)return;
   if(linking){const p=worldPoint(ev);linking.x=p.x;linking.y=p.y;renderTempLink();return;}
   if(marquee){marquee.c1={x:ev.clientX,y:ev.clientY};renderMarquee();
     const hits=marqueeHits(marquee),sel=marquee.add?new Set([...marquee.base,...hits]):hits;marquee._sel=sel;
@@ -4212,7 +4321,38 @@ window.addEventListener("pointerup",ev=>{
     if(Math.abs(m.c1.x-m.c0.x)>3||Math.abs(m.c1.y-m.c0.y)>3){selectedIds=m._sel||new Set();selected=[...selectedIds][0]||"";selectedLink="";render();}}
   finishLink(ev);
 });
-$("stage").addEventListener("wheel",ev=>{ev.preventDefault();const v=project.editor.viewport,r=$("stage").getBoundingClientRect();const mx=ev.clientX-r.left,my=ev.clientY-r.top;const f=ev.deltaY<0?1.1:0.9;const nz=Math.max(.3,Math.min(2.5,v.zoom*f));v.x=mx-(mx-v.x)*(nz/v.zoom);v.y=my-(my-v.y)*(nz/v.zoom);v.zoom=nz;applyViewport();saveDraft();},{passive:false});
+$("stage").addEventListener("wheel",ev=>{ev.preventDefault();const v=project.editor.viewport,r=$("stage").getBoundingClientRect();const mx=ev.clientX-r.left,my=ev.clientY-r.top;const f=ev.deltaY<0?1.1:0.9;const nz=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,v.zoom*f));v.x=mx-(mx-v.x)*(nz/v.zoom);v.y=my-(my-v.y)*(nz/v.zoom);v.zoom=nz;applyViewport();saveDraft();},{passive:false});
+/* Two-finger pinch zooms the canvas itself, so the header and side panels
+   do not move or scale with the gesture (page zoom is disabled below). */
+$("stage").addEventListener("touchstart",ev=>{
+  if(ev.touches.length!==2)return;
+  ev.preventDefault();
+  const a=ev.touches[0],b=ev.touches[1],r=$("stage").getBoundingClientRect(),v=project.editor.viewport;
+  const cx=(a.clientX+b.clientX)/2-r.left,cy=(a.clientY+b.clientY)/2-r.top;
+  pinch={d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1,cx,cy,x:v.x,y:v.y,z:v.zoom};
+  panning=null;dragging=null;draggingText=null;linking=null;marquee=null;
+  renderMarquee();renderTempLink();
+},{passive:false});
+$("stage").addEventListener("touchmove",ev=>{
+  if(!pinch||ev.touches.length<2)return;
+  ev.preventDefault();
+  const a=ev.touches[0],b=ev.touches[1],r=$("stage").getBoundingClientRect(),v=project.editor.viewport;
+  const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1;
+  const cx=(a.clientX+b.clientX)/2-r.left,cy=(a.clientY+b.clientY)/2-r.top;
+  const z=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,pinch.z*(d/pinch.d)));
+  const wx=(pinch.cx-pinch.x)/pinch.z,wy=(pinch.cy-pinch.y)/pinch.z;
+  v.zoom=z;v.x=cx-wx*z;v.y=cy-wy*z;
+  applyViewport();
+},{passive:false});
+function endPinch(ev){
+  if(!pinch)return;
+  if(ev.touches&&ev.touches.length>=2)return;
+  pinch=null;panning=null;saveDraft();
+}
+$("stage").addEventListener("touchend",endPinch,{passive:false});
+$("stage").addEventListener("touchcancel",endPinch,{passive:false});
+document.addEventListener("gesturestart",ev=>ev.preventDefault(),{passive:false});
+document.addEventListener("touchmove",ev=>{if(ev.touches&&ev.touches.length>1)ev.preventDefault();},{passive:false});
 function applyViewport(){const v=project.editor.viewport;$("world").style.transform="translate("+v.x+"px,"+v.y+"px) scale("+v.zoom+")";const st=$("stage");st.style.setProperty("--gstep",(GRID*v.zoom)+"px");st.style.setProperty("--gx",v.x+"px");st.style.setProperty("--gy",v.y+"px");}
 
 /* ---- auto layout ----------------------------------------------------- */
@@ -4303,6 +4443,16 @@ function alignBlocks(){
   });
   render();setStatus(t("st_aligned"));
 }
+function zoomViewport(factor){
+  const v=project.editor.viewport,r=$("stage").getBoundingClientRect();
+  const cx=(r.width||800)/2,cy=(r.height||600)/2;
+  const nz=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,v.zoom*factor));
+  if(nz===v.zoom)return;
+  v.x=cx-(cx-v.x)*(nz/v.zoom);
+  v.y=cy-(cy-v.y)*(nz/v.zoom);
+  v.zoom=nz;
+  applyViewport();saveDraft();
+}
 function fitViewport(){
   if(!project.blocks.length&&!(project.texts||[]).length){
     project.editor.viewport={x:40,y:40,zoom:1};applyViewport();saveDraft();return;
@@ -4319,7 +4469,7 @@ function fitViewport(){
   const r=$("stage").getBoundingClientRect();
   const sw=Math.max(320,r.width||800),sh=Math.max(240,r.height||600);
   const pad=50,gw=Math.max(200,maxX-minX+pad*2),gh=Math.max(120,maxY-minY+pad*2);
-  const zoom=Math.max(0.3,Math.min(1.5,Math.round(Math.min(sw/gw,sh/gh)*100)/100));
+  const zoom=Math.max(ZOOM_MIN,Math.min(ZOOM_FIT_MAX,Math.min(sw/gw,sh/gh)));
   project.editor.viewport={
     x:Math.round((sw-(maxX-minX)*zoom)/2-minX*zoom),
     y:Math.round((sh-(maxY-minY)*zoom)/2-minY*zoom),
@@ -4500,6 +4650,9 @@ $("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
 if($("b_align"))$("b_align").onclick=alignBlocks;
 if($("b_fit"))$("b_fit").onclick=fitViewport;
+$("b_zoom_out").onclick=()=>zoomViewport(0.9);
+$("b_zoom_in").onclick=()=>zoomViewport(1.1);
+$("b_zoom_fit").onclick=fitViewport;
 if($("b_play_target"))$("b_play_target").onclick=togglePlayTarget;
 function exitEditor(){
   stopPreview();
@@ -4512,8 +4665,9 @@ function exitEditor(){
 }
 window.exitEditor=exitEditor;
 $("b_theme").onclick=toggleTheme;
-$("b_pal").onclick=()=>document.body.classList.toggle("show-pal");
-$("b_insp").onclick=()=>document.body.classList.toggle("show-insp");
+$("b_pal").onclick=()=>{document.body.classList.toggle("show-pal");document.body.classList.remove("show-insp");};
+$("b_insp").onclick=()=>{document.body.classList.toggle("show-insp");document.body.classList.remove("show-pal");};
+(()=>{const m=$("main");if(m)m.addEventListener("click",ev=>{if(ev.target===m)document.body.classList.remove("show-pal","show-insp");});})();
 $("b_text").onclick=()=>{textMode=!textMode;$("b_text").classList.toggle("on",textMode);$("stage").style.cursor=textMode?"crosshair":"";setStatus(textMode?t("text_adding"):t("ready"));};
 $("b_file_png").onclick=exportSchemePng;
 $("b_file_txt").onclick=exportText;
@@ -4555,7 +4709,7 @@ function applyStatic(){
   renderPlayTargetBtn();
   applyTheme(document.documentElement.getAttribute("data-theme")||"dark");
 }
-function toggleLang(){lang=(lang==="en")?"ru":"en";try{localStorage.setItem("aura_lang",lang);}catch(e){}applyStatic();renderSnapBtn();render();}
+function toggleLang(){lang=(lang==="en")?"ru":"en";try{localStorage.setItem("aura_lang",lang);}catch(e){}localizeProjectNames(project);applyStatic();renderSnapBtn();historyReset();render();}
 $("b_lang").onclick=toggleLang;
 /* toolbar dropdown menus */
 document.querySelectorAll("header.top .tm").forEach(tm=>{
@@ -4563,16 +4717,19 @@ document.querySelectorAll("header.top .tm").forEach(tm=>{
   btn.addEventListener("click",ev=>{ev.stopPropagation();
     const open=tm.classList.contains("open");
     document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));
-    if(!open){tm.classList.add("open");panel.style.left="0";panel.style.right="auto";const r=panel.getBoundingClientRect();if(r.right>window.innerWidth-8){panel.style.left="auto";panel.style.right="0";}}
+    if(!open){tm.classList.add("open");
+      if(window.matchMedia&&window.matchMedia("(max-width:760px)").matches){panel.style.left="";panel.style.right="";}
+      else{panel.style.left="0";panel.style.right="auto";const r=panel.getBoundingClientRect();if(r.right>window.innerWidth-8){panel.style.left="auto";panel.style.right="0";}}
+    }
   });
 });
 document.addEventListener("click",()=>document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open")));
-window.addEventListener("keydown",ev=>{if(ev.key==="Escape"){document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));if(textMode){textMode=false;$("b_text").classList.remove("on");$("stage").style.cursor="";setStatus(t("ready"));}}});
+window.addEventListener("keydown",ev=>{if(ev.key==="Escape"){document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));document.body.classList.remove("show-pal","show-insp");if(textMode){textMode=false;$("b_text").classList.remove("on");$("stage").style.cursor="";setStatus(t("ready"));}}});
 applyStatic();
-loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
+loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();if(window.matchMedia&&window.matchMedia("(max-width:760px)").matches)fitViewport();else applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
 if($("boot_skip"))$("boot_skip").onclick=()=>{preloadCancel=true;bootSkipped=true;bootDone=true;hideBootOverlay();};
 startBootPreload();
-  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
+  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
 })();
 </script>
 </body>

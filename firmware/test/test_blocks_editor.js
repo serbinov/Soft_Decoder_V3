@@ -642,3 +642,113 @@ test('29. Default scheme sound manifest matches the compiled default project', t
     .sort();
   assert.deepEqual(Array.from(actual), Array.from(expected));
 });
+
+test('30. Switching the editor language re-localizes built-in project, scheme and block names', t => {
+  const { api, dom } = createEditorFixture(t, { search: '?lang=en' });
+  const p = api.project();
+  assert.equal(p.name, 'ChME3 Locomotive');
+  assert.equal(p.schemes.find(s => s.id === 'uncoupler_scheme').name, 'Uncoupler');
+  assert.equal(p.mix.blocks.find(b => b.id === 'f15').name, 'F15 Uncoupler');
+  assert.equal(p.mix.blocks.find(b => b.id === 'uncoupler_cue').name, 'Uncoupler');
+
+  dom.getEl('b_lang').onclick();
+
+  assert.equal(p.name, 'Тепловоз ЧМЭ3');
+  assert.equal(p.schemes.find(s => s.id === 'uncoupler_scheme').name, 'Расцепка');
+  assert.equal(p.mix.blocks.find(b => b.id === 'f15').name, 'F15 Расцепка СА-3');
+  assert.equal(p.mix.blocks.find(b => b.id === 'uncoupler_cue').name, 'Расцепка');
+  assert.equal(p.schemes.find(s => s.id === 'eng1').name, 'Дизель 0–14% (Поз. 2)');
+  assert.equal(p.mix.blocks.find(b => b.id === 'head').name, 'Фары (буферные)');
+
+  dom.getEl('b_lang').onclick();
+  assert.equal(p.name, 'ChME3 Locomotive');
+  assert.equal(p.schemes.find(s => s.id === 'uncoupler_scheme').name, 'Uncoupler');
+});
+
+test('31. Loading an English project while the editor is Russian localizes built-in names', t => {
+  const { api } = createEditorFixture(t, { search: '?lang=ru' });
+  api.setProject({
+    format: 'sound-blocks', schemaVersion: 2, id: 'en_project', name: 'ChME3 Locomotive',
+    mix: {
+      blocks: [{ id: 'f15', type: 'fx_in', name: 'F15 Uncoupler', fn: 15, trigger: 'auto', volume: 80, rate: 1000, level: 100, files: {}, fxMode: 'toggle', x: 0, y: 0 }],
+      links: [], texts: []
+    },
+    schemes: [{ id: 'uncoupler_scheme', name: 'Uncoupler', blocks: [], links: [], texts: [] }],
+    vars: [],
+    editor: { viewport: { x: 0, y: 0, zoom: 1 }, snap: true, bindTuples: [], auxChannels: [], mode: 'mix', activeScheme: '' }
+  });
+
+  const p = api.project();
+  assert.equal(p.name, 'Тепловоз ЧМЭ3');
+  assert.equal(p.schemes.find(s => s.id === 'uncoupler_scheme').name, 'Расцепка');
+  assert.equal(p.mix.blocks.find(b => b.id === 'f15').name, 'F15 Расцепка СА-3');
+});
+
+test('32. Header zoom buttons zoom in/out and fit the canvas', t => {
+  const { api, dom } = createEditorFixture(t);
+  const p = api.project();
+  p.editor.viewport = { x: 0, y: 0, zoom: 1 };
+
+  dom.getEl('b_zoom_in').onclick();
+  assert.ok(p.editor.viewport.zoom > 1, 'Zoom + increases the viewport scale');
+
+  const zoomed = p.editor.viewport.zoom;
+  dom.getEl('b_zoom_out').onclick();
+  assert.ok(p.editor.viewport.zoom < zoomed, 'Zoom - decreases the viewport scale');
+
+  p.editor.viewport = { x: 12345, y: 12345, zoom: 2.5 };
+  dom.getEl('b_zoom_fit').onclick();
+  assert.ok(p.editor.viewport.zoom >= 0.05 && p.editor.viewport.zoom <= 1.5, 'A fits the viewport scale');
+  assert.ok(p.editor.viewport.x < 12345 && p.editor.viewport.y < 12345, 'A centers the canvas in view');
+});
+
+test('33. Fit view scales down large diagrams so every block fits on screen', t => {
+  const { api, dom } = createEditorFixture(t);
+  const p = api.project();
+  p.mix.blocks.forEach((b, i) => {
+    b.x = 40 + (i % 3) * 350;
+    b.y = 40 + i * 80;
+  });
+
+  api.fitViewport();
+
+  const vp = p.editor.viewport;
+  const r = dom.getEl('stage').getBoundingClientRect();
+  assert.ok(vp.zoom < 0.3, `Large diagrams must be allowed below 30% zoom, got ${vp.zoom}`);
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  p.mix.blocks.forEach(b => {
+    minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + 240); maxY = Math.max(maxY, b.y + api.nodeHeight(b));
+  });
+
+  assert.ok(vp.x + minX * vp.zoom >= -1, 'Left edge is inside the stage');
+  assert.ok(vp.y + minY * vp.zoom >= -1, 'Top edge is inside the stage');
+  assert.ok(vp.x + maxX * vp.zoom <= r.width + 1, 'Right edge is inside the stage');
+  assert.ok(vp.y + maxY * vp.zoom <= r.height + 1, 'Bottom edge is inside the stage');
+});
+
+test('34. Two-finger pinch zooms the canvas around the gesture midpoint', t => {
+  const { api, dom } = createEditorFixture(t);
+  const p = api.project();
+  p.editor.viewport = { x: 0, y: 0, zoom: 1 };
+  const stage = dom.getEl('stage');
+  const preventDefault = () => {};
+
+  stage.dispatchEvent({
+    type: 'touchstart',
+    touches: [{ clientX: 100, clientY: 100 }, { clientX: 300, clientY: 100 }],
+    preventDefault
+  });
+  stage.dispatchEvent({
+    type: 'touchmove',
+    touches: [{ clientX: 50, clientY: 100 }, { clientX: 350, clientY: 100 }],
+    preventDefault
+  });
+
+  assert.ok(Math.abs(p.editor.viewport.zoom - 1.5) < 1e-9, 'Pinching apart zooms in');
+  assert.ok(Math.abs(p.editor.viewport.x + 100) < 1e-9, 'The world point under the midpoint stays anchored');
+  assert.ok(Math.abs(p.editor.viewport.y + 50) < 1e-9, 'The midpoint stays anchored vertically');
+
+  stage.dispatchEvent({ type: 'touchend', touches: [], preventDefault });
+});

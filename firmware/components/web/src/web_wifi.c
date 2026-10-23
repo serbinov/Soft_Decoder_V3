@@ -217,7 +217,10 @@ esp_err_t wifi_start(const settings_config_t *cfg)
     memcpy(ap.ap.ssid, ssid, ssid_len);
     ap.ap.ssid_len = (uint8_t)ssid_len;
     ap.ap.channel = 1;
-    ap.ap.max_connection = 4;
+    /* Single-controller access point: the decoder must not be driven from two
+     * phones/PCs at once. A browser may still open several tabs over the one
+     * association. */
+    ap.ap.max_connection = 1;
     ap.ap.beacon_interval = 100;
     ap.ap.authmode = WIFI_AUTH_OPEN;
     if (cfg->ap_password[0] != '\0' && strlen(cfg->ap_password) >= 8U) {

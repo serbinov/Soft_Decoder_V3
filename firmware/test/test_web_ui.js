@@ -512,6 +512,57 @@ test('library rows show index, .wav name, volume and icon play/delete buttons', 
   assert.match(html, /class="btn sm lib-del"[^>]*><svg/);
 });
 
+test('library shows a loader while the first request is pending', async t => {
+  const { context, element } = fixture(t);
+  let finish;
+  context.api = () => new Promise(resolve => { finish = resolve; });
+  const pending = context.loadLibrary();
+  assert.equal(context.libLoading, true);
+  assert.match(element('sound_lib').innerHTML, /spinner|Загрузка звуков/);
+  finish({ ok: true, files: [], total: 0, preview: '' });
+  await pending;
+  assert.equal(context.libLoading, false);
+});
+
+test('decoder preview completion clears the stop button even while other audio plays', t => {
+  const { context } = fixture(t);
+  context.localStorage = { getItem: k => k === 'aura_sound_play' ? 'decoder' : null,
+    setItem() {}, removeItem() {} };
+  context.libPreview = 'Horn';
+  context.applyAudioStatus({ playing: true, preview: 'Horn' });
+  assert.equal(context.libPreview, 'Horn');
+  context.applyAudioStatus({ playing: true, preview: '' });
+  assert.equal(context.libPreview, '');
+});
+
+test('lost connection clears a stale sound preview after three failed polls', t => {
+  const { context } = fixture(t);
+  context.libPreview = 'Horn';
+  context.state.audio.preview = 'Horn';
+  context.setConnected(false);
+  context.setConnected(false);
+  context.setConnected(false);
+  assert.equal(context.libPreview, '');
+  assert.equal(context.state.audio.preview, '');
+});
+
+test('PC preview decodes fetched WAV through Web Audio', async t => {
+  const { context } = fixture(t);
+  let fetched = 0, started = 0;
+  context.fetch = async () => { fetched++; return { ok: true, status: 200,
+    arrayBuffer: async () => new ArrayBuffer(8) }; };
+  context.AudioContext = class {
+    constructor() { this.state = 'running'; this.destination = {}; }
+    decodeAudioData() { return Promise.resolve({}); }
+    createBufferSource() { return { connect() {}, start() { started++; }, stop() {}, disconnect() {}, onended: null }; }
+    createGain() { return { gain: { value: 0 }, connect() {}, disconnect() {} }; }
+  };
+  context.playLibOnPc('Horn');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(fetched, 1);
+  assert.equal(started, 1);
+});
+
 test('encryptAspBytes and decryptAspBytes round-trip password-protected sound packs', async t => {
   const { context } = fixture(t);
   const plain = new Uint8Array([65, 85, 82, 65, 83, 80, 48, 49, 1, 0, 1, 0, 32, 0, 0, 0]);
@@ -697,6 +748,10 @@ test('CV filtering hides legacy CVs and collapses speed table CV67..94 until tog
   const { context, element } = fixture(t);
   context.renderCvList();
   const initialRows = context.filteredCv();
+  for (const index of [12, 15, 16, 21, 23, 28, 66, 95, 105, 106]) {
+    assert.equal(initialRows.some(c => c.index === index), true,
+      `standard CV ${index} is visible`);
+  }
   assert.equal(initialRows.some(c => c.index === 30 || c.index === 114), false, 'Legacy CVs hidden by default');
   assert.equal(initialRows.some(c => c.index >= 67 && c.index <= 94), false, 'Speed table CVs collapsed by default');
 

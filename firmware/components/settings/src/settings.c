@@ -1,4 +1,4 @@
-﻿#include "settings.h"
+#include "settings.h"
 
 #include <string.h>
 
@@ -81,7 +81,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
-#define SETTINGS_CV7_VERSION 10
+#define SETTINGS_CV7_VERSION 11
 #define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
@@ -98,6 +98,8 @@ static void cv_set_defaults(void)
     s_cv[54] = 128;   /* BEMF Kp (~1.05) */
     s_cv[55] = 60;    /* BEMF Ki (~0.07) */
     s_cv[56] = 32;    /* BEMF Kd (~0.10) */
+    s_cv[66] = 128;   /* forward trim: 100 % */
+    s_cv[95] = 128;   /* reverse trim: 100 % */
     /* Reserved legacy sound rates: chuff/exhaust, bell and dynamic-brake
      * playback rate, 0..255 (51 = 1.0x). The graph engine does not read them. */
     s_cv[114] = 57;   /* chuff / exhaust rate */
@@ -115,6 +117,10 @@ static void cv_migrate_version(void)
 {
     if (s_cv[7] == SETTINGS_CV7_VERSION) {
         return;
+    }
+    if (s_cv[7] < SETTINGS_CV7_VERSION) {
+        s_cv[66] = 128U;
+        s_cv[95] = 128U;
     }
     s_cv[7] = SETTINGS_CV7_VERSION;
     s_cv_pending = true;
@@ -418,6 +424,14 @@ esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
 {
     if (idx < 1 || idx > SETTINGS_CV_COUNT) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (idx != 15U && idx != 16U) {
+        portENTER_CRITICAL(&s_cv_mux);
+        bool locked = s_cv[15] != s_cv[16];
+        portEXIT_CRITICAL(&s_cv_mux);
+        if (locked) {
+            return ESP_ERR_INVALID_STATE;
+        }
     }
     if (idx == 7) {
         return ESP_ERR_INVALID_ARG; /* read-only */

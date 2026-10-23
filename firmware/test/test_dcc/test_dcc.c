@@ -761,6 +761,39 @@ static void test_dcc_function_f21_group(void)
     TEST_ASSERT_FALSE(g_fn_state[23]);
 }
 
+static void test_all_function_keys_round_trip(void)
+{
+    const uint8_t f0_f4_on[] = {0x03, 0x9F, 0x03 ^ 0x9F};
+    const uint8_t f5_f8_on[] = {0x03, 0xBF, 0x03 ^ 0xBF};
+    const uint8_t f9_f12_on[] = {0x03, 0xAF, 0x03 ^ 0xAF};
+    const uint8_t f13_f20_on[] = {0x03, 0xDE, 0xFF, 0x03 ^ 0xDE ^ 0xFF};
+    const uint8_t f21_f28_on[] = {0x03, 0xDF, 0xFF, 0x03 ^ 0xDF ^ 0xFF};
+    feed_packet(f0_f4_on, sizeof(f0_f4_on), 12);
+    feed_packet(f5_f8_on, sizeof(f5_f8_on), 12);
+    feed_packet(f9_f12_on, sizeof(f9_f12_on), 12);
+    feed_packet(f13_f20_on, sizeof(f13_f20_on), 12);
+    feed_packet(f21_f28_on, sizeof(f21_f28_on), 12);
+    TEST_ASSERT_EQUAL_INT(29, g_fn_calls);
+    for (uint8_t fn = 0; fn < 29U; ++fn) {
+        TEST_ASSERT_TRUE(g_fn_state[fn]);
+    }
+
+    const uint8_t f0_f4_off[] = {0x03, 0x80, 0x03 ^ 0x80};
+    const uint8_t f5_f8_off[] = {0x03, 0xB0, 0x03 ^ 0xB0};
+    const uint8_t f9_f12_off[] = {0x03, 0xA0, 0x03 ^ 0xA0};
+    const uint8_t f13_f20_off[] = {0x03, 0xDE, 0x00, 0x03 ^ 0xDE};
+    const uint8_t f21_f28_off[] = {0x03, 0xDF, 0x00, 0x03 ^ 0xDF};
+    feed_packet(f0_f4_off, sizeof(f0_f4_off), 12);
+    feed_packet(f5_f8_off, sizeof(f5_f8_off), 12);
+    feed_packet(f9_f12_off, sizeof(f9_f12_off), 12);
+    feed_packet(f13_f20_off, sizeof(f13_f20_off), 12);
+    feed_packet(f21_f28_off, sizeof(f21_f28_off), 12);
+    TEST_ASSERT_EQUAL_INT(58, g_fn_calls);
+    for (uint8_t fn = 0; fn < 29U; ++fn) {
+        TEST_ASSERT_FALSE(g_fn_state[fn]);
+    }
+}
+
 static void test_dcc_function_group2_f9_f12(void)
 {
     /* 1010_DDDD controls F9..F12. */
@@ -1415,6 +1448,7 @@ int main(void)
     RUN_TEST(test_dcc_ops_bit_verify_no_write);
     RUN_TEST(test_dcc_ops_write_high_cv);
     RUN_TEST(test_dcc_function_f21_group);
+    RUN_TEST(test_all_function_keys_round_trip);
     RUN_TEST(test_dcc_function_group2_f9_f12);
     RUN_TEST(test_dcc_service_bit_verify);
     RUN_TEST(test_dcc_service_needs_long_preamble);

@@ -256,6 +256,22 @@ static void test_parse_engine_no_fkey_and_hold(void)
     TEST_ASSERT_TRUE(g->observers);
     TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
 }
+static void test_parse_editor_boolean_and_effect_metadata(void)
+{
+    const char *json =
+        "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"test\",\"name\":\"Test\","
+        "\"engine\":{\"entry\":\"off\",\"fn\":255,\"hold\":false},\"hysteresis\":2,\"observers\":false,"
+        "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+        "\"transitions\":[],\"effects\":[{\"id\":\"horn\",\"entry\":\"off\",\"fn\":2,\"hasFn\":true,\"label\":\"Horn\"}],"
+        "\"assets\":[],\"editor\":{\"positions\":{},\"viewport\":{\"x\":0,\"zoom\":1}}}";
+    TEST_ASSERT_EQUAL(ESP_OK,sg_parse(json,strlen(json),g,&diagnostic));
+    TEST_ASSERT_FALSE(g->engine_hold);
+    TEST_ASSERT_FALSE(g->observers);
+    TEST_ASSERT_EQUAL_UINT8(1,g->effect_count);
+    TEST_ASSERT_EQUAL_STRING("horn",g->effects[0].id);
+    TEST_ASSERT_EQUAL_UINT8(2,g->effects[0].fn);
+    TEST_ASSERT_EQUAL(ESP_OK,sg_validate(g,&diagnostic));
+}
 static void test_duplicate_keys_and_malformed_json(void)
 {
     reject_editor("{\"x\":1,\"x\":2}"); reject_editor("{\"x\":1,\"\\u0078\":2}");
@@ -332,6 +348,41 @@ static void test_engine_without_fkey_runs_continuously(void)
     sg_runner_tick(r,0,0,true,20);
     TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
 }
+static void test_all_function_keys_drive_effect_channels(void)
+{
+    unsigned play_state[29], off_state[29];
+    memset(g,0,sizeof(*g));
+    snprintf(g->id,sizeof(g->id),"allfn");
+    snprintf(g->name,sizeof(g->name),"All F");
+    g->hysteresis = 2;
+    g->engine_fn = SG_NONE;
+    state("eng_off","",false);
+    snprintf(g->engine_entry,sizeof(g->engine_entry),"eng_off");
+    for (unsigned fn = 0; fn < 29; ++fn) {
+        char off[16], play[16], file[16];
+        snprintf(off,sizeof(off),"e%u_off",fn);
+        snprintf(play,sizeof(play),"e%u_play",fn);
+        snprintf(file,sizeof(file),"f%u.wav",fn);
+        off_state[fn] = state(off,"",false);
+        play_state[fn] = state(play,file,false);
+        snprintf(g->effects[fn].id,sizeof(g->effects[fn].id),"fx%u",fn);
+        snprintf(g->effects[fn].entry,sizeof(g->effects[fn].entry),"%s",off);
+        g->effects[fn].fn = (uint8_t)fn;
+        g->effect_count = fn + 1;
+        edge(off,play,1,SG_FN_ON,fn,SG_IMMEDIATE);
+        edge(play,off,1,SG_FN_OFF,fn,SG_IMMEDIATE);
+    }
+    init_runner();
+    sg_runner_tick(r,0,0,true,20);
+    for (unsigned fn = 0; fn < 29; ++fn) {
+        sg_runner_function(r,(uint8_t)fn,true);
+        sg_runner_tick(r,0,0,true,20);
+        TEST_ASSERT_EQUAL_UINT8(play_state[fn],r->channels[fn + 1].state);
+        sg_runner_function(r,(uint8_t)fn,false);
+        sg_runner_tick(r,0,0,true,20);
+        TEST_ASSERT_EQUAL_UINT8(off_state[fn],r->channels[fn + 1].state);
+    }
+}
 static void test_state_enter_fires_once_after_entry(void)
 {
     state("wait","",false); state("run","run.wav",false);
@@ -359,6 +410,25 @@ static void test_short_edges_priority_and_one_transition(void)
     TEST_ASSERT_EQUAL_UINT8(2,r->channels[0].state); TEST_ASSERT_EQUAL(1,plays);
     sg_runner_tick(r,0,0,true,20); TEST_ASSERT_EQUAL_UINT8(3,r->channels[0].state); TEST_ASSERT_EQUAL(2,plays);
 }
+static void test_engine_endless_loop_changes_band_immediately(void)
+{
+    unsigned idle = state("idle","idle.wav",true);
+    unsigned run = state("run","run.wav",true);
+    edge("off","idle",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
+    unsigned e = edge("idle","run",1,SG_SPEED,0,SG_AFTER_SAMPLE);
+    g->transitions[e].condition.has_min = true; g->transitions[e].condition.min = 1;
+    g->transitions[e].condition.has_max = true; g->transitions[e].condition.max = 255;
+    init_runner(); sg_runner_power(r,true);
+    sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL_UINT8(idle,r->channels[0].state);
+    TEST_ASSERT_TRUE(r->channels[0].playing);
+    /* The engine loop has no sample end: a speed-band change must not wait for
+     * sample_done, otherwise the engine freezes on the idle loop. */
+    sg_runner_tick(r,100,0,true,20);
+    TEST_ASSERT_EQUAL_UINT8(run,r->channels[0].state);
+    TEST_ASSERT_EQUAL(2,plays);
+}
+
 static void test_pending_boundary_rechecks_condition_and_loop_replays(void)
 {
     state("run","run.wav",true); state("end","end.wav",false);
@@ -794,15 +864,15 @@ static void test_condition_json_rejections(void)
 }
 int main(void)
 {
-    UNITY_BEGIN(); RUN_TEST(test_parse_minimal_and_draft); RUN_TEST(test_parse_engine_no_fkey_and_hold); RUN_TEST(test_duplicate_keys_and_malformed_json);
+    UNITY_BEGIN(); RUN_TEST(test_parse_minimal_and_draft); RUN_TEST(test_parse_engine_no_fkey_and_hold); RUN_TEST(test_parse_editor_boolean_and_effect_metadata); RUN_TEST(test_duplicate_keys_and_malformed_json);
     RUN_TEST(test_parse_valid_token_edges); RUN_TEST(test_parse_rejects_malformed_token_edges); RUN_TEST(test_validator_error_matrix);
     RUN_TEST(test_utf8_and_unicode_escapes); RUN_TEST(test_parser_size_depth_and_string_bounds);
     RUN_TEST(test_exact_body_limit_and_token_limit);
     RUN_TEST(test_ids_filenames_and_direct_model_bounds); RUN_TEST(test_validator_references_ranges_priorities);
-    RUN_TEST(test_runner_no_autostart_and_toggle_edges); RUN_TEST(test_engine_without_fkey_runs_continuously);
+    RUN_TEST(test_runner_no_autostart_and_toggle_edges); RUN_TEST(test_engine_without_fkey_runs_continuously); RUN_TEST(test_all_function_keys_drive_effect_channels);
     RUN_TEST(test_state_enter_fires_once_after_entry); RUN_TEST(test_observers_arm_from_boot);
     RUN_TEST(test_short_edges_priority_and_one_transition);
-    RUN_TEST(test_pending_boundary_rechecks_condition_and_loop_replays); RUN_TEST(test_finite_loop_repeats_then_sample_done); RUN_TEST(test_loop_timeout_covers_whole_loop_not_one_sample); RUN_TEST(test_no_free_voice_is_retried_not_failed); RUN_TEST(test_parse_state_loops_field); RUN_TEST(test_sample_done_silent_next_tick_and_audible_once);
+    RUN_TEST(test_engine_endless_loop_changes_band_immediately); RUN_TEST(test_pending_boundary_rechecks_condition_and_loop_replays); RUN_TEST(test_finite_loop_repeats_then_sample_done); RUN_TEST(test_loop_timeout_covers_whole_loop_not_one_sample); RUN_TEST(test_no_free_voice_is_retried_not_failed); RUN_TEST(test_parse_state_loops_field); RUN_TEST(test_sample_done_silent_next_tick_and_audible_once);
     RUN_TEST(test_async_and_admission_failure_stop_channel); RUN_TEST(test_effect_channels_do_not_interrupt_engine);
     RUN_TEST(test_filtered_accel_and_decel_ranges); RUN_TEST(test_silent_cycles_and_temporal_events);
     RUN_TEST(test_speed_hysteresis_rejects_threshold_jitter); RUN_TEST(test_state_and_asset_capacity);

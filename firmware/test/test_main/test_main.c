@@ -33,6 +33,9 @@ static int g_worker_delays;
 static jmp_buf g_worker_exit;
 static int g_lease_depth, g_lease_ends, g_motor_calls, g_notes, g_motion;
 static int g_functions, g_sound_stops, g_sound_requests, g_reload, g_deferred, g_flush, g_volume;
+static int g_emergency_resets;
+static uint8_t g_last_fn;
+static bool g_last_fn_state;
 static int g_graph_faults, g_graph_installs;
 static unsigned g_cal_watchdog_calls;
 static bool g_bound_safety;
@@ -51,6 +54,7 @@ static dcc_function_cb_t g_function_cb;
 static dcc_cv_write_cb_t g_write_cb;
 static dcc_cv_read_cb_t g_read_cb;
 static dcc_reset_cb_t g_reset_cb, g_estop_cb, g_hard_cb;
+static bool g_cal_active;
 
 esp_err_t pinmap_validate(void) { return ESP_OK; }
 void motor_boot_safe(void) { g_mask = MOTOR_INHIBIT_CONTROL; }
@@ -60,6 +64,7 @@ esp_err_t storage_mount(void) { return ESP_OK; }
 storage_backend_t storage_get_backend(void) { return STORAGE_BACKEND_NONE; }
 bool storage_is_mounted(void) { return g_storage_mounted; }
 void motor_bemf_cal_watchdog(void) { ++g_cal_watchdog_calls; }
+bool motor_bemf_cal_active(void) { return g_cal_active; }
 esp_err_t settings_init(void) { return ESP_OK; }
 esp_err_t audio_init(void) { return ESP_OK; }
 esp_err_t sound_init(void) { return g_sound_init_err; }
@@ -134,6 +139,7 @@ esp_err_t esp_ota_mark_app_valid_cancel_rollback(void)
 bool track_is_dc_mode(void) { return g_dc; }
 bool web_control_is_rails(void) { return g_rails && (!g_boot_mode || g_admitted); }
 bool web_control_source_is_rails(void) { return g_rails && (!g_boot_mode || g_admitted); }
+bool web_actuation_ready(void) { return !g_boot_mode || g_admitted; }
 bool web_control_rails_begin(uint32_t *generation)
 {
     (void)generation;
@@ -174,11 +180,13 @@ void web_motion_changed(uint8_t speed, bool forward)
 }
 void web_apply_function(uint8_t fn, bool state)
 {
-    (void)fn;
-    (void)state;
+    g_last_fn = fn;
+    g_last_fn_state = state;
     ++g_functions;
 }
+void web_emergency_reset(void) { ++g_emergency_resets; }
 void sound_stop_all(void) { ++g_sound_stops; }
+void audio_stop_all(void) { }
 void sound_set_volumes(uint8_t engine, uint8_t effects) { (void)engine; (void)effects; }
 void sound_request_stop(void) { ++g_sound_requests; }
 void web_log_event(const char *tag, const char *format, ...)
@@ -265,8 +273,12 @@ void setUp(void)
     g_worker_delays = 0;
     g_lease_depth = g_lease_ends = g_motor_calls = g_notes = g_motion = 0;
     g_functions = g_sound_stops = g_reload = g_deferred = g_flush = 0;
+    g_emergency_resets = 0;
+    g_last_fn = 0;
+    g_last_fn_state = false;
     g_sound_requests = g_graph_faults = g_graph_installs = 0;
     g_cal_watchdog_calls = 0;
+    g_cal_active = false;
     g_bound_safety = false;
     g_safety_delays = 0;
     g_graph_selected = false;
@@ -507,18 +519,75 @@ static void test_callbacks_source_leases_and_accepted_motion_only(void)
     TEST_ASSERT_EQUAL_INT(2, g_notes);
     on_dcc_reset();
     TEST_ASSERT_EQUAL_INT(3, g_notes);
-    TEST_ASSERT_EQUAL_INT(SETTINGS_FUNC_MAP_COUNT + 1, g_functions);
+    TEST_ASSERT_EQUAL_INT(1, g_functions);
     TEST_ASSERT_EQUAL_INT(1, g_sound_stops);
     TEST_ASSERT_EQUAL_INT(5, g_lease_ends);
+    TEST_ASSERT_EQUAL_INT(2, g_emergency_resets);
     g_rails = false;
     on_dcc_speed(50, true); on_dcc_function(1, true);
     on_dcc_reset(); on_dcc_emergency_stop();
-    TEST_ASSERT_EQUAL_INT(4, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(6, g_motor_calls);
     TEST_ASSERT_EQUAL_INT(3, g_notes);
+    TEST_ASSERT_EQUAL_INT(2, g_sound_stops);
+    TEST_ASSERT_EQUAL_INT(4, g_emergency_resets);
     g_rails = true; g_dc = true;
     on_dcc_speed(50, true); on_dcc_function(1, true);
-    TEST_ASSERT_EQUAL_INT(4, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(6, g_motor_calls);
 }
+static void test_dcc_speed_ignored_while_bemf_calibration_owns_bridge(void)
+{
+    g_rails = true;
+    g_dc = false;
+    g_cal_active = true;
+    int motor_calls = g_motor_calls, notes = g_notes, motion = g_motion, lease_ends = g_lease_ends;
+    /* A command station refreshes the parked loco with speed 0; that must not
+     * reach motor_set_speed() and cancel the calibration. */
+    on_dcc_speed(0, true);
+    on_dcc_speed(40, false);
+    TEST_ASSERT_EQUAL_INT(motor_calls, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(notes, g_notes);
+    TEST_ASSERT_EQUAL_INT(motion, g_motion);
+    TEST_ASSERT_EQUAL_INT(lease_ends, g_lease_ends);
+    TEST_ASSERT_EQUAL_INT(0, g_lease_depth);
+    g_cal_active = false;
+    on_dcc_speed(40, false);
+    TEST_ASSERT_EQUAL_INT(motor_calls + 1, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(notes + 1, g_notes);
+    TEST_ASSERT_EQUAL_INT(motion + 1, g_motion);
+}
+
+static void test_dcc_forwards_every_function_key(void)
+{
+    g_rails = true;
+    g_dc = false;
+    for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
+        g_functions = 0;
+        on_dcc_function(fn, true);
+        TEST_ASSERT_EQUAL_INT(1, g_functions);
+        TEST_ASSERT_EQUAL_UINT8(fn, g_last_fn);
+        TEST_ASSERT_TRUE(g_last_fn_state);
+        on_dcc_function(fn, false);
+        TEST_ASSERT_EQUAL_INT(2, g_functions);
+        TEST_ASSERT_EQUAL_UINT8(fn, g_last_fn);
+        TEST_ASSERT_FALSE(g_last_fn_state);
+    }
+
+    g_rails = false;
+    for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
+        g_functions = 0;
+        on_dcc_function(fn, true);
+        TEST_ASSERT_EQUAL_INT(0, g_functions);
+    }
+
+    g_rails = true;
+    g_dc = true;
+    for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
+        g_functions = 0;
+        on_dcc_function(fn, true);
+        TEST_ASSERT_EQUAL_INT(0, g_functions);
+    }
+}
+
 static void test_cv_write_error_prevents_ack_side_effects(void)
 {
     g_cv_err = ESP_ERR_TIMEOUT;
@@ -673,6 +742,8 @@ int main(void)
     RUN_TEST(test_cv11_dcc_timeout_recovery_preserves_other_owners);
     RUN_TEST(test_cv11_ignored_in_dc_and_web_modes);
     RUN_TEST(test_callbacks_source_leases_and_accepted_motion_only);
+    RUN_TEST(test_dcc_speed_ignored_while_bemf_calibration_owns_bridge);
+    RUN_TEST(test_dcc_forwards_every_function_key);
     RUN_TEST(test_cv_write_error_prevents_ack_side_effects);
     RUN_TEST(test_cv_write_reset_reload_and_master_alias);
     RUN_TEST(test_hard_reset_delegates_subset_and_error_reload);

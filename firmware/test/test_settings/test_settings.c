@@ -246,6 +246,19 @@ static void test_cv_read_write(void)
     TEST_ASSERT_EQUAL_UINT8(42, v);
 }
 
+static void test_cv_decoder_lock(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(15, 7));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(16, 3));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, settings_cv_write(1, 42));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, settings_cv_write(63, 128));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(16, 7));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(1, 42));
+    uint8_t v = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(1, &v));
+    TEST_ASSERT_EQUAL_UINT8(42, v);
+}
+
 static void test_cv7_readonly(void)
 {
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_write(7, 5));
@@ -977,8 +990,12 @@ static void test_cv63_master_volume_alias(void)
 static void test_cv7_migrated_from_old_blob(void)
 {
     s_cv[7] = 7; /* simulate a device upgraded from an older firmware */
+    s_cv[66] = 0;
+    s_cv[95] = 0;
     cv_migrate_version();
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, s_cv[7]);
+    TEST_ASSERT_EQUAL_UINT8(128, s_cv[66]);
+    TEST_ASSERT_EQUAL_UINT8(128, s_cv[95]);
     cv_migrate_version(); /* idempotent */
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, s_cv[7]);
 }
@@ -1501,6 +1518,7 @@ int main(void)
     RUN_TEST(test_defaults_speed_table);
     RUN_TEST(test_cv_curve_migration);
     RUN_TEST(test_cv_read_write);
+    RUN_TEST(test_cv_decoder_lock);
     RUN_TEST(test_cv7_readonly);
     RUN_TEST(test_cv8_not_factory_reset);
     RUN_TEST(test_cv8_factory_reset);

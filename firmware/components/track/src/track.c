@@ -141,9 +141,11 @@ static void track_adc_step(bool *was_driving)
         (void)motor_set_rail_voltage_mv(0U);
     }
     bool driving = track_is_dc_mode() && permitted;
+    uint8_t dc_speed = dc_speed_step(s_rail_mv);
+    bool dc_forward = s_dc_forward ^ ((cv29 & 0x01U) != 0U);
     if (driving) {
-        if (motor_set_speed(dc_speed_step(s_rail_mv),
-                            s_dc_forward ^ ((cv29 & 0x01U) != 0U)) == ESP_OK) {
+        if (motor_set_speed(dc_speed, dc_forward) == ESP_OK) {
+            web_motion_changed(dc_speed, dc_forward);
             portENTER_CRITICAL(&s_track_mux);
             s_dc_generation = generation;
             s_dcc_motor_owned = false;
@@ -163,6 +165,7 @@ static void track_adc_step(bool *was_driving)
         /* Only an accepted motor command hands ownership to DCC. Merely
          * receiving addressed functions/CVs must not preserve old DC motion. */
         motor_emergency_stop();
+        web_motion_changed(0, dc_forward);
     }
     web_control_rails_end();
     *was_driving = driving;

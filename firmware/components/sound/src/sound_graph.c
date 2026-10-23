@@ -196,6 +196,15 @@ static bool sg_boolean(const sg_parser_t *p, int t, bool *out)
 {
     if (t < 0 || (p->tokens[t].type != 't' && p->tokens[t].type != 'f')) { return false; } *out = p->tokens[t].type == 't'; return true;
 }
+static bool sg_flag(const sg_parser_t *p, int t, bool *out)
+{
+    if (t < 0 || out == NULL) { return false; }
+    if (p->tokens[t].type == 't' || p->tokens[t].type == 'f') { return sg_boolean(p,t,out); }
+    uint32_t n = 0;
+    if (!sg_uint(p,t,1,&n)) { return false; }
+    *out = n != 0;
+    return true;
+}
 static int sg_enum(const char *s, const char *const *names, int count)
 {
     for (int i = 0; i < count; ++i) { if (!strcmp(s, names[i])) { return i; } } return -1;
@@ -218,11 +227,11 @@ esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_
     SG_NUM(0, "schemaVersion", n, 1); if (n != 1) { goto fail; }
     SG_STR(0,"id",out->id); SG_STR(0,"name",out->name); SG_NUM(0,"hysteresis",out->hysteresis,32);
     int obs = sg_get(&p,0,"observers");
-    if (obs >= 0) { SG_NUM(0,"observers",n,1); out->observers = n != 0; } else { out->observers = false; }
+    if (obs >= 0) { if (!sg_flag(&p,obs,&out->observers)) { goto fail; } } else { out->observers = false; }
     obj = sg_get(&p,0,"engine"); if (!sg_keys(&p,obj,"|entry||fn||hold|")) { goto fail; }
     SG_STR(obj,"entry",out->engine_entry); SG_NUM(obj,"fn",out->engine_fn,SG_NONE);
     int engineHold = sg_get(&p,obj,"hold");
-    if (engineHold >= 0) { SG_NUM(obj,"hold",n,1); out->engine_hold = n != 0; } else { out->engine_hold = false; }
+    if (engineHold >= 0) { if (!sg_flag(&p,engineHold,&out->engine_hold)) { goto fail; } } else { out->engine_hold = false; }
 #define SG_ARRAY(k,max,dest) do { arr = sg_get(&p,0,k); if (arr < 0 || p.tokens[arr].type != '[' || p.tokens[arr].count > max) { goto fail; } dest = (uint8_t)p.tokens[arr].count; } while (0)
     /* The variables array is optional so pre-variable graphs keep parsing. */
     arr = sg_get(&p,0,"variables");
@@ -279,7 +288,7 @@ esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_
     }
     SG_ARRAY("effects",SG_MAX_EFFECTS,out->effect_count); obj = arr + 1;
     for (unsigned i = 0; i < out->effect_count; ++i, obj = p.tokens[obj].next) {
-        sg_effect_t *e = &out->effects[i]; if (!sg_keys(&p,obj,"|id||entry||fn|")) { goto fail; }
+        sg_effect_t *e = &out->effects[i]; if (!sg_keys(&p,obj,"|id||entry||fn||hasFn||label|")) { goto fail; }
         SG_STR(obj,"id",e->id); SG_STR(obj,"entry",e->entry); SG_NUM(obj,"fn",e->fn,28);
     }
     SG_ARRAY("assets",SG_MAX_ASSETS,out->asset_count); obj = arr + 1;

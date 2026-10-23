@@ -597,6 +597,16 @@ static void motor_tick(void)
     uint8_t cv3 = 0, cv4 = 0;
     (void)motor_cv_read(3, &cv3);
     (void)motor_cv_read(4, &cv4);
+    uint8_t cv19 = 0;
+    if (motor_cv_read(19, &cv19) == ESP_OK && (cv19 & 0x7FU) != 0U) {
+        uint8_t cv23 = 0, cv24 = 0;
+        (void)motor_cv_read(23, &cv23);
+        (void)motor_cv_read(24, &cv24);
+        uint16_t accel = (uint16_t)cv3 + cv23;
+        uint16_t decel = (uint16_t)cv4 + cv24;
+        cv3 = (uint8_t)(accel > 255U ? 255U : accel);
+        cv4 = (uint8_t)(decel > 255U ? 255U : decel);
+    }
 
     uint8_t applied = s_applied_speed;
     bool reversing = (s_applied_forward != target_forward) && (applied > 0U);
@@ -654,6 +664,10 @@ static void motor_tick(void)
     }
 
     uint32_t duty_base = speed_duty(applied);
+    uint8_t trim = 128;
+    if (motor_cv_read(s_applied_forward ? 66U : 95U, &trim) == ESP_OK && trim != 128U) {
+        duty_base = (duty_base * trim) / 128U;
+    }
     uint32_t duty_final = duty_base;
 
     /* Kickstart (CV65): boost the duty for a short burst when starting. */
@@ -1396,6 +1410,14 @@ esp_err_t motor_bemf_cal_start(void)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+bool motor_bemf_cal_active(void)
+{
+    portENTER_CRITICAL(&s_output_mux);
+    bool active = s_cal_active;
+    portEXIT_CRITICAL(&s_output_mux);
+    return active;
 }
 
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info)

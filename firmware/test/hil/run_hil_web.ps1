@@ -118,6 +118,17 @@ function Post-Raw {
         return $false
     }
 }
+# Read-only helper for aggregated checks; returns $null on transport errors.
+function Get-Raw {
+    param([string]$Path)
+    try {
+        $r = Invoke-RestMethod -Uri "$BaseUrl$Path" -Method Get -TimeoutSec 8
+        if ($r -and ($r.PSObject.Properties.Name -contains 'ok') -and $r.ok) { return $r }
+        return $null
+    } catch {
+        return $null
+    }
+}
 
 try {
     # Root page.
@@ -159,13 +170,17 @@ try {
     }
     Add-Result "F0..F28 (web buttons)" ($fnFail -eq 0) "$fnFail failed"
 
-    # All AUX channels: effect on/off.
+    # All AUX channels: effect on/off and readback of the effective state.
     $auxFail = 0
     for ($ch = 0; $ch -lt 9; $ch++) {
         if (-not (Post-Raw "/api/aux/effect?ch=$ch&on=1&pwm_on=255&pwm_off=0&mode=0&period=800")) { $auxFail++ }
+        $st = Get-Raw "/api/aux/state"
+        if (-not ($st -and $st.aux[$ch] -and $st.aux[$ch].on)) { $auxFail++ }
         if (-not (Post-Raw "/api/aux/effect?ch=$ch&on=0&pwm_on=255&pwm_off=0&mode=0&period=800")) { $auxFail++ }
+        $st = Get-Raw "/api/aux/state"
+        if (-not ($st -and $st.aux[$ch] -and (-not $st.aux[$ch].on))) { $auxFail++ }
     }
-    Add-Result "AUX0..8 (web buttons)" ($auxFail -eq 0) "$auxFail failed"
+    Add-Result "AUX0..8 (web buttons + state)" ($auxFail -eq 0) "$auxFail failed"
 
     # AUX config write: re-apply the current level/effect (idempotent).
     $auxCfgFail = 0

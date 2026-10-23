@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 const { test } = require('node:test');
 
 const htmlPath = path.join(__dirname, '..', 'sound_editor', 'public', 'blocks.html');
@@ -157,7 +159,7 @@ function createEditorFixture(t, opts = {}) {
     URL: Object.assign(URL, { createObjectURL: () => 'blob:mock', revokeObjectURL: () => {} }),
     Image: class { set src(v) { if (this.onload) this.onload(); } },
     Audio: class {
-      constructor(src) { this.src = src; this.volume = 1; }
+      constructor(src) { this.src = src; this.volume = 1; context.lastAudio = this; }
       play() { return Promise.resolve(); }
       pause() {}
     },
@@ -618,6 +620,163 @@ test('27. Editor playback target is independent of the web UI and defaults to PC
   assert.equal(api.soundPlayTarget(), 'pc');
 });
 
+test('27b. PC preview status returns to Ready when the sound ends', async t => {
+  const { api, context, dom } = createEditorFixture(t);
+  await api.playFile('horn.wav');
+  assert.match(dom.getEl('status_txt').textContent, /Играю/);
+  assert.ok(context.lastAudio, 'PC preview created an Audio element');
+  context.lastAudio.onended();
+  assert.equal(dom.getEl('status_txt').textContent, 'Готово');
+});
+
+test('27c. Live mapping finds the active scheme block from runner channel states', t => {
+  const { api } = createEditorFixture(t);
+  api.switchMode('scheme');
+  api.selectScheme('horn_scheme');
+  const payload = api.compile().payload;
+  const effect = payload.effects.findIndex(e => e.id === 'horn_cue-h_loop');
+  assert.ok(effect >= 0, 'horn cue has an effect channel');
+  const state = payload.states.findIndex(s => s.id.indexOf('horn_cue-h_loop') === 0 && /_play$/.test(s.id));
+  assert.ok(state >= 0, 'expanded horn loop play state exists');
+  const states = Array(40).fill(255);
+  states[effect + 1] = state;
+  const active = api.liveBlockIds({ active: true, states });
+  const schemeBlocks = new Set(api.project().schemes.find(s => s.id === 'horn_scheme').blocks.map(b => b.id));
+  assert.equal([...active].some(id => schemeBlocks.has(id)), true);
+});
+
+test('27d. Live mapping highlights the cue block while editing Mixes', t => {
+  const { api } = createEditorFixture(t);
+  const payload = api.compile().payload;
+  const effect = payload.effects.findIndex(e => e.id === 'horn_cue-h_loop');
+  const state = payload.states.findIndex(s => s.id.indexOf('horn_cue-h_loop') === 0 && /_play$/.test(s.id));
+  assert.ok(effect >= 0 && state >= 0);
+  const states = Array(40).fill(255);
+  states[effect + 1] = state;
+  const active = api.liveBlockIds({ active: true, states });
+  assert.equal(active.has('horn_cue'), true);
+  const off = payload.states.findIndex(s => s.id === 'horn_cue-h_loop_off');
+  assert.ok(off >= 0, 'silent entry state exists');
+  states[effect + 1] = off;
+  assert.equal(api.liveBlockIds({ active: true, states }).has('horn_cue'), false, 'silent _off channel is not highlighted');
+});
+
+test('27e. Live switches to simulator state and highlights its active block', async t => {
+  const { api, dom } = createEditorFixture(t);
+  api.project().schemes.push({
+    id: 'live_loop',
+    name: 'LiveLoop',
+    blocks: [{ id: 'll_loop', type: 'loop', name: 'Loop', fn: -1, volume: 80, rate: 1000, loopMode: 'hold', files: { sound: 'ms-loop.wav' }, outEvent: 'finish', outDelay: 0, x: 60, y: 80 }],
+    links: [],
+    texts: []
+  });
+  api.switchMode('scheme');
+  api.selectScheme('live_loop');
+  await api.openSimulator();
+  const sim = api.sim();
+  const off = sim.states.findIndex(s => s.id === 'll_loop_off');
+  assert.ok(off >= 0, 'loop has a silent entry state');
+  sim.chans[0].state = off;
+  assert.equal(api.simActiveBlockIds().has('ll_loop'), false, 'silent simulator channel is not highlighted');
+  api.simTick();
+  const active = api.simActiveBlockIds();
+  assert.equal(active.has('ll_loop'), true, 'simulator active state maps to the scheme block');
+  api.startLivePolling();
+  assert.equal(api.liveState(), 'sim', 'Live is always on and uses simulator state');
+  api.closeSimulator();
+  api.switchMode('mix');
+  await api.openSimulator();
+  const mixActive = api.simActiveBlockIds();
+  assert.equal(mixActive.has('horn_cue'), false, 'inactive cue is not highlighted in Mixes');
+  api.closeSimulator();
+});
+
+test('27f. Live highlights AUX/headlight outputs and shows active headlight direction', async t => {
+  const { api } = createEditorFixture(t);
+  const states = Array(40).fill(255);
+  const fwd = api.liveBlockIds({ active: true, outputs: 1, logic: 0, states });
+  assert.equal(fwd.has('head'), true, 'F0F headlight block is active');
+  assert.equal(api.liveOutputBadges({ outputs: 1, logic: 0 }).head, 'F0F');
+  const rev = api.liveBlockIds({ active: true, outputs: 2, logic: 0, states });
+  assert.equal(rev.has('head'), true, 'F0R headlight block is active');
+  assert.equal(api.liveOutputBadges({ outputs: 2, logic: 0 }).head, 'F0R');
+  const aux = api.liveBlockIds({ active: true, outputs: 1 << 2, logic: 0, states });
+  assert.equal(aux.has('cab'), true, 'AUX1 block is active');
+  assert.equal(api.liveOutputBadges({ outputs: 1 << 2, logic: 0 }).cab, undefined, 'AUX block is not duplicated by a badge');
+  const input = api.liveBlockIds({ active: true, outputs: 0, logic: 0, functions: 1, states });
+  assert.equal(input.has('f0'), true, 'active F0 input block is highlighted');
+
+  await api.openSimulator();
+  api.simPress(0);
+  api.simTick();
+  assert.equal(api.simActiveBlockIds().has('head'), true, 'simulator highlights the F0 headlight output');
+  assert.equal(api.simActiveBlockIds().has('f0'), true, 'simulator highlights the active F0 input block');
+  assert.equal(api.simOutputBadges().head, 'F0F');
+  api.closeSimulator();
+});
+
+test('27g. Default locomotive template uses 100% constant light/AUX outputs', t => {
+  const { api } = createEditorFixture(t);
+  for (const id of ['head', 'cab', 'beacon', 'strobe', 'under_light', 'fan']) {
+    const b = api.project().mix.blocks.find(x => x.id === id);
+    assert.ok(b, id + ' output exists');
+    assert.equal(b.level, 100, id + ' level');
+    assert.equal(b.effect, 0, id + ' effect');
+  }
+  const summary = api.nodeSummary(api.project().mix.blocks.find(x => x.id === 'head'));
+  assert.match(summary, /Фары · 100%/);
+  assert.equal(summary.indexOf('F0 ·'), -1, 'output block summary does not duplicate the F-key source');
+});
+
+test('27h. Opening the editor loads the active device project over a local draft', async t => {
+  let active = null;
+  const { api, context } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) {
+      return active
+        ? { ok: true, active: true, id: active.id, revision: 5 }
+        : { ok: true, active: false, revision: 0 };
+    }
+    if (url.startsWith('/api/sound/graph/project')) {
+      return { ok: true, revision: 5, project: { name: active.name, editor: { project: active } } };
+    }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    if (url.startsWith('/api/sound/graph/asset')) return { ok: true, asset: { file: 'x.wav', size: 1, sampleRate: 22050, channels: 1, bits: 16, durationMs: 100 } };
+    return { ok: true };
+  } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  active = JSON.parse(JSON.stringify(api.project()));
+  active.id = 'active_device';
+  active.name = 'Active device project';
+  context.localStorage.setItem('aura_blocks_project_v1', '{}');
+  /* The local draft may have been saved for the active id/revision but its
+   * project id was changed (e.g. user loaded the default template). */
+  api.setMeta(active.id, 5);
+  assert.notEqual(api.project().id, active.id);
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.project().id, 'active_device');
+  assert.equal(api.project().name, 'Active device project');
+});
+
+test('27i. Engine speed band follows speed immediately (endless loop)', async t => {
+  const { api } = createEditorFixture(t);
+  await api.openSimulator();
+  const sim = api.sim();
+  const tick = n => { for (let i = 0; i < n; i++) api.simTick(); };
+  sim.speed = 0; tick(4);
+  const idle = sim.states[sim.chans[0].state].id;
+  assert.match(idle, /idle/, 'engine starts in idle');
+  sim.speed = 9; tick(5);
+  const low = sim.states[sim.chans[0].state].id;
+  assert.match(low, /eng1/, 'speed 9 selects the first running band');
+  sim.speed = 30; tick(5);
+  const mid = sim.states[sim.chans[0].state].id;
+  assert.match(mid, /eng3/, 'speed 30 selects the third running band');
+  api.closeSimulator();
+});
+
 test('28. Simulator unlocks the PC AudioContext synchronously on open', async t => {
   const { api, context } = createEditorFixture(t);
   let resumed = 0;
@@ -751,4 +910,44 @@ test('34. Two-finger pinch zooms the canvas around the gesture midpoint', t => {
   assert.ok(Math.abs(p.editor.viewport.y + 50) < 1e-9, 'The midpoint stays anchored vertically');
 
   stage.dispatchEvent({ type: 'touchend', touches: [], preventDefault });
+});
+
+test('35. The compiled editor payload is accepted by the firmware C parser', t => {
+  const { api } = createEditorFixture(t);
+  const compiled = api.compile();
+  compiled.payload = api.wirePayload(compiled.payload);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-contract-'));
+  const payloadPath = path.join(tmp, 'payload.json');
+  const exePath = path.join(tmp, process.platform === 'win32' ? 'check.exe' : 'check');
+  fs.writeFileSync(payloadPath, JSON.stringify(compiled.payload));
+
+  const cc = process.env.CC || 'gcc';
+  execFileSync(cc, [
+    '-std=c11',
+    '-I', path.join(__dirname, '..', 'test_libs', 'teststubs', 'include'),
+    '-I', path.join(__dirname, '..', 'components', 'sound', 'include'),
+    path.join(__dirname, '..', 'test_tools', 'graph_contract_check.c'),
+    path.join(__dirname, '..', 'components', 'sound', 'src', 'sound_graph.c'),
+    '-o', exePath
+  ], { stdio: 'pipe' });
+
+  const output = execFileSync(exePath, [payloadPath], { encoding: 'utf8' });
+  assert.match(output, /parse=0 validate=0/, output);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('36. Wire payload uses legacy numeric flags and drops editor-only effect metadata', t => {
+  const { api } = createEditorFixture(t);
+  const raw = api.compile().payload;
+  const wire = api.wirePayload(raw);
+  assert.equal(typeof wire.observers, 'number');
+  assert.equal(typeof wire.engine.hold, 'number');
+  assert.ok(wire.observers === 0 || wire.observers === 1);
+  assert.ok(wire.engine.hold === 0 || wire.engine.hold === 1);
+  for (const effect of wire.effects) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(effect, 'hasFn'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(effect, 'label'));
+  }
+  assert.ok(raw.effects.some(effect => 'hasFn' in effect || 'label' in effect),
+    'the simulator metadata still exists in the in-memory payload');
 });

@@ -22,6 +22,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 import wave
 from http.server import ThreadingHTTPServer
@@ -107,6 +108,42 @@ def main():
             assert status == 200 and raw[0:4] == b"RIFF", (n, status, len(raw))
         if dotted:
             print("dotted names playable: %s" % dotted)
+
+        # Live mode consumes these masks: F-key levels and physical outputs.
+        _http(port, "POST", "/api/motor?forward=1")
+        _http(port, "POST", "/api/function?fn=0&state=1")
+        status, raw = _http(port, "GET", "/api/sound/graph/state")
+        live = json.loads(raw)
+        assert live.get("ok") and (live.get("functions", 0) & 1), live
+        assert live.get("outputs", 0) & 1, live  # F0F
+        _http(port, "POST", "/api/motor?forward=0")
+        status, raw = _http(port, "GET", "/api/sound/graph/state")
+        live = json.loads(raw)
+        assert live.get("outputs", 0) & 2, live  # F0R
+        _http(port, "POST", "/api/function?fn=3&state=1")
+        status, raw = _http(port, "GET", "/api/sound/graph/state")
+        live = json.loads(raw)
+        assert live.get("functions", 0) & (1 << 3), live
+        assert live.get("outputs", 0) & (1 << 2), live  # AUX1
+        print("graph/state Live masks: functions=0x%x outputs=0x%x" %
+              (live["functions"], live["outputs"]))
+
+        status, raw = _http(port, "GET", "/api/sound/graph/state")
+        before = json.loads(raw)
+        _http(port, "POST", "/api/motor?speed=30&forward=1")
+        _http(port, "POST", "/api/function?fn=2&state=1")
+        time.sleep(0.85)
+        status, raw = _http(port, "GET", "/api/sound/graph/state")
+        running = json.loads(raw)
+        assert len(running.get("states", [])) == 33, running
+        assert running["active"] is True, running
+        assert running["states"] != before["states"], (before["states"], running["states"])
+        status, raw = _http(port, "GET", "/api/sound/graph/project")
+        project = json.loads(raw)["project"]
+        engine_id = project["states"][running["states"][0]]["id"]
+        assert "idle" not in engine_id.lower() and "off" not in engine_id.lower(), engine_id
+        print("graph runner: engine=%s effects changed=%s" %
+              (engine_id, running["states"] != before["states"]))
 
         status, raw = _http(port, "POST", "/api/audio/pack", b"not a sound pack")
         bad = json.loads(raw)

@@ -1420,19 +1420,19 @@ esp_err_t auxio_init(void)
     return (esp_err_t)mock_auxio_init_ret;
 }
 
-int mock_auxio_enabled_state[8];
+int mock_auxio_enabled_state[AUXIO_CH_COUNT];
 esp_err_t auxio_set_enabled(uint8_t channel, bool enabled)
 {
     mock_auxio_set_enabled_calls++;
     mock_auxio_last_channel = channel;
     mock_auxio_last_enabled = enabled ? 1 : 0;
-    if (channel < 8U) mock_auxio_enabled_state[channel] = enabled ? 1 : 0;
+    if (channel < AUXIO_CH_COUNT) mock_auxio_enabled_state[channel] = enabled ? 1 : 0;
     return ESP_OK;
 }
 
 esp_err_t auxio_get_enabled(uint8_t channel, bool *out_enabled)
 {
-    if (channel >= 8U || out_enabled == NULL) return ESP_ERR_INVALID_ARG;
+    if (channel >= AUXIO_CH_COUNT || out_enabled == NULL) return ESP_ERR_INVALID_ARG;
     *out_enabled = mock_auxio_enabled_state[channel] != 0;
     return ESP_OK;
 }
@@ -1534,6 +1534,10 @@ esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
 
 int mock_dcc_reload_config_calls = 0;
 bool mock_dcc_control_enabled;
+uint32_t mock_dcc_overruns;
+int64_t mock_dcc_last_packet_us;
+uint32_t dcc_get_isr_overruns(void) { return mock_dcc_overruns; }
+int64_t dcc_last_packet_us(void) { return mock_dcc_last_packet_us; }
 
 void dcc_set_control_enabled(bool enabled)
 {
@@ -1717,6 +1721,8 @@ void mock_web_reset(void)
     mock_storage_access_ret = mock_storage_maintenance_ret = mock_storage_access_leases = 0;
     mock_storage_maintenance_owner = NULL;
     mock_dcc_control_enabled = false;
+    mock_dcc_overruns = 0;
+    mock_dcc_last_packet_us = 0;
     mock_route_count = 0;
     memset(&mock_httpd_last_cfg, 0, sizeof(mock_httpd_last_cfg));
     memset(mock_routes, 0, sizeof(mock_routes));

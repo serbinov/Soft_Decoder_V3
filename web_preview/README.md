@@ -15,8 +15,11 @@ auditioning.
 Every `/api/*` request is answered with in-memory mock data. The graph API
 (`/api/sound/graph/{capabilities,projects,project,state,asset,validate,save,apply}`)
 returns a sound-graph project (`states`/`transitions`/`effects`/`assets`), so
-Save/Apply and the live state poll work. Function bindings are served by
-`/api/func-map?view=bind`.
+Save/Apply and the live state poll work. The mock also runs a small graph
+runner: `/api/sound/graph/state` advances engine/effect channels from the saved
+transitions using the current F-key levels and motor speed, so Live in the block
+editor highlights the same sound blocks as the simulator while you operate the
+web control page. Function bindings are served by `/api/func-map?view=bind`.
 
 ## Run
 

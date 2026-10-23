@@ -296,6 +296,7 @@ void setUp(void)
     s_route_count = 0;
     memset(s_legacy_voice, 0, sizeof(s_legacy_voice));
     memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+    s_preview_name[0] = '\0';
     test_pending_transfer = NULL;
     test_boot_calls = test_complete_calls = 0;
     test_complete_gate_closed = false;
@@ -631,6 +632,360 @@ static void test_web_apply_function_scheme_routes_to_sound(void)
     TEST_ASSERT_FALSE(mock_sound_last_state);
 }
 
+static void set_one_binding(uint8_t fn, uint8_t type, uint8_t id, uint8_t dir, uint8_t state)
+{
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = fn;
+    s_func_bind[0].target_type = type;
+    s_func_bind[0].target_id = id;
+    s_func_bind[0].dir = dir;
+    s_func_bind[0].state = state;
+    s_func_bind_count = 1;
+    s_func_bind_present = true;
+}
+
+static void test_function_post_all_f_to_all_aux(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.control_source = 1;
+    s_func_bind_present = true;
+    s_func_bind_count = WEB_FN_COUNT;
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) {
+        s_func_bind[fn].used = 1;
+        s_func_bind[fn].fn = fn;
+        s_func_bind[fn].target_type = FUNC_TARGET_OUTPUT;
+        s_func_bind[fn].target_id = (uint8_t)(fn % AUXIO_CH_COUNT);
+        s_func_bind[fn].dir = FUNC_DIR_ANY;
+        s_func_bind[fn].state = FUNC_STATE_ANY;
+    }
+    memset(s_fn, 0, sizeof(s_fn));
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) {
+        char q[32];
+        uint8_t ch = (uint8_t)(fn % AUXIO_CH_COUNT);
+        snprintf(q, sizeof(q), "fn=%u&state=1", (unsigned)fn);
+        set_query(q); reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, function_post(&req));
+        TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[ch]);
+        for (uint8_t other = 0; other < AUXIO_CH_COUNT; ++other) {
+            if (other != ch) TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[other]);
+        }
+        snprintf(q, sizeof(q), "fn=%u&state=0", (unsigned)fn);
+        set_query(q); reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, function_post(&req));
+        TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[ch]);
+    }
+}
+
+static void test_legacy_map_all_f_to_all_aux(void)
+{
+    s_func_bind_present = false;
+    s_func_bind_count = 0;
+    for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) {
+        uint8_t ch = (uint8_t)(fn % AUXIO_CH_COUNT);
+        uint16_t mask = (uint16_t)(1U << ch);
+        memset(s_func_map, 0, sizeof(s_func_map));
+        s_func_map[fn].aux_mask = mask;
+        s_func_map[fn].dir = SETTINGS_FUNC_DIR_NONE;
+        s_func_map[fn].speed = SETTINGS_FUNC_SPD_NONE;
+        memset(s_fn, 0, sizeof(s_fn));
+        memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+        s_outputs_applied = 0;
+
+        web_apply_function(fn, true);
+        TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[ch]);
+        for (uint8_t other = 0; other < AUXIO_CH_COUNT; ++other) {
+            if (other != ch) TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[other]);
+        }
+        web_apply_function(fn, false);
+        TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[ch]);
+    }
+}
+
+static void test_headlight_direction_bindings(void)
+{
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[0].target_id = AUXIO_CH_F0F;
+    s_func_bind[0].dir = FUNC_DIR_FWD;
+    s_func_bind[0].state = FUNC_STATE_ANY;
+    s_func_bind[1].used = 1;
+    s_func_bind[1].fn = 2;
+    s_func_bind[1].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[1].target_id = AUXIO_CH_F0R;
+    s_func_bind[1].dir = FUNC_DIR_REV;
+    s_func_bind[1].state = FUNC_STATE_ANY;
+    s_func_bind_count = 2;
+    s_func_bind_present = true;
+    memset(s_fn, 0, sizeof(s_fn));
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    s_motion_initialized = true;
+    s_motion_forward = true;
+    s_motion_speed = 0;
+
+    web_apply_function(1, true);
+    TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[AUXIO_CH_F0F]);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+    web_apply_function(2, true);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+
+    web_motion_changed(0, false);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0F]);
+    TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+    web_apply_function(1, false);
+    TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+    web_apply_function(2, false);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+}
+
+static void test_graph_state_reports_dcc_control_masks(void)
+{
+    httpd_req_t req = make_req(0);
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[0].target_id = AUXIO_CH_F0F;
+    s_func_bind[0].dir = FUNC_DIR_FWD;
+    s_func_bind[1].used = 1;
+    s_func_bind[1].fn = 2;
+    s_func_bind[1].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[1].target_id = AUXIO_CH_F0R;
+    s_func_bind[1].dir = FUNC_DIR_REV;
+    s_func_bind[2].used = 1;
+    s_func_bind[2].fn = 3;
+    s_func_bind[2].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[2].target_id = AUXIO_CH_AUX1;
+    s_func_bind[2].dir = FUNC_DIR_ANY;
+    s_func_bind_count = 3;
+    s_func_bind_present = true;
+    memset(s_fn, 0, sizeof(s_fn));
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    s_motion_initialized = true;
+    s_motion_forward = true;
+    s_motion_speed = 0;
+
+    /* This is exactly the path used by app_main on_dcc_function(). */
+    web_apply_function(1, true);
+    web_apply_function(2, true);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_state_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"functions\":6"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"outputs\":1"));
+
+    /* DCC direction change must re-gate the headlight pair for Live. */
+    web_motion_changed(30, false);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_state_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"functions\":6"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"outputs\":2"));
+
+    web_apply_function(3, true);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_state_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"functions\":14"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"outputs\":6"));
+}
+
+static void test_motor_post_updates_motion_and_headlights(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.control_source = 1;
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[0].target_id = AUXIO_CH_F0F;
+    s_func_bind[0].dir = FUNC_DIR_FWD;
+    s_func_bind[0].state = FUNC_STATE_ANY;
+    s_func_bind[1].used = 1;
+    s_func_bind[1].fn = 2;
+    s_func_bind[1].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[1].target_id = AUXIO_CH_F0R;
+    s_func_bind[1].dir = FUNC_DIR_REV;
+    s_func_bind[1].state = FUNC_STATE_ANY;
+    s_func_bind_count = 2;
+    s_func_bind_present = true;
+    memset(s_fn, 0, sizeof(s_fn));
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    s_motion_initialized = false;
+    s_motion_forward = true;
+    s_motion_speed = 0;
+
+    set_query("speed=40&forward=0");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(40, s_motion_speed);
+    TEST_ASSERT_FALSE(s_motion_forward);
+
+    web_apply_function(1, true);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0F]);
+    web_apply_function(2, true);
+    TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+
+    set_query("speed=40&forward=1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_post(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[AUXIO_CH_F0F]);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0R]);
+
+    set_query("speed=0&forward=1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(0, s_motion_speed);
+    web_apply_function(1, false);
+    web_apply_function(2, false);
+}
+
+static void test_web_emergency_reset_clears_outputs(void)
+{
+    memset(s_fn, 0, sizeof(s_fn));
+    s_fn[1] = true;
+    s_fn[2] = true;
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    mock_auxio_enabled_state[AUXIO_CH_F0F] = 1;
+    mock_auxio_enabled_state[AUXIO_CH_AUX7] = 1;
+    s_outputs_applied = (uint16_t)((1U << AUXIO_CH_F0F) | (1U << AUXIO_CH_AUX7));
+    s_logic_active = (uint16_t)(1U << (FUNC_LOGIC_DRIVE_HOLD - 1U));
+    s_motion_speed = 30;
+    s_motion_initialized = false;
+
+    web_emergency_reset();
+
+    for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) TEST_ASSERT_FALSE(s_fn[fn]);
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[ch]);
+    }
+    TEST_ASSERT_EQUAL_UINT16(0, s_outputs_applied);
+    TEST_ASSERT_EQUAL_UINT16(0, s_logic_active);
+    TEST_ASSERT_EQUAL_UINT8(0, s_motion_speed);
+    TEST_ASSERT_TRUE(s_motion_initialized);
+    TEST_ASSERT_FALSE(mock_sound_logic_drive_hold);
+}
+
+static void test_all_logic_actions(void)
+{
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    memset(s_fn, 0, sizeof(s_fn));
+    s_motion_initialized = true;
+    s_motion_forward = true;
+    s_motion_speed = 0;
+    s_logic_active = 0;
+    s_logic_notch = 0;
+
+    set_one_binding(1, FUNC_TARGET_LOGIC, FUNC_LOGIC_MUTE_STOP, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(1, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_mute);
+    web_apply_function(1, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_mute);
+
+    s_motion_speed = 30;
+    set_one_binding(2, FUNC_TARGET_LOGIC, FUNC_LOGIC_MUTE_MOVE, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(2, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_mute);
+    web_apply_function(2, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_mute);
+    s_motion_speed = 0;
+
+    mock_auxio_enabled_state[AUXIO_CH_F0F] = 1;
+    set_one_binding(3, FUNC_TARGET_LOGIC, FUNC_LOGIC_MUTE_LIGHT, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(3, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_mute);
+    web_apply_function(3, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_mute);
+    mock_auxio_enabled_state[AUXIO_CH_F0F] = 0;
+
+    set_one_binding(4, FUNC_TARGET_LOGIC, FUNC_LOGIC_DRIVE_HOLD, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(4, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_drive_hold);
+    web_apply_function(4, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_drive_hold);
+
+    set_one_binding(5, FUNC_TARGET_LOGIC, FUNC_LOGIC_COAST, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(5, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_coast);
+    web_apply_function(5, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_coast);
+
+    set_one_binding(6, FUNC_TARGET_LOGIC, FUNC_LOGIC_DYNAMIC_BRAKE, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(6, true);
+    TEST_ASSERT_TRUE(mock_sound_logic_dynamic_brake);
+    web_apply_function(6, false);
+    TEST_ASSERT_FALSE(mock_sound_logic_dynamic_brake);
+
+    s_logic_notch = 0;
+    s_logic_active = 0;
+    set_one_binding(7, FUNC_TARGET_LOGIC, FUNC_LOGIC_NOTCH_UP, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(7, true);
+    TEST_ASSERT_EQUAL_INT(1, mock_sound_logic_notch);
+    web_apply_function(7, false);
+    web_apply_function(7, true);
+    TEST_ASSERT_EQUAL_INT(2, mock_sound_logic_notch);
+    web_apply_function(7, false);
+
+    s_logic_notch = 0;
+    s_logic_active = 0;
+    set_one_binding(8, FUNC_TARGET_LOGIC, FUNC_LOGIC_NOTCH_DOWN, FUNC_DIR_ANY, FUNC_STATE_ANY);
+    web_apply_function(8, true);
+    TEST_ASSERT_EQUAL_INT(-1, mock_sound_logic_notch);
+    web_apply_function(8, false);
+    web_apply_function(8, true);
+    TEST_ASSERT_EQUAL_INT(-2, mock_sound_logic_notch);
+    web_apply_function(8, false);
+}
+
+static void test_graph_mode_routes_all_functions_to_sound(void)
+{
+    mock_sound_scheme_enabled = 1;
+    mock_sound_function_calls = 0;
+    mock_audio_voice_play_calls = 0;
+    s_func_bind_present = false;
+    s_func_bind_count = 0;
+    memset(s_func_map, 0, sizeof(s_func_map));
+    memset(s_fn, 0, sizeof(s_fn));
+    for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) {
+        web_apply_function(fn, true);
+        TEST_ASSERT_EQUAL_INT((int)fn * 2 + 1, mock_sound_function_calls);
+        TEST_ASSERT_EQUAL_UINT8(fn, mock_sound_last_fn);
+        TEST_ASSERT_TRUE(mock_sound_last_state);
+        web_apply_function(fn, false);
+        TEST_ASSERT_EQUAL_INT((int)fn * 2 + 2, mock_sound_function_calls);
+        TEST_ASSERT_EQUAL_UINT8(fn, mock_sound_last_fn);
+        TEST_ASSERT_FALSE(mock_sound_last_state);
+    }
+    TEST_ASSERT_EQUAL_INT(0, mock_audio_voice_play_calls);
+}
+
+static void test_aux_cfg_all_channels(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_aux_save_ret = ESP_OK;
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        uint8_t level = (uint8_t)(10U + ch * 9U);
+        uint8_t fx = (uint8_t)(ch % AUXIO_EFFECT_COUNT);
+        char q[64];
+        int before = mock_auxio_config_calls;
+        snprintf(q, sizeof(q), "ch=%u&level=%u&effect=%u",
+                 (unsigned)ch, (unsigned)level, (unsigned)fx);
+        set_query(q);
+        reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, aux_cfg_post(&req));
+        TEST_ASSERT_EQUAL_INT(before + 1, mock_auxio_config_calls);
+        TEST_ASSERT_EQUAL_UINT8(ch, mock_auxio_last_channel);
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)((uint16_t)level * 255U / 100U), mock_auxio_last_pwm_on);
+        TEST_ASSERT_EQUAL_INT(fx, mock_auxio_last_mode);
+        TEST_ASSERT_EQUAL_UINT16(aux_effect_period(fx), mock_auxio_last_period);
+    }
+}
+
 static void test_web_motion_changed(void)
 {
     s_motion_initialized = false;
@@ -913,6 +1268,8 @@ static void test_control_source_get(void)
 static void test_control_source_post(void)
 {
     httpd_req_t req = make_req(0);
+    s_fn[1] = true;
+    mock_auxio_enabled_state[AUXIO_CH_F0F] = 1;
     set_query("");
     TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
     TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
@@ -922,6 +1279,8 @@ static void test_control_source_post(void)
     TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
     TEST_ASSERT_EQUAL_UINT8(1, s_cfg.control_source);
     TEST_ASSERT_EQUAL_INT(1, mock_settings_save_calls);
+    TEST_ASSERT_FALSE(s_fn[1]);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_F0F]);
 
     reset_resp();
     set_query("source=1");
@@ -1338,6 +1697,59 @@ static void test_aux_effect_post(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"mode\":99"));
 }
 
+static void test_aux_effect_all_channels(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.control_source = 1;
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        char q[96];
+        snprintf(q, sizeof(q), "ch=%u&on=1&pwm_on=200&pwm_off=10&mode=%u&period=500",
+                 (unsigned)ch, (unsigned)(ch % AUXIO_EFFECT_COUNT));
+        set_query(q);
+        reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, aux_effect_post(&req));
+        TEST_ASSERT_EQUAL_UINT8(ch, mock_auxio_last_channel);
+        TEST_ASSERT_EQUAL_INT(1, mock_auxio_last_enabled);
+
+        snprintf(q, sizeof(q), "ch=%u&on=0&pwm_on=200&pwm_off=10&mode=0&period=500",
+                 (unsigned)ch);
+        set_query(q);
+        reset_resp();
+        TEST_ASSERT_EQUAL(ESP_OK, aux_effect_post(&req));
+        TEST_ASSERT_EQUAL_UINT8(ch, mock_auxio_last_channel);
+        TEST_ASSERT_EQUAL_INT(0, mock_auxio_last_enabled);
+    }
+}
+
+static void test_aux_state_get(void)
+{
+    httpd_req_t req = make_req(0);
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    mock_auxio_enabled_state[AUXIO_CH_F0F] = 1;
+    mock_auxio_enabled_state[AUXIO_CH_AUX7] = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, aux_state_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"aux\":["));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body,
+                                 "{\"ch\":0,\"on\":true,\"error\":false}"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body,
+                                 "{\"ch\":8,\"on\":true,\"error\":false}"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body,
+                                 "{\"ch\":2,\"on\":false,\"error\":false}"));
+}
+
+static void test_dcc_status_get(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_timer_now_us = 1000000;
+    mock_dcc_last_packet_us = 950000;
+    mock_dcc_overruns = 7;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_status_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"overruns\":7"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"lastPacketMs\":50"));
+}
+
 static void test_audio_status_get(void)
 {
     httpd_req_t req = make_req(0);
@@ -1353,6 +1765,21 @@ static void test_audio_status_get(void)
     mock_audio_is_playing = 0;
     TEST_ASSERT_EQUAL(ESP_OK, audio_status_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"playing\":false"));
+    /* A finished preview must not stay in the status just because another
+     * voice (engine/graph) keeps audio_is_playing() true. */
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_alloc_owned(&s_preview_voice));
+    uint8_t preview_voice = s_preview_voice.voice;
+    TEST_ASSERT_EQUAL(ESP_OK, audio_voice_play_owned(&s_preview_voice, "horn.wav", false, 80));
+    snprintf(s_preview_name, sizeof(s_preview_name), "horn");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_status_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"preview\":\"horn\""));
+    mock_audio_owned_state[preview_voice] = AUDIO_VOICE_FINISHED;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, audio_status_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"preview\":\"\""));
+    TEST_ASSERT_EQUAL_STRING("", s_preview_name);
+    TEST_ASSERT_FALSE(mock_audio_owned_busy[preview_voice]);
 }
 
 static void test_audio_tracks_get(void)
@@ -2269,13 +2696,13 @@ static void test_func_map_post_binding(void)
     httpd_req_t req = make_req(0);
 
     reset_resp();
-    set_query("bind=1&fn=2&type=2&id=5&dir=1&state=2&mode=3&flags=1&short=7"
+    set_query("bind=1&fn=2&type=1&id=3&dir=1&state=2&mode=3&flags=1&short=7"
               "&short_ms=400&min_ms=150&fade_ms=80");
     TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
     TEST_ASSERT_EQUAL_UINT32(1, s_func_bind_count);
     TEST_ASSERT_EQUAL_UINT8(2, s_func_bind[0].fn);
-    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_SOUND, s_func_bind[0].target_type);
-    TEST_ASSERT_EQUAL_UINT8(5, s_func_bind[0].target_id);
+    TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_OUTPUT, s_func_bind[0].target_type);
+    TEST_ASSERT_EQUAL_UINT8(3, s_func_bind[0].target_id);
     TEST_ASSERT_EQUAL_UINT8(1, s_func_bind[0].dir);
     TEST_ASSERT_EQUAL_UINT8(2, s_func_bind[0].state);
     TEST_ASSERT_EQUAL_UINT8(3, s_func_bind[0].mode);
@@ -2296,6 +2723,8 @@ static void test_func_map_post_binding(void)
         "bind=1&fn=1&type=0&id=0",
         "bind=1&fn=1&type=9&id=0",
         "bind=1&fn=1&type=1",
+        "bind=1&fn=1&type=2&id=5",
+        "bind=1&fn=1&type=3&id=1",
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
         reset_resp();
@@ -2306,7 +2735,7 @@ static void test_func_map_post_binding(void)
 
     reset_resp();
     mock_bind_save_ret = ESP_FAIL;
-    set_query("bind=1&fn=3&type=2&id=1");
+    set_query("bind=1&fn=3&type=1&id=1");
     TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
     mock_bind_save_ret = 0;
@@ -2332,7 +2761,7 @@ static void test_func_map_post_binding(void)
     /* Full store: add fails. */
     reset_resp();
     s_func_bind_count = FUNC_BIND_MAX;
-    set_query("bind=1&fn=3&type=2&id=1");
+    set_query("bind=1&fn=3&type=1&id=3");
     TEST_ASSERT_EQUAL(ESP_OK, func_map_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
 
@@ -4184,8 +4613,8 @@ static void test_graph_get_roundtrip_assets_and_routes(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
     TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
     reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
-    TEST_ASSERT_EQUAL_UINT32(60, s_route_count);
-    TEST_ASSERT_EQUAL_UINT32(60, mock_route_count);
+    TEST_ASSERT_EQUAL_UINT32(62, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(62, mock_route_count);
 }
 
 static void test_graph_referenced_uploads_fail_closed(void)
@@ -4259,6 +4688,12 @@ static void test_graph_projects_and_state_get(void)
     mock_graph_status.states[0] = 3;
     mock_graph_status.states[1] = 4;
     mock_graph_status.failed_channels = 2;
+    mock_graph_status.retry_channels = 4;
+    s_outputs_applied = 0x0005;
+    s_logic_active = 0x0002;
+    memset(s_fn, 0, sizeof(s_fn));
+    s_fn[0] = true;
+    s_fn[2] = true;
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, graph_state_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"active\":true"));
@@ -4267,9 +4702,14 @@ static void test_graph_projects_and_state_get(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"engine\":true"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"armed\":true"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"failedChannels\":2"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"retryChannels\":4"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"states\":[3,4"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":42"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"fault\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"outputs\":5"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"logic\":2"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"functions\":5"));
+    memset(s_fn, 0, sizeof(s_fn));
 }
 
 static void test_graph_projects_get_error(void)
@@ -4404,7 +4844,16 @@ int main(void)
     RUN_TEST(test_motor_get_post);
     RUN_TEST(test_functions_get);
     RUN_TEST(test_function_post);
+    RUN_TEST(test_function_post_all_f_to_all_aux);
+    RUN_TEST(test_legacy_map_all_f_to_all_aux);
+    RUN_TEST(test_headlight_direction_bindings);
+    RUN_TEST(test_graph_state_reports_dcc_control_masks);
+    RUN_TEST(test_motor_post_updates_motion_and_headlights);
+    RUN_TEST(test_web_emergency_reset_clears_outputs);
+    RUN_TEST(test_all_logic_actions);
+    RUN_TEST(test_graph_mode_routes_all_functions_to_sound);
     RUN_TEST(test_aux_effect_post);
+    RUN_TEST(test_aux_effect_all_channels);
     RUN_TEST(test_audio_status_get);
     RUN_TEST(test_audio_tracks_get);
     RUN_TEST(test_audio_play_post);
@@ -4439,6 +4888,9 @@ int main(void)
     RUN_TEST(test_cv_write_post);
     RUN_TEST(test_aux_cfg_get_post);
     RUN_TEST(test_aux_cfg_effect_periods);
+    RUN_TEST(test_aux_cfg_all_channels);
+    RUN_TEST(test_aux_state_get);
+    RUN_TEST(test_dcc_status_get);
     RUN_TEST(test_func_map_get_post);
     RUN_TEST(test_func_bind_load_and_desired);
     RUN_TEST(test_func_bind_get_view);

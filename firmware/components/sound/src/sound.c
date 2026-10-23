@@ -319,6 +319,7 @@ void sound_graph_status_get(sound_graph_status_t *out)
         for (unsigned i = 0; i <= s_graph->effect_count; ++i) {
             out->states[i] = s_graph_runner->channels[i].state;
             if (s_graph_runner->channels[i].failed) { out->failed_channels |= UINT32_C(1) << i; }
+            if (s_graph_runner->channels[i].retry_play) { out->retry_channels |= UINT32_C(1) << i; }
         }
     }
     sound_unlock();

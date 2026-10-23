@@ -177,10 +177,17 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
             }
         }
         uint8_t imm[SG_MAX_TRANSITIONS], pend[SG_MAX_TRANSITIONS]; int ni = 0, np = 0;
+        const sg_state_t *cur = &r->graph->states[ch->state];
+        /* An endless engine loop never finishes its sample; waiting for
+         * sample_done would freeze a speed band. Only speed/motion transitions
+         * get the immediate treatment; F-event transitions keep after_sample. */
+        bool engine_speed_change = i == 0 && cur->loop && cur->loops == 0;
         for (unsigned j = 0; j < r->graph->transition_count; ++j) {
             const sg_transition_t *e = &r->graph->transitions[j];
             if (e->source_index != ch->state || !sgr_condition(r,ch,j,speed,accel,was_entered)) { continue; }
-            if (e->timing == SG_AFTER_SAMPLE && ch->playing) { pend[np++] = (uint8_t)j; }
+            bool speed_band = engine_speed_change &&
+                (e->condition.type == SG_SPEED || e->condition.type == SG_ACCEL || e->condition.type == SG_DECEL);
+            if (e->timing == SG_AFTER_SAMPLE && ch->playing && !speed_band) { pend[np++] = (uint8_t)j; }
             else { imm[ni++] = (uint8_t)j; }
         }
         int best = sgr_best(r,imm,ni), pb = sgr_best(r,pend,np);
@@ -189,8 +196,7 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
             const sg_transition_t *e = &r->graph->transitions[best];
             sgr_enter(r,i,e->target_index); continue;
         }
-        const sg_state_t *cs = &r->graph->states[ch->state];
-        if (ch->done && cs->loop && cs->loops == 0) { sgr_replay_loop(r,i); }
+        if (ch->done && cur->loop && cur->loops == 0) { sgr_replay_loop(r,i); }
         else { ch->done = false; }
     }
     r->fn_press = 0; r->fn_release = 0;

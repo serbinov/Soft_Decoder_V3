@@ -32,6 +32,7 @@ VERSION = "PREVIEW"
 CV_COUNT = 512
 FN_COUNT = 29
 TRACK_COUNT = 20
+SG_MAX_EFFECTS = 32
 AUX_NAMES = ["F0F", "F0R", "AUX1", "AUX2", "AUX3", "AUX4", "AUX5", "AUX6", "AUX7"]
 
 GRAPH_LIMITS = {
@@ -241,6 +242,7 @@ def _load_pack(body):
                     GRAPH["revision"] = GRAPH.get("revision", 0) + 1
                     GRAPH["active"] = True
                     GRAPH["fault"] = False
+                    _runner_reset()
                     scheme_id = doc.get("id", "locomotive_default")
             except Exception as exc:
                 raise ValueError("некорректная схема в пакете: %s" % exc)
@@ -480,6 +482,12 @@ def _new_binds():
     binds = [
         _bind(0, 1, 0, 1, 0),
         _bind(0, 1, 1, 2, 0),
+        # Locomotive template outputs (F3/F4/F11/F14/F28 -> AUX1..AUX5).
+        _bind(3, 1, 2, 0, 0),
+        _bind(4, 1, 3, 0, 0),
+        _bind(11, 1, 4, 0, 0),
+        _bind(14, 1, 5, 0, 0),
+        _bind(28, 1, 6, 0, 0),
     ]
     for n in range(1, TRACK_COUNT + 1):
         binds.append(_bind(n, 3, n, 0, 0))
@@ -493,7 +501,229 @@ STATE["cv"][0] = 3        # CV1 primary address
 STATE["cv"][28] = 2       # CV29 28/128 speed steps
 
 # The active sound graph project and its revision.
-GRAPH = {"project": _new_graph(), "revision": 4, "active": False, "fault": False}
+GRAPH = {"project": _new_graph(), "revision": 4, "active": True, "fault": False}
+# Minimal graph runner for the preview: it keeps the same channel order as the
+# firmware (engine at index 0, then effects) and evaluates the saved schema-v1
+# transitions from the current F-key/motor state. This makes Live show the same
+# active sound blocks as the editor simulator while controlling over the web.
+RUNNER = {"channels": [], "state_by_id": {}, "assets": {}, "previous_fn": 0,
+          "previous_speed": 0, "last_ms": 0.0}
+
+
+def _runner_payload():
+    p = GRAPH.get("project") or {}
+    return p if isinstance(p.get("states"), list) else None
+
+
+def _runner_channel(engine, index, states):
+    st = states[index]
+    return {"engine": engine, "state": index, "elapsed": 0.0,
+            "done": not bool(st.get("file")), "loops_done": 0,
+            "entered": True, "pending": "", "pending_prio": 0}
+
+
+def _runner_reset():
+    p = _runner_payload()
+    if not p:
+        RUNNER.update(channels=[], state_by_id={}, assets={})
+        return
+    states = p.get("states") or []
+    RUNNER["state_by_id"] = {st.get("id"): i for i, st in enumerate(states)}
+    RUNNER["assets"] = {a.get("file"): int(a.get("durationMs", 1000) or 1000)
+                        for a in (p.get("assets") or []) if a.get("file")}
+    chans = []
+    eng = p.get("engine") or {}
+    if eng.get("entry") in RUNNER["state_by_id"]:
+        chans.append(_runner_channel(True, RUNNER["state_by_id"][eng["entry"]], states))
+    for effect in (p.get("effects") or []):
+        entry = effect.get("entry")
+        if entry in RUNNER["state_by_id"]:
+            chans.append(_runner_channel(False, RUNNER["state_by_id"][entry], states))
+    RUNNER["channels"] = chans
+    RUNNER["previous_fn"] = 0
+    RUNNER["previous_speed"] = 0
+    RUNNER["last_ms"] = time.monotonic() * 1000.0
+
+
+def _runner_enter(channel, target):
+    idx = RUNNER["state_by_id"].get(target)
+    if idx is None:
+        return
+    st = (_runner_payload().get("states") or [])[idx]
+    channel.update(state=idx, elapsed=0.0, done=not bool(st.get("file")),
+                   loops_done=0, entered=True, pending="", pending_prio=0)
+
+
+def _runner_var(p, name):
+    return {"speed": int(RUNNER.get("speed255", 0)),
+            "forward": 1 if STATE["motor"]["forward"] else 0,
+            "moving": 1 if int(STATE["motor"]["speed"]) > 0 else 0,
+            "engine": 1 if RUNNER.get("engine_on") else 0}.get(name, 0)
+
+
+def _runner_cond(c, channel, press, release, speed, engine_on, accel, entered):
+    if not c:
+        return True
+    typ = c.get("type")
+    fn = c.get("fn")
+    if typ == "state_enter":
+        return bool(entered)
+    if typ == "fn_press":
+        return fn is not None and fn >= 0 and bool(press & (1 << int(fn)))
+    if typ == "fn_release":
+        return fn is not None and fn >= 0 and bool(release & (1 << int(fn)))
+    if typ == "fn_on":
+        return fn is not None and 0 <= int(fn) < FN_COUNT and bool(STATE["fn"][int(fn)])
+    if typ == "fn_off":
+        return fn is not None and 0 <= int(fn) < FN_COUNT and not STATE["fn"][int(fn)]
+    if typ == "engine_on":
+        return bool(engine_on)
+    if typ == "engine_off":
+        return not engine_on
+    if typ == "dir_fwd":
+        return bool(STATE["motor"]["forward"])
+    if typ == "dir_rev":
+        return not STATE["motor"]["forward"]
+    if typ == "sample_done":
+        return bool(channel["done"])
+    if typ == "timeout":
+        return channel["elapsed"] >= max(1, int(c.get("min", 0) or 0)) * 50
+    if typ == "speed":
+        if not engine_on:
+            return False
+        lo = 0 if c.get("min") is None else int(c["min"])
+        hi = 255 if c.get("max") is None else int(c["max"])
+        return lo <= speed <= hi
+    if typ == "accel":
+        lo = int(c.get("min", 0) or 0)
+        hi = 255 if c.get("max") is None else int(c["max"])
+        return lo <= accel <= hi
+    if typ == "decel":
+        lo = int(c.get("min", 0) or 0)
+        hi = 255 if c.get("max") is None else int(c["max"])
+        return lo <= -accel <= hi
+    if typ == "var_cmp":
+        p = _runner_payload() or {}
+        def val(ref):
+            if isinstance(ref, str):
+                return _runner_var(p, ref)
+            if isinstance(ref, int) and 0 <= ref < len(p.get("variables") or []):
+                return _runner_var(p, (p["variables"][ref] or {}).get("name"))
+            return 0
+        a = val(c.get("var"))
+        b = val(c.get("var2")) if c.get("var2") is not None else int(c.get("value", 0) or 0)
+        op = int(c.get("op", 0) or 0)
+        return {0: a == b, 1: a != b, 2: a < b, 3: a <= b,
+                4: a > b, 5: a >= b}.get(op, False)
+    if typ == "random":
+        return True
+    return False
+
+
+def _runner_tick_channel(channel, p, press, release, speed, engine_on, accel, dt):
+    states = p.get("states") or []
+    if not (0 <= channel["state"] < len(states)):
+        return
+    st = states[channel["state"]]
+    channel["elapsed"] += dt
+    was_entered = bool(channel["entered"])
+    channel["entered"] = False
+    file = st.get("file") or ""
+    loops = int(st.get("loops", 0) or 0)
+    native_loop = bool(st.get("loop")) and loops == 0
+    if not file:
+        channel["done"] = True
+    elif native_loop:
+        channel["done"] = False
+    elif not channel["done"]:
+        dur = RUNNER["assets"].get(file, 1000)
+        if channel["elapsed"] >= dur:
+            if loops > 0 and channel["loops_done"] + 1 < loops:
+                channel["loops_done"] += 1
+                channel["elapsed"] = 0.0
+            else:
+                channel["done"] = True
+
+    cands = []
+    for tr in (p.get("transitions") or []):
+        if tr.get("source") != st.get("id"):
+            continue
+        ok = _runner_cond(tr.get("condition"), channel, press, release,
+                          speed, engine_on, accel, was_entered)
+        if tr.get("timing") == "after_sample":
+            if channel["done"]:
+                if ok or channel["pending"] == tr.get("id"):
+                    cands.append(tr)
+            elif ok:
+                # Endless engine loops have no sample end; waiting would freeze
+                # the speed band. Only speed/motion edges switch immediately.
+                ctype = (tr.get("condition") or {}).get("type")
+                if channel.get("engine") and native_loop and ctype in ("speed", "accel", "decel"):
+                    cands.append(tr)
+                else:
+                    prio = int(tr.get("priority", 0) or 0)
+                    if not channel["pending"] or prio > channel["pending_prio"]:
+                        channel["pending"] = tr.get("id")
+                        channel["pending_prio"] = prio
+        elif ok:
+            cands.append(tr)
+    if cands:
+        channel["pending"] = ""
+        channel["pending_prio"] = 0
+        best = max(int(t.get("priority", 0) or 0) for t in cands)
+        group = [t for t in cands if int(t.get("priority", 0) or 0) == best]
+        rnd = [t for t in group if (t.get("condition") or {}).get("type") == "random"]
+        pick = rnd[0] if rnd else group[0]
+        _runner_enter(channel, pick.get("target"))
+        return True
+    if channel["done"]:
+        channel["pending"] = ""
+        channel["pending_prio"] = 0
+        if st.get("loop") and (loops == 0 or channel["loops_done"] < loops):
+            channel["elapsed"] = 0.0
+            channel["done"] = False
+            channel["entered"] = True
+        else:
+            channel["done"] = False
+    return False
+
+
+def _runner_states():
+    p = _runner_payload()
+    if not p:
+        return [0]
+    if not RUNNER["channels"]:
+        _runner_reset()
+    now = time.monotonic() * 1000.0
+    last = RUNNER["last_ms"] or now
+    dt = max(0.0, min(1000.0, now - last))
+    RUNNER["last_ms"] = now
+    fnmask = _function_mask()
+    press = fnmask & ~RUNNER["previous_fn"]
+    release = RUNNER["previous_fn"] & ~fnmask
+    RUNNER["previous_fn"] = fnmask
+    raw_speed = int(STATE["motor"].get("speed", 0) or 0)
+    speed = int(round(raw_speed * 255.0 / 126.0))
+    RUNNER["speed255"] = speed
+    eng = p.get("engine") or {}
+    eng_fn = int(eng.get("fn", 255) or 255)
+    engine_on = speed > 0 or eng_fn > 28 or (0 <= eng_fn < FN_COUNT and bool(STATE["fn"][eng_fn]))
+    RUNNER["engine_on"] = engine_on
+    accel = speed - RUNNER["previous_speed"]
+    RUNNER["previous_speed"] = speed
+    for ch in RUNNER["channels"]:
+        _runner_tick_channel(ch, p, press, release, speed, engine_on, accel, dt)
+        # Settle immediate chains (engine idle -> off -> new speed band) in one
+        # web poll instead of waiting for the next 700 ms request.
+        for _ in range(3):
+            if not _runner_tick_channel(ch, p, 0, 0, speed, engine_on, 0, 0.0):
+                break
+    out = [255] * (SG_MAX_EFFECTS + 1)
+    for i, ch in enumerate(RUNNER["channels"]):
+        if i < len(out):
+            out[i] = ch["state"]
+    return out
+
 
 
 def add_log(tag, text):
@@ -552,6 +782,56 @@ def motor_json():
 
 def functions_json():
     return ok(states=list(STATE["fn"]))
+
+
+def _binding_active(b):
+    """Apply the direction/motion gate used by the device for output bindings."""
+    m = STATE["motor"]
+    d = int(b.get("dir", 0) or 0)
+    if d == 1 and not m["forward"]:
+        return False
+    if d == 2 and m["forward"]:
+        return False
+    st = int(b.get("state", 0) or 0)
+    moving = int(m.get("speed", 0) or 0) > 0
+    if st == 1 and not moving:
+        return False
+    if st == 2 and moving:
+        return False
+    return True
+
+
+def _function_mask():
+    mask = 0
+    for fn, level in enumerate(STATE["fn"]):
+        if level:
+            mask |= 1 << fn
+    return mask
+
+
+def _output_mask():
+    mask = 0
+    for b in STATE["binds"]:
+        if int(b.get("type", 0) or 0) != 1:
+            continue
+        fn = int(b.get("fn", -1))
+        if 0 <= fn < FN_COUNT and STATE["fn"][fn] and _binding_active(b):
+            ch = int(b.get("id", -1))
+            if 0 <= ch <= 8:
+                mask |= 1 << ch
+    return mask
+
+
+def _logic_mask():
+    mask = 0
+    for b in STATE["binds"]:
+        if int(b.get("type", 0) or 0) != 4:
+            continue
+        fn = int(b.get("fn", -1))
+        op = int(b.get("id", 0))
+        if 0 <= fn < FN_COUNT and STATE["fn"][fn] and _binding_active(b) and 1 <= op <= 8:
+            mask |= 1 << (op - 1)
+    return mask
 
 
 def audio_status_json():
@@ -907,8 +1187,10 @@ def handle_api(method, path, query, body):
         return 200, ok(active=GRAPH["active"], fault=GRAPH["fault"],
                        id=GRAPH["project"]["id"], projectId=GRAPH["project"]["id"],
                        revision=GRAPH["revision"],
-                       engine=False, armed=True, states=[0],
-                       failedChannels=0, speed=m["speed"])
+                       engine=False, armed=True, states=_runner_states(),
+                       failedChannels=0, speed=m["speed"],
+                       functions=_function_mask(), outputs=_output_mask(),
+                       logic=_logic_mask())
 
     if path == "/api/sound/graph/asset":
         return 200, ok(asset=_asset(q1(query, "file", "sample.wav")))
@@ -929,14 +1211,17 @@ def handle_api(method, path, query, body):
                     if key in GRAPH["project"]:
                         incoming[key] = GRAPH["project"][key]
             GRAPH["project"] = incoming
+            _runner_reset()
         expected = as_int(q1(query, "expectedRevision"), 0)
         GRAPH["revision"] = expected + 1 if expected else GRAPH["revision"] + 1
+        GRAPH["active"] = True
         add_log("Граф", "сохранена версия %d" % GRAPH["revision"])
         return 200, ok(revision=GRAPH["revision"])
 
     if path == "/api/sound/graph/apply":
         GRAPH["active"] = True
         GRAPH["fault"] = False
+        _runner_reset()
         add_log("Граф", "применён проект %s" % GRAPH["project"].get("id", ""))
         return 200, ok()
 

@@ -22,6 +22,7 @@ bool web_control_rails_begin(uint32_t *generation);
 void web_control_rails_end(void);
 /* Default false until outputs, maps and safety consumer are ready. */
 esp_err_t web_set_actuation_ready(bool ready);
+bool web_actuation_ready(void);
 esp_err_t web_maintenance_begin(bool exclusive_fs);
 void web_maintenance_end(void);
 bool web_maintenance_active(void);
@@ -40,6 +41,7 @@ uint8_t web_get_voice_volume(uint8_t fn);
  * web_func_audio_slots() returns the (up to two) mapped sound slots (0=none). */
 void web_apply_function(uint8_t fn, bool state);
 void web_motion_changed(uint8_t speed, bool forward);
+void web_emergency_reset(void);
 void web_func_audio_slots(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b);
 bool web_func_map_get(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b, uint16_t *aux,
                       uint8_t *dir, uint8_t *speed);

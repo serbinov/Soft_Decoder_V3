@@ -238,6 +238,8 @@ static void cv_defaults(void)
     g_cv[54] = 128;
     g_cv[55] = 60;
     g_cv[56] = 32;
+    g_cv[66] = 128;
+    g_cv[95] = 128;
     for (int i = 0; i < 28; ++i) {
         g_cv[67 + i] = (uint8_t)((i * 255) / 27);
     }

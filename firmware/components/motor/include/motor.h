@@ -106,6 +106,11 @@ void motor_bemf_cal_watchdog(void);
 /* Nonblocking, idempotent; inactive cancellation never stops normal motion.
  * The active reservation survives cancellation/failure until worker cleanup. */
 esp_err_t motor_bemf_cal_cancel(void);
+/* True while an admitted calibration owns the bridge (including the bounded
+ * cleanup window after a cancel/failure). DCC speed packets must not be
+ * forwarded to motor_set_speed() during this time: a repeating speed-0 packet
+ * would otherwise cancel the calibration immediately. */
+bool motor_bemf_cal_active(void);
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info);
 esp_err_t motor_bemf_cal_clear(void);
 /* Re-read the stored calibration (or the firmware base curve) and apply it. */

@@ -41,6 +41,9 @@ int64_t dcc_last_packet_us(void);
 /* All checksum-valid digital packets, including idle/accessory/other addresses. */
 int64_t dcc_last_signal_packet_us(void);
 bool dcc_signal_is_static(uint32_t min_us);
+/* Cumulative half-period samples dropped by the receiver queue. Any increase
+ * means the DCC task did not keep up (flash stall, long callback, CPU load). */
+uint32_t dcc_get_isr_overruns(void);
 
 /* Service-mode acknowledgement (NMRA ~6 ms current pulse on ACK_LOAD). */
 esp_err_t dcc_service_ack(void);

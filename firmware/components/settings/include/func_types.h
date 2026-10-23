@@ -2,16 +2,16 @@
 #define FUNC_TYPES_H
 
 /* Canonical function (F-key) bindings: a many-to-many mapping from F0..F28 to
- * an output, a sound graph entry, a legacy audio slot or a logic target. Gated
- * by driving direction and motion state. The graph engine is the single sound
- * behaviour model; these bindings are the runtime routing compiled from it. */
+ * outputs and logic targets, gated by driving direction and motion state.
+ * Sound is owned by the sound graph (or the legacy slot map), not by new
+ * canonical bindings. The graph engine is the single sound behaviour model. */
 
 #include <stdint.h>
 
 #define FUNC_TARGET_NONE    0
 #define FUNC_TARGET_OUTPUT  1  /* target_id = output 0..8 (F0F,F0R,AUX1..7) */
-#define FUNC_TARGET_SOUND   2  /* target_id = sound graph effect index */
-#define FUNC_TARGET_SLOT    3  /* target_id = audio slot 1..20 (legacy) */
+#define FUNC_TARGET_SOUND   2  /* legacy persisted type; graph effects are F-key driven */
+#define FUNC_TARGET_SLOT    3  /* legacy persisted type; use /api/func-map slot map */
 #define FUNC_TARGET_LOGIC   4  /* target_id = FUNC_LOGIC_* */
 
 #define FUNC_DIR_ANY    0

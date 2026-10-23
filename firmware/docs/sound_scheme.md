@@ -1,6 +1,6 @@
 # Sound engine (`components/sound`)
 
-Version: firmware 0.10. The graph engine is the **single** sound behaviour
+Version: firmware 0.11. The graph engine is the **single** sound behaviour
 model. The legacy MDS/table sound-scheme subsystem (`sound_store`, `sound_scheme_t`,
 `.mds` files, `/api/sound/*`) has been removed; there is no migration path.
 
@@ -102,7 +102,7 @@ through `audio_voice_set_volume_live` and restored when effects end. A state's
 | `/api/sound/graph/capabilities` | GET | format/schema + limits |
 | `/api/sound/graph/projects` | GET | stored projects |
 | `/api/sound/graph/project` | GET | one project (raw JSON) |
-| `/api/sound/graph/state` | GET | live status (engine, revision, speed, armed/fault) |
+| `/api/sound/graph/state` | GET | live status (engine, revision, speed, armed/fault, effect states, active output/logic masks) |
 | `/api/sound/graph/asset` | GET | WAV manifest (size/CRC/format) |
 | `/api/sound/graph/validate` | POST | device-side validation |
 | `/api/sound/graph/save` | POST | save a new revision |

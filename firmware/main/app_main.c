@@ -43,6 +43,14 @@ static void on_dcc_speed(uint8_t speed128, bool forward)
     if (track_is_dc_mode()) {
         return;
     }
+    /* BEMF calibration runs the motor open-loop. A command station keeps
+     * refreshing the last speed (usually 0 while the loco is parked), and
+     * motor_set_speed(0) cancels calibration. Ignore DCC speed while the
+     * calibration owns the bridge; an explicit DCC e-stop/reset still calls
+     * motor_emergency_stop() directly and cancels it for safety. */
+    if (motor_bemf_cal_active()) {
+        return;
+    }
     if (web_control_rails_begin(NULL)) {
         /* Log every decoded speed change so the actual command received from
          * the throttle can be compared with what the motor does (only on a
@@ -124,32 +132,33 @@ static void clear_functions(void)
 
 static void on_dcc_reset(void)
 {
-    if (!web_control_rails_begin(NULL)) {
-        return;
-    }
+    if (!web_actuation_ready()) return;
     motor_emergency_stop();
-    track_note_dcc_motor_command();
-    clear_functions();
+    audio_stop_all();
+    sound_stop_all();
+    web_emergency_reset();
+    if (web_control_rails_begin(NULL)) {
+        track_note_dcc_motor_command();
+        web_control_rails_end();
+    }
     web_log_event("DCC", "сброс декодера (broadcast)");
     ESP_LOGI(TAG, "Decoder reset (broadcast)");
-    web_control_rails_end();
 }
 
 static void on_dcc_emergency_stop(void)
 {
     /* Safety actions must not depend on the control mutex: a REST handler can
-     * hold it across NVS work. Source isolation is still checked first. */
-    if (!web_control_source_is_rails()) {
-        return;
-    }
+     * hold it across NVS work. They also must not depend on the active source:
+     * a layout emergency stop applies to a web-driven locomotive as well. */
+    if (!web_actuation_ready()) return;
     motor_emergency_stop();
     sound_request_stop();
-    if (!web_control_rails_begin(NULL)) {
-        return;
+    audio_stop_all();
+    web_emergency_reset();
+    if (web_control_rails_begin(NULL)) {
+        track_note_dcc_motor_command();
+        web_control_rails_end();
     }
-    track_note_dcc_motor_command();
-    web_motion_changed(0, true);
-    web_control_rails_end();
 }
 
 static void on_dcc_hard_reset(void)

@@ -49,6 +49,16 @@ bool web_control_rails_begin(uint32_t *generation)
 }
 void web_control_rails_end(void) { g_rails_locked = false; }
 
+static int g_motion_calls;
+static uint8_t g_motion_speed;
+static bool g_motion_forward;
+void web_motion_changed(uint8_t speed, bool forward)
+{
+    ++g_motion_calls;
+    g_motion_speed = speed;
+    g_motion_forward = forward;
+}
+
 esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
 {
     mock_timer_now_us += g_settings_delay_us;
@@ -131,6 +141,9 @@ void setUp(void)
     g_rail_set = 0;
     g_speed_calls = 0;
     g_speed_result = ESP_OK;
+    g_motion_calls = 0;
+    g_motion_speed = 0;
+    g_motion_forward = false;
     memset(mock_adc_raw, 0, sizeof(mock_adc_raw));
     mock_adc_ok = 1;
     mock_gpio_get_level = 0;
@@ -268,6 +281,9 @@ static void test_track_step_drives_in_dc_mode(void)
     TEST_ASSERT_TRUE(wd);
     TEST_ASSERT_EQUAL_UINT8(dc_speed_step(raw_to_mv(2048)), g_last_speed);
     TEST_ASSERT_TRUE(g_last_forward);
+    TEST_ASSERT_TRUE(g_motion_calls > 0);
+    TEST_ASSERT_EQUAL_UINT8(g_last_speed, g_motion_speed);
+    TEST_ASSERT_TRUE(g_motion_forward);
 }
 
 static void test_track_step_reverse_polarity_debounce(void)

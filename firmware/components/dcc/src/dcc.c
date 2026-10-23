@@ -65,6 +65,7 @@ static int64_t s_last_signal_packet_us;
  * up. Any drop invalidates the half-period pairing, so the task re-acquires
  * framing on the next packet preamble instead of decoding shifted garbage. */
 static DRAM_ATTR volatile uint32_t s_isr_overruns;
+static DRAM_ATTR volatile uint32_t s_isr_overruns_total;
 static DRAM_ATTR portMUX_TYPE s_edge_mux = portMUX_INITIALIZER_UNLOCKED;
 static int64_t s_init_us;
 static QueueHandle_t s_start_queue;
@@ -638,6 +639,7 @@ static void dcc_task(void *arg)
             portENTER_CRITICAL(&s_edge_mux);
             uint32_t overruns = s_isr_overruns;
             s_isr_overruns = 0U;
+            s_isr_overruns_total += overruns;
             portEXIT_CRITICAL(&s_edge_mux);
             if (overruns != 0U) {
                 /* Samples were dropped while a callback (function packet /
@@ -829,6 +831,14 @@ int64_t dcc_last_packet_us(void)
     portENTER_CRITICAL(&s_ts_mux);
     int64_t v = s_last_packet_us;
     portEXIT_CRITICAL(&s_ts_mux);
+    return v;
+}
+
+uint32_t dcc_get_isr_overruns(void)
+{
+    portENTER_CRITICAL(&s_edge_mux);
+    uint32_t v = s_isr_overruns_total;
+    portEXIT_CRITICAL(&s_edge_mux);
     return v;
 }
 

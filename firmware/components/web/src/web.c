@@ -380,6 +380,14 @@ bool web_control_source_is_rails(void)
     return rails;
 }
 
+bool web_actuation_ready(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    bool ready = s_actuation_ready;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    return ready;
+}
+
 bool web_maintenance_active(void)
 {
     portENTER_CRITICAL(&s_control_state_mux);
@@ -525,8 +533,15 @@ void web_maintenance_end(void)
 {
     if (s_maintenance_owner != xTaskGetCurrentTaskHandle()) return;
     if (s_maintenance_exclusive_fs) storage_maintenance_end();
-    if (s_control_mutex == NULL ||
-        xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+    if (control_mutex_init() != ESP_OK) {
+        portENTER_CRITICAL(&s_control_state_mux);
+        s_maintenance_owner = NULL;
+        s_maintenance_exclusive_fs = false;
+        s_actuation_ready = false;
+        portEXIT_CRITICAL(&s_control_state_mux);
+        return;
+    }
+    (void)xSemaphoreTake(s_control_mutex, portMAX_DELAY);
     bool ready = actuation_ready();
     esp_err_t sound_err = sound_set_inhibited(!ready);
     esp_err_t audio_err = audio_set_inhibited(!ready);
@@ -756,8 +771,24 @@ void web_motion_changed(uint8_t speed, bool forward)
     if (s_func_mutex != NULL) {
         xSemaphoreGive(s_func_mutex);
     }
-    web_log_event("DCC", "скор %u, напр %s", (unsigned)speed,
+    web_log_event("Ход", "скор %u, напр %s", (unsigned)speed,
                   forward ? "вперёд" : "назад");
+}
+
+void web_emergency_reset(void)
+{
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+    memset(s_fn, 0, sizeof(s_fn));
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        (void)auxio_set_enabled(ch, false);
+    }
+    s_outputs_applied = 0;
+    s_logic_active = 0;
+    sound_set_logic(false, false, false, false, s_logic_notch);
+    s_motion_speed = 0;
+    s_motion_initialized = true;
+    if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
 }
 
 void web_func_audio_slots(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b)
@@ -1126,15 +1157,29 @@ static esp_err_t graph_project_get(httpd_req_t *req)
     return err;
 }
 
+static void io_state_snapshot(uint16_t *outputs, uint16_t *logic, uint32_t *functions)
+{
+    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    *outputs = s_outputs_applied;
+    *logic = s_logic_active;
+    uint32_t fn = 0;
+    for (uint8_t i = 0; i < WEB_FN_COUNT; ++i) if (s_fn[i]) fn |= 1UL << i;
+    *functions = fn;
+    if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+}
+
 static esp_err_t graph_state_get(httpd_req_t *req)
 {
     sound_graph_status_t st = {0};
     sound_graph_status_get(&st);
-    char json[768], id[SG_ID_CAP * 6]; size_t used = 0;
+    uint16_t outputs = 0, logic = 0;
+    uint32_t functions = 0;
+    io_state_snapshot(&outputs, &logic, &functions);
+    char json[1024], id[SG_ID_CAP * 6]; size_t used = 0;
     json_escape(st.id, id, sizeof(id));
-    buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"active\":%s,\"id\":\"%s\",\"revision\":%lu,\"engine\":%s,\"armed\":%s,\"failedChannels\":%lu,\"states\":[", st.active ? "true" : "false", id, (unsigned long)st.revision, st.engine ? "true" : "false", st.armed ? "true" : "false", (unsigned long)st.failed_channels);
+    buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"active\":%s,\"id\":\"%s\",\"revision\":%lu,\"engine\":%s,\"armed\":%s,\"failedChannels\":%lu,\"retryChannels\":%lu,\"states\":[", st.active ? "true" : "false", id, (unsigned long)st.revision, st.engine ? "true" : "false", st.armed ? "true" : "false", (unsigned long)st.failed_channels, (unsigned long)st.retry_channels);
     for (size_t i = 0; i < SG_MAX_EFFECTS + 1; ++i) buf_appendf(json, sizeof(json), &used, "%s%u", i ? "," : "", st.states[i]);
-    buf_appendf(json, sizeof(json), &used, "],\"speed\":%u,\"fault\":%s}", (unsigned)st.speed, st.fault ? "true" : "false");
+    buf_appendf(json, sizeof(json), &used, "],\"speed\":%u,\"fault\":%s,\"outputs\":%u,\"logic\":%u,\"functions\":%lu}", (unsigned)st.speed, st.fault ? "true" : "false", (unsigned)outputs, (unsigned)logic, (unsigned long)functions);
     return send_json(req, json);
 }
 
@@ -1300,6 +1345,9 @@ static esp_err_t control_source_post(httpd_req_t *req)
     settings_config_t next = s_cfg;
     next.control_source = (strcasecmp(buf, "web") == 0 || strcmp(buf, "1") == 0) ? 1 : 0;
     motor_emergency_stop();
+    audio_stop_all();
+    sound_stop_all();
+    web_emergency_reset();
     if (next.control_source == 0) {
         uint8_t cv29 = 0;
         esp_err_t err = settings_cv_read(29, &cv29);
@@ -1361,6 +1409,9 @@ static esp_err_t mode_post(httpd_req_t *req)
     esp_err_t err = settings_cv_write(29, cv29);
     if (err == ESP_OK) err = settings_cv_commit();
     motor_emergency_stop();
+    audio_stop_all();
+    sound_stop_all();
+    web_emergency_reset();
     ++s_control_generation;
     xSemaphoreGive(s_control_mutex);
     if (err != ESP_OK) return send_json(req, "{\"ok\":false,\"error\":\"mode save failed\"}");
@@ -1584,6 +1635,7 @@ static esp_err_t motor_post(httpd_req_t *req)
                       forward ? "вперёд" : "назад");
     }
     esp_err_t err = motor_set_speed(speed, forward);
+    if (err == ESP_OK) web_motion_changed(speed, forward);
     xSemaphoreGive(s_control_mutex);
     if (err != ESP_OK) return send_json(req, "{\"ok\":false,\"error\":\"motor rejected\"}");
 
@@ -1604,6 +1656,7 @@ static esp_err_t emergency_post(httpd_req_t *req)
     motor_emergency_stop();
     audio_stop_all();
     sound_stop_all();
+    web_emergency_reset();
     if (s_control_mutex != NULL &&
         xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         ++s_control_generation;
@@ -1612,11 +1665,6 @@ static esp_err_t emergency_post(httpd_req_t *req)
         portENTER_CRITICAL(&s_control_state_mux);
         ++s_control_generation;
         portEXIT_CRITICAL(&s_control_state_mux);
-    }
-    if (s_func_mutex != NULL &&
-        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        memset(s_fn, 0, sizeof(s_fn));
-        xSemaphoreGive(s_func_mutex);
     }
     web_log_event("Стоп", "ЭКСТРЕННЫЙ СТОП");
     return send_json(req, "{\"ok\":true}");
@@ -1732,6 +1780,18 @@ typedef struct {
 } web_lib_item_t;
 
 static char s_preview_name[WEB_LIB_NAME_MAX];
+
+/* A finished preview voice keeps its handle and name until the next play or an
+ * explicit stop. The library/status pollers must see the preview as finished
+ * even when another voice (engine sound, graph effect) is still playing. */
+static void preview_sync(void)
+{
+    if (s_preview_name[0] == '\0') return;
+    if (audio_voice_get_state(s_preview_voice) != AUDIO_VOICE_FINISHED) return;
+    audio_voice_release_owned(s_preview_voice);
+    memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+    s_preview_name[0] = '\0';
+}
 
 static bool web_name_is_wav(const char *n)
 {
@@ -2039,15 +2099,18 @@ static esp_err_t sound_file_get(httpd_req_t *req)
 
 static esp_err_t audio_status_get(httpd_req_t *req)
 {
-    char json[160];
+    preview_sync();
+    char pe[WEB_LIB_NAME_MAX * 2];
+    json_escape(s_preview_name, pe, sizeof(pe));
+    char json[320];
     snprintf(json, sizeof(json),
              "{\"ok\":true,\"playing\":%s,\"active_slot\":%u,\"master_volume\":%u,"
-             "\"engine_volume\":%u,\"effects_volume\":%u}",
+             "\"engine_volume\":%u,\"effects_volume\":%u,\"preview\":\"%s\"}",
              audio_is_playing() ? "true" : "false",
              (unsigned)s_cfg.active_slot,
              (unsigned)s_cfg.master_volume,
              (unsigned)s_cfg.engine_volume,
-             (unsigned)s_cfg.effects_volume);
+             (unsigned)s_cfg.effects_volume, pe);
     return send_json(req, json);
 }
 
@@ -2196,6 +2259,7 @@ static esp_err_t audio_volume_post(httpd_req_t *req)
 /* GET /api/audio/library — every installed WAV with its per-file volume. */
 static esp_err_t audio_library_get(httpd_req_t *req)
 {
+    preview_sync();
     esp_err_t err = storage_access_begin();
     if (err != ESP_OK) {
         return send_json(req, "{\"ok\":false,\"error\":\"storage busy\"}");
@@ -2824,6 +2888,38 @@ static esp_err_t cv_read_get(httpd_req_t *req)
     return send_json(req, json);
 }
 
+static esp_err_t dcc_status_get(httpd_req_t *req)
+{
+    int64_t last = dcc_last_packet_us();
+    int64_t age = -1;
+    if (last > 0) {
+        int64_t now = esp_timer_get_time();
+        age = now > last ? (now - last) / 1000 : 0;
+    }
+    char json[160];
+    snprintf(json, sizeof(json),
+             "{\"ok\":true,\"overruns\":%lu,\"lastPacketMs\":%lld}",
+             (unsigned long)dcc_get_isr_overruns(), (long long)age);
+    return send_json(req, json);
+}
+
+static esp_err_t aux_state_get(httpd_req_t *req)
+{
+    char json[512];
+    size_t used = 0;
+    buf_appendf(json, sizeof(json), &used, "{\"ok\":true,\"aux\":[");
+    for (uint8_t i = 0; i < AUXIO_CH_COUNT; ++i) {
+        bool on = false;
+        esp_err_t err = auxio_get_enabled(i, &on);
+        buf_appendf(json, sizeof(json), &used,
+                    "%s{\"ch\":%u,\"on\":%s,\"error\":%s}",
+                    i == 0U ? "" : ",", (unsigned)i,
+                    on ? "true" : "false", err == ESP_OK ? "false" : "true");
+    }
+    buf_appendf(json, sizeof(json), &used, "]}");
+    return send_json(req, json);
+}
+
 static esp_err_t aux_cfg_get(httpd_req_t *req)
 {
     char json[512];
@@ -2968,8 +3064,8 @@ static esp_err_t func_map_post_binding(httpd_req_t *req, const char *query)
     if (!parse_u8(query, "type", &type) || type < FUNC_TARGET_OUTPUT || type > FUNC_TARGET_LOGIC) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad type");
     }
-    if (sound_graph_active() && (type == FUNC_TARGET_SOUND || type == FUNC_TARGET_SLOT))
-        return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/blocks.html");
+    if (type == FUNC_TARGET_SOUND || type == FUNC_TARGET_SLOT)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "sound targets are graph/legacy only");
     if (!parse_u8(query, "id", &id)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad id");
     }
@@ -4732,6 +4828,8 @@ static esp_err_t start_http_server(void)
     register_route("/api/func-map", HTTP_GET, func_map_get);
     register_route("/api/func-map", HTTP_POST, func_map_post);
     register_route("/api/aux/cfg", HTTP_GET, aux_cfg_get);
+    register_route("/api/aux/state", HTTP_GET, aux_state_get);
+    register_route("/api/dcc/status", HTTP_GET, dcc_status_get);
     register_route("/api/aux/cfg", HTTP_POST, aux_cfg_post);
     register_route("/api/cv/read", HTTP_GET, cv_read_get);
     register_route("/api/cv/all", HTTP_GET, cv_all_get);

@@ -21,6 +21,7 @@ typedef struct {
     uint8_t speed;
     uint8_t states[SG_MAX_EFFECTS + 1];
     uint32_t failed_channels;
+    uint32_t retry_channels;
 } sound_graph_status_t;
 
 bool sound_graph_active(void);

@@ -503,6 +503,87 @@ static void test_native_atomic_pointer_replacement(void)
     TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &revision, &selected)); TEST_ASSERT_FALSE(selected);
     free(json);
 }
+static void test_seed_default_builds_manifest_and_defers_to_saved_project(void)
+{
+    make_wav();
+    char *seed = fixture(SG_DEFAULT_PROJECT_ID, "loop.wav", NULL);
+    uint32_t revision = 0;
+    bool seeded = false;
+
+    /* Factory state: install the built-in scheme with a manifest built from
+     * the WAV actually present on the device. */
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed,
+                                                        strlen(seed), &revision, &seeded));
+    TEST_ASSERT_TRUE(seeded);
+    TEST_ASSERT_EQUAL_UINT32(1, revision);
+
+    char id[SG_ID_CAP]; uint32_t selected_rev = 0; bool selected = false;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &selected_rev, &selected));
+    TEST_ASSERT_TRUE(selected);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, id);
+    TEST_ASSERT_EQUAL_UINT32(1, selected_rev);
+
+    char *out = NULL; size_t len = 0; uint32_t actual = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_read(id, 1, &out, &len, &actual));
+    TEST_ASSERT_NOT_NULL(strstr(out, "\"assets\":[{\"file\":\"loop.wav\",\"crc32\":\"16fa94f8\""));
+    sg_graph_t *graph = malloc(sizeof(*graph)); sg_diagnostic_t diag;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_parse(out, len, graph, &diag));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_assets_validate(graph, &diag));
+    TEST_ASSERT_NULL(strstr(out, "\"assets\":[]"));
+    free(graph); free(out);
+
+    /* A selected graph is never replaced. */
+    revision = 0; seeded = true;
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_INVALID_STATE,
+                          sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed, strlen(seed), &revision, &seeded));
+    TEST_ASSERT_FALSE(seeded);
+
+    /* Selection record lost but the user's project saved: adopt its latest
+     * revision instead of overwriting it with the built-in copy. */
+    char sel[512]; snprintf(sel, sizeof(sel), "%s/graphs/selection", root);
+    TEST_ASSERT_EQUAL_INT(0, remove(sel));
+    char *edited = fixture(SG_DEFAULT_PROJECT_ID, "loop.wav", NULL);
+    *strstr(edited, "opaque") = 'O';
+    uint32_t edited_rev = save_json(SG_DEFAULT_PROJECT_ID, 1, edited);
+    revision = 0; seeded = true;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed,
+                                                        strlen(seed), &revision, &seeded));
+    TEST_ASSERT_FALSE(seeded);
+    TEST_ASSERT_EQUAL_UINT32(edited_rev, revision);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &selected_rev, &selected));
+    TEST_ASSERT_TRUE(selected);
+    TEST_ASSERT_EQUAL_UINT32(edited_rev, selected_rev);
+
+    /* An explicit legacy selection (factory reset) reinstalls the built-in
+     * scheme as a new revision, so the device returns to the factory scheme. */
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_select_legacy());
+    revision = 0; seeded = false;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed,
+                                                        strlen(seed), &revision, &seeded));
+    TEST_ASSERT_TRUE(seeded);
+    TEST_ASSERT_EQUAL_UINT32(edited_rev + 1U, revision);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &selected_rev, &selected));
+    TEST_ASSERT_TRUE(selected);
+    TEST_ASSERT_EQUAL_UINT32(revision, selected_rev);
+    char *factory = NULL; size_t factory_len = 0; uint32_t factory_rev = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_read(id, revision, &factory, &factory_len, &factory_rev));
+    TEST_ASSERT_NOT_NULL(strstr(factory, "Project locomotive_default"));
+    free(factory);
+
+    /* A missing sound prevents installation entirely: no selection is written
+     * and the next boot retries after the sound pack arrives. */
+    free(edited); free(seed);
+    char graphs[300]; snprintf(graphs, sizeof(graphs), "%s/graphs", root); clean_dir(graphs);
+    char *missing = fixture("chme3_missing", "gone.wav", NULL);
+    revision = 0; seeded = true;
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_NOT_FOUND,
+                          sg_store_seed_default("chme3_missing", missing, strlen(missing), &revision, &seeded));
+    TEST_ASSERT_FALSE(seeded);
+    TEST_ASSERT_EQUAL_UINT32(0, revision);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &selected_rev, &selected));
+    TEST_ASSERT_FALSE(selected);
+    free(missing);
+}
 int main(void)
 {
     UNITY_BEGIN();
@@ -529,5 +610,6 @@ int main(void)
     RUN_TEST(test_reference_and_revision_scan_bounds);
     RUN_TEST(test_invalid_arguments_and_missing_selection_target);
     RUN_TEST(test_native_atomic_pointer_replacement);
+    RUN_TEST(test_seed_default_builds_manifest_and_defers_to_saved_project);
     return UNITY_END();
 }

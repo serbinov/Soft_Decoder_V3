@@ -1,0 +1,3666 @@
+{
+  "format": "sound-blocks",
+  "schemaVersion": 2,
+  "id": "locomotive_default",
+  "name": "Тепловоз ЧМЭ3",
+  "mix": {
+    "blocks": [
+      {
+        "id": "eng",
+        "type": "engine",
+        "name": "Двигатель",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 85,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 160,
+        "run": [
+          {
+            "from": 0,
+            "to": 14,
+            "file": ""
+          },
+          {
+            "from": 14,
+            "to": 28,
+            "file": ""
+          },
+          {
+            "from": 28,
+            "to": 42,
+            "file": ""
+          },
+          {
+            "from": 42,
+            "to": 57,
+            "file": ""
+          },
+          {
+            "from": 57,
+            "to": 71,
+            "file": ""
+          },
+          {
+            "from": 71,
+            "to": 85,
+            "file": ""
+          },
+          {
+            "from": 85,
+            "to": 100,
+            "file": ""
+          }
+        ],
+        "hyst": 1
+      },
+      {
+        "id": "vol",
+        "type": "volume",
+        "name": "Громкость",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 400,
+        "master": 85,
+        "engine": 85,
+        "effects": 75
+      },
+      {
+        "id": "f0",
+        "type": "fx_in",
+        "name": "F0 Буферные фонари",
+        "fn": 0,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1040,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f1",
+        "type": "fx_in",
+        "name": "F1 Свисток",
+        "fn": 1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1160,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f2",
+        "type": "fx_in",
+        "name": "F2 Тифон",
+        "fn": 2,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1280,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f3",
+        "type": "fx_in",
+        "name": "F3 Свет в кабине",
+        "fn": 3,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1400,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f4",
+        "type": "fx_in",
+        "name": "F4 Прожектор / Маяк",
+        "fn": 4,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1520,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f5",
+        "type": "fx_in",
+        "name": "F5 Радиостанция",
+        "fn": 5,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1640,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f6",
+        "type": "fx_in",
+        "name": "F6 Компрессор",
+        "fn": 6,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1760,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f7",
+        "type": "fx_in",
+        "name": "F7 Автосцепка",
+        "fn": 7,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 1880,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f8",
+        "type": "fx_in",
+        "name": "F8 Песочница",
+        "fn": 8,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2000,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f9",
+        "type": "fx_in",
+        "name": "F9 Позиция +",
+        "fn": 9,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2120,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f10",
+        "type": "fx_in",
+        "name": "F10 Позиция −",
+        "fn": 10,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2240,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f11",
+        "type": "fx_in",
+        "name": "F11 Строб маневровый",
+        "fn": 11,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2360,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f12",
+        "type": "fx_in",
+        "name": "F12 Дверь кабины откр.",
+        "fn": 12,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2480,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f13",
+        "type": "fx_in",
+        "name": "F13 Дверь кабины закр.",
+        "fn": 13,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2600,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f14",
+        "type": "fx_in",
+        "name": "F14 Холодильник ЧМЭ3",
+        "fn": 14,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 40,
+        "y": 2720,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f15",
+        "type": "fx_in",
+        "name": "F15 Расцепка СА-3",
+        "fn": 15,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1040,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f16",
+        "type": "fx_in",
+        "name": "F16 Турбокомпрессор",
+        "fn": 16,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1160,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f17",
+        "type": "fx_in",
+        "name": "F17 Скрип в кривых",
+        "fn": 17,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1280,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f18",
+        "type": "fx_in",
+        "name": "F18 Перестук на стрелках",
+        "fn": 18,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1400,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f19",
+        "type": "fx_in",
+        "name": "F19 Выпуск воздуха",
+        "fn": 19,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1520,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f20",
+        "type": "fx_in",
+        "name": "F20 Свисток составителя",
+        "fn": 20,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1640,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f21",
+        "type": "fx_in",
+        "name": "F21 Вокзал: объявление",
+        "fn": 21,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1760,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f22",
+        "type": "fx_in",
+        "name": "F22 Ручной тормоз",
+        "fn": 22,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 1880,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f23",
+        "type": "fx_in",
+        "name": "F23 Реверсор",
+        "fn": 23,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 2000,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f24",
+        "type": "fx_in",
+        "name": "F24 ТЭД + Удержание хода",
+        "fn": 24,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 2120,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f25",
+        "type": "fx_in",
+        "name": "F25 Визг тормозов + Выбег",
+        "fn": 25,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 2240,
+        "fxMode": "hold"
+      },
+      {
+        "id": "f26",
+        "type": "fx_in",
+        "name": "F26 Динамический тормоз",
+        "fn": 26,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 2360,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f27",
+        "type": "fx_in",
+        "name": "F27 Глушение / Mute",
+        "fn": 27,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 2480,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "f28",
+        "type": "fx_in",
+        "name": "F28 Освещение экипажа",
+        "fn": 28,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1120,
+        "y": 2600,
+        "fxMode": "toggle"
+      },
+      {
+        "id": "idle_cue",
+        "type": "sound_cue",
+        "name": "Холостой ход",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 40,
+        "scheme": "idle_scheme"
+      },
+      {
+        "id": "eng1_cue",
+        "type": "sound_cue",
+        "name": "Дизель 0–14% (Поз. 2)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 150,
+        "scheme": "eng1"
+      },
+      {
+        "id": "eng2_cue",
+        "type": "sound_cue",
+        "name": "Дизель 14–28% (Поз. 3)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 260,
+        "scheme": "eng2"
+      },
+      {
+        "id": "eng3_cue",
+        "type": "sound_cue",
+        "name": "Дизель 28–42% (Поз. 4)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 370,
+        "scheme": "eng3"
+      },
+      {
+        "id": "eng4_cue",
+        "type": "sound_cue",
+        "name": "Дизель 42–57% (Поз. 5)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 480,
+        "scheme": "eng4"
+      },
+      {
+        "id": "eng5_cue",
+        "type": "sound_cue",
+        "name": "Дизель 57–71% (Поз. 6)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 590,
+        "scheme": "eng5"
+      },
+      {
+        "id": "eng6_cue",
+        "type": "sound_cue",
+        "name": "Дизель 71–85% (Поз. 7)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 700,
+        "scheme": "eng6"
+      },
+      {
+        "id": "eng7_cue",
+        "type": "sound_cue",
+        "name": "Дизель 85–100% (Поз. 8)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 810,
+        "scheme": "eng7"
+      },
+      {
+        "id": "whistle_cue",
+        "type": "sound_cue",
+        "name": "Свисток",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1160,
+        "scheme": "whistle_scheme"
+      },
+      {
+        "id": "horn_cue",
+        "type": "sound_cue",
+        "name": "Тифон (низкий)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1280,
+        "scheme": "horn_scheme"
+      },
+      {
+        "id": "bell_cue",
+        "type": "sound_cue",
+        "name": "Радиостанция",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1640,
+        "scheme": "bell_scheme"
+      },
+      {
+        "id": "comp_cue",
+        "type": "sound_cue",
+        "name": "Компрессор",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1760,
+        "scheme": "compressor_scheme"
+      },
+      {
+        "id": "coupler_cue",
+        "type": "sound_cue",
+        "name": "Автосцепка",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1880,
+        "scheme": "coupler_scheme"
+      },
+      {
+        "id": "sander_cue",
+        "type": "sound_cue",
+        "name": "Песочница",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2000,
+        "scheme": "sander_scheme"
+      },
+      {
+        "id": "door_open_cue",
+        "type": "sound_cue",
+        "name": "Двери кабины: откр.",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2480,
+        "scheme": "door_open_scheme"
+      },
+      {
+        "id": "door_close_cue",
+        "type": "sound_cue",
+        "name": "Двери кабины: закр.",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2600,
+        "scheme": "door_close_scheme"
+      },
+      {
+        "id": "fan_cue",
+        "type": "sound_cue",
+        "name": "Вентилятор холодильника",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2720,
+        "scheme": "fan_scheme"
+      },
+      {
+        "id": "uncoupler_cue",
+        "type": "sound_cue",
+        "name": "Расцепка",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1040,
+        "scheme": "uncoupler_scheme"
+      },
+      {
+        "id": "turbo_cue",
+        "type": "sound_cue",
+        "name": "Турбокомпрессор ЧМЭ3",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1160,
+        "scheme": "turbo_scheme"
+      },
+      {
+        "id": "curve_cue",
+        "type": "sound_cue",
+        "name": "Скрип колёс в кривых",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1280,
+        "scheme": "curve_squeal_scheme"
+      },
+      {
+        "id": "clank_cue",
+        "type": "sound_cue",
+        "name": "Перестук колёс и стрелки",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1400,
+        "scheme": "rail_clank_scheme"
+      },
+      {
+        "id": "air_rel_cue",
+        "type": "sound_cue",
+        "name": "Выпуск воздуха",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1520,
+        "scheme": "air_release_scheme"
+      },
+      {
+        "id": "shunter_cue",
+        "type": "sound_cue",
+        "name": "Свисток составителя",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1640,
+        "scheme": "shunter_whistle_scheme"
+      },
+      {
+        "id": "station_cue",
+        "type": "sound_cue",
+        "name": "Вокзал: объявление поезда",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1760,
+        "scheme": "station_ann_scheme"
+      },
+      {
+        "id": "handbrake_cue",
+        "type": "sound_cue",
+        "name": "Ручной тормоз",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 1880,
+        "scheme": "handbrake_scheme"
+      },
+      {
+        "id": "reverser_cue",
+        "type": "sound_cue",
+        "name": "Реверсор кабины",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 2000,
+        "scheme": "reverser_scheme"
+      },
+      {
+        "id": "ted_cue",
+        "type": "sound_cue",
+        "name": "Тяговые электродвигатели (ТЭД)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1820,
+        "y": 2120,
+        "scheme": "traction_motors_scheme"
+      },
+      {
+        "id": "brake_sq_cue",
+        "type": "sound_cue",
+        "name": "Визг тормозов",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1820,
+        "y": 2240,
+        "scheme": "brake_squeal_scheme"
+      },
+      {
+        "id": "dyn_brake_cue",
+        "type": "sound_cue",
+        "name": "Динамический тормоз: звук",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1820,
+        "y": 2360,
+        "scheme": "dyn_brake_scheme"
+      },
+      {
+        "id": "stop_eng_cue",
+        "type": "sound_cue",
+        "name": "Дизель: выбег при глушении",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 2140,
+        "y": 2480,
+        "scheme": "diesel_start_stop_scheme"
+      },
+      {
+        "id": "brake_cue",
+        "type": "sound_cue",
+        "name": "Торможение ЧМЭ3",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 100,
+        "rate": 1000,
+        "level": 100,
+        "files": {
+          "sound": ""
+        },
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 920,
+        "scheme": "brake_scheme"
+      },
+      {
+        "id": "head",
+        "type": "output",
+        "name": "Фары (буферные)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1040,
+        "channel": 0,
+        "effect": 0,
+        "dir": "auto",
+        "state": "any"
+      },
+      {
+        "id": "cab",
+        "type": "output",
+        "name": "AUX1 Освещение кабины",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1400,
+        "channel": 1,
+        "effect": 0,
+        "dir": "auto",
+        "state": "any"
+      },
+      {
+        "id": "beacon",
+        "type": "output",
+        "name": "AUX2 Прожектор / Маяк",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 1520,
+        "channel": 2,
+        "effect": 0,
+        "dir": "auto",
+        "state": "any"
+      },
+      {
+        "id": "strobe",
+        "type": "output",
+        "name": "AUX3 Строб",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2360,
+        "channel": 3,
+        "effect": 0,
+        "dir": "auto",
+        "state": "any"
+      },
+      {
+        "id": "under_light",
+        "type": "output",
+        "name": "AUX5 Подсветка ходовой",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 2600,
+        "channel": 5,
+        "effect": 0,
+        "dir": "auto",
+        "state": "any"
+      },
+      {
+        "id": "n_up",
+        "type": "logic_out",
+        "name": "Набор позиции",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2120,
+        "op": 7,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "n_down",
+        "type": "logic_out",
+        "name": "Сброс позиции",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2240,
+        "op": 8,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "l_hold",
+        "type": "logic_out",
+        "name": "Удержание хода",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 2120,
+        "op": 4,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "l_coast",
+        "type": "logic_out",
+        "name": "Выбег (Coast)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 2240,
+        "op": 5,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "l_dynbrk",
+        "type": "logic_out",
+        "name": "Динамический тормоз",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 2360,
+        "op": 6,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "l_mute1",
+        "type": "logic_out",
+        "name": "Mute (на стоянке)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1500,
+        "y": 2480,
+        "op": 1,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "l_mute2",
+        "type": "logic_out",
+        "name": "Mute (в движении)",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 1820,
+        "y": 2480,
+        "op": 2,
+        "dir": "any",
+        "state": "any"
+      },
+      {
+        "id": "fan_logic",
+        "type": "logic",
+        "name": "Холодильник: скорость > 20%",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 420,
+        "y": 2840,
+        "join": "and",
+        "conds": [
+          {
+            "var": "speed",
+            "op": 4,
+            "value": 20
+          }
+        ]
+      },
+      {
+        "id": "fan",
+        "type": "output",
+        "name": "AUX4 Жалюзи холодильника",
+        "fn": -1,
+        "trigger": "auto",
+        "volume": 80,
+        "rate": 1000,
+        "level": 100,
+        "files": {},
+        "outEvent": "finish",
+        "outDelay": 0,
+        "shortMs": 400,
+        "x": 760,
+        "y": 2840,
+        "channel": 4,
+        "effect": 0,
+        "dir": "auto",
+        "state": "any"
+      }
+    ],
+    "links": [
+      {
+        "id": "dl0_f0",
+        "from": "f0",
+        "to": "head",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl1_f1",
+        "from": "f1",
+        "to": "whistle_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl2_f2",
+        "from": "f2",
+        "to": "horn_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl3_f3",
+        "from": "f3",
+        "to": "cab",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl4_f4",
+        "from": "f4",
+        "to": "beacon",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl5_f11",
+        "from": "f11",
+        "to": "strobe",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl6_f5",
+        "from": "f5",
+        "to": "bell_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl7_f6",
+        "from": "f6",
+        "to": "comp_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl8_f7",
+        "from": "f7",
+        "to": "coupler_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl9_f8",
+        "from": "f8",
+        "to": "sander_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl10_f12",
+        "from": "f12",
+        "to": "door_open_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl11_f13",
+        "from": "f13",
+        "to": "door_close_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl12_f9",
+        "from": "f9",
+        "to": "n_up",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl13_f10",
+        "from": "f10",
+        "to": "n_down",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl14_f14",
+        "from": "f14",
+        "to": "fan_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl15_f14",
+        "from": "f14",
+        "to": "fan_logic",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "db16_fan_logic",
+        "from": "fan_logic",
+        "to": "fan",
+        "kind": "bind",
+        "cond": "true"
+      },
+      {
+        "id": "dl17_f15",
+        "from": "f15",
+        "to": "uncoupler_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl18_f16",
+        "from": "f16",
+        "to": "turbo_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl19_f17",
+        "from": "f17",
+        "to": "curve_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl20_f18",
+        "from": "f18",
+        "to": "clank_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl21_f19",
+        "from": "f19",
+        "to": "air_rel_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl22_f20",
+        "from": "f20",
+        "to": "shunter_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl23_f21",
+        "from": "f21",
+        "to": "station_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl24_f22",
+        "from": "f22",
+        "to": "handbrake_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl25_f23",
+        "from": "f23",
+        "to": "reverser_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl26_f24",
+        "from": "f24",
+        "to": "l_hold",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl27_f24",
+        "from": "f24",
+        "to": "ted_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl28_f25",
+        "from": "f25",
+        "to": "l_coast",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl29_f25",
+        "from": "f25",
+        "to": "brake_sq_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl30_f26",
+        "from": "f26",
+        "to": "l_dynbrk",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl31_f26",
+        "from": "f26",
+        "to": "dyn_brake_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl32_f27",
+        "from": "f27",
+        "to": "l_mute1",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl33_f27",
+        "from": "f27",
+        "to": "l_mute2",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl34_f27",
+        "from": "f27",
+        "to": "stop_eng_cue",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl35_f28",
+        "from": "f28",
+        "to": "under_light",
+        "kind": "after",
+        "cond": "out"
+      },
+      {
+        "id": "dl36_eng",
+        "from": "eng",
+        "to": "idle_cue",
+        "kind": "after",
+        "cond": "eng_idle"
+      },
+      {
+        "id": "dl37_eng",
+        "from": "eng",
+        "to": "eng1_cue",
+        "kind": "after",
+        "cond": "eng0"
+      },
+      {
+        "id": "dl38_eng",
+        "from": "eng",
+        "to": "eng2_cue",
+        "kind": "after",
+        "cond": "eng1"
+      },
+      {
+        "id": "dl39_eng",
+        "from": "eng",
+        "to": "eng3_cue",
+        "kind": "after",
+        "cond": "eng2"
+      },
+      {
+        "id": "dl40_eng",
+        "from": "eng",
+        "to": "eng4_cue",
+        "kind": "after",
+        "cond": "eng3"
+      },
+      {
+        "id": "dl41_eng",
+        "from": "eng",
+        "to": "eng5_cue",
+        "kind": "after",
+        "cond": "eng4"
+      },
+      {
+        "id": "dl42_eng",
+        "from": "eng",
+        "to": "eng6_cue",
+        "kind": "after",
+        "cond": "eng5"
+      },
+      {
+        "id": "dl43_eng",
+        "from": "eng",
+        "to": "eng7_cue",
+        "kind": "after",
+        "cond": "eng6"
+      },
+      {
+        "id": "dl44_eng",
+        "from": "eng",
+        "to": "brake_cue",
+        "kind": "after",
+        "cond": "eng_brake"
+      }
+    ],
+    "texts": []
+  },
+  "schemes": [
+    {
+      "id": "horn_scheme",
+      "name": "Тифон (низкий)",
+      "blocks": [
+        {
+          "id": "h_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "horn_low_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "h_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "horn_low_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "h_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "horn_low_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_h_start",
+          "from": "h_start",
+          "to": "h_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_h_loop",
+          "from": "h_loop",
+          "to": "h_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "whistle_scheme",
+      "name": "Свисток",
+      "blocks": [
+        {
+          "id": "w_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "whistle_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "w_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "whistle_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "w_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "whistle_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_w_start",
+          "from": "w_start",
+          "to": "w_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_w_loop",
+          "from": "w_loop",
+          "to": "w_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "bell_scheme",
+      "name": "Радиостанция",
+      "blocks": [
+        {
+          "id": "b_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "radio_ptt_press.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "b_beep",
+          "type": "simple",
+          "name": "Простой",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "radio_channel_beep.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        },
+        {
+          "id": "b_msg",
+          "type": "simple",
+          "name": "Простой",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "radio_command_forward_gleis3.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        },
+        {
+          "id": "b_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "radio_ptt_release.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 1020,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_b_start",
+          "from": "b_start",
+          "to": "b_beep",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_b_beep",
+          "from": "b_beep",
+          "to": "b_msg",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl2_b_msg",
+          "from": "b_msg",
+          "to": "b_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "compressor_scheme",
+      "name": "Компрессор",
+      "blocks": [
+        {
+          "id": "c_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "compressor_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "c_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "compressor_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "c_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "compressor_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_c_start",
+          "from": "c_start",
+          "to": "c_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_c_loop",
+          "from": "c_loop",
+          "to": "c_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "coupler_scheme",
+      "name": "Автосцепка",
+      "blocks": [
+        {
+          "id": "k_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "coupler_attach.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        }
+      ],
+      "links": [],
+      "texts": []
+    },
+    {
+      "id": "sander_scheme",
+      "name": "Песочница",
+      "blocks": [
+        {
+          "id": "s_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "sander_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "s_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "sander_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "s_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "sander_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_s_start",
+          "from": "s_start",
+          "to": "s_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_s_loop",
+          "from": "s_loop",
+          "to": "s_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "fan_scheme",
+      "name": "Вентилятор холодильника",
+      "blocks": [
+        {
+          "id": "fn_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "fan_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "fn_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "fan_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "fn_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "fan_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_fn_start",
+          "from": "fn_start",
+          "to": "fn_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_fn_loop",
+          "from": "fn_loop",
+          "to": "fn_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "door_open_scheme",
+      "name": "Двери кабины: откр.",
+      "blocks": [
+        {
+          "id": "d_open",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "cab_door_open.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        }
+      ],
+      "links": [],
+      "texts": []
+    },
+    {
+      "id": "door_close_scheme",
+      "name": "Двери кабины: закр.",
+      "blocks": [
+        {
+          "id": "d_close",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "cab_door_close.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        }
+      ],
+      "links": [],
+      "texts": []
+    },
+    {
+      "id": "uncoupler_scheme",
+      "name": "Расцепка",
+      "blocks": [
+        {
+          "id": "uc_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "coupler_detach.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        }
+      ],
+      "links": [],
+      "texts": []
+    },
+    {
+      "id": "turbo_scheme",
+      "name": "Турбокомпрессор ЧМЭ3",
+      "blocks": [
+        {
+          "id": "tb_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "turbo_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "tb_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "turbo_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "tb_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "turbo_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_tb_start",
+          "from": "tb_start",
+          "to": "tb_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_tb_loop",
+          "from": "tb_loop",
+          "to": "tb_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "curve_squeal_scheme",
+      "name": "Скрип колёс в кривых",
+      "blocks": [
+        {
+          "id": "cs_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "curve_squeal_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "cs_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "curve_squeal_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "cs_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "curve_squeal_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_cs_start",
+          "from": "cs_start",
+          "to": "cs_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_cs_loop",
+          "from": "cs_loop",
+          "to": "cs_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "rail_clank_scheme",
+      "name": "Перестук колёс и стрелки",
+      "blocks": [
+        {
+          "id": "rc_1",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "rail_switch_clank.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "rc_2",
+          "type": "simple",
+          "name": "Простой",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "rail_joint_slow.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        },
+        {
+          "id": "rc_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "rail_joint_fast.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_rc_1",
+          "from": "rc_1",
+          "to": "rc_2",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_rc_2",
+          "from": "rc_2",
+          "to": "rc_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "air_release_scheme",
+      "name": "Выпуск воздуха",
+      "blocks": [
+        {
+          "id": "ar_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "air_release_valve.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "ar_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "air_release_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "ar_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "air_release_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_ar_start",
+          "from": "ar_start",
+          "to": "ar_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_ar_loop",
+          "from": "ar_loop",
+          "to": "ar_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "shunter_whistle_scheme",
+      "name": "Свисток составителя",
+      "blocks": [
+        {
+          "id": "sh_1",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "shunter_whistle.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "sh_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "radio_acknowledge.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_sh_1",
+          "from": "sh_1",
+          "to": "sh_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "station_ann_scheme",
+      "name": "Вокзал: объявление поезда",
+      "blocks": [
+        {
+          "id": "st_1",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "station_departure_announcement.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        }
+      ],
+      "links": [],
+      "texts": []
+    },
+    {
+      "id": "handbrake_scheme",
+      "name": "Ручной тормоз",
+      "blocks": [
+        {
+          "id": "hb_1",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "handbrake_apply.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "hb_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "handbrake_release.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_hb_1",
+          "from": "hb_1",
+          "to": "hb_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "reverser_scheme",
+      "name": "Реверсор кабины",
+      "blocks": [
+        {
+          "id": "rv_1",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "reverser_forward.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "rv_2",
+          "type": "simple",
+          "name": "Простой",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "reverser_shunt_mode.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        },
+        {
+          "id": "rv_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "reverser_reverse.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_rv_1",
+          "from": "rv_1",
+          "to": "rv_2",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_rv_2",
+          "from": "rv_2",
+          "to": "rv_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "traction_motors_scheme",
+      "name": "Тяговые электродвигатели (ТЭД)",
+      "blocks": [
+        {
+          "id": "tm_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "traction_motor_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "tm_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "traction_motor_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_tm_loop",
+          "from": "tm_loop",
+          "to": "tm_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "brake_squeal_scheme",
+      "name": "Визг тормозов",
+      "blocks": [
+        {
+          "id": "bs_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "brake_squeal_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "bs_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "brake_squeal_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "bs_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "brake_squeal_stop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_bs_start",
+          "from": "bs_start",
+          "to": "bs_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_bs_loop",
+          "from": "bs_loop",
+          "to": "bs_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "dyn_brake_scheme",
+      "name": "Динамический тормоз: звук",
+      "blocks": [
+        {
+          "id": "db_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "dynamic_brake_on.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "db_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "dynamic_brake_off.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_db_start",
+          "from": "db_start",
+          "to": "db_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "diesel_start_stop_scheme",
+      "name": "Дизель: выбег при глушении",
+      "blocks": [
+        {
+          "id": "ds_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_crank_start.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "ds_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_crank_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        },
+        {
+          "id": "ds_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_shutdown.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 700,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_ds_start",
+          "from": "ds_start",
+          "to": "ds_loop",
+          "kind": "after",
+          "cond": "out"
+        },
+        {
+          "id": "dl1_ds_loop",
+          "from": "ds_loop",
+          "to": "ds_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "idle_scheme",
+      "name": "Холостой ход",
+      "blocks": [
+        {
+          "id": "i_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_decel_to_idle.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "i_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_idle_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_i_start",
+          "from": "i_start",
+          "to": "i_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng1",
+      "name": "Дизель 0–14% (Поз. 2)",
+      "blocks": [
+        {
+          "id": "eng1_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_1_to_2.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng1_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_2_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng1_start",
+          "from": "eng1_start",
+          "to": "eng1_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng2",
+      "name": "Дизель 14–28% (Поз. 3)",
+      "blocks": [
+        {
+          "id": "eng2_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_2_to_3.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng2_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_3_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng2_start",
+          "from": "eng2_start",
+          "to": "eng2_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng3",
+      "name": "Дизель 28–42% (Поз. 4)",
+      "blocks": [
+        {
+          "id": "eng3_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_3_to_4.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng3_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_4_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng3_start",
+          "from": "eng3_start",
+          "to": "eng3_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng4",
+      "name": "Дизель 42–57% (Поз. 5)",
+      "blocks": [
+        {
+          "id": "eng4_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_4_to_5.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng4_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_5_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng4_start",
+          "from": "eng4_start",
+          "to": "eng4_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng5",
+      "name": "Дизель 57–71% (Поз. 6)",
+      "blocks": [
+        {
+          "id": "eng5_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_5_to_6.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng5_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_6_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng5_start",
+          "from": "eng5_start",
+          "to": "eng5_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng6",
+      "name": "Дизель 71–85% (Поз. 7)",
+      "blocks": [
+        {
+          "id": "eng6_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_6_to_7.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng6_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_7_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng6_start",
+          "from": "eng6_start",
+          "to": "eng6_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "eng7",
+      "name": "Дизель 85–100% (Поз. 8)",
+      "blocks": [
+        {
+          "id": "eng7_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_accel_7_to_8.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "eng7_loop",
+          "type": "loop",
+          "name": "Цикл",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "engine_notch_8_loop.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80,
+          "loopMode": "hold",
+          "dirTrigger": "fwd"
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_eng7_start",
+          "from": "eng7_start",
+          "to": "eng7_loop",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    },
+    {
+      "id": "brake_scheme",
+      "name": "Торможение ЧМЭ3",
+      "blocks": [
+        {
+          "id": "br_start",
+          "type": "start",
+          "name": "Старт",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "brake_apply.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 60,
+          "y": 80
+        },
+        {
+          "id": "br_end",
+          "type": "end",
+          "name": "Конец",
+          "fn": -1,
+          "trigger": "auto",
+          "volume": 80,
+          "rate": 1000,
+          "level": 100,
+          "files": {
+            "sound": "brake_release.wav"
+          },
+          "outEvent": "finish",
+          "outDelay": 0,
+          "shortMs": 400,
+          "x": 380,
+          "y": 80
+        }
+      ],
+      "links": [
+        {
+          "id": "dl0_br_start",
+          "from": "br_start",
+          "to": "br_end",
+          "kind": "after",
+          "cond": "out"
+        }
+      ],
+      "texts": []
+    }
+  ],
+  "vars": [
+    {
+      "name": "speed",
+      "kind": "speed",
+      "init": 0
+    },
+    {
+      "name": "forward",
+      "kind": "forward",
+      "init": 0
+    },
+    {
+      "name": "moving",
+      "kind": "moving",
+      "init": 0
+    },
+    {
+      "name": "engine",
+      "kind": "engine",
+      "init": 0
+    }
+  ],
+  "editor": {
+    "viewport": {
+      "x": 40,
+      "y": 40,
+      "zoom": 1
+    },
+    "snap": true,
+    "bindTuples": [],
+    "auxChannels": [],
+    "mode": "mix",
+    "activeScheme": ""
+  }
+}

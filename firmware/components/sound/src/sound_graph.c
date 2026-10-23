@@ -402,7 +402,8 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
     }
     /* A silent state supplies no audio boundary. Persistent immediate guards
      * must not form a cycle; edge events and next-tick sample_done are temporal. */
-    uint8_t immediate[SG_MAX_STATES][SG_MAX_STATES] = {{0}};
+    enum { SG_IMM_WORDS = (SG_MAX_STATES + 31) / 32 };
+    uint32_t immediate[SG_MAX_STATES][SG_IMM_WORDS] = {{0}};
     for (unsigned i = 0; i < g->transition_count; ++i) {
         const sg_transition_t *e = &g->transitions[i];
         if (e->timing == SG_IMMEDIATE && e->condition.type >= SG_FN_ON &&
@@ -410,21 +411,23 @@ esp_err_t sg_validate(sg_graph_t *g, sg_diagnostic_t *diag)
             e->condition.type != SG_TIMEOUT && e->condition.type != SG_VAR_CMP &&
             e->condition.type != SG_STATE_ENTER &&
             !g->states[e->source_index].file[0] && !g->states[e->target_index].file[0]) {
-            immediate[e->source_index][e->target_index] = 1;
+            immediate[e->source_index][e->target_index / 32U] |= (1UL << (e->target_index % 32U));
         }
     }
     for (unsigned k = 0; k < g->state_count; ++k) {
+        unsigned kw = k / 32U;
+        uint32_t km = 1UL << (k % 32U);
         for (unsigned i = 0; i < g->state_count; ++i) {
-            if (immediate[i][k]) {
-                for (unsigned j = 0; j < g->state_count; ++j) {
-                    if (immediate[k][j]) { immediate[i][j] = 1; }
+            if (immediate[i][kw] & km) {
+                for (unsigned w = 0; w < SG_IMM_WORDS; ++w) {
+                    immediate[i][w] |= immediate[k][w];
                 }
             }
         }
     }
     for (unsigned i = 0; i < g->state_count; ++i) {
         if (diag) { snprintf(diag->id,sizeof(diag->id),"%s",g->states[i].id); snprintf(diag->field,sizeof(diag->field),"transitions"); }
-        SG_CHECK(!immediate[i][i],"immediate silent cycle");
+        SG_CHECK(!(immediate[i][i / 32U] & (1UL << (i % 32U))),"immediate silent cycle");
     }
     bool reached[SG_MAX_STATES] = {false};
     reached[g->engine_entry_index] = true;

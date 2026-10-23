@@ -42,6 +42,10 @@ static bool g_bound_safety;
 static unsigned g_safety_delays;
 static jmp_buf g_safety_exit;
 static bool g_graph_selected;
+static char g_install_id[SG_ID_CAP];
+static uint32_t g_install_revision;
+static int g_seed_calls;
+static esp_err_t g_seed_err;
 static bool g_storage_mounted;
 static esp_err_t g_selection_err, g_graph_read_err, g_graph_parse_err, g_graph_assets_err;
 static esp_err_t g_sound_init_err;
@@ -75,6 +79,26 @@ esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision, bool
     *selected = g_graph_selected;
     return g_selection_err;
 }
+const char *default_scheme_blob(size_t *length)
+{
+    if (length) { *length = 2; }
+    return "{}";
+}
+esp_err_t sg_store_seed_default(const char *id, const char *json, size_t length,
+                                uint32_t *revision, bool *seeded)
+{
+    (void)id;
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, id);
+    TEST_ASSERT_EQUAL_UINT(2, length);
+    TEST_ASSERT_EQUAL_MEMORY("{}", json, 2);
+    ++g_seed_calls;
+    if (revision) { *revision = 0; }
+    if (seeded) { *seeded = false; }
+    if (g_seed_err != ESP_OK) { return g_seed_err; }
+    if (revision) { *revision = 7; }
+    if (seeded) { *seeded = true; }
+    return ESP_OK;
+}
 esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *length, uint32_t *actual)
 {
     (void)id;
@@ -98,8 +122,9 @@ esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag)
 }
 esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t revision)
 {
-    (void)graph; (void)id;
-    TEST_ASSERT_EQUAL(2, revision);
+    (void)graph;
+    snprintf(g_install_id, sizeof(g_install_id), "%s", id);
+    g_install_revision = revision;
     ++g_graph_installs;
     return ESP_OK;
 }
@@ -285,6 +310,10 @@ void setUp(void)
     g_storage_mounted = true;
     g_selection_err = g_graph_read_err = g_graph_parse_err = g_graph_assets_err = ESP_OK;
     g_sound_init_err = ESP_OK;
+    g_seed_err = ESP_ERR_INVALID_STATE;
+    g_seed_calls = 0;
+    g_install_id[0] = 0;
+    g_install_revision = 0;
     g_volume = g_listener = g_confirm = g_hard_reset_calls = 0;
     g_mask = MOTOR_INHIBIT_CONTROL;
     mock_timer_now_us = 1000000;
@@ -686,6 +715,38 @@ static void test_selected_graph_restores_without_legacy_fallback(void)
     TEST_ASSERT_EQUAL(2, g_graph_faults);
 }
 
+static void test_boot_seeds_builtin_scheme_when_nothing_is_selected(void)
+{
+    /* No selection and no saved project: the built-in scheme is installed. */
+    g_seed_err = ESP_OK;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(1, g_seed_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_graph_installs);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(7, g_install_revision);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_faults);
+
+    /* A selected project always wins over the built-in copy. */
+    g_graph_selected = true;
+    g_seed_calls = 0;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(0, g_seed_calls);
+    TEST_ASSERT_EQUAL_INT(2, g_graph_installs);
+    TEST_ASSERT_EQUAL_STRING("saved_graph", g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(2, g_install_revision);
+}
+
+static void test_boot_without_sounds_stays_silent_not_failed(void)
+{
+    /* Built-in scheme cannot be installed (e.g. the sound pack is missing):
+     * boot stays silent instead of latching a failure. */
+    g_seed_err = ESP_ERR_NOT_FOUND;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(1, g_seed_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_installs);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_faults);
+}
+
 static void test_corrupt_selection_and_missing_storage_fail_safe(void)
 {
     g_selection_err = ESP_FAIL;
@@ -722,6 +783,8 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_selected_graph_restores_without_legacy_fallback);
+    RUN_TEST(test_boot_seeds_builtin_scheme_when_nothing_is_selected);
+    RUN_TEST(test_boot_without_sounds_stays_silent_not_failed);
     RUN_TEST(test_corrupt_selection_and_missing_storage_fail_safe);
     RUN_TEST(test_failed_sound_initialization_never_restores_legacy_audio);
     RUN_TEST(test_emergency_stop_requests_audio_stop_immediately);

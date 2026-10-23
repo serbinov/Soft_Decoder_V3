@@ -381,6 +381,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-24 (v0.11) — feat(sound,editor,flasher): English sound names, full ChME3 schemes and built-in default project
 - 2026-10-23 (v0.11) — feat(web,editor): live state highlighting and v0.11 fixes
 - 2026-10-21 (v0.10) — chore(release): rebuild v0.10 artifacts with updated editor
 - 2026-10-21 (v0.10) — feat(editor): localize built-in names, add zoom controls and mobile layout

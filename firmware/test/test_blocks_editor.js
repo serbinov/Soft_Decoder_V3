@@ -539,7 +539,7 @@ test('24. Flowchart SVG export renders header, spreads engine output ports, wrap
   api.selectScheme('horn_scheme');
   assert.equal(api.exportFileBase(), 'locomotive_default-horn_scheme');
   const schemeSvg = api.buildSchemeSvg();
-  assert.match(schemeSvg, /horn-low-loop\.wav/);
+  assert.match(schemeSvg, /horn_low_loop\.wav/);
 });
 
 test('25. alignBlocks and fitViewport arrange nodes and update viewport, and invalid speed band emits warning', t => {
@@ -634,7 +634,7 @@ test('27c. Live mapping finds the active scheme block from runner channel states
   api.switchMode('scheme');
   api.selectScheme('horn_scheme');
   const payload = api.compile().payload;
-  const effect = payload.effects.findIndex(e => e.id === 'horn_cue-h_loop');
+  const effect = payload.effects.findIndex(e => e.id === 'horn_cue-h_start');
   assert.ok(effect >= 0, 'horn cue has an effect channel');
   const state = payload.states.findIndex(s => s.id.indexOf('horn_cue-h_loop') === 0 && /_play$/.test(s.id));
   assert.ok(state >= 0, 'expanded horn loop play state exists');
@@ -648,14 +648,14 @@ test('27c. Live mapping finds the active scheme block from runner channel states
 test('27d. Live mapping highlights the cue block while editing Mixes', t => {
   const { api } = createEditorFixture(t);
   const payload = api.compile().payload;
-  const effect = payload.effects.findIndex(e => e.id === 'horn_cue-h_loop');
+  const effect = payload.effects.findIndex(e => e.id === 'horn_cue-h_start');
   const state = payload.states.findIndex(s => s.id.indexOf('horn_cue-h_loop') === 0 && /_play$/.test(s.id));
   assert.ok(effect >= 0 && state >= 0);
   const states = Array(40).fill(255);
   states[effect + 1] = state;
   const active = api.liveBlockIds({ active: true, states });
   assert.equal(active.has('horn_cue'), true);
-  const off = payload.states.findIndex(s => s.id === 'horn_cue-h_loop_off');
+  const off = payload.states.findIndex(s => s.id === 'horn_cue-h_start_off');
   assert.ok(off >= 0, 'silent entry state exists');
   states[effect + 1] = off;
   assert.equal(api.liveBlockIds({ active: true, states }).has('horn_cue'), false, 'silent _off channel is not highlighted');
@@ -800,6 +800,30 @@ test('29. Default scheme sound manifest matches the compiled default project', t
     .filter(line => line && !line.startsWith('#'))
     .sort();
   assert.deepEqual(Array.from(actual), Array.from(expected));
+});
+
+test('29b. Default locomotive bundle contains the scheme and all compiled sounds', t => {
+  const { api } = createEditorFixture(t);
+  const expected = api.compile().files.slice().sort();
+  const base = path.join(__dirname, '..', '..', 'default_locomotive');
+  const sounds = fs.readdirSync(path.join(base, 'sounds')).sort();
+  assert.deepEqual(Array.from(sounds), Array.from(expected));
+  const project = JSON.parse(fs.readFileSync(path.join(base, 'default_locomotive.blocks.json'), 'utf8'));
+  assert.equal(project.id, 'locomotive_default');
+  const scheme = JSON.parse(fs.readFileSync(path.join(base, 'scheme.json'), 'utf8'));
+  assert.equal(scheme.format, 'sound-graph');
+  assert.deepEqual(Array.from(scheme.assets.map(a => a.file)).sort(), Array.from(expected));
+});
+
+test('29c. Built-in default scheme blob matches the compiled default project', t => {
+  const { api } = createEditorFixture(t);
+  const wire = api.wirePayload(api.compile().payload);
+  const blobPath = path.join(__dirname, '..', 'main', 'data', 'default_scheme.json');
+  const blob = fs.readFileSync(blobPath, 'utf8');
+  assert.equal(blob, JSON.stringify(wire), 'regenerate firmware/main/data/default_scheme.json');
+  assert.ok(blob.includes('"assets":[]'), 'seed blob keeps an empty asset manifest');
+  assert.equal(JSON.parse(blob).id, 'locomotive_default');
+  assert.ok(Buffer.byteLength(blob) <= 131072, 'seed blob fits SG_MAX_JSON');
 });
 
 test('30. Switching the editor language re-localizes built-in project, scheme and block names', t => {

@@ -178,10 +178,11 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
         }
         uint8_t imm[SG_MAX_TRANSITIONS], pend[SG_MAX_TRANSITIONS]; int ni = 0, np = 0;
         const sg_state_t *cur = &r->graph->states[ch->state];
-        /* An endless engine loop never finishes its sample; waiting for
-         * sample_done would freeze a speed band. Only speed/motion transitions
-         * get the immediate treatment; F-event transitions keep after_sample. */
-        bool engine_speed_change = i == 0 && cur->loop && cur->loops == 0;
+            /* An endless engine loop (or engine Start transition when the
+             * throttle moves out of the band) should follow speed immediately
+             * rather than freezing the speed band. Only speed/motion transitions
+             * get the immediate treatment; F-event transitions keep after_sample. */
+            bool engine_speed_change = i == 0 && (!cur->loop || cur->loops == 0);
         for (unsigned j = 0; j < r->graph->transition_count; ++j) {
             const sg_transition_t *e = &r->graph->transitions[j];
             if (e->source_index != ch->state || !sgr_condition(r,ch,j,speed,accel,was_entered)) { continue; }

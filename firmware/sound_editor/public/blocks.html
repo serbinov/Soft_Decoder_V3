@@ -443,7 +443,7 @@ function detectLang(){
 function t(k){const d=I18N[lang]||I18N.ru;return (d&&d[k]!=null)?d[k]:((I18N.ru[k]!=null)?I18N.ru[k]:k);}
 function tr(v){if(v&&typeof v==="object")return (v[lang]!=null)?v[lang]:v.ru;return v;}
 
-const LIMITS={states:128,soundStates:96,silentStates:64,transitions:250,effects:32,assets:64,jsonBytes:131072};
+const LIMITS={states:192,soundStates:144,silentStates:96,transitions:250,effects:32,assets:128,jsonBytes:131072};
 const STORE_KEY="aura_blocks_project_v1";
 const GRID=20;const NODE_W=240;const NODE_H=80;const SPEED_STEP=25;const SPEED_HYST=1;
 const ZOOM_MIN=0.05,ZOOM_MAX=2.5,ZOOM_FIT_MAX=1.5;
@@ -605,7 +605,7 @@ const NAME_PAIRS=[
   ["Перестук колёс и стрелки","Rail joints & switches"],["Свисток составителя","Shunter whistle"],
   ["Вокзал: объявление поезда","Station announcement"],["Ручной тормоз","Handbrake"],
   ["Реверсор кабины","Cab reverser"],["Тяговые электродвигатели (ТЭД)","Traction motors"],
-  ["Визг тормозов","Brake squeal"],["Дизель: выбег при глушении","Diesel: shutdown"],
+  ["Визг тормозов","Brake squeal"],["Динамический тормоз: звук","Dynamic brake sound"],["Дизель: выбег при глушении","Diesel: shutdown"],
   ["Дизель 0–14% (Поз. 2)","Diesel 0–14% (Notch 2)"],["Дизель 14–28% (Поз. 3)","Diesel 14–28% (Notch 3)"],
   ["Дизель 28–42% (Поз. 4)","Diesel 28–42% (Notch 4)"],["Дизель 42–57% (Поз. 5)","Diesel 42–57% (Notch 5)"],
   ["Дизель 57–71% (Поз. 6)","Diesel 57–71% (Notch 6)"],["Дизель 71–85% (Поз. 7)","Diesel 71–85% (Notch 7)"],
@@ -735,7 +735,7 @@ function normalizeProject(p){
   const engBlk=p.mix.blocks.find(b=>b.type==="engine");
   const legacyBrakes=p.mix.blocks.filter(b=>b&&b.type==="brake");
   legacyBrakes.forEach(br=>{
-    const wav=(br.files&&br.files.sound)||"bremse-anlegen_lokbremse.wav";
+    const wav=(br.files&&br.files.sound)||"brake_apply.wav";
     const sName=br.name||t("default_brake_scheme");
     let sch=p.schemes.find(s=>s.id==="brake_scheme"||s.name===sName);
     if(!sch){
@@ -888,109 +888,163 @@ function defaultProject(){
   const newScheme=(id,name)=>{const s={id,name,blocks:[],links:[],texts:[]};p.schemes.push(s);return s;};
   const cue=(id,scheme,name,x,y)=>add(p.mix,id,"sound_cue",{scheme:scheme.id,volume:100,name:name||scheme.name,x,y});
 
-  /* F2: Тифон (низкий) — horn-low-loop.wav -> horn-low-exit.wav */
+  /* F2: Тифон (низкий) — horn-low-init.wav -> horn-low-loop.wav -> horn-low-exit.wav */
   const horn=newScheme("horn_scheme",t("default_horn_scheme"));
-  const hLoop=add(horn,"h_loop","loop",{files:{sound:"horn-low-loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
-  const hEnd=add(horn,"h_end","end",{files:{sound:"horn-low-exit.wav"},x:380,y:80});
-  link(horn,hLoop,hEnd);
+  const hStart=add(horn,"h_start","start",{files:{sound:"horn_low_start.wav"},x:60,y:80});
+  const hLoop=add(horn,"h_loop","loop",{files:{sound:"horn_low_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const hEnd=add(horn,"h_end","end",{files:{sound:"horn_low_stop.wav"},x:700,y:80});
+  link(horn,hStart,hLoop);link(horn,hLoop,hEnd);
 
-  /* F1: Свисток ЧМЭ3 — whistle-loop1.5.wav */
+  /* F1: Свисток ЧМЭ3 — whistle-init_1.wav -> whistle-loop1.5.wav -> whistle-exit.wav */
   const whistleS=newScheme("whistle_scheme",t("default_whistle_scheme"));
-  add(whistleS,"w_loop","loop",{files:{sound:"whistle-loop1.5.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const wStart=add(whistleS,"w_start","start",{files:{sound:"whistle_start.wav"},x:60,y:80});
+  const wLoop=add(whistleS,"w_loop","loop",{files:{sound:"whistle_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const wEnd=add(whistleS,"w_end","end",{files:{sound:"whistle_stop.wav"},x:700,y:80});
+  link(whistleS,wStart,wLoop);link(whistleS,wLoop,wEnd);
 
-  /* F5: Маневровая радиостанция ЧМЭ3 — переговоры машиниста (рус.) */
+  /* F5: Маневровая радиостанция ЧМЭ3 — тангента -> вызов -> команда (рус.) -> отбой */
   const bellS=newScheme("bell_scheme",t("default_bell_scheme"));
-  add(bellS,"b_start","start",{files:{sound:"vorwärts-nach-gleis_3_alexander-russian.wav"},x:60,y:80});
+  const bStart=add(bellS,"b_start","start",{files:{sound:"radio_ptt_press.wav"},x:60,y:80});
+  const bBeep=add(bellS,"b_beep","simple",{files:{sound:"radio_channel_beep.wav"},x:380,y:80});
+  const bMsg=add(bellS,"b_msg","simple",{files:{sound:"radio_command_forward_gleis3.wav"},x:700,y:80});
+  const bEnd=add(bellS,"b_end","end",{files:{sound:"radio_ptt_release.wav"},x:1020,y:80});
+  link(bellS,bStart,bBeep);link(bellS,bBeep,bMsg);link(bellS,bMsg,bEnd);
 
-  /* F6: Компрессор КТ-6 — Air_Compressor_Idle.wav */
+  /* F6: Компрессор КТ-6 — Air_Compressor_Start.wav -> Air_Compressor_Idle.wav -> Air_Compressor_End.wav */
   const compS=newScheme("compressor_scheme",t("default_compressor_scheme"));
-  add(compS,"c_loop","loop",{files:{sound:"Air_Compressor_Idle.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const cStart=add(compS,"c_start","start",{files:{sound:"compressor_start.wav"},x:60,y:80});
+  const cLoop=add(compS,"c_loop","loop",{files:{sound:"compressor_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const cEnd=add(compS,"c_end","end",{files:{sound:"compressor_stop.wav"},x:700,y:80});
+  link(compS,cStart,cLoop);link(compS,cLoop,cEnd);
 
   /* F7: Автосцепка СА-3 */
   const couplerS=newScheme("coupler_scheme",t("default_coupler_scheme"));
-  add(couplerS,"k_start","start",{files:{sound:"ankuppeln.wav"},x:60,y:80});
+  add(couplerS,"k_start","start",{files:{sound:"coupler_attach.wav"},x:60,y:80});
 
-  /* F8: Песочница — sanden-loop1.7.wav */
+  /* F8: Песочница — sanden-init.wav -> sanden-loop1.7.wav -> sanden-exit.wav */
   const sanderS=newScheme("sander_scheme",t("default_sander_scheme"));
-  add(sanderS,"s_loop","loop",{files:{sound:"sanden-loop1.7.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const sStart=add(sanderS,"s_start","start",{files:{sound:"sander_start.wav"},x:60,y:80});
+  const sLoop=add(sanderS,"s_loop","loop",{files:{sound:"sander_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const sEnd=add(sanderS,"s_end","end",{files:{sound:"sander_stop.wav"},x:700,y:80});
+  link(sanderS,sStart,sLoop);link(sanderS,sLoop,sEnd);
 
-  /* F14: Вентилятор холодильника ЧМЭ3 — lüfter_loop_1.1.wav */
+  /* F14: Вентилятор холодильника ЧМЭ3 — lüfter_init.wav -> lüfter_loop_1.1.wav -> lüfter_exit.wav */
   const fanS=newScheme("fan_scheme",t("default_fan_scheme"));
-  add(fanS,"fn_loop","loop",{files:{sound:"lüfter_loop_1.1.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const fnStart=add(fanS,"fn_start","start",{files:{sound:"fan_start.wav"},x:60,y:80});
+  const fnLoop=add(fanS,"fn_loop","loop",{files:{sound:"fan_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const fnEnd=add(fanS,"fn_end","end",{files:{sound:"fan_stop.wav"},x:700,y:80});
+  link(fanS,fnStart,fnLoop);link(fanS,fnLoop,fnEnd);
 
   /* F12 / F13: Двери кабины машиниста */
   const doorOpenS=newScheme("door_open_scheme",t("default_door_open_scheme"));
-  add(doorOpenS,"d_open","start",{files:{sound:"türe-auf_führerstand.wav"},x:60,y:80});
+  add(doorOpenS,"d_open","start",{files:{sound:"cab_door_open.wav"},x:60,y:80});
   const doorCloseS=newScheme("door_close_scheme",t("default_door_close_scheme"));
-  add(doorCloseS,"d_close","start",{files:{sound:"türe-zu_führerstand.wav"},x:60,y:80});
+  add(doorCloseS,"d_close","start",{files:{sound:"cab_door_close.wav"},x:60,y:80});
 
   /* F15: Расцепка СА-3 */
   const uncouplerS=newScheme("uncoupler_scheme",t("default_uncoupler_scheme"));
-  add(uncouplerS,"uc_start","start",{files:{sound:"abkuppeln.wav"},x:60,y:80});
+  add(uncouplerS,"uc_start","start",{files:{sound:"coupler_detach.wav"},x:60,y:80});
 
-  /* F16: Турбокомпрессор ПДГ ЧМЭ3 */
+  /* F16: Турбокомпрессор ПДГ ЧМЭ3 — turbo-init.wav -> turbo-loop1.1.wav -> turbo-fast-exit.wav */
   const turboS=newScheme("turbo_scheme",tr({ru:"Турбокомпрессор ЧМЭ3",en:"ChME3 Turbocharger"}));
-  add(turboS,"tb_loop","loop",{files:{sound:"turbo-loop1.1.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const tbStart=add(turboS,"tb_start","start",{files:{sound:"turbo_start.wav"},x:60,y:80});
+  const tbLoop=add(turboS,"tb_loop","loop",{files:{sound:"turbo_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const tbEnd=add(turboS,"tb_end","end",{files:{sound:"turbo_stop.wav"},x:700,y:80});
+  link(turboS,tbStart,tbLoop);link(turboS,tbLoop,tbEnd);
 
-  /* F17: Скрип гребней колёс в кривых */
+  /* F17: Скрип гребней колёс в кривых — вход -> цикл -> выход */
   const curveS=newScheme("curve_squeal_scheme",tr({ru:"Скрип колёс в кривых",en:"Curve flange squeal"}));
-  add(curveS,"cs_loop","loop",{files:{sound:"curve-squeal-speed2-loop1.5.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const csStart=add(curveS,"cs_start","start",{files:{sound:"curve_squeal_start.wav"},x:60,y:80});
+  const csLoop=add(curveS,"cs_loop","loop",{files:{sound:"curve_squeal_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const csEnd=add(curveS,"cs_end","end",{files:{sound:"curve_squeal_stop.wav"},x:700,y:80});
+  link(curveS,csStart,csLoop);link(curveS,csLoop,csEnd);
 
-  /* F18: Перестук колёс на стрелках */
+  /* F18: Перестук колёс на стрелках и стыках */
   const railClankS=newScheme("rail_clank_scheme",tr({ru:"Перестук колёс и стрелки",en:"Rail joints & switches"}));
-  add(railClankS,"rc_1","start",{files:{sound:"switch-flange_1.wav"},x:60,y:80});
+  const rc1=add(railClankS,"rc_1","start",{files:{sound:"rail_switch_clank.wav"},x:60,y:80});
+  const rc2=add(railClankS,"rc_2","simple",{files:{sound:"rail_joint_slow.wav"},x:380,y:80});
+  const rcEnd=add(railClankS,"rc_end","end",{files:{sound:"rail_joint_fast.wav"},x:700,y:80});
+  link(railClankS,rc1,rc2);link(railClankS,rc2,rcEnd);
 
   /* F19: Выпуск воздуха / клапан тормоза */
   const airRelS=newScheme("air_release_scheme",t("default_vent_scheme"));
-  add(airRelS,"ar_start","start",{files:{sound:"bremstaste-_1.wav"},x:60,y:80});
+  const arStart=add(airRelS,"ar_start","start",{files:{sound:"air_release_valve.wav"},x:60,y:80});
+  const arLoop=add(airRelS,"ar_loop","loop",{files:{sound:"air_release_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const arEnd=add(airRelS,"ar_end","end",{files:{sound:"air_release_stop.wav"},x:700,y:80});
+  link(airRelS,arStart,arLoop);link(airRelS,arLoop,arEnd);
 
-  /* F20: Свисток составителя */
+  /* F20: Свисток составителя + подтверждение по рации */
   const shunterS=newScheme("shunter_whistle_scheme",tr({ru:"Свисток составителя",en:"Shunter whistle"}));
-  add(shunterS,"sh_1","start",{files:{sound:"schaffnerpfiff_1.wav"},x:60,y:80});
+  const sh1=add(shunterS,"sh_1","start",{files:{sound:"shunter_whistle.wav"},x:60,y:80});
+  const shEnd=add(shunterS,"sh_end","end",{files:{sound:"radio_acknowledge.wav"},x:380,y:80});
+  link(shunterS,sh1,shEnd);
 
   /* F21: Объявление диктора на вокзале */
   const stationS=newScheme("station_ann_scheme",tr({ru:"Вокзал: объявление поезда",en:"Station announcement"}));
-  add(stationS,"st_1","start",{files:{sound:"Russische-Durchsage__8-Gleis1-Vorsicht-Zug-fährt-ab.wav"},x:60,y:80});
+  add(stationS,"st_1","start",{files:{sound:"station_departure_announcement.wav"},x:60,y:80});
 
-  /* F22: Ручной тормоз кабины */
+  /* F22: Ручной тормоз кабины — затяжка и отпуск */
   const handbrakeS=newScheme("handbrake_scheme",tr({ru:"Ручной тормоз",en:"Handbrake"}));
-  add(handbrakeS,"hb_1","start",{files:{sound:"Hand_Brake_Apply.wav"},x:60,y:80});
+  const hb1=add(handbrakeS,"hb_1","start",{files:{sound:"handbrake_apply.wav"},x:60,y:80});
+  const hbEnd=add(handbrakeS,"hb_end","end",{files:{sound:"handbrake_release.wav"},x:380,y:80});
+  link(handbrakeS,hb1,hbEnd);
 
-  /* F23: Реверсор кабины */
+  /* F23: Реверсор кабины и переключение маневрового режима */
   const reverserS=newScheme("reverser_scheme",tr({ru:"Реверсор кабины",en:"Cab reverser"}));
-  add(reverserS,"rv_1","start",{files:{sound:"richtungsumschalter-vorwärts.wav"},x:60,y:80});
+  const rv1=add(reverserS,"rv_1","start",{files:{sound:"reverser_forward.wav"},x:60,y:80});
+  const rv2=add(reverserS,"rv_2","simple",{files:{sound:"reverser_shunt_mode.wav"},x:380,y:80});
+  const rvEnd=add(reverserS,"rv_end","end",{files:{sound:"reverser_reverse.wav"},x:700,y:80});
+  link(reverserS,rv1,rv2);link(reverserS,rv2,rvEnd);
 
-  /* F24: Тяговые электродвигатели (ТЭД) */
+  /* F24: Тяговые электродвигатели (ТЭД) — цикл и выбег */
   const tedS=newScheme("traction_motors_scheme",tr({ru:"Тяговые электродвигатели (ТЭД)",en:"Traction motors"}));
-  add(tedS,"tm_loop","loop",{files:{sound:"e-motor-deep-loop1.4.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const tmLoop=add(tedS,"tm_loop","loop",{files:{sound:"traction_motor_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const tmEnd=add(tedS,"tm_end","end",{files:{sound:"traction_motor_stop.wav"},x:380,y:80});
+  link(tedS,tmLoop,tmEnd);
 
-  /* F25: Визг тормозных колодок */
+  /* F25: Визг тормозных колодок — вход -> цикл -> выход */
   const brakeSquealS=newScheme("brake_squeal_scheme",tr({ru:"Визг тормозов",en:"Brake squeal"}));
-  add(brakeSquealS,"bs_loop","loop",{files:{sound:"brake-squeal-02-loop1.4.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const bsStart=add(brakeSquealS,"bs_start","start",{files:{sound:"brake_squeal_start.wav"},x:60,y:80});
+  const bsLoop=add(brakeSquealS,"bs_loop","loop",{files:{sound:"brake_squeal_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const bsEnd=add(brakeSquealS,"bs_end","end",{files:{sound:"brake_squeal_stop.wav"},x:700,y:80});
+  link(brakeSquealS,bsStart,bsLoop);link(brakeSquealS,bsLoop,bsEnd);
 
-  /* F27: Глушение дизеля ЧМЭ3 */
+  /* F26: Динамический тормоз — включение и отключение */
+  const dynBrakeS=newScheme("dyn_brake_scheme",tr({ru:"Динамический тормоз: звук",en:"Dynamic brake sound"}));
+  const dbStart=add(dynBrakeS,"db_start","start",{files:{sound:"dynamic_brake_on.wav"},x:60,y:80});
+  const dbEnd=add(dynBrakeS,"db_end","end",{files:{sound:"dynamic_brake_off.wav"},x:380,y:80});
+  link(dynBrakeS,dbStart,dbEnd);
+
+  /* F27: Пуск и глушение дизеля ЧМЭ3 */
   const fullStartStopS=newScheme("diesel_start_stop_scheme",tr({ru:"Дизель: выбег при глушении",en:"Diesel: shutdown"}));
-  add(fullStartStopS,"ds_end","start",{files:{sound:"ms-end.wav"},x:60,y:80});
+  const dsStart=add(fullStartStopS,"ds_start","start",{files:{sound:"engine_crank_start.wav"},x:60,y:80});
+  const dsLoop=add(fullStartStopS,"ds_loop","loop",{files:{sound:"engine_crank_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  const dsEnd=add(fullStartStopS,"ds_end","end",{files:{sound:"engine_shutdown.wav"},x:700,y:80});
+  link(fullStartStopS,dsStart,dsLoop);link(fullStartStopS,dsLoop,dsEnd);
 
   /* Дизель K6S310DR (ЧМЭ3) по всем 7 ходовым позициям контроллера машиниста (Поз. 2 .. Поз. 8) */
   const engineBands=[
-    {id:"eng1",name:tr({ru:"Дизель 0–14% (Поз. 2)",en:"Diesel 0–14% (Notch 2)"}),file:"notch_2-loop1.4.wav"},
-    {id:"eng2",name:tr({ru:"Дизель 14–28% (Поз. 3)",en:"Diesel 14–28% (Notch 3)"}),file:"notch_3-loop1.3.wav"},
-    {id:"eng3",name:tr({ru:"Дизель 28–42% (Поз. 4)",en:"Diesel 28–42% (Notch 4)"}),file:"notch_4-loop1.1.wav"},
-    {id:"eng4",name:tr({ru:"Дизель 42–57% (Поз. 5)",en:"Diesel 42–57% (Notch 5)"}),file:"notch_5-loop1.3.wav"},
-    {id:"eng5",name:tr({ru:"Дизель 57–71% (Поз. 6)",en:"Diesel 57–71% (Notch 6)"}),file:"notch_6-loop1.3.wav"},
-    {id:"eng6",name:tr({ru:"Дизель 71–85% (Поз. 7)",en:"Diesel 71–85% (Notch 7)"}),file:"notch_7-loop1.3.wav"},
-    {id:"eng7",name:tr({ru:"Дизель 85–100% (Поз. 8)",en:"Diesel 85–100% (Notch 8)"}),file:"notch_8-loop1.1.wav"}
+    {id:"eng1",name:tr({ru:"Дизель 0–14% (Поз. 2)",en:"Diesel 0–14% (Notch 2)"}),start:"engine_accel_1_to_2.wav",file:"engine_notch_2_loop.wav"},
+    {id:"eng2",name:tr({ru:"Дизель 14–28% (Поз. 3)",en:"Diesel 14–28% (Notch 3)"}),start:"engine_accel_2_to_3.wav",file:"engine_notch_3_loop.wav"},
+    {id:"eng3",name:tr({ru:"Дизель 28–42% (Поз. 4)",en:"Diesel 28–42% (Notch 4)"}),start:"engine_accel_3_to_4.wav",file:"engine_notch_4_loop.wav"},
+    {id:"eng4",name:tr({ru:"Дизель 42–57% (Поз. 5)",en:"Diesel 42–57% (Notch 5)"}),start:"engine_accel_4_to_5.wav",file:"engine_notch_5_loop.wav"},
+    {id:"eng5",name:tr({ru:"Дизель 57–71% (Поз. 6)",en:"Diesel 57–71% (Notch 6)"}),start:"engine_accel_5_to_6.wav",file:"engine_notch_6_loop.wav"},
+    {id:"eng6",name:tr({ru:"Дизель 71–85% (Поз. 7)",en:"Diesel 71–85% (Notch 7)"}),start:"engine_accel_6_to_7.wav",file:"engine_notch_7_loop.wav"},
+    {id:"eng7",name:tr({ru:"Дизель 85–100% (Поз. 8)",en:"Diesel 85–100% (Notch 8)"}),start:"engine_accel_7_to_8.wav",file:"engine_notch_8_loop.wav"}
   ];
   /* Холостой ход дизеля ЧМЭ3 (K6S310DR, 350 об/мин, Поз. 0–1) */
   const idleS=newScheme("idle_scheme",t("s_engine_idle"));
-  add(idleS,"i_loop","loop",{files:{sound:"s-loop1.1.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+  const iStart=add(idleS,"i_start","start",{files:{sound:"engine_decel_to_idle.wav"},x:60,y:80});
+  const iLoop=add(idleS,"i_loop","loop",{files:{sound:"engine_idle_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+  link(idleS,iStart,iLoop);
 
   const engineCueX=420,engineCueY=150,engineCueStep=110;
   const idleCue=cue("idle_cue",idleS,t("s_engine_idle"),engineCueX,40);
   const engineCues=engineBands.map((band,i)=>{
     const es=newScheme(band.id,band.name);
-    add(es,band.id+"_loop","loop",{files:{sound:band.file},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:60,y:80});
+    const eStart=add(es,band.id+"_start","start",{files:{sound:band.start},x:60,y:80});
+    const eLoop=add(es,band.id+"_loop","loop",{files:{sound:band.file},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
+    link(es,eStart,eLoop);
     return cue(band.id+"_cue",es,band.name,engineCueX,engineCueY+i*engineCueStep);
   });
 
@@ -1015,11 +1069,14 @@ function defaultProject(){
   const reverserCue=cue("reverser_cue",reverserS,null,1500,2000);
   const tedCue=cue("ted_cue",tedS,null,1820,2120);
   const brakeSqCue=cue("brake_sq_cue",brakeSquealS,null,1820,2240);
+  const dynBrakeCue=cue("dyn_brake_cue",dynBrakeS,null,1820,2360);
   const stopEngCue=cue("stop_eng_cue",fullStartStopS,null,2140,2480);
 
   /* Ambient brake: колодочный тормоз локомотива по замедлению (через звуковую схему). */
   const brakeS=newScheme("brake_scheme",t("default_brake_scheme"));
-  add(brakeS,"br_start","start",{files:{sound:"bremse-anlegen_lokbremse.wav"},x:60,y:80});
+  const brStart=add(brakeS,"br_start","start",{files:{sound:"brake_apply.wav"},x:60,y:80});
+  const brEnd=add(brakeS,"br_end","end",{files:{sound:"brake_release.wav"},x:380,y:80});
+  link(brakeS,brStart,brEnd);
   const brakeCue=cue("brake_cue",brakeS,t("default_brake_scheme"),420,920);
   /* Light/AUX outputs and notch/logic actions. */
   const out=(id,ch,effect,level,x,y,name)=>add(p.mix,id,"output",{channel:ch,effect,level,dir:"auto",state:"any",name:name||tr(BY_TYPE.output.name),x,y});
@@ -1061,7 +1118,7 @@ function defaultProject(){
   link(p.mix,f23,reverserCue);
   link(p.mix,f24,lHold);link(p.mix,f24,tedCue);
   link(p.mix,f25,lCoast);link(p.mix,f25,brakeSqCue);
-  link(p.mix,f26,lDynBrk);
+  link(p.mix,f26,lDynBrk);link(p.mix,f26,dynBrakeCue);
   link(p.mix,f27,lMuteStop);link(p.mix,f27,lMuteMove);link(p.mix,f27,stopEngCue);
   link(p.mix,f28,underLight);
   link(p.mix,eng,idleCue,"eng_idle");
@@ -1600,7 +1657,7 @@ function _compileFlat(){
         const t=triggerCondOf(b.id);
         sStop=(t&&t.type==="speed")?speedOutConds(t):(holdStopOf(t)||{type:"engine_off"});
       }
-      const trigs=inputTrigs(b.id),hasSpeed=trigs.some(c=>c.type==="speed");
+      const trigs=inputTrigs(b.id),tTrig=triggerCondOf(b.id),hasSpeed=trigs.some(c=>c.type==="speed")||!!(tTrig&&tTrig.type==="speed");
       if(b.files.sound){
         const loops=(lm==="count")?Math.max(1,Math.min(255,b.loopCount||2)):0;
         const ph=b.id+"_play";addState(ph,blockName(b),b.files.sound,true,vol,rate,loops);
@@ -1799,7 +1856,7 @@ function _compileFlat(){
     }else{
       const src=entryOf(b.id);
       if(states.some(s=>s.id===src)&&src!==dst)addEdge(src,dst,{type:"sample_done"},5);
-      else if(!states.some(s=>s.id===src)&&isLeaf(b.id)&&terminal[b.id]){
+      else if(!engineChainIds.has(b.id)&&!states.some(s=>s.id===src)&&isLeaf(b.id)&&terminal[b.id]){
         const stops=Array.isArray(stopCondOf[b.id])?stopCondOf[b.id]:[stopCondOf[b.id]||{type:"sample_done"}];
         stops.forEach((c,i)=>{if(c)addEdge(terminal[b.id],dst,c,10+i);});
       }
@@ -2479,10 +2536,10 @@ function reverseGraphToProject(payload,fallbackName){
     }else if(has(p,"play")){
       const play=byId[p+"_play"],entry=entryCond(p),stop=exitCond(p,"play");
       if(play&&play.loop){
-        if(stop&&stop.type==="speed"){
+        if(stop&&stop.type==="speed"&&entry&&entry.type==="speed"){
           b=mk(p,"compressor",{volume:volOf(p+"_play"),rate:rateOf(p+"_play")});
           b.files.sound=fileOf(p+"_play");b.trigger="speed";
-          if(entry&&entry.type==="speed"){b.speedMin=fmtPct(entry.min);b.speedMax=fmtPct(entry.max==null?255:entry.max);}
+          b.speedMin=fmtPct(entry.min);b.speedMax=fmtPct(entry.max==null?255:entry.max);
         }else{
           b=mk(p,"loop",{volume:volOf(p+"_play"),rate:rateOf(p+"_play")});
           b.files.sound=fileOf(p+"_play");b.loopMode="hold";
@@ -2561,7 +2618,7 @@ function reverseGraphToProject(payload,fallbackName){
     });
     blocks.unshift(eng);
     if(idleRoot){idleRoot.trigger="auto";if(idleRoot.type==="whistle"||idleRoot.type==="simple")idleRoot.type="start";addLink(eng,idleRoot,"eng_idle");}
-    bandRoots.forEach((b,i)=>{b.trigger="auto";if(b.type==="compressor"){b.type="loop";b.loopMode="hold";}addLink(eng,b,"eng"+i);});
+    bandRoots.forEach((b,i)=>{b.trigger="auto";if(b.type==="compressor"){b.type="loop";b.loopMode="hold";}else if(b.type==="whistle"||b.type==="simple")b.type="start";addLink(eng,b,"eng"+i);});
   }
   blocks.forEach(b=>{if(b.type==="simple"&&!links.some(l=>l.to===b.id&&l.kind==="after"&&(blocks.find(x=>x.id===l.from)||{}).type!=="fx_in"&&(blocks.find(x=>x.id===l.from)||{}).type!=="engine"))b.type="start";});
   const vars=(payload.variables||[]).filter(v=>v&&v.kind==="user").map(v=>({name:cutUtf(v.name,23),kind:"user",init:v.init|0}));
@@ -3099,10 +3156,11 @@ function simTickChannel(ch,press,release,speed){
       if(ch.done){
         if(simCond(t.condition,ch,press,release,speed,wasEntered)||ch.pending===t.id)cands.push(t);
       }else if(simCond(t.condition,ch,press,release,speed,wasEntered)){
-        /* An endless engine loop has no sample end; waiting for it would freeze
-         * the speed band. Only speed/motion edges switch immediately. */
+        /* An endless engine loop (or engine Start transition when speed leaves
+         * the band) switches immediately so the speed band never freezes. */
         const speedEdge=t.condition&&(t.condition.type==="speed"||t.condition.type==="accel"||t.condition.type==="decel");
-        if(ch.engine&&nativeLoop&&speedEdge)cands.push(t);
+        const engineSpeedChange=ch.engine&&(!st.loop||(st.loops||0)===0);
+        if(engineSpeedChange&&speedEdge)cands.push(t);
         else if(!ch.pending||t.priority>ch.pendingPrio){ch.pending=t.id;ch.pendingPrio=t.priority;}
       }
       continue;

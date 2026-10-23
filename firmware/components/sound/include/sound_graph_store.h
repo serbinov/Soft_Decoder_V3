@@ -8,6 +8,8 @@
 /* Newest revisions kept per project. Older files are pruned after a save;
  * the selected revision is always retained so boot/apply stays valid. */
 #define SG_STORE_KEEP_REVISIONS 8U
+/* Project id of the built-in "ChME3 Locomotive" scheme. */
+#define SG_DEFAULT_PROJECT_ID "locomotive_default"
 
 typedef struct {
     char id[SG_ID_CAP], name[SG_NAME_CAP];
@@ -34,6 +36,16 @@ esp_err_t sg_store_select(const char *id, uint32_t revision);
 esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision,
                              bool *graph_selected);
 esp_err_t sg_store_select_legacy(void);
+/* Install the built-in scheme when no graph is selected (factory state).
+ * `json` is a sound-graph document whose `"assets":[]` manifest is empty: the
+ * real manifest is built from the WAV files installed on the device, so the
+ * copy matches the sound pack (ADPCM/PCM, any resampling).
+ * A selected graph is never replaced: that returns ESP_ERR_INVALID_STATE.
+ * If `id` is already stored (e.g. the selection record was lost) its latest
+ * saved revision is selected instead, so user edits win over the built-in copy.
+ * `seeded` reports whether a new revision was written. */
+esp_err_t sg_store_seed_default(const char *id, const char *json, size_t len,
+                                uint32_t *revision, bool *seeded);
 /* Delete every revision of a project. If it was selected, selection is
  * switched to legacy first. was_selected may be NULL. */
 esp_err_t sg_store_delete(const char *id, bool *was_selected);

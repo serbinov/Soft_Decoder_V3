@@ -1,0 +1,7353 @@
+{
+  "format": "sound-graph",
+  "schemaVersion": 1,
+  "id": "locomotive_default",
+  "name": "Тепловоз ЧМЭ3",
+  "engine": {
+    "entry": "eng_off",
+    "fn": 255,
+    "hold": 0
+  },
+  "hysteresis": 3,
+  "observers": 0,
+  "variables": [
+    {
+      "name": "speed",
+      "kind": "speed"
+    },
+    {
+      "name": "forward",
+      "kind": "forward"
+    },
+    {
+      "name": "moving",
+      "kind": "moving"
+    },
+    {
+      "name": "engine",
+      "kind": "engine"
+    }
+  ],
+  "states": [
+    {
+      "id": "eng_off",
+      "name": "Выкл",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "idle_cue-i_start_play",
+      "name": "Старт",
+      "file": "engine_decel_to_idle.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "idle_cue-i_loop_play",
+      "name": "Цикл",
+      "file": "engine_idle_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng1_cue-eng1_start_play",
+      "name": "Старт",
+      "file": "engine_accel_1_to_2.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng1_cue-eng1_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_2_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng2_cue-eng2_start_play",
+      "name": "Старт",
+      "file": "engine_accel_2_to_3.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng2_cue-eng2_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_3_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng3_cue-eng3_start_play",
+      "name": "Старт",
+      "file": "engine_accel_3_to_4.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng3_cue-eng3_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_4_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng4_cue-eng4_start_play",
+      "name": "Старт",
+      "file": "engine_accel_4_to_5.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng4_cue-eng4_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_5_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng5_cue-eng5_start_play",
+      "name": "Старт",
+      "file": "engine_accel_5_to_6.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng5_cue-eng5_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_6_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng6_cue-eng6_start_play",
+      "name": "Старт",
+      "file": "engine_accel_6_to_7.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng6_cue-eng6_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_7_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng7_cue-eng7_start_play",
+      "name": "Старт",
+      "file": "engine_accel_7_to_8.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "eng7_cue-eng7_loop_play",
+      "name": "Цикл",
+      "file": "engine_notch_8_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "whistle_cue-w_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "whistle_cue-w_start_play",
+      "name": "Старт",
+      "file": "whistle_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "whistle_cue-w_loop_play",
+      "name": "Цикл",
+      "file": "whistle_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "whistle_cue-w_end_end",
+      "name": "Конец",
+      "file": "whistle_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "horn_cue-h_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "horn_cue-h_start_play",
+      "name": "Старт",
+      "file": "horn_low_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "horn_cue-h_loop_play",
+      "name": "Цикл",
+      "file": "horn_low_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "horn_cue-h_end_end",
+      "name": "Конец",
+      "file": "horn_low_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "bell_cue-b_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "bell_cue-b_start_play",
+      "name": "Старт",
+      "file": "radio_ptt_press.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "bell_cue-b_beep_play",
+      "name": "Простой",
+      "file": "radio_channel_beep.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "bell_cue-b_msg_play",
+      "name": "Простой",
+      "file": "radio_command_forward_gleis3.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "bell_cue-b_end_end",
+      "name": "Конец",
+      "file": "radio_ptt_release.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "comp_cue-c_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "comp_cue-c_start_play",
+      "name": "Старт",
+      "file": "compressor_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "comp_cue-c_loop_play",
+      "name": "Цикл",
+      "file": "compressor_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "comp_cue-c_end_end",
+      "name": "Конец",
+      "file": "compressor_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "coupler_cue-k_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "coupler_cue-k_start_play",
+      "name": "Старт",
+      "file": "coupler_attach.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "sander_cue-s_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "sander_cue-s_start_play",
+      "name": "Старт",
+      "file": "sander_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "sander_cue-s_loop_play",
+      "name": "Цикл",
+      "file": "sander_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "sander_cue-s_end_end",
+      "name": "Конец",
+      "file": "sander_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "door_open_cue-d_open_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "door_open_cue-d_open_play",
+      "name": "Старт",
+      "file": "cab_door_open.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "door_close_cue-d_close_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "door_close_cue-d_close_play",
+      "name": "Старт",
+      "file": "cab_door_close.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "fan_cue-fn_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "fan_cue-fn_start_play",
+      "name": "Старт",
+      "file": "fan_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "fan_cue-fn_loop_play",
+      "name": "Цикл",
+      "file": "fan_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "fan_cue-fn_end_end",
+      "name": "Конец",
+      "file": "fan_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "uncoupler_cue-uc_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "uncoupler_cue-uc_start_play",
+      "name": "Старт",
+      "file": "coupler_detach.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "turbo_cue-tb_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "turbo_cue-tb_start_play",
+      "name": "Старт",
+      "file": "turbo_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "turbo_cue-tb_loop_play",
+      "name": "Цикл",
+      "file": "turbo_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "turbo_cue-tb_end_end",
+      "name": "Конец",
+      "file": "turbo_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "curve_cue-cs_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "curve_cue-cs_start_play",
+      "name": "Старт",
+      "file": "curve_squeal_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "curve_cue-cs_loop_play",
+      "name": "Цикл",
+      "file": "curve_squeal_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "curve_cue-cs_end_end",
+      "name": "Конец",
+      "file": "curve_squeal_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "clank_cue-rc_1_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "clank_cue-rc_1_play",
+      "name": "Старт",
+      "file": "rail_switch_clank.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "clank_cue-rc_2_play",
+      "name": "Простой",
+      "file": "rail_joint_slow.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "clank_cue-rc_end_end",
+      "name": "Конец",
+      "file": "rail_joint_fast.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "air_rel_cue-ar_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "air_rel_cue-ar_start_play",
+      "name": "Старт",
+      "file": "air_release_valve.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "air_rel_cue-ar_loop_play",
+      "name": "Цикл",
+      "file": "air_release_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "air_rel_cue-ar_end_end",
+      "name": "Конец",
+      "file": "air_release_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "shunter_cue-sh_1_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "shunter_cue-sh_1_play",
+      "name": "Старт",
+      "file": "shunter_whistle.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "shunter_cue-sh_end_end",
+      "name": "Конец",
+      "file": "radio_acknowledge.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "station_cue-st_1_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "station_cue-st_1_play",
+      "name": "Старт",
+      "file": "station_departure_announcement.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "handbrake_cue-hb_1_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "handbrake_cue-hb_1_play",
+      "name": "Старт",
+      "file": "handbrake_apply.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "handbrake_cue-hb_end_end",
+      "name": "Конец",
+      "file": "handbrake_release.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "reverser_cue-rv_1_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "reverser_cue-rv_1_play",
+      "name": "Старт",
+      "file": "reverser_forward.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "reverser_cue-rv_2_play",
+      "name": "Простой",
+      "file": "reverser_shunt_mode.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "reverser_cue-rv_end_end",
+      "name": "Конец",
+      "file": "reverser_reverse.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "ted_cue-tm_loop_off",
+      "name": "Цикл",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "ted_cue-tm_loop_play",
+      "name": "Цикл",
+      "file": "traction_motor_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "ted_cue-tm_end_end",
+      "name": "Конец",
+      "file": "traction_motor_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "brake_sq_cue-bs_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "brake_sq_cue-bs_start_play",
+      "name": "Старт",
+      "file": "brake_squeal_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "brake_sq_cue-bs_loop_play",
+      "name": "Цикл",
+      "file": "brake_squeal_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "brake_sq_cue-bs_end_end",
+      "name": "Конец",
+      "file": "brake_squeal_stop.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "dyn_brake_cue-db_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "dyn_brake_cue-db_start_play",
+      "name": "Старт",
+      "file": "dynamic_brake_on.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "dyn_brake_cue-db_end_end",
+      "name": "Конец",
+      "file": "dynamic_brake_off.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "stop_eng_cue-ds_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "stop_eng_cue-ds_start_play",
+      "name": "Старт",
+      "file": "engine_crank_start.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "stop_eng_cue-ds_loop_play",
+      "name": "Цикл",
+      "file": "engine_crank_loop.wav",
+      "loop": true,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "stop_eng_cue-ds_end_end",
+      "name": "Конец",
+      "file": "engine_shutdown.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "brake_cue-br_start_off",
+      "name": "Старт",
+      "file": "",
+      "loop": false,
+      "volume": 100,
+      "rate": 1000
+    },
+    {
+      "id": "brake_cue-br_start_play",
+      "name": "Старт",
+      "file": "brake_apply.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    },
+    {
+      "id": "brake_cue-br_end_end",
+      "name": "Конец",
+      "file": "brake_release.wav",
+      "loop": false,
+      "volume": 80,
+      "rate": 1000
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "source": "eng_off",
+      "target": "idle_cue-i_start_play",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "t2",
+      "source": "idle_cue-i_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 1,
+        "max": 255
+      }
+    },
+    {
+      "id": "t3",
+      "source": "idle_cue-i_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t4",
+      "source": "idle_cue-i_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 1,
+        "max": 255
+      }
+    },
+    {
+      "id": "t5",
+      "source": "idle_cue-i_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t6",
+      "source": "eng_off",
+      "target": "eng1_cue-eng1_start_play",
+      "priority": 9,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 1,
+        "max": 36
+      }
+    },
+    {
+      "id": "t7",
+      "source": "eng1_cue-eng1_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "t8",
+      "source": "eng1_cue-eng1_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 37,
+        "max": 255
+      }
+    },
+    {
+      "id": "t9",
+      "source": "eng1_cue-eng1_start_play",
+      "target": "eng_off",
+      "priority": 202,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t10",
+      "source": "eng1_cue-eng1_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "t11",
+      "source": "eng1_cue-eng1_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 37,
+        "max": 255
+      }
+    },
+    {
+      "id": "t12",
+      "source": "eng1_cue-eng1_loop_play",
+      "target": "eng_off",
+      "priority": 12,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t13",
+      "source": "eng_off",
+      "target": "eng2_cue-eng2_start_play",
+      "priority": 8,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 37,
+        "max": 71
+      }
+    },
+    {
+      "id": "t14",
+      "source": "eng2_cue-eng2_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 36
+      }
+    },
+    {
+      "id": "t15",
+      "source": "eng2_cue-eng2_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 72,
+        "max": 255
+      }
+    },
+    {
+      "id": "t16",
+      "source": "eng2_cue-eng2_start_play",
+      "target": "eng_off",
+      "priority": 202,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t17",
+      "source": "eng2_cue-eng2_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 36
+      }
+    },
+    {
+      "id": "t18",
+      "source": "eng2_cue-eng2_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 72,
+        "max": 255
+      }
+    },
+    {
+      "id": "t19",
+      "source": "eng2_cue-eng2_loop_play",
+      "target": "eng_off",
+      "priority": 12,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t20",
+      "source": "eng_off",
+      "target": "eng3_cue-eng3_start_play",
+      "priority": 7,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 72,
+        "max": 107
+      }
+    },
+    {
+      "id": "t21",
+      "source": "eng3_cue-eng3_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 71
+      }
+    },
+    {
+      "id": "t22",
+      "source": "eng3_cue-eng3_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 108,
+        "max": 255
+      }
+    },
+    {
+      "id": "t23",
+      "source": "eng3_cue-eng3_start_play",
+      "target": "eng_off",
+      "priority": 202,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t24",
+      "source": "eng3_cue-eng3_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 71
+      }
+    },
+    {
+      "id": "t25",
+      "source": "eng3_cue-eng3_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 108,
+        "max": 255
+      }
+    },
+    {
+      "id": "t26",
+      "source": "eng3_cue-eng3_loop_play",
+      "target": "eng_off",
+      "priority": 12,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t27",
+      "source": "eng_off",
+      "target": "eng4_cue-eng4_start_play",
+      "priority": 6,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 108,
+        "max": 145
+      }
+    },
+    {
+      "id": "t28",
+      "source": "eng4_cue-eng4_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 107
+      }
+    },
+    {
+      "id": "t29",
+      "source": "eng4_cue-eng4_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 146,
+        "max": 255
+      }
+    },
+    {
+      "id": "t30",
+      "source": "eng4_cue-eng4_start_play",
+      "target": "eng_off",
+      "priority": 202,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t31",
+      "source": "eng4_cue-eng4_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 107
+      }
+    },
+    {
+      "id": "t32",
+      "source": "eng4_cue-eng4_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 146,
+        "max": 255
+      }
+    },
+    {
+      "id": "t33",
+      "source": "eng4_cue-eng4_loop_play",
+      "target": "eng_off",
+      "priority": 12,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t34",
+      "source": "eng_off",
+      "target": "eng5_cue-eng5_start_play",
+      "priority": 5,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 146,
+        "max": 181
+      }
+    },
+    {
+      "id": "t35",
+      "source": "eng5_cue-eng5_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 145
+      }
+    },
+    {
+      "id": "t36",
+      "source": "eng5_cue-eng5_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 182,
+        "max": 255
+      }
+    },
+    {
+      "id": "t37",
+      "source": "eng5_cue-eng5_start_play",
+      "target": "eng_off",
+      "priority": 202,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t38",
+      "source": "eng5_cue-eng5_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 145
+      }
+    },
+    {
+      "id": "t39",
+      "source": "eng5_cue-eng5_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 182,
+        "max": 255
+      }
+    },
+    {
+      "id": "t40",
+      "source": "eng5_cue-eng5_loop_play",
+      "target": "eng_off",
+      "priority": 12,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t41",
+      "source": "eng_off",
+      "target": "eng6_cue-eng6_start_play",
+      "priority": 4,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 182,
+        "max": 217
+      }
+    },
+    {
+      "id": "t42",
+      "source": "eng6_cue-eng6_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 181
+      }
+    },
+    {
+      "id": "t43",
+      "source": "eng6_cue-eng6_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 218,
+        "max": 255
+      }
+    },
+    {
+      "id": "t44",
+      "source": "eng6_cue-eng6_start_play",
+      "target": "eng_off",
+      "priority": 202,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t45",
+      "source": "eng6_cue-eng6_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 181
+      }
+    },
+    {
+      "id": "t46",
+      "source": "eng6_cue-eng6_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 218,
+        "max": 255
+      }
+    },
+    {
+      "id": "t47",
+      "source": "eng6_cue-eng6_loop_play",
+      "target": "eng_off",
+      "priority": 12,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t48",
+      "source": "eng_off",
+      "target": "eng7_cue-eng7_start_play",
+      "priority": 3,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 218,
+        "max": 255
+      }
+    },
+    {
+      "id": "t49",
+      "source": "eng7_cue-eng7_start_play",
+      "target": "eng_off",
+      "priority": 200,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 217
+      }
+    },
+    {
+      "id": "t50",
+      "source": "eng7_cue-eng7_start_play",
+      "target": "eng_off",
+      "priority": 201,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t51",
+      "source": "eng7_cue-eng7_loop_play",
+      "target": "eng_off",
+      "priority": 10,
+      "timing": "after_sample",
+      "condition": {
+        "type": "speed",
+        "min": 0,
+        "max": 217
+      }
+    },
+    {
+      "id": "t52",
+      "source": "eng7_cue-eng7_loop_play",
+      "target": "eng_off",
+      "priority": 11,
+      "timing": "immediate",
+      "condition": {
+        "type": "engine_off"
+      }
+    },
+    {
+      "id": "t53",
+      "source": "whistle_cue-w_start_off",
+      "target": "whistle_cue-w_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 1
+      }
+    },
+    {
+      "id": "t54",
+      "source": "horn_cue-h_start_off",
+      "target": "horn_cue-h_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 2
+      }
+    },
+    {
+      "id": "t55",
+      "source": "bell_cue-b_start_off",
+      "target": "bell_cue-b_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 5
+      }
+    },
+    {
+      "id": "t56",
+      "source": "comp_cue-c_start_off",
+      "target": "comp_cue-c_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 6
+      }
+    },
+    {
+      "id": "t57",
+      "source": "coupler_cue-k_start_off",
+      "target": "coupler_cue-k_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 7
+      }
+    },
+    {
+      "id": "t58",
+      "source": "coupler_cue-k_start_play",
+      "target": "coupler_cue-k_start_off",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t59",
+      "source": "sander_cue-s_start_off",
+      "target": "sander_cue-s_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 8
+      }
+    },
+    {
+      "id": "t60",
+      "source": "door_open_cue-d_open_off",
+      "target": "door_open_cue-d_open_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 12
+      }
+    },
+    {
+      "id": "t61",
+      "source": "door_open_cue-d_open_play",
+      "target": "door_open_cue-d_open_off",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t62",
+      "source": "door_close_cue-d_close_off",
+      "target": "door_close_cue-d_close_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 13
+      }
+    },
+    {
+      "id": "t63",
+      "source": "door_close_cue-d_close_play",
+      "target": "door_close_cue-d_close_off",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t64",
+      "source": "fan_cue-fn_start_off",
+      "target": "fan_cue-fn_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 14
+      }
+    },
+    {
+      "id": "t65",
+      "source": "uncoupler_cue-uc_start_off",
+      "target": "uncoupler_cue-uc_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 15
+      }
+    },
+    {
+      "id": "t66",
+      "source": "uncoupler_cue-uc_start_play",
+      "target": "uncoupler_cue-uc_start_off",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t67",
+      "source": "turbo_cue-tb_start_off",
+      "target": "turbo_cue-tb_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 16
+      }
+    },
+    {
+      "id": "t68",
+      "source": "curve_cue-cs_start_off",
+      "target": "curve_cue-cs_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 17
+      }
+    },
+    {
+      "id": "t69",
+      "source": "clank_cue-rc_1_off",
+      "target": "clank_cue-rc_1_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 18
+      }
+    },
+    {
+      "id": "t70",
+      "source": "air_rel_cue-ar_start_off",
+      "target": "air_rel_cue-ar_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 19
+      }
+    },
+    {
+      "id": "t71",
+      "source": "shunter_cue-sh_1_off",
+      "target": "shunter_cue-sh_1_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 20
+      }
+    },
+    {
+      "id": "t72",
+      "source": "station_cue-st_1_off",
+      "target": "station_cue-st_1_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 21
+      }
+    },
+    {
+      "id": "t73",
+      "source": "station_cue-st_1_play",
+      "target": "station_cue-st_1_off",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t74",
+      "source": "handbrake_cue-hb_1_off",
+      "target": "handbrake_cue-hb_1_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 22
+      }
+    },
+    {
+      "id": "t75",
+      "source": "reverser_cue-rv_1_off",
+      "target": "reverser_cue-rv_1_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 23
+      }
+    },
+    {
+      "id": "t76",
+      "source": "ted_cue-tm_loop_off",
+      "target": "ted_cue-tm_loop_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 24
+      }
+    },
+    {
+      "id": "t77",
+      "source": "brake_sq_cue-bs_start_off",
+      "target": "brake_sq_cue-bs_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_on",
+        "fn": 25
+      }
+    },
+    {
+      "id": "t78",
+      "source": "dyn_brake_cue-db_start_off",
+      "target": "dyn_brake_cue-db_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 26
+      }
+    },
+    {
+      "id": "t79",
+      "source": "stop_eng_cue-ds_start_off",
+      "target": "stop_eng_cue-ds_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_press",
+        "fn": 27
+      }
+    },
+    {
+      "id": "t80",
+      "source": "brake_cue-br_start_off",
+      "target": "brake_cue-br_start_play",
+      "priority": 10,
+      "timing": "immediate",
+      "condition": {
+        "type": "decel",
+        "min": 1,
+        "max": 255
+      }
+    },
+    {
+      "id": "t81",
+      "source": "idle_cue-i_start_play",
+      "target": "idle_cue-i_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t82",
+      "source": "eng1_cue-eng1_start_play",
+      "target": "eng1_cue-eng1_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t83",
+      "source": "eng2_cue-eng2_start_play",
+      "target": "eng2_cue-eng2_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t84",
+      "source": "eng3_cue-eng3_start_play",
+      "target": "eng3_cue-eng3_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t85",
+      "source": "eng4_cue-eng4_start_play",
+      "target": "eng4_cue-eng4_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t86",
+      "source": "eng5_cue-eng5_start_play",
+      "target": "eng5_cue-eng5_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t87",
+      "source": "eng6_cue-eng6_start_play",
+      "target": "eng6_cue-eng6_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t88",
+      "source": "eng7_cue-eng7_start_play",
+      "target": "eng7_cue-eng7_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t89",
+      "source": "whistle_cue-w_start_play",
+      "target": "whistle_cue-w_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t90",
+      "source": "whistle_cue-w_loop_play",
+      "target": "whistle_cue-w_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 1
+      }
+    },
+    {
+      "id": "t91",
+      "source": "horn_cue-h_start_play",
+      "target": "horn_cue-h_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t92",
+      "source": "horn_cue-h_loop_play",
+      "target": "horn_cue-h_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 2
+      }
+    },
+    {
+      "id": "t93",
+      "source": "bell_cue-b_start_play",
+      "target": "bell_cue-b_beep_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t94",
+      "source": "bell_cue-b_beep_play",
+      "target": "bell_cue-b_msg_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t95",
+      "source": "bell_cue-b_msg_play",
+      "target": "bell_cue-b_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t96",
+      "source": "comp_cue-c_start_play",
+      "target": "comp_cue-c_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t97",
+      "source": "comp_cue-c_loop_play",
+      "target": "comp_cue-c_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 6
+      }
+    },
+    {
+      "id": "t98",
+      "source": "sander_cue-s_start_play",
+      "target": "sander_cue-s_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t99",
+      "source": "sander_cue-s_loop_play",
+      "target": "sander_cue-s_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 8
+      }
+    },
+    {
+      "id": "t100",
+      "source": "fan_cue-fn_start_play",
+      "target": "fan_cue-fn_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t101",
+      "source": "fan_cue-fn_loop_play",
+      "target": "fan_cue-fn_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 14
+      }
+    },
+    {
+      "id": "t102",
+      "source": "turbo_cue-tb_start_play",
+      "target": "turbo_cue-tb_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t103",
+      "source": "turbo_cue-tb_loop_play",
+      "target": "turbo_cue-tb_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 16
+      }
+    },
+    {
+      "id": "t104",
+      "source": "curve_cue-cs_start_play",
+      "target": "curve_cue-cs_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t105",
+      "source": "curve_cue-cs_loop_play",
+      "target": "curve_cue-cs_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 17
+      }
+    },
+    {
+      "id": "t106",
+      "source": "clank_cue-rc_1_play",
+      "target": "clank_cue-rc_2_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t107",
+      "source": "clank_cue-rc_2_play",
+      "target": "clank_cue-rc_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t108",
+      "source": "air_rel_cue-ar_start_play",
+      "target": "air_rel_cue-ar_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t109",
+      "source": "air_rel_cue-ar_loop_play",
+      "target": "air_rel_cue-ar_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 19
+      }
+    },
+    {
+      "id": "t110",
+      "source": "shunter_cue-sh_1_play",
+      "target": "shunter_cue-sh_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t111",
+      "source": "handbrake_cue-hb_1_play",
+      "target": "handbrake_cue-hb_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t112",
+      "source": "reverser_cue-rv_1_play",
+      "target": "reverser_cue-rv_2_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t113",
+      "source": "reverser_cue-rv_2_play",
+      "target": "reverser_cue-rv_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t114",
+      "source": "ted_cue-tm_loop_play",
+      "target": "ted_cue-tm_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 24
+      }
+    },
+    {
+      "id": "t115",
+      "source": "brake_sq_cue-bs_start_play",
+      "target": "brake_sq_cue-bs_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t116",
+      "source": "brake_sq_cue-bs_loop_play",
+      "target": "brake_sq_cue-bs_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 25
+      }
+    },
+    {
+      "id": "t117",
+      "source": "dyn_brake_cue-db_start_play",
+      "target": "dyn_brake_cue-db_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t118",
+      "source": "stop_eng_cue-ds_start_play",
+      "target": "stop_eng_cue-ds_loop_play",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t119",
+      "source": "stop_eng_cue-ds_loop_play",
+      "target": "stop_eng_cue-ds_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 27
+      }
+    },
+    {
+      "id": "t120",
+      "source": "brake_cue-br_start_play",
+      "target": "brake_cue-br_end_end",
+      "priority": 58,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t121",
+      "source": "whistle_cue-w_start_play",
+      "target": "whistle_cue-w_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 1
+      }
+    },
+    {
+      "id": "t122",
+      "source": "whistle_cue-w_end_end",
+      "target": "whistle_cue-w_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t123",
+      "source": "horn_cue-h_start_play",
+      "target": "horn_cue-h_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 2
+      }
+    },
+    {
+      "id": "t124",
+      "source": "horn_cue-h_end_end",
+      "target": "horn_cue-h_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t125",
+      "source": "bell_cue-b_start_play",
+      "target": "bell_cue-b_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 5
+      }
+    },
+    {
+      "id": "t126",
+      "source": "bell_cue-b_end_end",
+      "target": "bell_cue-b_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t127",
+      "source": "comp_cue-c_start_play",
+      "target": "comp_cue-c_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 6
+      }
+    },
+    {
+      "id": "t128",
+      "source": "comp_cue-c_end_end",
+      "target": "comp_cue-c_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t129",
+      "source": "sander_cue-s_start_play",
+      "target": "sander_cue-s_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 8
+      }
+    },
+    {
+      "id": "t130",
+      "source": "sander_cue-s_end_end",
+      "target": "sander_cue-s_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t131",
+      "source": "fan_cue-fn_start_play",
+      "target": "fan_cue-fn_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 14
+      }
+    },
+    {
+      "id": "t132",
+      "source": "fan_cue-fn_end_end",
+      "target": "fan_cue-fn_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t133",
+      "source": "turbo_cue-tb_start_play",
+      "target": "turbo_cue-tb_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 16
+      }
+    },
+    {
+      "id": "t134",
+      "source": "turbo_cue-tb_end_end",
+      "target": "turbo_cue-tb_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t135",
+      "source": "curve_cue-cs_start_play",
+      "target": "curve_cue-cs_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 17
+      }
+    },
+    {
+      "id": "t136",
+      "source": "curve_cue-cs_end_end",
+      "target": "curve_cue-cs_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t137",
+      "source": "clank_cue-rc_1_play",
+      "target": "clank_cue-rc_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 18
+      }
+    },
+    {
+      "id": "t138",
+      "source": "clank_cue-rc_end_end",
+      "target": "clank_cue-rc_1_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t139",
+      "source": "air_rel_cue-ar_start_play",
+      "target": "air_rel_cue-ar_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 19
+      }
+    },
+    {
+      "id": "t140",
+      "source": "air_rel_cue-ar_end_end",
+      "target": "air_rel_cue-ar_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t141",
+      "source": "shunter_cue-sh_1_play",
+      "target": "shunter_cue-sh_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 20
+      }
+    },
+    {
+      "id": "t142",
+      "source": "shunter_cue-sh_end_end",
+      "target": "shunter_cue-sh_1_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t143",
+      "source": "handbrake_cue-hb_1_play",
+      "target": "handbrake_cue-hb_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 22
+      }
+    },
+    {
+      "id": "t144",
+      "source": "handbrake_cue-hb_end_end",
+      "target": "handbrake_cue-hb_1_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t145",
+      "source": "reverser_cue-rv_1_play",
+      "target": "reverser_cue-rv_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 23
+      }
+    },
+    {
+      "id": "t146",
+      "source": "reverser_cue-rv_end_end",
+      "target": "reverser_cue-rv_1_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t147",
+      "source": "ted_cue-tm_end_end",
+      "target": "ted_cue-tm_loop_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t148",
+      "source": "brake_sq_cue-bs_start_play",
+      "target": "brake_sq_cue-bs_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_off",
+        "fn": 25
+      }
+    },
+    {
+      "id": "t149",
+      "source": "brake_sq_cue-bs_end_end",
+      "target": "brake_sq_cue-bs_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t150",
+      "source": "dyn_brake_cue-db_start_play",
+      "target": "dyn_brake_cue-db_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 26
+      }
+    },
+    {
+      "id": "t151",
+      "source": "dyn_brake_cue-db_end_end",
+      "target": "dyn_brake_cue-db_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t152",
+      "source": "stop_eng_cue-ds_start_play",
+      "target": "stop_eng_cue-ds_end_end",
+      "priority": 200,
+      "timing": "immediate",
+      "condition": {
+        "type": "fn_release",
+        "fn": 27
+      }
+    },
+    {
+      "id": "t153",
+      "source": "stop_eng_cue-ds_end_end",
+      "target": "stop_eng_cue-ds_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    },
+    {
+      "id": "t154",
+      "source": "brake_cue-br_end_end",
+      "target": "brake_cue-br_start_off",
+      "priority": 5,
+      "timing": "immediate",
+      "condition": {
+        "type": "sample_done"
+      }
+    }
+  ],
+  "effects": [
+    {
+      "id": "whistle_cue-w_start",
+      "entry": "whistle_cue-w_start_off",
+      "fn": 1
+    },
+    {
+      "id": "horn_cue-h_start",
+      "entry": "horn_cue-h_start_off",
+      "fn": 2
+    },
+    {
+      "id": "bell_cue-b_start",
+      "entry": "bell_cue-b_start_off",
+      "fn": 5
+    },
+    {
+      "id": "comp_cue-c_start",
+      "entry": "comp_cue-c_start_off",
+      "fn": 6
+    },
+    {
+      "id": "coupler_cue-k_start",
+      "entry": "coupler_cue-k_start_off",
+      "fn": 7
+    },
+    {
+      "id": "sander_cue-s_start",
+      "entry": "sander_cue-s_start_off",
+      "fn": 8
+    },
+    {
+      "id": "door_open_cue-d_open",
+      "entry": "door_open_cue-d_open_off",
+      "fn": 12
+    },
+    {
+      "id": "door_close_cue-d_close",
+      "entry": "door_close_cue-d_close_off",
+      "fn": 13
+    },
+    {
+      "id": "fan_cue-fn_start",
+      "entry": "fan_cue-fn_start_off",
+      "fn": 14
+    },
+    {
+      "id": "uncoupler_cue-uc_start",
+      "entry": "uncoupler_cue-uc_start_off",
+      "fn": 15
+    },
+    {
+      "id": "turbo_cue-tb_start",
+      "entry": "turbo_cue-tb_start_off",
+      "fn": 16
+    },
+    {
+      "id": "curve_cue-cs_start",
+      "entry": "curve_cue-cs_start_off",
+      "fn": 17
+    },
+    {
+      "id": "clank_cue-rc_1",
+      "entry": "clank_cue-rc_1_off",
+      "fn": 18
+    },
+    {
+      "id": "air_rel_cue-ar_start",
+      "entry": "air_rel_cue-ar_start_off",
+      "fn": 19
+    },
+    {
+      "id": "shunter_cue-sh_1",
+      "entry": "shunter_cue-sh_1_off",
+      "fn": 20
+    },
+    {
+      "id": "station_cue-st_1",
+      "entry": "station_cue-st_1_off",
+      "fn": 21
+    },
+    {
+      "id": "handbrake_cue-hb_1",
+      "entry": "handbrake_cue-hb_1_off",
+      "fn": 22
+    },
+    {
+      "id": "reverser_cue-rv_1",
+      "entry": "reverser_cue-rv_1_off",
+      "fn": 23
+    },
+    {
+      "id": "ted_cue-tm_loop",
+      "entry": "ted_cue-tm_loop_off",
+      "fn": 24
+    },
+    {
+      "id": "brake_sq_cue-bs_start",
+      "entry": "brake_sq_cue-bs_start_off",
+      "fn": 25
+    },
+    {
+      "id": "dyn_brake_cue-db_start",
+      "entry": "dyn_brake_cue-db_start_off",
+      "fn": 26
+    },
+    {
+      "id": "stop_eng_cue-ds_start",
+      "entry": "stop_eng_cue-ds_start_off",
+      "fn": 27
+    },
+    {
+      "id": "brake_cue-br_start",
+      "entry": "brake_cue-br_start_off",
+      "fn": 0
+    }
+  ],
+  "assets": [
+    {
+      "file": "air_release_loop.wav",
+      "crc32": "495df646",
+      "size": 15572,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 248
+    },
+    {
+      "file": "air_release_stop.wav",
+      "crc32": "3708704b",
+      "size": 21754,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 347
+    },
+    {
+      "file": "air_release_valve.wav",
+      "crc32": "602cf310",
+      "size": 179778,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2876
+    },
+    {
+      "file": "brake_apply.wav",
+      "crc32": "715fbfb9",
+      "size": 133886,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2141
+    },
+    {
+      "file": "brake_release.wav",
+      "crc32": "58d38381",
+      "size": 183134,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2929
+    },
+    {
+      "file": "brake_squeal_loop.wav",
+      "crc32": "499248d5",
+      "size": 42548,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 680
+    },
+    {
+      "file": "brake_squeal_start.wav",
+      "crc32": "ecdfc705",
+      "size": 54574,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 872
+    },
+    {
+      "file": "brake_squeal_stop.wav",
+      "crc32": "5720989f",
+      "size": 101178,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1618
+    },
+    {
+      "file": "cab_door_close.wav",
+      "crc32": "47058c88",
+      "size": 29646,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 474
+    },
+    {
+      "file": "cab_door_open.wav",
+      "crc32": "d2fe986f",
+      "size": 29378,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 469
+    },
+    {
+      "file": "compressor_loop.wav",
+      "crc32": "ee8ded4f",
+      "size": 11404,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 182
+    },
+    {
+      "file": "compressor_start.wav",
+      "crc32": "b329f31a",
+      "size": 51694,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 826
+    },
+    {
+      "file": "compressor_stop.wav",
+      "crc32": "beaff2ba",
+      "size": 49084,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 785
+    },
+    {
+      "file": "coupler_attach.wav",
+      "crc32": "c270ae9a",
+      "size": 109864,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1757
+    },
+    {
+      "file": "coupler_detach.wav",
+      "crc32": "28307cfb",
+      "size": 108820,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1740
+    },
+    {
+      "file": "curve_squeal_loop.wav",
+      "crc32": "98f0590e",
+      "size": 119052,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1904
+    },
+    {
+      "file": "curve_squeal_start.wav",
+      "crc32": "4d2bc083",
+      "size": 62558,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1000
+    },
+    {
+      "file": "curve_squeal_stop.wav",
+      "crc32": "ac40efa6",
+      "size": 82042,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1312
+    },
+    {
+      "file": "dynamic_brake_off.wav",
+      "crc32": "bef4105f",
+      "size": 315566,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 5048
+    },
+    {
+      "file": "dynamic_brake_on.wav",
+      "crc32": "173d8cf5",
+      "size": 243682,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 3898
+    },
+    {
+      "file": "engine_accel_1_to_2.wav",
+      "crc32": "0f8aaa75",
+      "size": 18732,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 299
+    },
+    {
+      "file": "engine_accel_2_to_3.wav",
+      "crc32": "4c187147",
+      "size": 22108,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 353
+    },
+    {
+      "file": "engine_accel_3_to_4.wav",
+      "crc32": "db264101",
+      "size": 16478,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 263
+    },
+    {
+      "file": "engine_accel_4_to_5.wav",
+      "crc32": "948ff430",
+      "size": 15700,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 250
+    },
+    {
+      "file": "engine_accel_5_to_6.wav",
+      "crc32": "f4b7fcf4",
+      "size": 13782,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 220
+    },
+    {
+      "file": "engine_accel_6_to_7.wav",
+      "crc32": "e88d41d4",
+      "size": 17348,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 277
+    },
+    {
+      "file": "engine_accel_7_to_8.wav",
+      "crc32": "45e1f29d",
+      "size": 49714,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 795
+    },
+    {
+      "file": "engine_crank_loop.wav",
+      "crc32": "96f58534",
+      "size": 56600,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 905
+    },
+    {
+      "file": "engine_crank_start.wav",
+      "crc32": "7117658d",
+      "size": 85778,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1372
+    },
+    {
+      "file": "engine_decel_to_idle.wav",
+      "crc32": "56c96c5c",
+      "size": 97564,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1560
+    },
+    {
+      "file": "engine_idle_loop.wav",
+      "crc32": "efdcef1a",
+      "size": 48974,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 783
+    },
+    {
+      "file": "engine_notch_2_loop.wav",
+      "crc32": "a07f47c8",
+      "size": 57630,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 921
+    },
+    {
+      "file": "engine_notch_3_loop.wav",
+      "crc32": "0e5d8b0e",
+      "size": 35734,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 571
+    },
+    {
+      "file": "engine_notch_4_loop.wav",
+      "crc32": "d92c0d83",
+      "size": 50788,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 812
+    },
+    {
+      "file": "engine_notch_5_loop.wav",
+      "crc32": "046ad2f5",
+      "size": 48474,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 775
+    },
+    {
+      "file": "engine_notch_6_loop.wav",
+      "crc32": "c96a70a5",
+      "size": 44322,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 708
+    },
+    {
+      "file": "engine_notch_7_loop.wav",
+      "crc32": "9d214610",
+      "size": 40298,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 644
+    },
+    {
+      "file": "engine_notch_8_loop.wav",
+      "crc32": "de522d8c",
+      "size": 36534,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 584
+    },
+    {
+      "file": "engine_shutdown.wav",
+      "crc32": "66f2f59b",
+      "size": 470612,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 7529
+    },
+    {
+      "file": "fan_loop.wav",
+      "crc32": "df8731b3",
+      "size": 27540,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 440
+    },
+    {
+      "file": "fan_start.wav",
+      "crc32": "57a4c53b",
+      "size": 156400,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2502
+    },
+    {
+      "file": "fan_stop.wav",
+      "crc32": "e0124be5",
+      "size": 185564,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2968
+    },
+    {
+      "file": "handbrake_apply.wav",
+      "crc32": "0c26102c",
+      "size": 477480,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 7639
+    },
+    {
+      "file": "handbrake_release.wav",
+      "crc32": "8e84bb5e",
+      "size": 302720,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 4843
+    },
+    {
+      "file": "horn_low_loop.wav",
+      "crc32": "7c41bc0f",
+      "size": 5148,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 82
+    },
+    {
+      "file": "horn_low_start.wav",
+      "crc32": "fe85dcc8",
+      "size": 5694,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 90
+    },
+    {
+      "file": "horn_low_stop.wav",
+      "crc32": "ea572daa",
+      "size": 132486,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2119
+    },
+    {
+      "file": "radio_acknowledge.wav",
+      "crc32": "c1478107",
+      "size": 64798,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1036
+    },
+    {
+      "file": "radio_channel_beep.wav",
+      "crc32": "f2d26fe5",
+      "size": 32066,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 512
+    },
+    {
+      "file": "radio_command_forward_gleis3.wav",
+      "crc32": "b94c682f",
+      "size": 96068,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1536
+    },
+    {
+      "file": "radio_ptt_press.wav",
+      "crc32": "a84cd1b4",
+      "size": 4730,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 75
+    },
+    {
+      "file": "radio_ptt_release.wav",
+      "crc32": "b19d1b3c",
+      "size": 4752,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 75
+    },
+    {
+      "file": "rail_joint_fast.wav",
+      "crc32": "4f1e1a53",
+      "size": 6292,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 100
+    },
+    {
+      "file": "rail_joint_slow.wav",
+      "crc32": "9636d6f2",
+      "size": 8762,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 139
+    },
+    {
+      "file": "rail_switch_clank.wav",
+      "crc32": "33f04df2",
+      "size": 74146,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1186
+    },
+    {
+      "file": "reverser_forward.wav",
+      "crc32": "62401ea0",
+      "size": 193664,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 3098
+    },
+    {
+      "file": "reverser_reverse.wav",
+      "crc32": "c567b75a",
+      "size": 185898,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2974
+    },
+    {
+      "file": "reverser_shunt_mode.wav",
+      "crc32": "a8af8585",
+      "size": 94700,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1514
+    },
+    {
+      "file": "sander_loop.wav",
+      "crc32": "0519040b",
+      "size": 6664,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 106
+    },
+    {
+      "file": "sander_start.wav",
+      "crc32": "c7023f6a",
+      "size": 20246,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 323
+    },
+    {
+      "file": "sander_stop.wav",
+      "crc32": "cf8103d6",
+      "size": 24306,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 388
+    },
+    {
+      "file": "shunter_whistle.wav",
+      "crc32": "dd1c370f",
+      "size": 104016,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1664
+    },
+    {
+      "file": "station_departure_announcement.wav",
+      "crc32": "7427f797",
+      "size": 217064,
+      "sampleRate": 15625,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 6945
+    },
+    {
+      "file": "traction_motor_loop.wav",
+      "crc32": "e0060011",
+      "size": 29742,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 475
+    },
+    {
+      "file": "traction_motor_stop.wav",
+      "crc32": "0ef82c58",
+      "size": 68766,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1100
+    },
+    {
+      "file": "turbo_loop.wav",
+      "crc32": "28f3e1d9",
+      "size": 17130,
+      "sampleRate": 15625,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 547
+    },
+    {
+      "file": "turbo_start.wav",
+      "crc32": "c813255f",
+      "size": 82556,
+      "sampleRate": 15625,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2640
+    },
+    {
+      "file": "turbo_stop.wav",
+      "crc32": "7eb27822",
+      "size": 48864,
+      "sampleRate": 15625,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 1562
+    },
+    {
+      "file": "whistle_loop.wav",
+      "crc32": "4c3f761d",
+      "size": 31092,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 497
+    },
+    {
+      "file": "whistle_start.wav",
+      "crc32": "4e2715be",
+      "size": 18580,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 297
+    },
+    {
+      "file": "whistle_stop.wav",
+      "crc32": "0470dcfc",
+      "size": 125044,
+      "sampleRate": 31250,
+      "channels": 1,
+      "bits": 16,
+      "durationMs": 2000
+    }
+  ],
+  "editor": {
+    "positions": {
+      "eng": {
+        "x": 40,
+        "y": 160
+      },
+      "vol": {
+        "x": 40,
+        "y": 400
+      },
+      "f0": {
+        "x": 40,
+        "y": 1040
+      },
+      "f1": {
+        "x": 40,
+        "y": 1160
+      },
+      "f2": {
+        "x": 40,
+        "y": 1280
+      },
+      "f3": {
+        "x": 40,
+        "y": 1400
+      },
+      "f4": {
+        "x": 40,
+        "y": 1520
+      },
+      "f5": {
+        "x": 40,
+        "y": 1640
+      },
+      "f6": {
+        "x": 40,
+        "y": 1760
+      },
+      "f7": {
+        "x": 40,
+        "y": 1880
+      },
+      "f8": {
+        "x": 40,
+        "y": 2000
+      },
+      "f9": {
+        "x": 40,
+        "y": 2120
+      },
+      "f10": {
+        "x": 40,
+        "y": 2240
+      },
+      "f11": {
+        "x": 40,
+        "y": 2360
+      },
+      "f12": {
+        "x": 40,
+        "y": 2480
+      },
+      "f13": {
+        "x": 40,
+        "y": 2600
+      },
+      "f14": {
+        "x": 40,
+        "y": 2720
+      },
+      "f15": {
+        "x": 1120,
+        "y": 1040
+      },
+      "f16": {
+        "x": 1120,
+        "y": 1160
+      },
+      "f17": {
+        "x": 1120,
+        "y": 1280
+      },
+      "f18": {
+        "x": 1120,
+        "y": 1400
+      },
+      "f19": {
+        "x": 1120,
+        "y": 1520
+      },
+      "f20": {
+        "x": 1120,
+        "y": 1640
+      },
+      "f21": {
+        "x": 1120,
+        "y": 1760
+      },
+      "f22": {
+        "x": 1120,
+        "y": 1880
+      },
+      "f23": {
+        "x": 1120,
+        "y": 2000
+      },
+      "f24": {
+        "x": 1120,
+        "y": 2120
+      },
+      "f25": {
+        "x": 1120,
+        "y": 2240
+      },
+      "f26": {
+        "x": 1120,
+        "y": 2360
+      },
+      "f27": {
+        "x": 1120,
+        "y": 2480
+      },
+      "f28": {
+        "x": 1120,
+        "y": 2600
+      },
+      "idle_cue-i_start": {
+        "x": 460,
+        "y": 80
+      },
+      "idle_cue-i_loop": {
+        "x": 484,
+        "y": 108
+      },
+      "eng1_cue-eng1_start": {
+        "x": 460,
+        "y": 190
+      },
+      "eng1_cue-eng1_loop": {
+        "x": 484,
+        "y": 218
+      },
+      "eng2_cue-eng2_start": {
+        "x": 460,
+        "y": 300
+      },
+      "eng2_cue-eng2_loop": {
+        "x": 484,
+        "y": 328
+      },
+      "eng3_cue-eng3_start": {
+        "x": 460,
+        "y": 410
+      },
+      "eng3_cue-eng3_loop": {
+        "x": 484,
+        "y": 438
+      },
+      "eng4_cue-eng4_start": {
+        "x": 460,
+        "y": 520
+      },
+      "eng4_cue-eng4_loop": {
+        "x": 484,
+        "y": 548
+      },
+      "eng5_cue-eng5_start": {
+        "x": 460,
+        "y": 630
+      },
+      "eng5_cue-eng5_loop": {
+        "x": 484,
+        "y": 658
+      },
+      "eng6_cue-eng6_start": {
+        "x": 460,
+        "y": 740
+      },
+      "eng6_cue-eng6_loop": {
+        "x": 484,
+        "y": 768
+      },
+      "eng7_cue-eng7_start": {
+        "x": 460,
+        "y": 850
+      },
+      "eng7_cue-eng7_loop": {
+        "x": 484,
+        "y": 878
+      },
+      "whistle_cue-w_start": {
+        "x": 460,
+        "y": 1200
+      },
+      "whistle_cue-w_loop": {
+        "x": 484,
+        "y": 1228
+      },
+      "whistle_cue-w_end": {
+        "x": 508,
+        "y": 1256
+      },
+      "horn_cue-h_start": {
+        "x": 460,
+        "y": 1320
+      },
+      "horn_cue-h_loop": {
+        "x": 484,
+        "y": 1348
+      },
+      "horn_cue-h_end": {
+        "x": 508,
+        "y": 1376
+      },
+      "bell_cue-b_start": {
+        "x": 460,
+        "y": 1680
+      },
+      "bell_cue-b_beep": {
+        "x": 484,
+        "y": 1708
+      },
+      "bell_cue-b_msg": {
+        "x": 508,
+        "y": 1736
+      },
+      "bell_cue-b_end": {
+        "x": 532,
+        "y": 1764
+      },
+      "comp_cue-c_start": {
+        "x": 460,
+        "y": 1800
+      },
+      "comp_cue-c_loop": {
+        "x": 484,
+        "y": 1828
+      },
+      "comp_cue-c_end": {
+        "x": 508,
+        "y": 1856
+      },
+      "coupler_cue-k_start": {
+        "x": 460,
+        "y": 1920
+      },
+      "sander_cue-s_start": {
+        "x": 460,
+        "y": 2040
+      },
+      "sander_cue-s_loop": {
+        "x": 484,
+        "y": 2068
+      },
+      "sander_cue-s_end": {
+        "x": 508,
+        "y": 2096
+      },
+      "door_open_cue-d_open": {
+        "x": 460,
+        "y": 2520
+      },
+      "door_close_cue-d_close": {
+        "x": 460,
+        "y": 2640
+      },
+      "fan_cue-fn_start": {
+        "x": 460,
+        "y": 2760
+      },
+      "fan_cue-fn_loop": {
+        "x": 484,
+        "y": 2788
+      },
+      "fan_cue-fn_end": {
+        "x": 508,
+        "y": 2816
+      },
+      "uncoupler_cue-uc_start": {
+        "x": 1540,
+        "y": 1080
+      },
+      "turbo_cue-tb_start": {
+        "x": 1540,
+        "y": 1200
+      },
+      "turbo_cue-tb_loop": {
+        "x": 1564,
+        "y": 1228
+      },
+      "turbo_cue-tb_end": {
+        "x": 1588,
+        "y": 1256
+      },
+      "curve_cue-cs_start": {
+        "x": 1540,
+        "y": 1320
+      },
+      "curve_cue-cs_loop": {
+        "x": 1564,
+        "y": 1348
+      },
+      "curve_cue-cs_end": {
+        "x": 1588,
+        "y": 1376
+      },
+      "clank_cue-rc_1": {
+        "x": 1540,
+        "y": 1440
+      },
+      "clank_cue-rc_2": {
+        "x": 1564,
+        "y": 1468
+      },
+      "clank_cue-rc_end": {
+        "x": 1588,
+        "y": 1496
+      },
+      "air_rel_cue-ar_start": {
+        "x": 1540,
+        "y": 1560
+      },
+      "air_rel_cue-ar_loop": {
+        "x": 1564,
+        "y": 1588
+      },
+      "air_rel_cue-ar_end": {
+        "x": 1588,
+        "y": 1616
+      },
+      "shunter_cue-sh_1": {
+        "x": 1540,
+        "y": 1680
+      },
+      "shunter_cue-sh_end": {
+        "x": 1564,
+        "y": 1708
+      },
+      "station_cue-st_1": {
+        "x": 1540,
+        "y": 1800
+      },
+      "handbrake_cue-hb_1": {
+        "x": 1540,
+        "y": 1920
+      },
+      "handbrake_cue-hb_end": {
+        "x": 1564,
+        "y": 1948
+      },
+      "reverser_cue-rv_1": {
+        "x": 1540,
+        "y": 2040
+      },
+      "reverser_cue-rv_2": {
+        "x": 1564,
+        "y": 2068
+      },
+      "reverser_cue-rv_end": {
+        "x": 1588,
+        "y": 2096
+      },
+      "ted_cue-tm_loop": {
+        "x": 1860,
+        "y": 2160
+      },
+      "ted_cue-tm_end": {
+        "x": 1884,
+        "y": 2188
+      },
+      "brake_sq_cue-bs_start": {
+        "x": 1860,
+        "y": 2280
+      },
+      "brake_sq_cue-bs_loop": {
+        "x": 1884,
+        "y": 2308
+      },
+      "brake_sq_cue-bs_end": {
+        "x": 1908,
+        "y": 2336
+      },
+      "dyn_brake_cue-db_start": {
+        "x": 1860,
+        "y": 2400
+      },
+      "dyn_brake_cue-db_end": {
+        "x": 1884,
+        "y": 2428
+      },
+      "stop_eng_cue-ds_start": {
+        "x": 2180,
+        "y": 2520
+      },
+      "stop_eng_cue-ds_loop": {
+        "x": 2204,
+        "y": 2548
+      },
+      "stop_eng_cue-ds_end": {
+        "x": 2228,
+        "y": 2576
+      },
+      "brake_cue-br_start": {
+        "x": 460,
+        "y": 960
+      },
+      "brake_cue-br_end": {
+        "x": 484,
+        "y": 988
+      },
+      "head": {
+        "x": 420,
+        "y": 1040
+      },
+      "cab": {
+        "x": 420,
+        "y": 1400
+      },
+      "beacon": {
+        "x": 420,
+        "y": 1520
+      },
+      "strobe": {
+        "x": 420,
+        "y": 2360
+      },
+      "under_light": {
+        "x": 1500,
+        "y": 2600
+      },
+      "n_up": {
+        "x": 420,
+        "y": 2120
+      },
+      "n_down": {
+        "x": 420,
+        "y": 2240
+      },
+      "l_hold": {
+        "x": 1500,
+        "y": 2120
+      },
+      "l_coast": {
+        "x": 1500,
+        "y": 2240
+      },
+      "l_dynbrk": {
+        "x": 1500,
+        "y": 2360
+      },
+      "l_mute1": {
+        "x": 1500,
+        "y": 2480
+      },
+      "l_mute2": {
+        "x": 1820,
+        "y": 2480
+      },
+      "fan_logic": {
+        "x": 420,
+        "y": 2840
+      },
+      "fan": {
+        "x": 760,
+        "y": 2840
+      }
+    },
+    "viewport": {
+      "x": 40,
+      "y": 40,
+      "zoom": 1
+    },
+    "project": {
+      "format": "sound-blocks",
+      "schemaVersion": 2,
+      "id": "locomotive_default",
+      "name": "Тепловоз ЧМЭ3",
+      "mix": {
+        "blocks": [
+          {
+            "id": "eng",
+            "type": "engine",
+            "name": "Двигатель",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 85,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 160,
+            "run": [
+              {
+                "from": 0,
+                "to": 14,
+                "file": ""
+              },
+              {
+                "from": 14,
+                "to": 28,
+                "file": ""
+              },
+              {
+                "from": 28,
+                "to": 42,
+                "file": ""
+              },
+              {
+                "from": 42,
+                "to": 57,
+                "file": ""
+              },
+              {
+                "from": 57,
+                "to": 71,
+                "file": ""
+              },
+              {
+                "from": 71,
+                "to": 85,
+                "file": ""
+              },
+              {
+                "from": 85,
+                "to": 100,
+                "file": ""
+              }
+            ],
+            "hyst": 1
+          },
+          {
+            "id": "vol",
+            "type": "volume",
+            "name": "Громкость",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 400,
+            "master": 85,
+            "engine": 85,
+            "effects": 75
+          },
+          {
+            "id": "f0",
+            "type": "fx_in",
+            "name": "F0 Буферные фонари",
+            "fn": 0,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1040,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f1",
+            "type": "fx_in",
+            "name": "F1 Свисток",
+            "fn": 1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1160,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f2",
+            "type": "fx_in",
+            "name": "F2 Тифон",
+            "fn": 2,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1280,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f3",
+            "type": "fx_in",
+            "name": "F3 Свет в кабине",
+            "fn": 3,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1400,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f4",
+            "type": "fx_in",
+            "name": "F4 Прожектор / Маяк",
+            "fn": 4,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1520,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f5",
+            "type": "fx_in",
+            "name": "F5 Радиостанция",
+            "fn": 5,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1640,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f6",
+            "type": "fx_in",
+            "name": "F6 Компрессор",
+            "fn": 6,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1760,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f7",
+            "type": "fx_in",
+            "name": "F7 Автосцепка",
+            "fn": 7,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 1880,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f8",
+            "type": "fx_in",
+            "name": "F8 Песочница",
+            "fn": 8,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2000,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f9",
+            "type": "fx_in",
+            "name": "F9 Позиция +",
+            "fn": 9,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2120,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f10",
+            "type": "fx_in",
+            "name": "F10 Позиция −",
+            "fn": 10,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2240,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f11",
+            "type": "fx_in",
+            "name": "F11 Строб маневровый",
+            "fn": 11,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2360,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f12",
+            "type": "fx_in",
+            "name": "F12 Дверь кабины откр.",
+            "fn": 12,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2480,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f13",
+            "type": "fx_in",
+            "name": "F13 Дверь кабины закр.",
+            "fn": 13,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2600,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f14",
+            "type": "fx_in",
+            "name": "F14 Холодильник ЧМЭ3",
+            "fn": 14,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 40,
+            "y": 2720,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f15",
+            "type": "fx_in",
+            "name": "F15 Расцепка СА-3",
+            "fn": 15,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1040,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f16",
+            "type": "fx_in",
+            "name": "F16 Турбокомпрессор",
+            "fn": 16,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1160,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f17",
+            "type": "fx_in",
+            "name": "F17 Скрип в кривых",
+            "fn": 17,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1280,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f18",
+            "type": "fx_in",
+            "name": "F18 Перестук на стрелках",
+            "fn": 18,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1400,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f19",
+            "type": "fx_in",
+            "name": "F19 Выпуск воздуха",
+            "fn": 19,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1520,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f20",
+            "type": "fx_in",
+            "name": "F20 Свисток составителя",
+            "fn": 20,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1640,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f21",
+            "type": "fx_in",
+            "name": "F21 Вокзал: объявление",
+            "fn": 21,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1760,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f22",
+            "type": "fx_in",
+            "name": "F22 Ручной тормоз",
+            "fn": 22,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 1880,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f23",
+            "type": "fx_in",
+            "name": "F23 Реверсор",
+            "fn": 23,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 2000,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f24",
+            "type": "fx_in",
+            "name": "F24 ТЭД + Удержание хода",
+            "fn": 24,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 2120,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f25",
+            "type": "fx_in",
+            "name": "F25 Визг тормозов + Выбег",
+            "fn": 25,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 2240,
+            "fxMode": "hold"
+          },
+          {
+            "id": "f26",
+            "type": "fx_in",
+            "name": "F26 Динамический тормоз",
+            "fn": 26,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 2360,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f27",
+            "type": "fx_in",
+            "name": "F27 Глушение / Mute",
+            "fn": 27,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 2480,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "f28",
+            "type": "fx_in",
+            "name": "F28 Освещение экипажа",
+            "fn": 28,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1120,
+            "y": 2600,
+            "fxMode": "toggle"
+          },
+          {
+            "id": "idle_cue",
+            "type": "sound_cue",
+            "name": "Холостой ход",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 40,
+            "scheme": "idle_scheme"
+          },
+          {
+            "id": "eng1_cue",
+            "type": "sound_cue",
+            "name": "Дизель 0–14% (Поз. 2)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 150,
+            "scheme": "eng1"
+          },
+          {
+            "id": "eng2_cue",
+            "type": "sound_cue",
+            "name": "Дизель 14–28% (Поз. 3)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 260,
+            "scheme": "eng2"
+          },
+          {
+            "id": "eng3_cue",
+            "type": "sound_cue",
+            "name": "Дизель 28–42% (Поз. 4)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 370,
+            "scheme": "eng3"
+          },
+          {
+            "id": "eng4_cue",
+            "type": "sound_cue",
+            "name": "Дизель 42–57% (Поз. 5)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 480,
+            "scheme": "eng4"
+          },
+          {
+            "id": "eng5_cue",
+            "type": "sound_cue",
+            "name": "Дизель 57–71% (Поз. 6)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 590,
+            "scheme": "eng5"
+          },
+          {
+            "id": "eng6_cue",
+            "type": "sound_cue",
+            "name": "Дизель 71–85% (Поз. 7)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 700,
+            "scheme": "eng6"
+          },
+          {
+            "id": "eng7_cue",
+            "type": "sound_cue",
+            "name": "Дизель 85–100% (Поз. 8)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 810,
+            "scheme": "eng7"
+          },
+          {
+            "id": "whistle_cue",
+            "type": "sound_cue",
+            "name": "Свисток",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1160,
+            "scheme": "whistle_scheme"
+          },
+          {
+            "id": "horn_cue",
+            "type": "sound_cue",
+            "name": "Тифон (низкий)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1280,
+            "scheme": "horn_scheme"
+          },
+          {
+            "id": "bell_cue",
+            "type": "sound_cue",
+            "name": "Радиостанция",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1640,
+            "scheme": "bell_scheme"
+          },
+          {
+            "id": "comp_cue",
+            "type": "sound_cue",
+            "name": "Компрессор",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1760,
+            "scheme": "compressor_scheme"
+          },
+          {
+            "id": "coupler_cue",
+            "type": "sound_cue",
+            "name": "Автосцепка",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1880,
+            "scheme": "coupler_scheme"
+          },
+          {
+            "id": "sander_cue",
+            "type": "sound_cue",
+            "name": "Песочница",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2000,
+            "scheme": "sander_scheme"
+          },
+          {
+            "id": "door_open_cue",
+            "type": "sound_cue",
+            "name": "Двери кабины: откр.",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2480,
+            "scheme": "door_open_scheme"
+          },
+          {
+            "id": "door_close_cue",
+            "type": "sound_cue",
+            "name": "Двери кабины: закр.",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2600,
+            "scheme": "door_close_scheme"
+          },
+          {
+            "id": "fan_cue",
+            "type": "sound_cue",
+            "name": "Вентилятор холодильника",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2720,
+            "scheme": "fan_scheme"
+          },
+          {
+            "id": "uncoupler_cue",
+            "type": "sound_cue",
+            "name": "Расцепка",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1040,
+            "scheme": "uncoupler_scheme"
+          },
+          {
+            "id": "turbo_cue",
+            "type": "sound_cue",
+            "name": "Турбокомпрессор ЧМЭ3",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1160,
+            "scheme": "turbo_scheme"
+          },
+          {
+            "id": "curve_cue",
+            "type": "sound_cue",
+            "name": "Скрип колёс в кривых",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1280,
+            "scheme": "curve_squeal_scheme"
+          },
+          {
+            "id": "clank_cue",
+            "type": "sound_cue",
+            "name": "Перестук колёс и стрелки",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1400,
+            "scheme": "rail_clank_scheme"
+          },
+          {
+            "id": "air_rel_cue",
+            "type": "sound_cue",
+            "name": "Выпуск воздуха",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1520,
+            "scheme": "air_release_scheme"
+          },
+          {
+            "id": "shunter_cue",
+            "type": "sound_cue",
+            "name": "Свисток составителя",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1640,
+            "scheme": "shunter_whistle_scheme"
+          },
+          {
+            "id": "station_cue",
+            "type": "sound_cue",
+            "name": "Вокзал: объявление поезда",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1760,
+            "scheme": "station_ann_scheme"
+          },
+          {
+            "id": "handbrake_cue",
+            "type": "sound_cue",
+            "name": "Ручной тормоз",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 1880,
+            "scheme": "handbrake_scheme"
+          },
+          {
+            "id": "reverser_cue",
+            "type": "sound_cue",
+            "name": "Реверсор кабины",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 2000,
+            "scheme": "reverser_scheme"
+          },
+          {
+            "id": "ted_cue",
+            "type": "sound_cue",
+            "name": "Тяговые электродвигатели (ТЭД)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1820,
+            "y": 2120,
+            "scheme": "traction_motors_scheme"
+          },
+          {
+            "id": "brake_sq_cue",
+            "type": "sound_cue",
+            "name": "Визг тормозов",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1820,
+            "y": 2240,
+            "scheme": "brake_squeal_scheme"
+          },
+          {
+            "id": "dyn_brake_cue",
+            "type": "sound_cue",
+            "name": "Динамический тормоз: звук",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1820,
+            "y": 2360,
+            "scheme": "dyn_brake_scheme"
+          },
+          {
+            "id": "stop_eng_cue",
+            "type": "sound_cue",
+            "name": "Дизель: выбег при глушении",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 2140,
+            "y": 2480,
+            "scheme": "diesel_start_stop_scheme"
+          },
+          {
+            "id": "brake_cue",
+            "type": "sound_cue",
+            "name": "Торможение ЧМЭ3",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 100,
+            "rate": 1000,
+            "level": 100,
+            "files": {
+              "sound": ""
+            },
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 920,
+            "scheme": "brake_scheme"
+          },
+          {
+            "id": "head",
+            "type": "output",
+            "name": "Фары (буферные)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1040,
+            "channel": 0,
+            "effect": 0,
+            "dir": "auto",
+            "state": "any"
+          },
+          {
+            "id": "cab",
+            "type": "output",
+            "name": "AUX1 Освещение кабины",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1400,
+            "channel": 1,
+            "effect": 0,
+            "dir": "auto",
+            "state": "any"
+          },
+          {
+            "id": "beacon",
+            "type": "output",
+            "name": "AUX2 Прожектор / Маяк",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 1520,
+            "channel": 2,
+            "effect": 0,
+            "dir": "auto",
+            "state": "any"
+          },
+          {
+            "id": "strobe",
+            "type": "output",
+            "name": "AUX3 Строб",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2360,
+            "channel": 3,
+            "effect": 0,
+            "dir": "auto",
+            "state": "any"
+          },
+          {
+            "id": "under_light",
+            "type": "output",
+            "name": "AUX5 Подсветка ходовой",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 2600,
+            "channel": 5,
+            "effect": 0,
+            "dir": "auto",
+            "state": "any"
+          },
+          {
+            "id": "n_up",
+            "type": "logic_out",
+            "name": "Набор позиции",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2120,
+            "op": 7,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "n_down",
+            "type": "logic_out",
+            "name": "Сброс позиции",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2240,
+            "op": 8,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "l_hold",
+            "type": "logic_out",
+            "name": "Удержание хода",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 2120,
+            "op": 4,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "l_coast",
+            "type": "logic_out",
+            "name": "Выбег (Coast)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 2240,
+            "op": 5,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "l_dynbrk",
+            "type": "logic_out",
+            "name": "Динамический тормоз",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 2360,
+            "op": 6,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "l_mute1",
+            "type": "logic_out",
+            "name": "Mute (на стоянке)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1500,
+            "y": 2480,
+            "op": 1,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "l_mute2",
+            "type": "logic_out",
+            "name": "Mute (в движении)",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 1820,
+            "y": 2480,
+            "op": 2,
+            "dir": "any",
+            "state": "any"
+          },
+          {
+            "id": "fan_logic",
+            "type": "logic",
+            "name": "Холодильник: скорость > 20%",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 420,
+            "y": 2840,
+            "join": "and",
+            "conds": [
+              {
+                "var": "speed",
+                "op": 4,
+                "value": 20
+              }
+            ]
+          },
+          {
+            "id": "fan",
+            "type": "output",
+            "name": "AUX4 Жалюзи холодильника",
+            "fn": -1,
+            "trigger": "auto",
+            "volume": 80,
+            "rate": 1000,
+            "level": 100,
+            "files": {},
+            "outEvent": "finish",
+            "outDelay": 0,
+            "shortMs": 400,
+            "x": 760,
+            "y": 2840,
+            "channel": 4,
+            "effect": 0,
+            "dir": "auto",
+            "state": "any"
+          }
+        ],
+        "links": [
+          {
+            "id": "dl0_f0",
+            "from": "f0",
+            "to": "head",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl1_f1",
+            "from": "f1",
+            "to": "whistle_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl2_f2",
+            "from": "f2",
+            "to": "horn_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl3_f3",
+            "from": "f3",
+            "to": "cab",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl4_f4",
+            "from": "f4",
+            "to": "beacon",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl5_f11",
+            "from": "f11",
+            "to": "strobe",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl6_f5",
+            "from": "f5",
+            "to": "bell_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl7_f6",
+            "from": "f6",
+            "to": "comp_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl8_f7",
+            "from": "f7",
+            "to": "coupler_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl9_f8",
+            "from": "f8",
+            "to": "sander_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl10_f12",
+            "from": "f12",
+            "to": "door_open_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl11_f13",
+            "from": "f13",
+            "to": "door_close_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl12_f9",
+            "from": "f9",
+            "to": "n_up",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl13_f10",
+            "from": "f10",
+            "to": "n_down",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl14_f14",
+            "from": "f14",
+            "to": "fan_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl15_f14",
+            "from": "f14",
+            "to": "fan_logic",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "db16_fan_logic",
+            "from": "fan_logic",
+            "to": "fan",
+            "kind": "bind",
+            "cond": "true"
+          },
+          {
+            "id": "dl17_f15",
+            "from": "f15",
+            "to": "uncoupler_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl18_f16",
+            "from": "f16",
+            "to": "turbo_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl19_f17",
+            "from": "f17",
+            "to": "curve_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl20_f18",
+            "from": "f18",
+            "to": "clank_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl21_f19",
+            "from": "f19",
+            "to": "air_rel_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl22_f20",
+            "from": "f20",
+            "to": "shunter_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl23_f21",
+            "from": "f21",
+            "to": "station_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl24_f22",
+            "from": "f22",
+            "to": "handbrake_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl25_f23",
+            "from": "f23",
+            "to": "reverser_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl26_f24",
+            "from": "f24",
+            "to": "l_hold",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl27_f24",
+            "from": "f24",
+            "to": "ted_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl28_f25",
+            "from": "f25",
+            "to": "l_coast",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl29_f25",
+            "from": "f25",
+            "to": "brake_sq_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl30_f26",
+            "from": "f26",
+            "to": "l_dynbrk",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl31_f26",
+            "from": "f26",
+            "to": "dyn_brake_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl32_f27",
+            "from": "f27",
+            "to": "l_mute1",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl33_f27",
+            "from": "f27",
+            "to": "l_mute2",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl34_f27",
+            "from": "f27",
+            "to": "stop_eng_cue",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl35_f28",
+            "from": "f28",
+            "to": "under_light",
+            "kind": "after",
+            "cond": "out"
+          },
+          {
+            "id": "dl36_eng",
+            "from": "eng",
+            "to": "idle_cue",
+            "kind": "after",
+            "cond": "eng_idle"
+          },
+          {
+            "id": "dl37_eng",
+            "from": "eng",
+            "to": "eng1_cue",
+            "kind": "after",
+            "cond": "eng0"
+          },
+          {
+            "id": "dl38_eng",
+            "from": "eng",
+            "to": "eng2_cue",
+            "kind": "after",
+            "cond": "eng1"
+          },
+          {
+            "id": "dl39_eng",
+            "from": "eng",
+            "to": "eng3_cue",
+            "kind": "after",
+            "cond": "eng2"
+          },
+          {
+            "id": "dl40_eng",
+            "from": "eng",
+            "to": "eng4_cue",
+            "kind": "after",
+            "cond": "eng3"
+          },
+          {
+            "id": "dl41_eng",
+            "from": "eng",
+            "to": "eng5_cue",
+            "kind": "after",
+            "cond": "eng4"
+          },
+          {
+            "id": "dl42_eng",
+            "from": "eng",
+            "to": "eng6_cue",
+            "kind": "after",
+            "cond": "eng5"
+          },
+          {
+            "id": "dl43_eng",
+            "from": "eng",
+            "to": "eng7_cue",
+            "kind": "after",
+            "cond": "eng6"
+          },
+          {
+            "id": "dl44_eng",
+            "from": "eng",
+            "to": "brake_cue",
+            "kind": "after",
+            "cond": "eng_brake"
+          }
+        ],
+        "texts": []
+      },
+      "schemes": [
+        {
+          "id": "horn_scheme",
+          "name": "Тифон (низкий)",
+          "blocks": [
+            {
+              "id": "h_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "horn_low_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "h_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "horn_low_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "h_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "horn_low_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_h_start",
+              "from": "h_start",
+              "to": "h_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_h_loop",
+              "from": "h_loop",
+              "to": "h_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "whistle_scheme",
+          "name": "Свисток",
+          "blocks": [
+            {
+              "id": "w_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "whistle_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "w_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "whistle_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "w_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "whistle_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_w_start",
+              "from": "w_start",
+              "to": "w_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_w_loop",
+              "from": "w_loop",
+              "to": "w_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "bell_scheme",
+          "name": "Радиостанция",
+          "blocks": [
+            {
+              "id": "b_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "radio_ptt_press.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "b_beep",
+              "type": "simple",
+              "name": "Простой",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "radio_channel_beep.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            },
+            {
+              "id": "b_msg",
+              "type": "simple",
+              "name": "Простой",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "radio_command_forward_gleis3.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            },
+            {
+              "id": "b_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "radio_ptt_release.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 1020,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_b_start",
+              "from": "b_start",
+              "to": "b_beep",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_b_beep",
+              "from": "b_beep",
+              "to": "b_msg",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl2_b_msg",
+              "from": "b_msg",
+              "to": "b_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "compressor_scheme",
+          "name": "Компрессор",
+          "blocks": [
+            {
+              "id": "c_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "compressor_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "c_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "compressor_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "c_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "compressor_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_c_start",
+              "from": "c_start",
+              "to": "c_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_c_loop",
+              "from": "c_loop",
+              "to": "c_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "coupler_scheme",
+          "name": "Автосцепка",
+          "blocks": [
+            {
+              "id": "k_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "coupler_attach.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            }
+          ],
+          "links": [],
+          "texts": []
+        },
+        {
+          "id": "sander_scheme",
+          "name": "Песочница",
+          "blocks": [
+            {
+              "id": "s_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "sander_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "s_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "sander_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "s_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "sander_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_s_start",
+              "from": "s_start",
+              "to": "s_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_s_loop",
+              "from": "s_loop",
+              "to": "s_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "fan_scheme",
+          "name": "Вентилятор холодильника",
+          "blocks": [
+            {
+              "id": "fn_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "fan_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "fn_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "fan_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "fn_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "fan_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_fn_start",
+              "from": "fn_start",
+              "to": "fn_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_fn_loop",
+              "from": "fn_loop",
+              "to": "fn_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "door_open_scheme",
+          "name": "Двери кабины: откр.",
+          "blocks": [
+            {
+              "id": "d_open",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "cab_door_open.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            }
+          ],
+          "links": [],
+          "texts": []
+        },
+        {
+          "id": "door_close_scheme",
+          "name": "Двери кабины: закр.",
+          "blocks": [
+            {
+              "id": "d_close",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "cab_door_close.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            }
+          ],
+          "links": [],
+          "texts": []
+        },
+        {
+          "id": "uncoupler_scheme",
+          "name": "Расцепка",
+          "blocks": [
+            {
+              "id": "uc_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "coupler_detach.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            }
+          ],
+          "links": [],
+          "texts": []
+        },
+        {
+          "id": "turbo_scheme",
+          "name": "Турбокомпрессор ЧМЭ3",
+          "blocks": [
+            {
+              "id": "tb_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "turbo_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "tb_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "turbo_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "tb_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "turbo_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_tb_start",
+              "from": "tb_start",
+              "to": "tb_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_tb_loop",
+              "from": "tb_loop",
+              "to": "tb_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "curve_squeal_scheme",
+          "name": "Скрип колёс в кривых",
+          "blocks": [
+            {
+              "id": "cs_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "curve_squeal_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "cs_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "curve_squeal_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "cs_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "curve_squeal_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_cs_start",
+              "from": "cs_start",
+              "to": "cs_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_cs_loop",
+              "from": "cs_loop",
+              "to": "cs_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "rail_clank_scheme",
+          "name": "Перестук колёс и стрелки",
+          "blocks": [
+            {
+              "id": "rc_1",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "rail_switch_clank.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "rc_2",
+              "type": "simple",
+              "name": "Простой",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "rail_joint_slow.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            },
+            {
+              "id": "rc_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "rail_joint_fast.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_rc_1",
+              "from": "rc_1",
+              "to": "rc_2",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_rc_2",
+              "from": "rc_2",
+              "to": "rc_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "air_release_scheme",
+          "name": "Выпуск воздуха",
+          "blocks": [
+            {
+              "id": "ar_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "air_release_valve.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "ar_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "air_release_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "ar_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "air_release_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_ar_start",
+              "from": "ar_start",
+              "to": "ar_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_ar_loop",
+              "from": "ar_loop",
+              "to": "ar_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "shunter_whistle_scheme",
+          "name": "Свисток составителя",
+          "blocks": [
+            {
+              "id": "sh_1",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "shunter_whistle.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "sh_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "radio_acknowledge.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_sh_1",
+              "from": "sh_1",
+              "to": "sh_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "station_ann_scheme",
+          "name": "Вокзал: объявление поезда",
+          "blocks": [
+            {
+              "id": "st_1",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "station_departure_announcement.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            }
+          ],
+          "links": [],
+          "texts": []
+        },
+        {
+          "id": "handbrake_scheme",
+          "name": "Ручной тормоз",
+          "blocks": [
+            {
+              "id": "hb_1",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "handbrake_apply.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "hb_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "handbrake_release.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_hb_1",
+              "from": "hb_1",
+              "to": "hb_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "reverser_scheme",
+          "name": "Реверсор кабины",
+          "blocks": [
+            {
+              "id": "rv_1",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "reverser_forward.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "rv_2",
+              "type": "simple",
+              "name": "Простой",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "reverser_shunt_mode.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            },
+            {
+              "id": "rv_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "reverser_reverse.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_rv_1",
+              "from": "rv_1",
+              "to": "rv_2",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_rv_2",
+              "from": "rv_2",
+              "to": "rv_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "traction_motors_scheme",
+          "name": "Тяговые электродвигатели (ТЭД)",
+          "blocks": [
+            {
+              "id": "tm_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "traction_motor_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "tm_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "traction_motor_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_tm_loop",
+              "from": "tm_loop",
+              "to": "tm_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "brake_squeal_scheme",
+          "name": "Визг тормозов",
+          "blocks": [
+            {
+              "id": "bs_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "brake_squeal_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "bs_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "brake_squeal_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "bs_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "brake_squeal_stop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_bs_start",
+              "from": "bs_start",
+              "to": "bs_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_bs_loop",
+              "from": "bs_loop",
+              "to": "bs_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "dyn_brake_scheme",
+          "name": "Динамический тормоз: звук",
+          "blocks": [
+            {
+              "id": "db_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "dynamic_brake_on.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "db_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "dynamic_brake_off.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_db_start",
+              "from": "db_start",
+              "to": "db_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "diesel_start_stop_scheme",
+          "name": "Дизель: выбег при глушении",
+          "blocks": [
+            {
+              "id": "ds_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_crank_start.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "ds_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_crank_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            },
+            {
+              "id": "ds_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_shutdown.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 700,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_ds_start",
+              "from": "ds_start",
+              "to": "ds_loop",
+              "kind": "after",
+              "cond": "out"
+            },
+            {
+              "id": "dl1_ds_loop",
+              "from": "ds_loop",
+              "to": "ds_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "idle_scheme",
+          "name": "Холостой ход",
+          "blocks": [
+            {
+              "id": "i_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_decel_to_idle.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "i_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_idle_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_i_start",
+              "from": "i_start",
+              "to": "i_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng1",
+          "name": "Дизель 0–14% (Поз. 2)",
+          "blocks": [
+            {
+              "id": "eng1_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_1_to_2.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng1_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_2_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng1_start",
+              "from": "eng1_start",
+              "to": "eng1_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng2",
+          "name": "Дизель 14–28% (Поз. 3)",
+          "blocks": [
+            {
+              "id": "eng2_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_2_to_3.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng2_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_3_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng2_start",
+              "from": "eng2_start",
+              "to": "eng2_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng3",
+          "name": "Дизель 28–42% (Поз. 4)",
+          "blocks": [
+            {
+              "id": "eng3_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_3_to_4.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng3_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_4_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng3_start",
+              "from": "eng3_start",
+              "to": "eng3_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng4",
+          "name": "Дизель 42–57% (Поз. 5)",
+          "blocks": [
+            {
+              "id": "eng4_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_4_to_5.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng4_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_5_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng4_start",
+              "from": "eng4_start",
+              "to": "eng4_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng5",
+          "name": "Дизель 57–71% (Поз. 6)",
+          "blocks": [
+            {
+              "id": "eng5_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_5_to_6.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng5_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_6_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng5_start",
+              "from": "eng5_start",
+              "to": "eng5_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng6",
+          "name": "Дизель 71–85% (Поз. 7)",
+          "blocks": [
+            {
+              "id": "eng6_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_6_to_7.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng6_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_7_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng6_start",
+              "from": "eng6_start",
+              "to": "eng6_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "eng7",
+          "name": "Дизель 85–100% (Поз. 8)",
+          "blocks": [
+            {
+              "id": "eng7_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_accel_7_to_8.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "eng7_loop",
+              "type": "loop",
+              "name": "Цикл",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "engine_notch_8_loop.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80,
+              "loopMode": "hold",
+              "dirTrigger": "fwd"
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_eng7_start",
+              "from": "eng7_start",
+              "to": "eng7_loop",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        },
+        {
+          "id": "brake_scheme",
+          "name": "Торможение ЧМЭ3",
+          "blocks": [
+            {
+              "id": "br_start",
+              "type": "start",
+              "name": "Старт",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "brake_apply.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 60,
+              "y": 80
+            },
+            {
+              "id": "br_end",
+              "type": "end",
+              "name": "Конец",
+              "fn": -1,
+              "trigger": "auto",
+              "volume": 80,
+              "rate": 1000,
+              "level": 100,
+              "files": {
+                "sound": "brake_release.wav"
+              },
+              "outEvent": "finish",
+              "outDelay": 0,
+              "shortMs": 400,
+              "x": 380,
+              "y": 80
+            }
+          ],
+          "links": [
+            {
+              "id": "dl0_br_start",
+              "from": "br_start",
+              "to": "br_end",
+              "kind": "after",
+              "cond": "out"
+            }
+          ],
+          "texts": []
+        }
+      ],
+      "vars": [
+        {
+          "name": "speed",
+          "kind": "speed",
+          "init": 0
+        },
+        {
+          "name": "forward",
+          "kind": "forward",
+          "init": 0
+        },
+        {
+          "name": "moving",
+          "kind": "moving",
+          "init": 0
+        },
+        {
+          "name": "engine",
+          "kind": "engine",
+          "init": 0
+        }
+      ],
+      "editor": {
+        "viewport": {
+          "x": 40,
+          "y": 40,
+          "zoom": 1
+        },
+        "snap": true,
+        "mode": "mix",
+        "activeScheme": ""
+      }
+    }
+  }
+}

@@ -390,6 +390,145 @@ esp_err_t sg_store_select_legacy(void)
     leave(); return err;
 }
 
+/* Read the raw selection record: no record, explicit legacy, or a graph.
+ * A graph selection is refused so callers never replace the user's scheme. */
+static esp_err_t selection_probe(bool *exists, bool *legacy)
+{
+    if (!exists || !legacy) { return ESP_ERR_INVALID_ARG; }
+    *exists = false; *legacy = false;
+    esp_err_t err = enter();
+    if (err != ESP_OK) { return err; }
+    char path[SG_PATH_CAP], record[96];
+    err = path_make(path, "selection", 0, NULL);
+    if (err == ESP_OK) { err = record_read(path, record, sizeof(record)); }
+    if (err == ESP_ERR_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err == ESP_OK) {
+        if (!strcmp(record, "legacy\n")) { *exists = true; *legacy = true; }
+        else { err = ESP_ERR_INVALID_STATE; }
+    }
+    leave();
+    return err;
+}
+
+/* Serialize one asset entry for the built-in project's manifest. */
+static int seed_asset_json(char *out, size_t cap, bool first, const sg_asset_t *a)
+{
+    return snprintf(out, cap,
+                    "%s{\"file\":\"%s\",\"crc32\":\"%s\",\"size\":%lu,\"sampleRate\":%lu,"
+                    "\"channels\":%lu,\"bits\":%lu,\"durationMs\":%lu}",
+                    first ? "" : ",", a->file, a->crc32,
+                    (unsigned long)a->size, (unsigned long)a->sampleRate,
+                    (unsigned long)a->channels, (unsigned long)a->bits,
+                    (unsigned long)a->durationMs);
+}
+
+esp_err_t sg_store_seed_default(const char *id, const char *json, size_t len,
+                                uint32_t *revision, bool *seeded)
+{
+    if (seeded) { *seeded = false; }
+    if (revision) { *revision = 0; }
+    if (!id || !json || !len || !revision || !sg_id_valid(id)) { return ESP_ERR_INVALID_ARG; }
+    if (len > SG_MAX_JSON) { return ESP_ERR_INVALID_SIZE; }
+
+    /* A selected graph (including the user's last save) always wins. */
+    bool record_exists = false, legacy = false;
+    esp_err_t err = selection_probe(&record_exists, &legacy);
+    if (err != ESP_OK) { return err; }
+
+    /* The project may already exist while the selection record was lost:
+     * select its newest revision instead of overwriting the user's edits.
+     * An explicit legacy selection (factory reset) does not adopt it: the
+     * built-in scheme is written as a new revision below. */
+    if (!record_exists) {
+        sg_store_descriptor_t *items = calloc(SG_STORE_MAX_PROJECTS, sizeof(*items));
+        if (!items) { return ESP_ERR_NO_MEM; }
+        size_t count = 0;
+        err = sg_store_list(items, SG_STORE_MAX_PROJECTS, &count);
+        if (err == ESP_OK) {
+            for (size_t i = 0; i < count; ++i) {
+                if (strcmp(items[i].id, id)) { continue; }
+                uint32_t latest = items[i].revision;
+                free(items);
+                if (!latest) { return ESP_FAIL; }
+                err = sg_store_select(id, latest);
+                if (err == ESP_OK) { *revision = latest; }
+                return err;
+            }
+        }
+        free(items);
+        if (err != ESP_OK) { return err; }
+    }
+
+    /* Build the asset manifest from the WAV files actually installed, so the
+     * built-in project matches any sound pack (ADPCM/PCM, any rate). */
+    sg_graph_t *graph = malloc(sizeof(*graph));
+    if (!graph) { return ESP_ERR_NO_MEM; }
+    sg_diagnostic_t diag = { 0 };
+    err = sg_parse(json, len, graph, &diag);
+    if (err == ESP_OK && strcmp(graph->id, id)) { err = ESP_ERR_INVALID_ARG; }
+
+    size_t unique = 0;
+    for (unsigned s = 0; err == ESP_OK && s < graph->state_count; ++s) {
+        const char *file = graph->states[s].file;
+        if (!file[0]) { continue; }
+        bool earlier = false;
+        for (unsigned i = 0; i < s; ++i) {
+            if (!strcmp(file, graph->states[i].file)) { earlier = true; break; }
+        }
+        if (!earlier) { ++unique; }
+    }
+
+    /* `"assets":[]` is the placeholder written by the editor build. */
+    const char *placeholder = "\"assets\":[]";
+    const char *at = err == ESP_OK ? strstr(json, placeholder) : NULL;
+    if (err == ESP_OK && !at) { err = ESP_ERR_INVALID_ARG; }
+    size_t head = err == ESP_OK ? (size_t)(at - json) + strlen("\"assets\":[") : 0;
+    size_t tail_off = err == ESP_OK ? (size_t)(at - json) + strlen(placeholder) : 0;
+    size_t tail_len = err == ESP_OK ? strlen(json + tail_off) : 0;
+    size_t cap = err == ESP_OK ? head + unique * 256U + 2U + tail_len + 1U : 0;
+    char *out = NULL;
+    size_t used = 0;
+    if (err == ESP_OK && (cap > SG_MAX_JSON || !(out = malloc(cap)))) { err = cap > SG_MAX_JSON ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM; }
+
+    if (err == ESP_OK) {
+        memcpy(out, json, head);
+        used = head;
+        for (unsigned s = 0; s < graph->state_count && err == ESP_OK; ++s) {
+            const char *file = graph->states[s].file;
+            if (!file[0]) { continue; }
+            bool earlier = false;
+            for (unsigned i = 0; i < s; ++i) {
+                if (!strcmp(file, graph->states[i].file)) { earlier = true; break; }
+            }
+            if (earlier) { continue; }
+            sg_asset_t asset;
+            err = sg_asset_inspect(file, &asset, &diag);
+            if (err != ESP_OK) { break; }
+            size_t room = cap - used;
+            int n = seed_asset_json(out + used, room, used == head, &asset);
+            if (n < 0 || (size_t)n >= room) { err = ESP_ERR_INVALID_SIZE; break; }
+            used += (size_t)n;
+        }
+    }
+    if (err == ESP_OK) {
+        out[used++] = ']';
+        memcpy(out + used, json + tail_off, tail_len + 1U);
+        used += tail_len;
+        /* The parsed graph is no longer needed; drop it before the store saves
+         * another copy so the peak heap stays within a normal editor save. */
+        free(graph);
+        graph = NULL;
+        uint32_t rev = 0;
+        err = sg_store_save_force(id, out, used, &rev, &diag);
+        if (err == ESP_OK) { err = sg_store_select(id, rev); }
+        if (err == ESP_OK) { *revision = rev; if (seeded) { *seeded = true; } }
+    }
+    free(out);
+    free(graph);
+    return err;
+}
+
 esp_err_t sg_store_delete(const char *id, bool *was_selected)
 {
     if (was_selected) *was_selected = false;

@@ -17,6 +17,7 @@
 
 #include "audio.h"
 #include "dcc.h"
+#include "default_scheme_data.h"
 #include "motor.h"
 #include "pinmap.h"
 #include "provision.h"
@@ -242,6 +243,24 @@ static void restore_sound_graph(void)
     uint32_t revision = 0;
     bool selected = false;
     esp_err_t err = sg_store_selection(id, sizeof(id), &revision, &selected);
+    if (err == ESP_OK && !selected) {
+        /* No graph selected: the built-in ChME3 project is the factory scheme.
+         * A project saved earlier wins (even if the selection record was lost),
+         * so user edits are never replaced by the built-in copy. */
+        size_t seed_length = 0;
+        const char *seed = default_scheme_blob(&seed_length);
+        uint32_t seed_revision = 0;
+        bool seeded = false;
+        if (seed && seed_length &&
+            sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed, seed_length,
+                                  &seed_revision, &seeded) == ESP_OK) {
+            snprintf(id, sizeof(id), "%s", SG_DEFAULT_PROJECT_ID);
+            revision = seed_revision;
+            selected = true;
+            ESP_LOGI(TAG, "Built-in sound scheme %s (revision %lu)",
+                     seeded ? "installed" : "restored", (unsigned long)revision);
+        }
+    }
     if (err == ESP_OK && !selected) { return; }
     char *json = NULL;
     size_t length = 0;

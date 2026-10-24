@@ -2233,6 +2233,9 @@ async function refreshStatus(){
         try{
           if(await adoptActiveDeviceProject(srvId,srvRev))activeProjectAutoLoadDone=true;
         }catch(e){}
+      }else if(!(srvId&&srvRev>0)&&shouldAdoptDefaultNoDeviceScheme()){
+        loadDefaultProject();
+        activeProjectAutoLoadDone=true;
       }else{
         activeProjectAutoLoadDone=true;
       }
@@ -3402,7 +3405,24 @@ function afterRestore(){installGraphAccessors(project);viewMode=project.editor&&
 function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);afterRestore();project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_undone"));}
 function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);afterRestore();project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_redone"));}
 function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
-const THEME_KEY="aura_theme";
+/* The working copy lives in localStorage. A scratch draft that was never
+ * written to a decoder must not hide the built-in project, so the previous
+ * draft is archived before the built-in one replaces it. */
+const DRAFT_BACKUP_KEY="aura_blocks_project_backup_v1";
+function backupDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(raw)localStorage.setItem(DRAFT_BACKUP_KEY,raw);}catch(e){}}
+function loadDefaultProject(){
+  backupDraft();
+  project=defaultProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";
+  selected="";selectedIds=new Set();revision=0;savedId="";assets={};assetsReady=false;diagnostics=[];
+  applyViewport();renderSnapBtn();historyReset();render();refreshAssets();
+  setStatus(t("st_default_loaded"));
+}
+/* A draft is scratch state until it is saved to a device. When the decoder
+ * reports no scheme at all (factory/first boot), the built-in ChME3 project
+ * is what it installs, so show that instead of an old local draft. */
+function shouldAdoptDefaultNoDeviceScheme(){
+  return !savedId && !!(project&&project.id) && project.id!=="locomotive_default";
+}const THEME_KEY="aura_theme";
 function applyTheme(th){if(th!=="light")th="dark";document.documentElement.setAttribute("data-theme",th);const b=$("b_theme");if(b)b.textContent=(th==="light"?"☾ ":"☀ ")+t("m_theme")+": "+t(th==="light"?"theme_light":"theme_dark");try{localStorage.setItem(THEME_KEY,th);}catch(e){}}
 function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-theme")==="light"?"dark":"light");}
 
@@ -5040,7 +5060,7 @@ function exportCompiledSchemeJson(){
 
 /* ---- toolbar --------------------------------------------------------- */
 $("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
-$("b_default").onclick=()=>{if(!confirm(t("confirm_default")))return;project=defaultProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();revision=0;savedId="";assets={};assetsReady=false;diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();refreshAssets();setStatus(t("st_default_loaded"));};
+$("b_default").onclick=()=>{if(!confirm(t("confirm_default")))return;loadDefaultProject();};
 $("b_mode_mix").onclick=()=>switchMode("mix");
 $("b_mode_scheme").onclick=()=>switchMode("scheme");
 if($("b_export"))$("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+".blocks.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
@@ -5138,7 +5158,7 @@ applyStatic();
 loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();if((window.matchMedia&&window.matchMedia("(max-width:760px)").matches)||viewMode==="scheme")fitViewport();else applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
 if($("boot_skip"))$("boot_skip").onclick=()=>{preloadCancel=true;bootSkipped=true;bootDone=true;hideBootOverlay();};
 startBootPreload();
-  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
+  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
 })();
 </script>
 </body>

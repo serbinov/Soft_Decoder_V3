@@ -867,6 +867,34 @@ test('31. Loading an English project while the editor is Russian localizes built
   assert.equal(p.mix.blocks.find(b => b.id === 'f15').name, 'F15 Расцепка СА-3');
 });
 
+test('31a. A draft never saved to a decoder yields to the built-in project when the device has no scheme', async t => {
+  const { api, context } = createEditorFixture(t);
+  const draft = JSON.parse(JSON.stringify(api.project()));
+  draft.id = 'scratch_draft';
+  draft.name = 'Scratch';
+  draft.schemes = [];
+  api.setProject(draft);
+  assert.equal(api.shouldAdoptDefaultNoDeviceScheme(), true);
+
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.project().id, 'locomotive_default', 'built-in project replaces the scratch draft');
+  assert.ok(context.localStorage.getItem('aura_blocks_project_backup_v1'), 'previous draft is archived');
+});
+
+test('31b. A draft saved on a decoder is kept when the device reports no scheme', async t => {
+  const { api } = createEditorFixture(t);
+  const draft = JSON.parse(JSON.stringify(api.project()));
+  draft.id = 'saved_work';
+  api.setProject(draft);
+  api.setMeta('saved_work', 4);
+  assert.equal(api.shouldAdoptDefaultNoDeviceScheme(), false);
+
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.project().id, 'saved_work', 'saved work is not replaced by the built-in project');
+});
+
 test('32. Header zoom buttons zoom in/out and fit the canvas', t => {
   const { api, dom } = createEditorFixture(t);
   const p = api.project();

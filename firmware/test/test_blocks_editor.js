@@ -895,6 +895,29 @@ test('31b. A draft saved on a decoder is kept when the device reports no scheme'
   assert.equal(api.project().id, 'saved_work', 'saved work is not replaced by the built-in project');
 });
 
+test('31c. Deleting the active device project returns to the built-in project', async t => {
+  const calls = [];
+  const { api } = createEditorFixture(t, {
+    fetch: async url => {
+      calls.push(url);
+      if (url.startsWith('/api/sound/graph/delete')) return { ok: true };
+      if (url.startsWith('/api/sound/graph/state')) return { ok: true, revision: 0 };
+      if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+      if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+      if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+      return { ok: true };
+    }
+  });
+  const draft = JSON.parse(JSON.stringify(api.project()));
+  draft.id = 'saved_old';
+  api.setProject(draft);
+  api.setMeta('saved_old', 3);
+
+  assert.equal(await api.deleteDeviceProject('saved_old', 'Saved old'), true);
+  assert.ok(calls.some(u => u.startsWith('/api/sound/graph/delete?id=saved_old')), 'delete request sent');
+  assert.equal(api.project().id, 'locomotive_default', 'built-in project loaded after deletion');
+});
+
 test('32. Header zoom buttons zoom in/out and fit the canvas', t => {
   const { api, dom } = createEditorFixture(t);
   const p = api.project();

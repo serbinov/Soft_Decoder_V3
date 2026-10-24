@@ -235,6 +235,13 @@
   <button id="b_undo" class="tbtn" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip" aria-label="Отменить" data-i18n-aria="undo_tip">↶</button>
   <button id="b_redo" class="tbtn" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip" aria-label="Повторить" data-i18n-aria="redo_tip">↷</button>
   <div class="tm" data-menu>
+    <button type="button" class="tm-btn" data-i18n="m_device">Устройство</button>
+    <div class="tm-panel">
+      <button id="b_device_projects" data-i18n="device_projects">Проекты на устройстве…</button>
+      <button id="b_device_delete_active" data-i18n="device_delete_active">Удалить схему с устройства</button>
+    </div>
+  </div>
+  <div class="tm" data-menu>
     <button type="button" class="tm-btn" data-i18n="m_settings">Настройки</button>
     <div class="tm-panel">
       <button id="b_snap" class="on">Сетка: вкл</button>
@@ -363,6 +370,7 @@ bt_scheme:"Схема: ",bt_counts_a:"Блоков: ",bt_counts_b:", связе�
 st_no_scheme:"Нет схемы",st_png_saved:"Блок-схема сохранена в JPG",st_png_fail:"Не удалось сохранить JPG",st_txt_saved:"Блок-схема сохранена в TXT",export_scheme:"Экспорт схемы для пакета (.json)",st_scheme_saved:"Файл scheme.json сохранён для упаковки в .asp",
 confirm_new:"Создать новую схему? Несохранённые правки будут потеряны.",default_project:"Тепловоз ЧМЭ3",default_project_name:"Тепловоз ЧМЭ3",default_horn_scheme:"Тифон (низкий)",default_whistle_scheme:"Свисток",default_bell_scheme:"Радиостанция",default_compressor_scheme:"Компрессор",default_coupler_scheme:"Автосцепка",default_uncoupler_scheme:"Расцепка",default_sander_scheme:"Песочница",default_fan_scheme:"Вентилятор холодильника",default_vent_scheme:"Выпуск воздуха",default_door_open_scheme:"Двери кабины: откр.",default_door_close_scheme:"Двери кабины: закр.",default_brake_scheme:"Торможение ЧМЭ3",confirm_default:"Загрузить типовой проект тепловоза ЧМЭ3? Несохранённые правки будут потеряны.",st_default_loaded:"Загружен типовой проект тепловоза ЧМЭ3.",st_new_scheme:"Новая схема",err_not_blocks_file:"Это не файл блоков",err_import:"Импорт не удался: ",st_imported:"Импортирована схема",cancel:"Отмена",load_device:"Загрузить с устройства",check_blocks:"Проверить блоки",project_name:"Имя проекта",project_id:"ID проекта",project_bad_id:"ID: только A-Z, a-z, 0-9, _ и -, до 31 символа.",st_no_projects:"На устройстве нет сохранённых проектов.",st_no_editor_copy:"В этом проекте нет редакторской копии (сохранён только граф).",st_loaded_device:"Загружен проект: ",st_load_error:"Ошибка загрузки: ",st_restored:"Восстановленный граф",rev_no_trigger:"Не найден триггер для блока: ",rev_unsupported:"Состояния без редакторского эквивалента пропущены: ",rev_logic:"Логический блок пропущен (сложная логика): ",st_no_outputs:"На устройстве нет привязок выходов или логики.",st_engine_out_bind:"Выход двигателя можно подключить к звуку/логике; к блоку выхода нельзя (нет диапазона скорости).",st_imported_outputs_a:"Импортировано выходов: ",st_imported_outputs_b:", обновлено: ",st_import_error:"Ошибка импорта выходов: ",v_bad_project_id:"Некорректный ID проекта.",v_bad_project_name:"Имя проекта пустое или длиннее 63 байт.",
 st_writing_outputs:"Запись выходов...",st_outputs_written:"Выходы записаны",st_outputs_not_written:"Выходы не записаны: ",st_impout_a:"Импортировано выходов: ",st_impout_none:"Новых выходов нет",
+device_projects:"Проекты на устройстве…",device_delete_active:"Удалить схему с устройства",del:"Удалить",confirm_delete_project:"Удалить проект с устройства «",st_project_deleted:"Проект удалён с устройства.",st_project_deleted_default:"Проект удалён. Загружен типовой проект тепловоза ЧМЭ3.",st_no_active_project:"На устройстве нет активной схемы.",
 new_scheme_name:"Новая схема тепловоза",
 s_engine_off:"Выкл",s_engine_start:"Запуск двигателя",s_engine_idle:"Холостой ход",s_engine_brake:"Торможение",s_engine_run:"Движение ",s_engine_stop:"Останов двигателя",s_silent_in:"",s_input:"вход",s_choose:" / выбор",s_short:" (короткий)",s_begin:" начало",s_cycle:" цикл",s_finish:" конец",s_delay:" / задержка",
 v_states_a:"Состояний ",v_states_b:" > ",v_states_c:". Упростите схему.",v_sound_states_a:"Звуковых состояний > ",v_transitions_a:"Переходов ",v_transitions_b:" > ",v_effects_a:"Эффектов > ",v_assets_a:"Звуковых файлов > ",v_silent_a:"Тихих состояний > ",v_var_limit_a:"Переменных ",v_var_limit_b:" > ",v_var_name:"Некорректное имя переменной: ",v_dup_var:"Дублируется переменная: ",v_var_builtin_init:"У встроенной переменной init должен быть 0: ",v_unknown_var:"Неизвестная переменная: ",v_logic_empty:"У блока «Логика» нет ни одного условия.",v_cue_scheme_missing:"Схема не найдена — выберите существующую.",v_scheme_start:"В схеме нет блока «Старт».",v_scheme_empty:"В схеме нет блоков.",v_cue_trigger:"К блоку «Звук» не подключён «Вход (Fx)» — схеме нечем запускаться.",v_assets_missing:"Нет WAV на устройстве: ",v_no_editor_copy:"Проект слишком большой: редакторская копия не сохранена, загрузить его обратно в редактор не получится.",
@@ -423,6 +431,7 @@ bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"=
 st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",export_scheme:"Export scheme for pack (.json)",st_scheme_saved:"scheme.json saved for packing into .asp",
 confirm_new:"Create a new scheme? Unsaved changes will be lost.",default_project:"ChME3 Locomotive",default_project_name:"ChME3 Locomotive",default_horn_scheme:"Horn (low)",default_whistle_scheme:"Whistle",default_bell_scheme:"Shunting radio",default_compressor_scheme:"Air compressor",default_coupler_scheme:"Coupler",default_uncoupler_scheme:"Uncoupler",default_sander_scheme:"Sander",default_fan_scheme:"Cooling fan",default_vent_scheme:"Air release",default_door_open_scheme:"Cab door: open",default_door_close_scheme:"Cab door: close",default_brake_scheme:"ChME3 Brake",confirm_default:"Load the default ChME3 locomotive project? Unsaved changes will be lost.",st_default_loaded:"Default ChME3 locomotive project loaded.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",cancel:"Cancel",load_device:"Load from device",check_blocks:"Check blocks",project_name:"Project name",project_id:"Project ID",project_bad_id:"ID: only A-Z, a-z, 0-9, _ and -, up to 31 characters.",st_no_projects:"No saved projects on the device.",st_no_editor_copy:"This project has no editor copy (only the graph was stored).",st_loaded_device:"Project loaded: ",st_load_error:"Load failed: ",st_restored:"Recovered graph",rev_no_trigger:"No trigger found for block: ",rev_unsupported:"States without an editor equivalent were skipped: ",rev_logic:"Logic block skipped (complex logic): ",st_no_outputs:"No output or logic bindings on the device.",st_engine_out_bind:"An engine output can drive sounds/logic, not an output block (no speed range).",st_imported_outputs_a:"Outputs imported: ",st_imported_outputs_b:", updated: ",st_import_error:"Output import failed: ",v_bad_project_id:"Invalid project ID.",v_bad_project_name:"Project name is empty or longer than 63 bytes.",
 st_writing_outputs:"Writing outputs...",st_outputs_written:"Outputs written",st_outputs_not_written:"Outputs not written: ",st_impout_a:"Outputs imported: ",st_impout_none:"No new outputs",
+device_projects:"Device projects…",device_delete_active:"Delete scheme from device",del:"Delete",confirm_delete_project:"Delete project from the device \"",st_project_deleted:"Project deleted from the device.",st_project_deleted_default:"Project deleted. Default ChME3 locomotive project loaded.",st_no_active_project:"No active scheme on the device.",
 new_scheme_name:"New locomotive scheme",
 s_engine_off:"Off",s_engine_start:"Engine start",s_engine_idle:"Idle",s_engine_brake:"Braking",s_engine_run:"Moving ",s_engine_stop:"Engine stop",s_silent_in:"",s_input:"input",s_choose:" / pick",s_short:" (short)",s_begin:" start",s_cycle:" loop",s_finish:" end",s_delay:" / delay",
 v_states_a:"States ",v_states_b:" > ",v_states_c:". Simplify the scheme.",v_sound_states_a:"Sound states > ",v_transitions_a:"Transitions ",v_transitions_b:" > ",v_effects_a:"Effects > ",v_assets_a:"WAV files > ",v_silent_a:"Silent states > ",v_var_limit_a:"Variables ",v_var_limit_b:" > ",v_var_name:"Invalid variable name: ",v_dup_var:"Duplicate variable: ",v_var_builtin_init:"Built-in variable init must be 0: ",v_unknown_var:"Unknown variable: ",v_logic_empty:"The Logic block has no conditions.",v_cue_scheme_missing:"Scheme not found — select an existing one.",v_scheme_start:"The scheme has no Start block.",v_scheme_empty:"The scheme has no blocks.",v_cue_trigger:"No «Input (Fx)» is connected to the Sound block, so the scheme cannot start.",v_assets_missing:"WAV missing on device: ",v_no_editor_copy:"Project is too large: the editor copy was not stored and cannot be loaded back.",
@@ -2352,16 +2361,57 @@ function chooseDeviceProject(items){
     overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999";
     const box=document.createElement("div");
     box.style.cssText="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:340px;max-width:90vw;max-height:80vh;overflow:auto";
-    box.innerHTML='<h3 style="margin:0 0 8px">'+esc(t("load_device"))+"</h3>";
+    box.innerHTML='<h3 style="margin:0 0 8px">'+esc(t("device_projects"))+"</h3>";
     items.forEach(p=>{
-      const b=document.createElement("button");b.style.display="block";b.style.width="100%";b.style.margin="4px 0";
+      const row=document.createElement("div");
+      row.style.cssText="display:flex;gap:6px;align-items:center;margin:4px 0";
+      const b=document.createElement("button");b.style.cssText="flex:1;text-align:left";
       b.textContent=(p.name||p.id)+" · #"+p.id+" · v"+p.revision;
-      b.onclick=()=>{overlay.remove();resolve(p);};box.appendChild(b);
+      b.onclick=()=>{overlay.remove();resolve({load:p});};
+      const d=document.createElement("button");d.textContent="🗑";d.title=t("del");
+      d.onclick=()=>{overlay.remove();resolve({del:p});};
+      row.appendChild(b);row.appendChild(d);box.appendChild(row);
     });
     const cancel=document.createElement("button");cancel.textContent=t("cancel");cancel.style.marginTop="8px";
     cancel.onclick=()=>{overlay.remove();resolve(null);};box.appendChild(cancel);
     overlay.appendChild(box);document.body.appendChild(overlay);
   });
+}
+/* Delete one project from the decoder. Deleting the active project switches
+ * the device to legacy, so the editor falls back to the built-in project. */
+async function deleteDeviceProject(id,name){
+  if(!id)return false;
+  if(!confirm(t("confirm_delete_project")+(name||id)+"\u00bb?"))return false;
+  await req("/api/sound/graph/delete?id="+encodeURIComponent(id),{method:"POST"});
+  const wasActive=(id===savedId)||(id===project.id);
+  if(wasActive){loadDefaultProject();setStatus(t("st_project_deleted_default"));}
+  else setStatus(t("st_project_deleted"));
+  return true;
+}
+async function deleteActiveDeviceProject(){
+  if(busy)return;
+  if(!online){setStatus(t("offline"));return;}
+  busy=true;refreshButtons();
+  try{
+    const st=await req("/api/sound/graph/state");
+    if(!st.id||!(Number(st.revision)>0)){setStatus(t("st_no_active_project"));return;}
+    await deleteDeviceProject(st.id,st.name||st.id);
+  }catch(e){setStatus(t("st_load_error")+e.message);}
+  finally{busy=false;refreshButtons();}
+}
+async function deviceProjectsUI(){
+  if(busy)return;
+  if(!online){setStatus(t("offline"));return;}
+  busy=true;refreshButtons();
+  try{
+    const r=await req("/api/sound/graph/projects"),items=Array.isArray(r.projects)?r.projects:[];
+    if(!items.length){setStatus(t("st_no_projects"));return;}
+    const action=await chooseDeviceProject(items);
+    if(!action)return;
+    if(action.del){await deleteDeviceProject(action.del.id,action.del.name||action.del.id);return;}
+    if(!(await adoptActiveDeviceProject(action.load.id,action.load.revision)))setStatus(t("st_load_error")+t("st_no_editor_copy"));
+  }catch(e){setStatus(t("st_load_error")+e.message);}
+  finally{busy=false;refreshButtons();}
 }
 /* Best-effort reverse compiler: rebuild an editable Mixes project from a
    compiled sound-graph payload (schema v1). It recognises the state patterns
@@ -2630,37 +2680,7 @@ function reverseGraphToProject(payload,fallbackName){
     editor:{viewport:(payload.editor&&payload.editor.viewport)||{x:40,y:40,zoom:1},snap:true,bindTuples:[],auxChannels:[],mode:"mix",activeScheme:""}};
   return {project:normalizeProject(p),warnings};
 }
-async function loadDeviceProjectUI(){
-  if(busy)return;
-  if(!online){setStatus(t("offline"));return;}
-  busy=true;refreshButtons();
-  try{
-    const r=await req("/api/sound/graph/projects"),items=Array.isArray(r.projects)?r.projects:[];
-    if(!items.length){setStatus(t("st_no_projects"));return;}
-    const chosen=items.length===1?items[0]:await chooseDeviceProject(items);
-    if(!chosen)return;
-    const full=await req("/api/sound/graph/project?"+qs({id:chosen.id,revision:chosen.revision}));
-    const embedded=full&&full.project&&full.project.editor&&full.project.editor.project;
-    let restored=null;
-    if(embedded&&embedded.format==="sound-blocks"){
-      project=normalizeProject(JSON.parse(JSON.stringify(embedded)));
-    }else{
-      restored=reverseGraphToProject(full&&full.project,chosen.name||chosen.id);
-      if(!restored||!restored.project){setStatus(t("st_no_editor_copy"));return;}
-      project=restored.project;diagnostics=restored.warnings||[];
-    }
-    project.editor.snap=project.editor.snap!==false;
-    viewMode=(project.editor.mode==="scheme"&&(project.schemes||[]).length)?"scheme":"mix";
-    activeSchemeId=project.editor.activeScheme||"";
-    selected="";selectedIds=new Set();selectedLink="";assets={};
-    if(!restored)diagnostics=[];
-    savedId=project.id;revision=Number(full.revision)||Number(chosen.revision)||0;
-    applyViewport();renderSnapBtn();historyReset();render();
-    if(restored){renderDiag();setTimeout(()=>{if(online)importOutputs();},200);}
-    setStatus(t("st_loaded_device")+project.name);
-  }catch(e){setStatus(t("st_load_error")+e.message);}
-  finally{busy=false;refreshButtons();}
-}
+async function loadDeviceProjectUI(){return deviceProjectsUI();}
 async function importOutputs(){
   if(busy)return;busy=true;refreshButtons();
   try{
@@ -4653,7 +4673,7 @@ function showInspectorOnMobile(){
   document.body.classList.remove("show-pal");
   document.body.classList.add("show-insp");
 }
-function refreshButtons(){$("b_save").disabled=busy||(!online&&viewMode!=="scheme");const v=$("b_validate");if(v)v.disabled=busy;const c=$("b_check_blocks");if(c)c.disabled=busy;const ld=$("b_load_device");if(ld)ld.disabled=!online||busy;const io=$("b_import_out");if(io)io.disabled=!online||busy;}
+function refreshButtons(){$("b_save").disabled=busy||(!online&&viewMode!=="scheme");const v=$("b_validate");if(v)v.disabled=busy;const c=$("b_check_blocks");if(c)c.disabled=busy;const ld=$("b_load_device");if(ld)ld.disabled=!online||busy;const io=$("b_import_out");if(io)io.disabled=!online||busy;["b_device_projects","b_device_delete_active"].forEach(id=>{const e=$(id);if(e)e.disabled=!online||busy;});}
 function renderSnapBtn(){$("b_snap").textContent=t("snap_a")+(project.editor.snap?t("snap_on"):t("snap_off"));$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
@@ -5068,6 +5088,8 @@ if($("b_import"))$("b_import").onclick=()=>$("f_import").click();
 if($("b_validate"))$("b_validate").onclick=doValidate;
 $("b_check_blocks").onclick=checkBlocks;
 if($("b_load_device"))$("b_load_device").onclick=loadDeviceProjectUI;
+if($("b_device_projects"))$("b_device_projects").onclick=deviceProjectsUI;
+if($("b_device_delete_active"))$("b_device_delete_active").onclick=deleteActiveDeviceProject;
 if($("b_import_out"))$("b_import_out").onclick=importOutputs;
   if($("b_sim"))$("b_sim").onclick=openSimulator;
   $("b_sim_top").onclick=openSimulator;
@@ -5158,7 +5180,7 @@ applyStatic();
 loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();if((window.matchMedia&&window.matchMedia("(max-width:760px)").matches)||viewMode==="scheme")fitViewport();else applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
 if($("boot_skip"))$("boot_skip").onclick=()=>{preloadCancel=true;bootSkipped=true;bootDone=true;hideBootOverlay();};
 startBootPreload();
-  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
+  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,deleteDeviceProject:deleteDeviceProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
 })();
 </script>
 </body>

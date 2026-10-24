@@ -790,6 +790,599 @@ test('28. Simulator unlocks the PC AudioContext synchronously on open', async t 
   api.closeSimulator();
 });
 
+test('27j. Saved projects are in the File submenu and playback is a Settings item', async t => {
+  const projects = [{ id: 'alpha', name: 'Alpha', revision: 7 }, { id: 'beta', name: 'Beta', revision: 2 }];
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects };
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, revision: 0 };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+
+  assert.ok(!html.includes('id="b_device_projects"'), 'device menu items are removed');
+  assert.ok(!html.includes('data-i18n="m_device"'), 'device menu is removed');
+  assert.ok(html.includes('id="b_saved_projects"'), 'saved projects submenu exists');
+  assert.ok(html.indexOf('id="b_play_target"') > html.indexOf('data-i18n="m_settings"'),
+    'playback control is inside the Settings menu');
+
+  await api.refreshStatus();
+  assert.equal(api.soundPlayTarget(), 'pc');
+  dom.getEl('b_play_target').onclick();
+  assert.equal(api.soundPlayTarget(), 'decoder', 'the moved playback item still toggles');
+  dom.getEl('b_play_target').onclick();
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const panel = dom.getEl('saved_projects_panel');
+  assert.equal(panel.children.length, 3, 'the submenu lists the reference and both saved projects');
+  assert.match(panel.children[0].children[1].textContent, /Тепловоз|ChME3/, 'the reference project is listed by its title');
+  assert.match(panel.children[1].children[1].textContent, /Alpha/);
+  assert.match(panel.children[2].children[1].textContent, /Beta/);
+  assert.ok(panel.children[0].children[2].className.includes('tm-proj-clone'),
+    'the reference project has a clone control');
+  assert.ok(!panel.children[0].innerHTML.includes('tm-proj-del'), 'the reference has no delete control');
+  assert.ok(panel.children[1].children[2].className.includes('tm-proj-rename'),
+    'a saved project has a rename control');
+  assert.ok(panel.children[1].children[3].className.includes('tm-proj-del'),
+    'a saved project has a delete control');
+  assert.ok(!panel.children[1].innerHTML.includes('tm-proj-clone'), 'saved projects are not cloned from this list');
+  assert.ok(!panel.children[1].children[1].textContent.includes('· v'), 'the version is not shown');
+});
+
+test('27k. New project asks for a name and applies it', async t => {
+  const { api, dom } = createEditorFixture(t);
+  dom.getEl('b_new').onclick();
+  for (let i = 0; i < 100 && !dom.getEl('new_project_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  const input = dom.getEl('new_project_name');
+  assert.ok(input, 'the new-project dialog opens');
+  assert.ok(input.value.trim().length > 0, 'a default name is suggested');
+  input.value = '  Мой локомотив  ';
+  dom.getEl('new_project_create').onclick();
+  assert.equal(api.project().name, 'Мой локомотив', 'the entered name is applied');
+  const title = (api.project().mix.texts || []).find(tx => tx.text === 'Мой локомотив');
+  assert.ok(title, 'a new project gets a title text with the project name');
+  assert.ok(title.size >= 20, 'the title text is larger than body labels');
+
+  dom.getEl('b_new').onclick();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const empty = dom.getEl('new_project_name');
+  empty.value = '   ';
+  dom.getEl('new_project_create').onclick();
+  assert.ok(dom.getEl('new_project_err').textContent.length > 0, 'empty names are rejected');
+  assert.equal(api.project().name, 'Мой локомотив', 'a rejected name keeps the current project');
+});
+
+test('27l. New projects get unique ids, auto-save and mark the Save button dirty', async t => {
+  const saves = [];
+  let activeId = '';
+  let revision = 0;
+  const { api, dom } = createEditorFixture(t, { fetch: async (url, init) => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: activeId, revision };
+    if (url.startsWith('/api/sound/graph/save')) {
+      const u = new URL(url, 'http://preview');
+      const id = u.searchParams.get('id');
+      saves.push({ id, expected: Number(u.searchParams.get('expectedRevision')) || 0, name: 'P' + (saves.length + 1) });
+      activeId = id;
+      revision += 1;
+      return { ok: true, revision };
+    }
+    if (url.startsWith('/api/sound/graph/apply')) return { ok: true };
+    if (url.startsWith('/api/sound/graph/projects')) {
+      return { ok: true, projects: saves.map((x, i) => ({ id: x.id, name: x.name, revision: i + 1 })) };
+    }
+    if (url.startsWith('/api/audio/volume')) return { ok: true };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  const waitFor = async (fn, ms = 2500) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { if (fn()) return; await new Promise(r => setTimeout(r, 5)); }
+    throw new Error('timeout waiting for auto-save');
+  };
+  await api.refreshStatus();
+
+  dom.getEl('b_new').onclick();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  dom.getEl('new_project_name').value = 'Первый';
+  dom.getEl('new_project_create').onclick();
+  await waitFor(() => saves.length === 1 && !dom.getEl('b_save').disabled);
+  const id1 = saves[0].id;
+  assert.match(id1, /^[A-Za-z0-9_-]{1,31}$/);
+  assert.equal(saves[0].expected, 0, 'a new project is created with expectedRevision=0');
+  assert.equal(api.project().id, id1, 'the generated id is the current project id');
+  assert.equal(dom.getEl('b_save').textContent.endsWith('*'), false, 'auto-save clears the dirty marker');
+
+  api.setProject(Object.assign({}, api.project(), { name: 'Edited project' }));
+  assert.ok(dom.getEl('b_save').textContent.endsWith('*'), 'an edit adds the * marker');
+  assert.ok(dom.getEl('b_save').classList.contains('dirty'), 'an edited project is bold');
+
+  dom.getEl('b_new').onclick();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  dom.getEl('new_project_name').value = 'Второй';
+  dom.getEl('new_project_create').onclick();
+  await waitFor(() => saves.length === 2 && !dom.getEl('b_save').disabled);
+  assert.notEqual(saves[1].id, id1, 'a second new project gets a different id');
+  assert.equal(saves[1].expected, 0, 'the second project is also new');
+  assert.equal(dom.getEl('b_save').textContent.endsWith('*'), false, 'the second project is auto-saved');
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await waitFor(() => dom.getEl('saved_projects_panel').children.length === 3);
+  assert.equal(dom.getEl('saved_projects_panel').children.length, 3, 'both projects remain next to the reference');
+});
+
+test('27m. Status polling keeps metadata for a non-active loaded project', async t => {
+  const { api } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: 'deviceB', revision: 9 };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.setProject(Object.assign({}, api.project(), { id: 'deviceB', name: 'B' }));
+  api.setMeta('deviceB', 9);
+  await api.refreshStatus(); // marks the first auto-load check as done
+
+  api.setProject(Object.assign({}, api.project(), { id: 'projectA', name: 'A' }));
+  api.setMeta('projectA', 3);
+  await api.refreshStatus();
+  const meta = api.meta();
+  assert.equal(meta.savedId, 'projectA', 'a poll for another active project keeps savedId');
+  assert.equal(meta.revision, 3, 'a poll for another active project keeps the revision');
+
+  api.setProject(Object.assign({}, api.project(), { id: 'deviceB', name: 'B' }));
+  api.setMeta('deviceB', 4);
+  await api.refreshStatus();
+  const activeMeta = api.meta();
+  assert.equal(activeMeta.savedId, 'deviceB', 'the active project still follows the device id');
+  assert.equal(activeMeta.revision, 9, 'the active project still follows the device revision');
+});
+
+test('27n. The first status poll loads the active device project', async t => {
+  let deviceProject = null;
+  const { api } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: 'deviceB', revision: 9 };
+    if (url.startsWith('/api/sound/graph/project')) {
+      return { ok: true, revision: 9, project: { id: 'deviceB', name: 'B', editor: { project: deviceProject } } };
+    }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  deviceProject = Object.assign({}, api.project(), { format: 'sound-blocks', id: 'deviceB', name: 'B' });
+  api.setProject(Object.assign({}, api.project(), { id: 'projectA', name: 'A' }));
+  api.setMeta('projectA', 3);
+  api.resetAutoLoad();
+  await api.refreshStatus();
+
+  assert.equal(api.project().id, 'deviceB', 'the editor switches to the active device project');
+  assert.equal(api.meta().savedId, 'deviceB', 'metadata follows the active project');
+});
+
+test('27o. The reference project is active by default and has no delete action', async t => {
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects: [] };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().activeProjectId, '__reference__');
+  assert.equal(api.stateProbe().referenceMode, true);
+  assert.ok(api.project().schemes.length > 0, 'the reference is the full ChME3 scheme, not a blank project');
+  assert.match(dom.getEl('b_save').textContent, /Клонир|Clone/);
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const panel = dom.getEl('saved_projects_panel');
+  assert.equal(panel.children[0].children[0].getAttribute('aria-pressed'), 'true', 'reference is checked');
+  assert.ok(!panel.children[0].innerHTML.includes('tm-proj-del'), 'reference has no delete control');
+  assert.ok(panel.children[0].children[2].className.includes('tm-proj-clone'), 'reference has a clone control');
+
+  panel.children[0].children[0].onclick({ stopPropagation() {} });
+  for (let i = 0; i < 200; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (!api.stateProbe().busy && api.project().id === 'locomotive_default') break;
+  }
+  assert.ok((api.project().mix.texts || []).some(tx => tx.text === 'Тепловоз ЧМЭ3'),
+    'the reference canvas shows its title');
+});
+
+test('27p. Selecting a saved project applies it and moves the active check', async t => {
+  const applied = [];
+  let savedProject = null;
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: true, id: 'saved1', revision: 1 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects: [{ id: 'saved1', name: 'Saved', revision: 1 }] };
+    if (url.startsWith('/api/sound/graph/project')) return { ok: true, revision: 1, project: { id: 'saved1', name: 'Saved', editor: { project: savedProject } } };
+    if (url.startsWith('/api/sound/graph/apply')) { applied.push(url); return { ok: true }; }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  savedProject = Object.assign({}, api.project(), { format: 'sound-blocks', id: 'saved1', name: 'Saved' });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().activeProjectId, 'saved1');
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const panel = dom.getEl('saved_projects_panel');
+  const savedRow = panel.children[1];
+  savedRow.children[0].onclick({ stopPropagation() {} });
+  for (let i = 0; i < 200; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (!api.stateProbe().busy && applied.length) break;
+  }
+  assert.ok(applied.some(u => u.includes('id=saved1')), 'the project is applied on the device');
+  assert.equal(api.stateProbe().activeProjectId, 'saved1');
+  assert.equal(api.project().id, 'saved1');
+  assert.equal(api.stateProbe().referenceMode, false);
+  assert.equal(panel.children[1].children[0].getAttribute('aria-pressed'), 'true', 'the active check moved to the saved project');
+});
+
+test('27q. The reference project can be cloned into a separate saved project', async t => {
+  const saves = [];
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) {
+      return { ok: true, projects: saves.map((s, i) => ({ id: s.id, name: s.name, revision: i + 1 })) };
+    }
+    if (url.startsWith('/api/sound/graph/save')) {
+      const u = new URL(url, 'http://preview');
+      saves.push({ id: u.searchParams.get('id'), expected: Number(u.searchParams.get('expectedRevision')) || 0, name: 'Clone' });
+      return { ok: true, revision: saves.length };
+    }
+    if (url.startsWith('/api/sound/graph/apply')) return { ok: true };
+    if (url.startsWith('/api/sound/graph/asset')) {
+      const file = new URL(url, 'http://preview').searchParams.get('file');
+      return { ok: true, asset: { file, size: 100, crc32: '0', sampleRate: 44100, channels: 1, bits: 16, durationMs: 100 } };
+    }
+    if (url.startsWith('/api/audio/volume')) return { ok: true };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().activeProjectId, '__reference__');
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  dom.getEl('saved_projects_panel').children[0].children[2].onclick({ stopPropagation() {} });
+  for (let i = 0; i < 100 && !dom.getEl('clone_project_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  const cloneName = dom.getEl('clone_project_name');
+  assert.ok(cloneName, 'the clone dialog opens');
+  assert.match(cloneName.value, /копия|copy/i, 'the clone name is suggested');
+  cloneName.value = 'Мой клон';
+  dom.getEl('clone_project_create').onclick();
+  for (let i = 0; i < 400; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    const b = dom.getEl('b_save');
+    if (saves.length && !api.stateProbe().busy && !b.textContent.endsWith('*')) break;
+  }
+  assert.equal(saves.length, 1, 'the clone is saved once');
+  assert.equal(saves[0].expected, 0, 'the clone is a new project');
+  assert.notEqual(saves[0].id, '__reference__');
+  assert.equal(api.stateProbe().activeProjectId, saves[0].id);
+  assert.equal(api.stateProbe().referenceMode, false);
+  assert.equal(api.project().id, saves[0].id);
+  assert.equal(api.project().name, 'Мой клон', 'the entered clone name is used');
+  assert.ok((api.project().mix.texts || []).some(tx => tx.text === 'Мой клон'),
+    'the clone gets a title text with its project name');
+  assert.equal(dom.getEl('b_save').textContent.endsWith('*'), false, 'the cloned project is clean');
+  assert.equal(dom.getEl('saved_projects_panel').children.length, 2, 'the list contains the reference and the clone');
+});
+
+test('27r. A seeded locomotive_default is shown as the active reference, not a project row', async t => {
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: true, id: 'locomotive_default', revision: 4 };
+    if (url.startsWith('/api/sound/graph/projects')) {
+      return { ok: true, projects: [
+        { id: 'locomotive_default', name: 'ChME3', revision: 4 },
+        { id: 'saved1', name: 'Saved', revision: 1 }
+      ] };
+    }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().activeProjectId, '__reference__');
+  assert.equal(api.stateProbe().referenceMode, true);
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const panel = dom.getEl('saved_projects_panel');
+  assert.equal(panel.children.length, 2, 'the seeded default is folded into the reference row');
+  assert.equal(panel.children[0].children[0].getAttribute('aria-pressed'), 'true');
+  assert.match(panel.children[1].children[1].textContent, /Saved/);
+  assert.ok(!panel.children.slice(1).some(r => /ChME3/.test(r.children[1].textContent)),
+    'no duplicate row for the built-in id');
+});
+
+test('27s. Saved projects have a trash control and can be deleted; the reference cannot', async t => {
+  let projects = [{ id: 'saved1', name: 'Saved', revision: 1 }];
+  const calls = [];
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    calls.push(url);
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects };
+    if (url.startsWith('/api/sound/graph/delete')) { projects = []; return { ok: true }; }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const panel = dom.getEl('saved_projects_panel');
+  assert.equal(panel.children.length, 2, 'reference + one saved project');
+  assert.ok(panel.children[1].children[2].className.includes('tm-proj-rename'), 'saved row has a rename control');
+  assert.ok(panel.children[1].children[3].className.includes('tm-proj-del'), 'saved row has a trash control');
+  assert.ok(!panel.children[0].innerHTML.includes('tm-proj-del'), 'reference row has no trash control');
+
+  panel.children[1].children[3].onclick({ stopPropagation() {} });
+  for (let i = 0; i < 200; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (projects.length === 0 && !api.stateProbe().busy) break;
+  }
+  assert.ok(calls.some(u => u.startsWith('/api/sound/graph/delete?id=saved1')), 'delete request is sent');
+  assert.equal(projects.length, 0, 'the saved project is removed');
+  assert.equal(dom.getEl('saved_projects_panel').children[0].children[1].textContent.includes('Тепловоз') ||
+    dom.getEl('saved_projects_panel').children[0].children[1].textContent.includes('ChME3'), true,
+    'the reference remains in the list');
+});
+
+test('27t. The reference Clone button asks for the clone name', async t => {
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects: [] };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.match(dom.getEl('b_save').textContent, /Клонир|Clone/);
+  dom.getEl('b_save').onclick();
+  for (let i = 0; i < 100 && !dom.getEl('clone_project_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  const input = dom.getEl('clone_project_name');
+  assert.ok(input, 'the clone dialog opens from the Clone button');
+  assert.match(input.value, /копия|copy/i, 'the clone name is suggested');
+  dom.getEl('clone_project_cancel').onclick();
+});
+
+test('27u. A duplicate clone name is auto-incremented before the dialog opens', async t => {
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) {
+      return { ok: true, projects: [{ id: 'existing_copy', name: 'Тепловоз ЧМЭ3, копия 1', revision: 1 }] };
+    }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  dom.getEl('saved_projects_panel').children[0].children[2].onclick({ stopPropagation() {} });
+  for (let i = 0; i < 200 && !dom.getEl('clone_project_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(dom.getEl('clone_project_name').value, 'Тепловоз ЧМЭ3, копия 2',
+    'the suggested clone name gets a free numeric suffix');
+  dom.getEl('clone_project_cancel').onclick();
+});
+
+test('27v. Creating or cloning an 11th project is blocked with a warning', async t => {
+  const ten = Array.from({ length: 10 }, (_, i) => ({ id: 'p' + i, name: 'Project ' + i, revision: 1 }));
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects: ten };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+
+  dom.getEl('b_new').onclick();
+  for (let i = 0; i < 100 && !dom.getEl('projects_limit_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.ok(dom.getEl('projects_limit_dialog').children.length > 0, 'the project limit warning opens');
+  assert.equal(dom.getEl('new_project_dialog').children.length, 0, 'the name dialog is not opened');
+  dom.getEl('projects_limit_ok').onclick();
+  dom.getEl('projects_limit_dialog').children = []; /* mock remove() is a no-op */
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  dom.getEl('saved_projects_panel').children[0].children[2].onclick({ stopPropagation() {} });
+  for (let i = 0; i < 100 && !dom.getEl('projects_limit_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.ok(dom.getEl('projects_limit_dialog').children.length > 0, 'the clone limit warning opens');
+  assert.equal(dom.getEl('clone_project_dialog').children.length, 0, 'the clone dialog is not opened');
+  dom.getEl('projects_limit_ok').onclick();
+});
+
+test('27w. A saved project can be renamed from the pencil action', async t => {
+  let projects = [{ id: 'saved1', name: 'Old name', revision: 1 }];
+  let savedProject = null;
+  const calls = [];
+  const { api, dom } = createEditorFixture(t, { fetch: async (url, init) => {
+    calls.push({ url, body: init && init.body });
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects };
+    if (url.startsWith('/api/sound/graph/project')) {
+      return { ok: true, revision: 1, project: { id: 'saved1', name: 'Old name', editor: { project: savedProject } } };
+    }
+    if (url.startsWith('/api/sound/graph/save')) {
+      const doc = JSON.parse(init.body);
+      projects = [{ id: 'saved1', name: doc.name, revision: 2 }];
+      return { ok: true, revision: 2 };
+    }
+    if (url.startsWith('/api/sound/graph/apply')) return { ok: true };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+  savedProject = Object.assign({}, api.project(), { format: 'sound-blocks', id: 'saved1', name: 'Old name' });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+
+  dom.getEl('b_saved_projects').dispatchEvent({ type: 'click', stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const panel = dom.getEl('saved_projects_panel');
+  panel.children[1].children[2].onclick({ stopPropagation() {} }); // pencil
+  for (let i = 0; i < 200 && !dom.getEl('rename_project_dialog').children.length; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.ok(dom.getEl('rename_project_dialog').children.length > 0, 'the rename dialog opens');
+  const input = dom.getEl('rename_project_name');
+  assert.equal(input.value, 'Old name');
+  input.value = 'New name';
+  dom.getEl('rename_project_create').onclick();
+  for (let i = 0; i < 400; i++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (projects[0].name === 'New name' && !api.stateProbe().busy) break;
+  }
+  const saveCall = calls.find(c => c.url.startsWith('/api/sound/graph/save'));
+  assert.ok(saveCall, 'the renamed project is saved');
+  assert.match(saveCall.url, /id=saved1/);
+  assert.match(saveCall.url, /expectedRevision=1/);
+  assert.equal(JSON.parse(saveCall.body).name, 'New name');
+  assert.equal(projects[0].name, 'New name');
+  assert.equal(dom.getEl('saved_projects_panel').children[1].children[1].textContent, 'New name');
+  assert.ok(!dom.getEl('saved_projects_panel').children[1].children[1].textContent.includes('· v'));
+});
+
+test('28a. Re-rendering keeps the simulator panel position and audio', async t => {
+  const { api, dom } = createEditorFixture(t);
+  await api.openSimulator();
+  const sim = api.sim();
+  const panel = dom.getEl('sim_panel');
+  panel.style.left = '123px';
+  panel.style.top = '45px';
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+  api.simTick();
+  const playing = sim.chans.find(c => c.audio || c.webSource);
+  const audio = playing && playing.audio;
+  const state = playing && playing.state;
+
+  api.setProject(api.project()); // selection/refresh with the same graph
+
+  assert.equal(api.sim(), sim, 'the simulator object is not replaced');
+  assert.equal(sim.running, true, 'the simulator keeps running');
+  assert.equal(dom.getEl('sim_panel'), panel, 'the panel is not rebuilt');
+  assert.equal(dom.getEl('sim_panel').style.left, '123px', 'panel left position is preserved');
+  assert.equal(dom.getEl('sim_panel').style.top, '45px', 'panel top position is preserved');
+  if (audio) assert.equal(playing.audio, audio, 'playing audio is not restarted');
+  if (state != null) assert.equal(playing.state, state, 'channel state is preserved');
+  api.closeSimulator();
+});
+
+test('28b. A block setting change hot-reloads the simulator in place', async t => {
+  const { api, dom } = createEditorFixture(t);
+  await api.openSimulator();
+  const sim = api.sim();
+  const panel = dom.getEl('sim_panel');
+  panel.style.left = '222px';
+  panel.style.top = '33px';
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+  sim.speed = 42;
+  sim.forward = false;
+  api.simTick();
+  const playing = sim.chans.find(c => c.audio || c.webSource);
+  const audio = playing && playing.audio;
+  const stateId = playing && sim.states[playing.state] && sim.states[playing.state].id;
+
+  const vol = api.project().mix.blocks.find(b => b.type === 'volume');
+  assert.ok(vol, 'default project has a volume block');
+  vol.master = (vol.master + 5) % 101;
+  api.setProject(api.project());
+
+  assert.equal(api.sim(), sim, 'the simulator object is updated in place');
+  assert.equal(sim.speed, 42, 'speed survives the reload');
+  assert.equal(sim.forward, false, 'direction survives the reload');
+  assert.equal(sim.running, true, 'the simulator keeps running');
+  assert.equal(dom.getEl('sim_panel'), panel, 'an unchanged control set keeps the same panel');
+  assert.equal(dom.getEl('sim_panel').style.left, '222px', 'panel position survives a settings edit');
+  if (audio) assert.equal(playing.audio, audio, 'an unchanged playing channel keeps its audio');
+  if (stateId) assert.equal(sim.states[playing.state].id, stateId, 'channel state id survives the reload');
+  api.closeSimulator();
+});
+
+test('28c. Rebuilding the simulator panel preserves its position and playing audio', async t => {
+  const { api, dom } = createEditorFixture(t);
+  await api.openSimulator();
+  const sim = api.sim();
+  const panel = dom.getEl('sim_panel');
+  panel.style.left = '321px';
+  panel.style.top = '77px';
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+  api.simTick();
+  const playing = sim.chans.find(c => c.audio || c.webSource);
+  const audio = playing && playing.audio;
+  const oldTitle = sim.title;
+
+  api.project().name = oldTitle + '_renamed';
+  api.setProject(api.project());
+
+  assert.equal(api.sim(), sim, 'the simulator object is updated in place');
+  assert.equal(sim.title, oldTitle + '_renamed', 'the new title is applied');
+  assert.notEqual(dom.getEl('sim_panel'), panel, 'the title change rebuilds the panel');
+  assert.equal(dom.getEl('sim_panel').style.left, '321px', 'rebuilt panel keeps its left position');
+  assert.equal(dom.getEl('sim_panel').style.top, '77px', 'rebuilt panel keeps its top position');
+  if (audio) assert.equal(playing.audio, audio, 'playing audio survives a panel rebuild');
+  api.closeSimulator();
+});
+
+test('28d. Reopening the simulator remembers the last panel position', async t => {
+  const { api, dom } = createEditorFixture(t);
+  await api.openSimulator();
+  const panel = dom.getEl('sim_panel');
+  panel.style.left = '111px';
+  panel.style.top = '22px';
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+  api.closeSimulator();
+
+  await api.openSimulator();
+  assert.equal(dom.getEl('sim_panel').style.left, '111px', 'left position is remembered');
+  assert.equal(dom.getEl('sim_panel').style.top, '22px', 'top position is remembered');
+  api.closeSimulator();
+});
+
 test('29. Default scheme sound manifest matches the compiled default project', t => {
   const { api } = createEditorFixture(t);
   const expected = api.compile().files.slice().sort();
@@ -882,7 +1475,7 @@ test('31a. A draft never saved to a decoder yields to the built-in project when 
   assert.ok(context.localStorage.getItem('aura_blocks_project_backup_v1'), 'previous draft is archived');
 });
 
-test('31b. A draft saved on a decoder is kept when the device reports no scheme', async t => {
+test('31b. A non-active saved draft yields to the reference when the device reports no scheme', async t => {
   const { api } = createEditorFixture(t);
   const draft = JSON.parse(JSON.stringify(api.project()));
   draft.id = 'saved_work';
@@ -892,7 +1485,8 @@ test('31b. A draft saved on a decoder is kept when the device reports no scheme'
 
   api.resetAutoLoad();
   await api.refreshStatus();
-  assert.equal(api.project().id, 'saved_work', 'saved work is not replaced by the built-in project');
+  assert.equal(api.project().id, 'locomotive_default', 'the active reference replaces a non-active draft');
+  assert.equal(api.meta().savedId, '', 'the reference is not a saved device project');
 });
 
 test('31c. Deleting the active device project returns to the built-in project', async t => {

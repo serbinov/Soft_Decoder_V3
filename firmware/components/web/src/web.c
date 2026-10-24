@@ -1302,6 +1302,23 @@ static esp_err_t graph_apply_post(httpd_req_t *req)
     return send_json(req, "{\"ok\":true}");
 }
 
+static esp_err_t graph_reference_post(httpd_req_t *req)
+{
+    if (req->content_len != 0U) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
+    if (!graph_motor_stopped()) return graph_error(req, "409 Conflict", "motor must be stopped");
+    bool maintenance = false, lease = false;
+    esp_err_t err = maintenance_reserve_checked(true);
+    maintenance = err == ESP_OK;
+    if (err == ESP_OK) err = maintenance_quiesce(false);
+    if (err == ESP_OK) { err = storage_access_begin(); lease = err == ESP_OK; }
+    if (err == ESP_OK) err = sg_store_select_legacy();
+    if (lease) storage_access_end();
+    if (maintenance) web_maintenance_end();
+    if (err != ESP_OK) return graph_result_error(req, err);
+    sound_graph_deactivate();
+    return send_json(req, "{\"ok\":true}");
+}
+
 static esp_err_t graph_project_delete_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = {0}, id[SG_ID_CAP];
@@ -4795,6 +4812,7 @@ static esp_err_t start_http_server(void)
     register_route("/api/sound/graph/save", HTTP_POST, graph_save_post);
     register_route("/api/sound/graph/apply", HTTP_POST, graph_apply_post);
     register_route("/api/sound/graph/delete", HTTP_POST, graph_project_delete_post);
+    register_route("/api/sound/graph/reference", HTTP_POST, graph_reference_post);
     register_route("/api/control/source", HTTP_GET, control_source_get);
     register_route("/api/control/source", HTTP_POST, control_source_post);
     register_route("/api/mode", HTTP_GET, mode_get);

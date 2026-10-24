@@ -107,6 +107,7 @@ through `audio_voice_set_volume_live` and restored when effects end. A state's
 | `/api/sound/graph/validate` | POST | device-side validation |
 | `/api/sound/graph/save` | POST | save a new revision |
 | `/api/sound/graph/apply` | POST | activate a saved revision |
+| `/api/sound/graph/reference` | POST | deactivate the graph and use the built-in reference project |
 | `/api/sound/graph/delete` | POST | delete a project and all its revisions |
 | `/api/func-map?view=bind` | GET | canonical function bindings |
 | `/api/func-map?bind=1...` | POST | add/remove a binding |

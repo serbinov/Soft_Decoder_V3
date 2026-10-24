@@ -381,6 +381,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-25 (v0.11) — feat(editor): persistent project library, clone/rename and simulator hot reload
 - 2026-10-25 (v0.11) — fix(motor): harden BEMF sensing, calibration and feedback faults
 - 2026-10-24 (v0.11) — fix(editor): keep the built-in project for legacy graphs and stop stale live highlights
 - 2026-10-24 (v0.11) — feat(editor): manage and delete sound projects on the decoder

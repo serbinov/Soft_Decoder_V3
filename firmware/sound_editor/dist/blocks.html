@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHRleHQgeD0iMzIiIHk9IjU0IiBmb250LWZhbWlseT0iQXJpYWwsSGVsdmV0aWNhLHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZvbnQtc2l6ZT0iNjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyNTYzZWIiPkE8L3RleHQ+PC9zdmc+" />
-<title>Конструктор Блок Схем</title>
+<title>ADDITIPUS AURA-X · Конструктор Блок Схем</title>
 <style>
   :root{
     --bg:#0f1420; --panel:#161b26; --panel2:#1e2533; --line:#2b3547;
@@ -35,15 +35,17 @@
   .hd-left{display:flex;align-items:center;gap:8px;justify-self:start;min-width:0}
   .hd-mid{display:flex;align-items:center;gap:8px;justify-self:center;flex-wrap:wrap}
   .hd-right{display:flex;align-items:center;gap:8px;justify-self:end}
-  .brand{font-weight:600}
-  .brand span{color:var(--accent);font-weight:400}
+  .brand{font-weight:600;line-height:1.15}
+  .brand span{display:block;color:var(--accent);font-weight:400}
   .grow{flex:1}
-  .status{font-size:12px;color:var(--muted)}
-  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--err);margin-right:5px;vertical-align:middle}
+  .status{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+  .status.only-dot #on_txt{display:none}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--err);vertical-align:middle}
   .dot.on{background:var(--ok)}
   button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
   button:hover{border-color:var(--accent)}
   button.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+  button.dirty{font-weight:700}
   button.apply{background:var(--ok);border-color:var(--ok);color:#04170c;font-weight:600}
   button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   button:disabled{opacity:.45;cursor:not-allowed}
@@ -88,6 +90,16 @@
   .tm-panel button{display:block;width:100%;text-align:left;margin:3px 0;background:transparent;border-color:transparent}
   .tm-panel button:hover{background:var(--panel2);border-color:var(--line)}
   .tm-panel button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+  .tm-sub{position:relative}
+  .tm-sub>.tm-sub-btn::after{content:"▸";float:right;margin-left:8px;opacity:.7}
+  .tm-sub-panel{display:none;position:absolute;left:calc(100% + 6px);top:-6px;min-width:240px;max-width:340px;max-height:60vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;z-index:61;box-shadow:0 12px 32px rgba(0,0,0,.4)}
+  .tm-sub.open>.tm-sub-panel{display:block}
+  .tm-sub-empty{padding:8px;color:var(--muted);font-size:12px;line-height:1.35}
+  .tm-proj-row{display:flex;align-items:center;gap:4px}
+  .tm-proj-row>.tm-proj-pick{width:22px;flex:0 0 22px;padding:4px 0;text-align:center}
+  .tm-proj-row>.tm-proj-name{flex:1 1 auto;width:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+  .tm-proj-row>.tm-proj-clone,.tm-proj-row>.tm-proj-del,.tm-proj-row>.tm-proj-rename{width:auto;padding:4px 7px;flex:0 0 auto}
+  .tm-proj-row>button.tm-proj-active{color:var(--accent);font-weight:600}
   main{flex:1;display:flex;min-height:0;border-bottom:1px solid var(--line)}
   aside{background:var(--panel);border-right:1px solid var(--line);width:230px;overflow:auto;padding:10px}
   aside.right{border-right:none;border-left:1px solid var(--line);width:290px}
@@ -156,11 +168,11 @@
   .right-status{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
   .diag{max-height:140px;overflow:auto;font-size:11px;width:100%;margin-top:6px}
   .diag .d{color:var(--err)}.diag .w{color:var(--warn)}
-  .legend-box{margin-top:14px;padding:10px 11px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.45;color:var(--text)}
-  .legend-box h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
+  .legend-box{margin-top:14px;padding:10px 11px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:13.8px;line-height:1.45;color:var(--text)}
+  .legend-box h3{margin:0 0 6px;font-size:12.65px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
   .legend-box .leg-row{margin:5px 0}
   .legend-box .leg-row b{color:var(--text)}
-  .legend-item{margin:6px 0;padding-left:8px;border-left:3px solid var(--line);font-size:11.5px;line-height:1.38}
+  .legend-item{margin:6px 0;padding-left:8px;border-left:3px solid var(--line);font-size:13.225px;line-height:1.38}
   .hidden{display:none}
   .mob{display:none}
   @media (max-width:760px){
@@ -187,6 +199,10 @@
     body.show-pal main::after,body.show-insp main::after{opacity:1;pointer-events:auto}
     .tm-panel{position:fixed;left:8px!important;right:8px!important;top:auto;bottom:calc(8px + env(safe-area-inset-bottom,0px));min-width:0;max-height:60vh;overflow:auto;border-radius:12px;z-index:80}
     .tm-panel button{padding:10px 12px;font-size:15px}
+    .tm-sub-panel{position:static;left:auto;top:auto;min-width:0;max-width:none;max-height:none;margin:2px 0 4px 10px;padding:0 0 0 6px;border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:none;background:transparent}
+    .tm-sub>.tm-sub-btn::after{content:"▾"}
+    .tm-proj-row>button:first-child{white-space:normal}
+    .tm-proj-row>.tm-proj-name{white-space:normal}
     aside input,aside select{font-size:16px}
   }
   @media (max-width:480px){
@@ -212,7 +228,7 @@
 <header class="top">
   <div class="hd-left">
     <button id="b_pal" class="mob" title="Палитра" data-i18n-title="palette">☰</button>
-    <div class="brand">AURA-X <span data-i18n="brand_sub">Конструктор Блок Схем</span></div>
+    <div class="brand">ADDITIPUS AURA-X<span data-i18n="brand_sub">Конструктор Блок Схем</span></div>
     <div class="status"><i class="dot" id="on"></i><span id="on_txt" data-i18n="offline">Нет связи</span></div>
   </div>
   <div class="hd-mid">
@@ -220,27 +236,18 @@
     <button type="button" class="tm-btn" data-i18n="m_file">Файл</button>
     <div class="tm-panel">
       <button id="b_new" data-i18n="new">Новый</button>
-      <button id="b_default" data-i18n="default_project">Тепловоз ЧМЭ3</button>
+      <div class="tm-sub" id="tm_saved">
+        <button type="button" id="b_saved_projects" class="tm-sub-btn" aria-haspopup="true" aria-expanded="false" data-i18n="projects">Проекты</button>
+        <div class="tm-sub-panel" id="saved_projects_panel" role="menu"></div>
+      </div>
       <button id="b_check_blocks" data-i18n="check_blocks">Проверить блоки</button>
-      <button id="b_export_scheme" data-i18n="export_scheme">Экспорт схемы для пакета (.json)</button>
       <button id="b_file_png" data-i18n="download_png">Скачать картинку</button>
       <button id="b_file_txt" data-i18n="download_txt">Скачать текст</button>
-      <div style="padding:6px 8px;border-top:1px solid var(--line)">
-        <label class="hint" data-i18n="project_name">Имя проекта</label>
-        <input id="p_name" style="width:100%;margin:2px 0">
-      </div>
     </div>
   </div>
   <button id="b_text" class="tbtn" title="Добавить текст" data-i18n-title="text_tip" aria-label="Добавить текст" data-i18n-aria="text_tip">T</button>
   <button id="b_undo" class="tbtn" title="Отменить (Ctrl+Z)" data-i18n-title="undo_tip" aria-label="Отменить" data-i18n-aria="undo_tip">↶</button>
   <button id="b_redo" class="tbtn" title="Повторить (Ctrl+Y)" data-i18n-title="redo_tip" aria-label="Повторить" data-i18n-aria="redo_tip">↷</button>
-  <div class="tm" data-menu>
-    <button type="button" class="tm-btn" data-i18n="m_device">Устройство</button>
-    <div class="tm-panel">
-      <button id="b_device_projects" data-i18n="device_projects">Проекты на устройстве…</button>
-      <button id="b_device_delete_active" data-i18n="device_delete_active">Удалить схему с устройства</button>
-    </div>
-  </div>
   <div class="tm" data-menu>
     <button type="button" class="tm-btn" data-i18n="m_settings">Настройки</button>
     <div class="tm-panel">
@@ -248,9 +255,9 @@
       <button id="b_fit" data-i18n="fit_view">Показать всё</button>
       <button id="b_theme" title="Светлая / тёмная тема" data-i18n-title="theme_tip">☀ Тема: тёмная</button>
       <button id="b_lang" title="Switch to English" data-i18n-title="lang_tip">Язык: RU</button>
+      <button id="b_play_target" class="play-target-btn" data-i18n-title="play_target_tip">Воспроизведение: ПК</button>
     </div>
   </div>
-  <button id="b_play_target" class="play-target-btn">Воспроизведение: ПК</button>
   <button id="b_save" disabled data-i18n="save">Сохранить</button>
   <button id="b_sim_top" data-i18n="simulator">Симулятор</button>
   <span class="zoom-group" role="group" aria-label="Масштаб" data-i18n-aria="zoom_group">
@@ -321,10 +328,10 @@
 /* ---- i18n (Russian / English), chosen by ?lang= or the site preference --- */
 const I18N={
 ru:{
-doc_title:"Конструктор Блок Схем",brand_sub:"Конструктор Блок Схем",palette:"Палитра",
+doc_title:"ADDITIPUS AURA-X · Конструктор Блок Схем",brand_sub:"Конструктор Блок Схем",palette:"Палитра",
 connected:"Подключено",offline:"Нет связи",
   new:"Новый",import:"Импорт",export:"Экспорт",align:"Выровнять",fit_view:"Показать всё",dup:"Дубль",m_file:"Файл",m_edit:"Правка",m_canvas:"Холст",m_check:"Проверка",m_device:"Устройство",m_undo:"↶ Отменить",m_redo:"↷ Повторить",m_scheme:"Схема и связи",m_settings:"Настройки",m_theme:"Тема",theme_light:"светлая",theme_dark:"тёмная",m_lang:"Язык",m_copy:"Копировать",m_paste:"Вставить",copy_tip:"Копировать (Ctrl+C)",paste_tip:"Вставить (Ctrl+V)",
-snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",play_target_a:"Воспроизведение: ",play_pc_s:"ПК",play_dec_s:"декодер",play_target_tip:"Где прослушивать звуки: на компьютере или на декодере",live_inactive:"Live: граф не активен на устройстве",live_mismatch:"Live: на устройстве другая схема",live_offline:"Live: нет связи",live_stale:"Live: схема изменена — сохраните её на устройстве",st_device_legacy_default:"На устройстве схема без редакторской копии. Загружен типовой проект; открыть или удалить старую схему можно в меню «Устройство».",confirm_del_scheme:"Удалить звуковую схему «",confirm_del_scheme_b:"»?",v_bad_band:"Некорректный диапазон скорости («От %» больше «До %»).",st_stopped:"Остановлено",fn_busy:"занята",st_all_fns_used:"Все клавиши F0..F28 уже используются",
+snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",play_target_a:"Воспроизведение: ",play_pc_s:"ПК",play_dec_s:"декодер",play_target_tip:"Где прослушивать звуки: на компьютере или на декодере",live_inactive:"Live: граф не активен на устройстве",live_mismatch:"Live: на устройстве другая схема",live_offline:"Live: нет связи",live_stale:"Live: схема изменена — сохраните её на устройстве",st_device_legacy_default:"На устройстве схема без редакторской копии. Загружен эталонный проект «Тепловоз ЧМЭ3»; открыть или удалить старую схему можно в меню «Файл → Проекты».",confirm_del_scheme:"Удалить звуковую схему «",confirm_del_scheme_b:"»?",v_bad_band:"Некорректный диапазон скорости («От %» больше «До %»).",st_stopped:"Остановлено",fn_busy:"занята",st_all_fns_used:"Все клавиши F0..F28 уже используются",
 undo_tip:"Отменить (Ctrl+Z)",redo_tip:"Повторить (Ctrl+Y)",dup_tip:"Дублировать (Ctrl+D)",
 text_tip:"Добавить текст на поле",text_default:"Текст",text_adding:"Кликните по полю, чтобы добавить текст",text_label:"Текст",text_size:"Размер",text_color:"Цвет",text_hint:"Перетащите подпись; двойной клик — редактирование на поле.",bt_texts:"== Подписи ==",
 scheme_tip:"Схема и таблица связей",scheme_aria:"Схема и связи",
@@ -368,9 +375,9 @@ mini_none:"Нет блоков.",lt_none:"Связей нет.",lt_source:"Ис�
 bd_run:" · запуск: ",bd_idle:" · холостой: ",bd_stop:" · стоп: ",bd_step_a:"ступень ",bd_prot_a:"защита ",bd_out_mid:" · выход: ",bd_delay_a:", задержка ",bd_delay_b:" мс",bd_random:" · случайно из:",bd_trigger:"запуск: ",tr_auto:"авто",bd_speed_a:"скорость ",bd_speed_b:"% · защита ",bd_dir:"направление: ",bd_dir_fwd:"вперёд",bd_dir_rev:"назад",bd_out_a:"выход: ",
 bt_scheme:"Схема: ",bt_counts_a:"Блоков: ",bt_counts_b:", связей: ",bt_blocks:"== Блоки ==",bt_links:"== Связи ==",
 st_no_scheme:"Нет схемы",st_png_saved:"Блок-схема сохранена в JPG",st_png_fail:"Не удалось сохранить JPG",st_txt_saved:"Блок-схема сохранена в TXT",export_scheme:"Экспорт схемы для пакета (.json)",st_scheme_saved:"Файл scheme.json сохранён для упаковки в .asp",
-confirm_new:"Создать новую схему? Несохранённые правки будут потеряны.",default_project:"Тепловоз ЧМЭ3",default_project_name:"Тепловоз ЧМЭ3",default_horn_scheme:"Тифон (низкий)",default_whistle_scheme:"Свисток",default_bell_scheme:"Радиостанция",default_compressor_scheme:"Компрессор",default_coupler_scheme:"Автосцепка",default_uncoupler_scheme:"Расцепка",default_sander_scheme:"Песочница",default_fan_scheme:"Вентилятор холодильника",default_vent_scheme:"Выпуск воздуха",default_door_open_scheme:"Двери кабины: откр.",default_door_close_scheme:"Двери кабины: закр.",default_brake_scheme:"Торможение ЧМЭ3",confirm_default:"Загрузить типовой проект тепловоза ЧМЭ3? Несохранённые правки будут потеряны.",st_default_loaded:"Загружен типовой проект тепловоза ЧМЭ3.",st_new_scheme:"Новая схема",err_not_blocks_file:"Это не файл блоков",err_import:"Импорт не удался: ",st_imported:"Импортирована схема",cancel:"Отмена",load_device:"Загрузить с устройства",check_blocks:"Проверить блоки",project_name:"Имя проекта",project_id:"ID проекта",project_bad_id:"ID: только A-Z, a-z, 0-9, _ и -, до 31 символа.",st_no_projects:"На устройстве нет сохранённых проектов.",st_no_editor_copy:"В этом проекте нет редакторской копии (сохранён только граф).",st_loaded_device:"Загружен проект: ",st_load_error:"Ошибка загрузки: ",st_restored:"Восстановленный граф",rev_no_trigger:"Не найден триггер для блока: ",rev_unsupported:"Состояния без редакторского эквивалента пропущены: ",rev_logic:"Логический блок пропущен (сложная логика): ",st_no_outputs:"На устройстве нет привязок выходов или логики.",st_engine_out_bind:"Выход двигателя можно подключить к звуку/логике; к блоку выхода нельзя (нет диапазона скорости).",st_imported_outputs_a:"Импортировано выходов: ",st_imported_outputs_b:", обновлено: ",st_import_error:"Ошибка импорта выходов: ",v_bad_project_id:"Некорректный ID проекта.",v_bad_project_name:"Имя проекта пустое или длиннее 63 байт.",
+confirm_new:"Создать новую схему? Несохранённые правки будут потеряны.",new_project_title:"Новый проект",new_project_hint:"Задайте имя проекта. При подключённом устройстве проект сразу сохранится; несохранённые правки текущего проекта будут потеряны.",create:"Создать",project_name_empty:"Имя проекта не может быть пустым.",project_name_long:"Имя проекта длиннее 63 байт.",default_project:"Тепловоз ЧМЭ3",default_project_name:"Тепловоз ЧМЭ3",default_horn_scheme:"Тифон (низкий)",default_whistle_scheme:"Свисток",default_bell_scheme:"Радиостанция",default_compressor_scheme:"Компрессор",default_coupler_scheme:"Автосцепка",default_uncoupler_scheme:"Расцепка",default_sander_scheme:"Песочница",default_fan_scheme:"Вентилятор холодильника",default_vent_scheme:"Выпуск воздуха",default_door_open_scheme:"Двери кабины: откр.",default_door_close_scheme:"Двери кабины: закр.",default_brake_scheme:"Торможение ЧМЭ3",confirm_default:"Загрузить типовой проект тепловоза ЧМЭ3? Несохранённые правки будут потеряны.",st_default_loaded:"Загружен типовой проект тепловоза ЧМЭ3.",st_new_scheme:"Новая схема",err_not_blocks_file:"Это не файл блоков",err_import:"Импорт не удался: ",st_imported:"Импортирована схема",cancel:"Отмена",load_device:"Загрузить с устройства",check_blocks:"Проверить блоки",project_name:"Имя проекта",project_id:"ID проекта",project_bad_id:"ID: только A-Z, a-z, 0-9, _ и -, до 31 символа.",st_no_projects:"На устройстве нет сохранённых проектов.",st_no_editor_copy:"В этом проекте нет редакторской копии (сохранён только граф).",st_loaded_device:"Загружен проект: ",st_load_error:"Ошибка загрузки: ",st_restored:"Восстановленный граф",rev_no_trigger:"Не найден триггер для блока: ",rev_unsupported:"Состояния без редакторского эквивалента пропущены: ",rev_logic:"Логический блок пропущен (сложная логика): ",st_no_outputs:"На устройстве нет привязок выходов или логики.",st_engine_out_bind:"Выход двигателя можно подключить к звуку/логике; к блоку выхода нельзя (нет диапазона скорости).",st_imported_outputs_a:"Импортировано выходов: ",st_imported_outputs_b:", обновлено: ",st_import_error:"Ошибка импорта выходов: ",v_bad_project_id:"Некорректный ID проекта.",v_bad_project_name:"Имя проекта пустое или длиннее 63 байт.",
 st_writing_outputs:"Запись выходов...",st_outputs_written:"Выходы записаны",st_outputs_not_written:"Выходы не записаны: ",st_impout_a:"Импортировано выходов: ",st_impout_none:"Новых выходов нет",
-device_projects:"Проекты на устройстве…",device_delete_active:"Удалить схему с устройства",del:"Удалить",confirm_delete_project:"Удалить проект с устройства «",st_project_deleted:"Проект удалён с устройства.",st_project_deleted_default:"Проект удалён. Загружен типовой проект тепловоза ЧМЭ3.",st_no_active_project:"На устройстве нет активной схемы.",
+device_projects:"Проекты на устройстве…",device_delete_active:"Удалить схему с устройства",del:"Удалить",confirm_delete_project:"Удалить проект с устройства «",st_project_deleted:"Проект удалён с устройства.",st_project_deleted_default:"Проект удалён. Загружен типовой проект тепловоза ЧМЭ3.",st_no_active_project:"На устройстве нет активной схемы.",saved_projects:"Сохранённые проекты",projects_loading:"Загрузка…",projects:"Проекты",reference_project:"Эталонный проект",clone:"Клонировать",clone_suffix:", копия",clone_project_title:"Клонировать проект",clone_project_hint:"Задайте имя клона. Копия сохранится как отдельный проект.",st_reference_active:"Активен эталонный проект.",st_project_activated:"Активный проект: ",st_clone_created:"Создана копия проекта.",reference_readonly:"Эталонный проект нельзя изменить: сохранение создаст копию.",select_project:"Сделать активным",projects_limit_title:"Лимит проектов",projects_limit_text:"Можно создать не более 10 схем. Удалите ненужную схему, чтобы освободить место.",ok:"Понятно",rename:"Переименовать",rename_project_title:"Переименовать проект",rename_project_hint:"Введите новое имя проекта.",st_project_renamed:"Проект переименован: ",
 new_scheme_name:"Новая схема тепловоза",
 s_engine_off:"Выкл",s_engine_start:"Запуск двигателя",s_engine_idle:"Холостой ход",s_engine_brake:"Торможение",s_engine_run:"Движение ",s_engine_stop:"Останов двигателя",s_silent_in:"",s_input:"вход",s_choose:" / выбор",s_short:" (короткий)",s_begin:" начало",s_cycle:" цикл",s_finish:" конец",s_delay:" / задержка",
 v_states_a:"Состояний ",v_states_b:" > ",v_states_c:". Упростите схему.",v_sound_states_a:"Звуковых состояний > ",v_transitions_a:"Переходов ",v_transitions_b:" > ",v_effects_a:"Эффектов > ",v_assets_a:"Звуковых файлов > ",v_silent_a:"Тихих состояний > ",v_var_limit_a:"Переменных ",v_var_limit_b:" > ",v_var_name:"Некорректное имя переменной: ",v_dup_var:"Дублируется переменная: ",v_var_builtin_init:"У встроенной переменной init должен быть 0: ",v_unknown_var:"Неизвестная переменная: ",v_logic_empty:"У блока «Логика» нет ни одного условия.",v_cue_scheme_missing:"Схема не найдена — выберите существующую.",v_scheme_start:"В схеме нет блока «Старт».",v_scheme_empty:"В схеме нет блоков.",v_cue_trigger:"К блоку «Звук» не подключён «Вход (Fx)» — схеме нечем запускаться.",v_assets_missing:"Нет WAV на устройстве: ",v_no_editor_copy:"Проект слишком большой: редакторская копия не сохранена, загрузить его обратно в редактор не получится.",
@@ -382,10 +389,10 @@ scheme_device_note:"Схема запускается входящей связ�
 boot_title:"Загрузка редактора…",boot_project:"Подготовка проекта…",boot_assets:"Подготовка звуков…",boot_sounds:"Загрузка звуков",boot_ready:"Готово",boot_partial:"Не удалось загрузить звуков: ",boot_offline:"Устройство недоступно — звуки загрузятся по запросу",boot_skip:"Продолжить без загрузки",boot_sim:"Загрузка симулятора…",boot_files:"файлов"
 },
 en:{
-doc_title:"Block Scheme Constructor",brand_sub:"Block Scheme Constructor",palette:"Palette",
+doc_title:"ADDITIPUS AURA-X · Block Scheme Constructor",brand_sub:"Block Scheme Constructor",palette:"Palette",
 connected:"Connected",offline:"No connection",
 new:"New",import:"Import",export:"Export",align:"Align",fit_view:"Fit to view",dup:"Duplicate",m_file:"File",m_edit:"Edit",m_canvas:"Canvas",m_check:"Check",m_device:"Device",m_undo:"↶ Undo",m_redo:"↷ Redo",m_scheme:"Scheme & links",m_settings:"Settings",m_theme:"Theme",theme_light:"light",theme_dark:"dark",m_lang:"Language",m_copy:"Copy",m_paste:"Paste",copy_tip:"Copy (Ctrl+C)",paste_tip:"Paste (Ctrl+V)",
-snap_a:"Grid: ",snap_on:"on",snap_off:"off",play_target_a:"Playback: ",play_pc_s:"PC",play_dec_s:"decoder",play_target_tip:"Where to preview sounds: on the computer or on the decoder",live_inactive:"Live: graph is not active on the device",live_mismatch:"Live: a different scheme is active on the device",live_offline:"Live: no connection",live_stale:"Live: the scheme changed — save it to the device",st_device_legacy_default:"The device scheme has no editor copy. The built-in project was loaded; open or delete the old scheme from the Device menu.",confirm_del_scheme:"Delete sound scheme \"",confirm_del_scheme_b:"\"?",v_bad_band:"Invalid speed band (From % is greater than To %).",st_stopped:"Stopped",fn_busy:"in use",st_all_fns_used:"All F0..F28 keys are already in use",
+snap_a:"Grid: ",snap_on:"on",snap_off:"off",play_target_a:"Playback: ",play_pc_s:"PC",play_dec_s:"decoder",play_target_tip:"Where to preview sounds: on the computer or on the decoder",live_inactive:"Live: graph is not active on the device",live_mismatch:"Live: a different scheme is active on the device",live_offline:"Live: no connection",live_stale:"Live: the scheme changed — save it to the device",st_device_legacy_default:"The device scheme has no editor copy. The reference ChME3 project was loaded; open or delete the old scheme from File → Projects.",confirm_del_scheme:"Delete sound scheme \"",confirm_del_scheme_b:"\"?",v_bad_band:"Invalid speed band (From % is greater than To %).",st_stopped:"Stopped",fn_busy:"in use",st_all_fns_used:"All F0..F28 keys are already in use",
 undo_tip:"Undo (Ctrl+Z)",redo_tip:"Redo (Ctrl+Y)",dup_tip:"Duplicate (Ctrl+D)",
 text_tip:"Add text to the canvas",text_default:"Text",text_adding:"Click the canvas to add text",text_label:"Text",text_size:"Size",text_color:"Color",text_hint:"Drag the label; double-click to edit it on the canvas.",bt_texts:"== Labels ==",
 scheme_tip:"Diagram and link table",scheme_aria:"Diagram and links",
@@ -429,9 +436,9 @@ mini_none:"No blocks.",lt_none:"No links.",lt_source:"Source",lt_target:"Target"
 bd_run:" · start: ",bd_idle:" · idle: ",bd_stop:" · stop: ",bd_step_a:"step ",bd_prot_a:"margin ",bd_out_mid:" · output: ",bd_delay_a:", delay ",bd_delay_b:" ms",bd_random:" · randomly from:",bd_trigger:"trigger: ",tr_auto:"auto",bd_speed_a:"speed ",bd_speed_b:"% · margin ",bd_dir:"direction: ",bd_dir_fwd:"forward",bd_dir_rev:"reverse",bd_out_a:"output: ",
 bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"== Blocks ==",bt_links:"== Links ==",
 st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",export_scheme:"Export scheme for pack (.json)",st_scheme_saved:"scheme.json saved for packing into .asp",
-confirm_new:"Create a new scheme? Unsaved changes will be lost.",default_project:"ChME3 Locomotive",default_project_name:"ChME3 Locomotive",default_horn_scheme:"Horn (low)",default_whistle_scheme:"Whistle",default_bell_scheme:"Shunting radio",default_compressor_scheme:"Air compressor",default_coupler_scheme:"Coupler",default_uncoupler_scheme:"Uncoupler",default_sander_scheme:"Sander",default_fan_scheme:"Cooling fan",default_vent_scheme:"Air release",default_door_open_scheme:"Cab door: open",default_door_close_scheme:"Cab door: close",default_brake_scheme:"ChME3 Brake",confirm_default:"Load the default ChME3 locomotive project? Unsaved changes will be lost.",st_default_loaded:"Default ChME3 locomotive project loaded.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",cancel:"Cancel",load_device:"Load from device",check_blocks:"Check blocks",project_name:"Project name",project_id:"Project ID",project_bad_id:"ID: only A-Z, a-z, 0-9, _ and -, up to 31 characters.",st_no_projects:"No saved projects on the device.",st_no_editor_copy:"This project has no editor copy (only the graph was stored).",st_loaded_device:"Project loaded: ",st_load_error:"Load failed: ",st_restored:"Recovered graph",rev_no_trigger:"No trigger found for block: ",rev_unsupported:"States without an editor equivalent were skipped: ",rev_logic:"Logic block skipped (complex logic): ",st_no_outputs:"No output or logic bindings on the device.",st_engine_out_bind:"An engine output can drive sounds/logic, not an output block (no speed range).",st_imported_outputs_a:"Outputs imported: ",st_imported_outputs_b:", updated: ",st_import_error:"Output import failed: ",v_bad_project_id:"Invalid project ID.",v_bad_project_name:"Project name is empty or longer than 63 bytes.",
+confirm_new:"Create a new scheme? Unsaved changes will be lost.",new_project_title:"New project",new_project_hint:"Enter the project name. With a device connected, the project is saved immediately; unsaved changes to the current project will be lost.",create:"Create",project_name_empty:"The project name cannot be empty.",project_name_long:"The project name is longer than 63 bytes.",default_project:"ChME3 Locomotive",default_project_name:"ChME3 Locomotive",default_horn_scheme:"Horn (low)",default_whistle_scheme:"Whistle",default_bell_scheme:"Shunting radio",default_compressor_scheme:"Air compressor",default_coupler_scheme:"Coupler",default_uncoupler_scheme:"Uncoupler",default_sander_scheme:"Sander",default_fan_scheme:"Cooling fan",default_vent_scheme:"Air release",default_door_open_scheme:"Cab door: open",default_door_close_scheme:"Cab door: close",default_brake_scheme:"ChME3 Brake",confirm_default:"Load the default ChME3 locomotive project? Unsaved changes will be lost.",st_default_loaded:"Default ChME3 locomotive project loaded.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",cancel:"Cancel",load_device:"Load from device",check_blocks:"Check blocks",project_name:"Project name",project_id:"Project ID",project_bad_id:"ID: only A-Z, a-z, 0-9, _ and -, up to 31 characters.",st_no_projects:"No saved projects on the device.",st_no_editor_copy:"This project has no editor copy (only the graph was stored).",st_loaded_device:"Project loaded: ",st_load_error:"Load failed: ",st_restored:"Recovered graph",rev_no_trigger:"No trigger found for block: ",rev_unsupported:"States without an editor equivalent were skipped: ",rev_logic:"Logic block skipped (complex logic): ",st_no_outputs:"No output or logic bindings on the device.",st_engine_out_bind:"An engine output can drive sounds/logic, not an output block (no speed range).",st_imported_outputs_a:"Outputs imported: ",st_imported_outputs_b:", updated: ",st_import_error:"Output import failed: ",v_bad_project_id:"Invalid project ID.",v_bad_project_name:"Project name is empty or longer than 63 bytes.",
 st_writing_outputs:"Writing outputs...",st_outputs_written:"Outputs written",st_outputs_not_written:"Outputs not written: ",st_impout_a:"Outputs imported: ",st_impout_none:"No new outputs",
-device_projects:"Device projects…",device_delete_active:"Delete scheme from device",del:"Delete",confirm_delete_project:"Delete project from the device \"",st_project_deleted:"Project deleted from the device.",st_project_deleted_default:"Project deleted. Default ChME3 locomotive project loaded.",st_no_active_project:"No active scheme on the device.",
+device_projects:"Device projects…",device_delete_active:"Delete scheme from device",del:"Delete",confirm_delete_project:"Delete project from the device \"",st_project_deleted:"Project deleted from the device.",st_project_deleted_default:"Project deleted. Default ChME3 locomotive project loaded.",st_no_active_project:"No active scheme on the device.",saved_projects:"Saved projects",projects_loading:"Loading…",projects:"Projects",reference_project:"Reference project",clone:"Clone",clone_suffix:", copy",clone_project_title:"Clone project",clone_project_hint:"Enter the clone name. The copy is saved as a separate project.",st_reference_active:"Reference project is active.",st_project_activated:"Active project: ",st_clone_created:"Project copy created.",reference_readonly:"The reference project cannot be changed; saving creates a copy.",select_project:"Make active",projects_limit_title:"Project limit",projects_limit_text:"You can create at most 10 schemes. Delete an unnecessary scheme to free a slot.",ok:"OK",rename:"Rename",rename_project_title:"Rename project",rename_project_hint:"Enter a new project name.",st_project_renamed:"Project renamed: ",
 new_scheme_name:"New locomotive scheme",
 s_engine_off:"Off",s_engine_start:"Engine start",s_engine_idle:"Idle",s_engine_brake:"Braking",s_engine_run:"Moving ",s_engine_stop:"Engine stop",s_silent_in:"",s_input:"input",s_choose:" / pick",s_short:" (short)",s_begin:" start",s_cycle:" loop",s_finish:" end",s_delay:" / delay",
 v_states_a:"States ",v_states_b:" > ",v_states_c:". Simplify the scheme.",v_sound_states_a:"Sound states > ",v_transitions_a:"Transitions ",v_transitions_b:" > ",v_effects_a:"Effects > ",v_assets_a:"WAV files > ",v_silent_a:"Silent states > ",v_var_limit_a:"Variables ",v_var_limit_b:" > ",v_var_name:"Invalid variable name: ",v_dup_var:"Duplicate variable: ",v_var_builtin_init:"Built-in variable init must be 0: ",v_unknown_var:"Unknown variable: ",v_logic_empty:"The Logic block has no conditions.",v_cue_scheme_missing:"Scheme not found — select an existing one.",v_scheme_start:"The scheme has no Start block.",v_scheme_empty:"The scheme has no blocks.",v_cue_trigger:"No «Input (Fx)» is connected to the Sound block, so the scheme cannot start.",v_assets_missing:"WAV missing on device: ",v_no_editor_copy:"Project is too large: the editor copy was not stored and cannot be loaded back.",
@@ -773,6 +780,7 @@ const MODE_NAMES={engine:{ru:"Двигатель",en:"Engine"},volume:{ru:"Гр�
 const DIRS=[{v:"auto",n:{ru:"Авто (вперёд/назад)",en:"Auto (fwd/rev)"}},{v:"fwd",n:{ru:"Только вперёд",en:"Forward only"}},{v:"rev",n:{ru:"Только назад",en:"Reverse only"}},{v:"any",n:{ru:"Без направления",en:"No direction"}}];
 const TRASH='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>';
 const PENCIL='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+const CLONE='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
 
 /* ---- state ----------------------------------------------------------- */
 let project=null;
@@ -780,6 +788,10 @@ let selected="",selectedIds=new Set(),marquee=null;
 let dragging=null,panning=null,linking=null,pinch=null,nodeDragMoved=false,nodeTapCandidate=null;
 let textMode=false,draggingText=null,editingText="";
 let online=false,busy=false,revision=0,savedId="",savedSig=null,activeProjectAutoLoadDone=false;
+const REFERENCE_ID="__reference__";
+const REFERENCE_PROJECT_ID="locomotive_default";
+const MAX_SAVED_PROJECTS=10;
+let activeProjectId=REFERENCE_ID,referenceMode=false;
 let soundFiles=[],diagnostics=[],assets={},assetsReady=false;
 let history=[],hIndex=-1,lastSig=null;
 let readyIds=new Set(),selectedLink="",deviceBinds=[],deviceAux=[];
@@ -832,6 +844,87 @@ function newProject(){
     const e=p.blocks.find(b=>b.type==="engine"),v=p.blocks.find(b=>b.type==="volume");
     if(e){e.x=80;e.y=120;}if(v){v.x=430;v.y=120;}});
   return p;
+}
+function makeProjectId(name){
+  const slug=String(name||"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,20);
+  const suffix=Date.now().toString(36).slice(-6)+Math.random().toString(36).slice(2,5);
+  return ((slug||"project")+"_"+suffix).slice(0,31);
+}
+function ensureProjectTitle(p){
+  if(!p||!p.mix)return;
+  const blocks=Array.isArray(p.mix.blocks)?p.mix.blocks:[];
+  const xs=blocks.map(b=>Number(b.x)||0),ys=blocks.map(b=>Number(b.y)||0);
+  const minX=xs.length?Math.min.apply(null,xs):80;
+  const minY=ys.length?Math.min.apply(null,ys):120;
+  const x=snapTo(p,minX),y=snapTo(p,Math.max(0,minY-80));
+  if(!Array.isArray(p.mix.texts))p.mix.texts=[];
+  const existing=p.mix.texts.find(t=>Math.abs((Number(t.x)||0)-x)<GRID&&Math.abs((Number(t.y)||0)-y)<GRID);
+  if(existing){
+    existing.text=String(p.name||"");
+    if(!existing.size||existing.size<20)existing.size=24;
+    return;
+  }
+  p.mix.texts.push({id:nextTextId(p.mix),text:String(p.name||""),x,y,size:24});
+}
+let knownProjectNames=new Set();
+let knownProjectCount=0;
+function normProjectName(n){return String(n||"").trim().toLocaleLowerCase();}
+async function loadKnownProjectNames(){
+  const names=new Set([normProjectName(t("default_project_name"))]);
+  if(online){
+    try{
+      const r=await req("/api/sound/graph/projects");
+      let count=0;
+      (r.projects||[]).forEach(p=>{if(p.id!==REFERENCE_PROJECT_ID){count++;names.add(normProjectName(p.name||p.id));}});
+      knownProjectCount=count;
+    }catch(e){}
+  }
+  knownProjectNames=names;
+  return names;
+}
+function uniqueProjectName(base,names){
+  const clean=String(base||"").trim()||t("new_scheme_name");
+  const set=names||knownProjectNames;
+  if(!set.has(normProjectName(clean)))return clean;
+  const enc=new TextEncoder();
+  for(let i=1;i<1000;i++){
+    const suffix=" +"+i;
+    let trimmed=clean;
+    while(trimmed.length>1&&enc.encode(trimmed+suffix).length>63)trimmed=trimmed.slice(0,-1);
+    const candidate=trimmed+suffix;
+    if(!set.has(normProjectName(candidate)))return candidate;
+  }
+  return clean;
+}
+async function newProjectUI(){
+  const names=await loadKnownProjectNames();
+  if(knownProjectCount>=MAX_SAVED_PROJECTS){showProjectLimit();return;}
+  const overlay=document.createElement("div");overlay.setAttribute("id","new_project_dialog");
+  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999";
+  const box=document.createElement("div");
+  box.style.cssText="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:320px;max-width:90vw";
+  box.innerHTML='<h3 style="margin:0 0 8px">'+esc(t("new_project_title"))+'</h3><p class="hint" style="margin:0 0 8px">'+esc(t("new_project_hint"))+'</p><input id="new_project_name" style="width:100%;margin:0 0 6px"><div id="new_project_err" class="hint" style="color:var(--err);min-height:16px"></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px"><button id="new_project_cancel">'+esc(t("cancel"))+'</button><button id="new_project_create" class="primary">'+esc(t("create"))+'</button></div>';
+  const input=box.querySelector("#new_project_name"),err=box.querySelector("#new_project_err");
+  input.value=t("new_scheme_name");
+  const close=()=>overlay.remove();
+  const submit=()=>{
+    const name=(input.value||"").trim();
+    if(!name){err.textContent=t("project_name_empty");input.focus();return;}
+    if(new TextEncoder().encode(name).length>63){err.textContent=t("project_name_long");input.focus();return;}
+    const finalName=uniqueProjectName(name,names);
+    knownProjectNames.add(normProjectName(finalName));
+    close();
+    project=newProject();project.name=finalName;project.id=makeProjectId(finalName);ensureProjectTitle(project);
+    viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();
+    revision=0;savedId="";savedSig=null;assets={};diagnostics=[];referenceMode=false;
+    applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));
+    autoSaveProject();
+  };
+  box.querySelector("#new_project_cancel").onclick=close;
+  box.querySelector("#new_project_create").onclick=submit;
+  input.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();submit();}else if(ev.key==="Escape"){ev.stopPropagation();close();}});
+  overlay.addEventListener("keydown",ev=>{if(ev.key==="Escape"){ev.stopPropagation();close();}});
+  overlay.appendChild(box);document.body.appendChild(overlay);input.focus();input.select();
 }
 /* Ready-to-run ChME3 locomotive template: K6S310DR diesel engine + horn/whistle
    schemes + compressor/sander/fan/coupler/radio/doors + light/AUX outputs +
@@ -2209,9 +2302,10 @@ async function adoptActiveDeviceProject(srvId,srvRev,opts){
   }else if(!manual){
     /* A graph without an editor copy is a legacy/foreign scheme: reverse
        engineering it produces a crowded flat layout and warnings. Keep the
-       built-in project on automatic load and let the Device menu open it. */
+       built-in reference template on automatic load and let the Projects
+       list open it manually. */
     loadDefaultProject();
-    savedId="";revision=0;savedSig=null;
+    savedId="";revision=0;savedSig=projectSig();
     diagnostics=[{message:t("st_device_legacy_default"),severity:"warning"}];
     renderDiag();render();
     setStatus(t("st_device_legacy_default"));
@@ -2233,7 +2327,7 @@ async function adoptActiveDeviceProject(srvId,srvRev,opts){
   }
   selected="";selectedIds=new Set();selectedLink="";assets={};assetsReady=false;
   diagnostics=restored?(restored.warnings||[]):[];
-  savedId=srvId;revision=srvRev;savedSig=projectSig();
+  savedId=srvId===REFERENCE_PROJECT_ID?"":srvId;revision=srvId===REFERENCE_PROJECT_ID?0:srvRev;savedSig=projectSig();referenceMode=srvId===REFERENCE_PROJECT_ID;
   if(viewMode==="scheme")fitViewport();else applyViewport();
   renderSnapBtn();historyReset();render();
   if(restored){renderDiag();setTimeout(()=>{if(online)importOutputs();},200);}
@@ -2247,22 +2341,40 @@ async function refreshStatus(){
     const s=await req("/api/sound/graph/state");online=true;
     const srvRev=Number(s.revision)||0;
     const srvId=s.id||"";
+    const srvActive=s.active!==false&&!!srvId&&srvRev>0;
+    const isRefActive=!srvActive||srvId===REFERENCE_PROJECT_ID;
+    activeProjectId=isRefActive?REFERENCE_ID:srvId;
     if(firstCheck){
-      const draftIsActive=project.id===srvId&&savedId===srvId&&revision===srvRev;
-      if(srvId&&srvRev>0&&!draftIsActive){
-        try{
-          if(await adoptActiveDeviceProject(srvId,srvRev))activeProjectAutoLoadDone=true;
-        }catch(e){}
-      }else if(!(srvId&&srvRev>0)&&shouldAdoptDefaultNoDeviceScheme()){
-        loadDefaultProject();
+      /* Opening the editor follows the device: load the active project. A
+       * draft of the same active project is kept so unsaved edits survive a
+       * page reload; a draft of another project is replaced by the active one. */
+      if(srvActive&&!isRefActive){
+        if(project.id===srvId){
+          activeProjectAutoLoadDone=true;
+        }else{
+          try{
+            if(await adoptActiveDeviceProject(srvId,srvRev))activeProjectAutoLoadDone=true;
+          }catch(e){}
+        }
+      }else if(isRefActive){
+        if(project.id!==REFERENCE_PROJECT_ID)loadDefaultProject();
+        referenceMode=true;
+        activeProjectId=REFERENCE_ID;
         activeProjectAutoLoadDone=true;
       }else{
         activeProjectAutoLoadDone=true;
       }
     }
-    revision=srvRev;if(srvId)savedId=srvId;
+    /* savedId/revision describe the project loaded in the editor, not the
+     * device's active project. Overwriting them here made a project loaded
+     * from File → Saved projects save with expectedRevision=0 (or update the
+     * wrong project) after the next status poll. */
+     if(srvId&&srvId!==REFERENCE_PROJECT_ID&&project.id===srvId){savedId=srvId;revision=srvRev;}
   }catch(e){online=false;if(firstCheck)activeProjectAutoLoadDone=true;}
-  $("on").classList.toggle("on",online);$("on_txt").textContent=online?t("connected"):t("offline");
+  $("on").classList.toggle("on",online);
+  const statusEl=$("on_txt").parentElement;
+  if(statusEl){statusEl.classList.toggle("only-dot",online);statusEl.title=online?t("connected"):t("offline");}
+  $("on_txt").textContent=online?t("connected"):t("offline");
   try{const sf=await req("/api/sound-files");soundFiles=(sf.files||[]).filter(f=>/\.wav$/i.test(f));}catch(e){soundFiles=[];}
   try{const rb=await req("/api/func-map?view=bind");deviceBinds=rb.binds||[];}catch(e){deviceBinds=[];}
   try{const ax=await req("/api/aux/cfg");deviceAux=ax.aux||[];}catch(e){deviceAux=[];}
@@ -2290,6 +2402,21 @@ async function doValidate(){
 }
 async function doSave(){
   if(busy)return;
+  if(referenceMode){
+    /* The reference project is immutable: saving it creates an editable
+     * copy instead of writing over the reference. */
+    const names=await loadKnownProjectNames();
+    if(knownProjectCount>=MAX_SAVED_PROJECTS){showProjectLimit();return;}
+    const suggested=uniqueCloneName(project.name,names);
+    const entered=await askCloneName(suggested);
+    if(entered===null)return;
+    const name=uniqueProjectName(entered,names);
+    knownProjectNames.add(normProjectName(name));
+    project.name=name;
+    project.id=makeProjectId(project.id||project.name||"reference");
+    referenceMode=false;savedId="";revision=0;savedSig=null;
+    render();updateSaveButton();
+  }
   const sb=$("b_save");
   if(sb)sb.classList.add("primary");
   if(viewMode==="scheme"){
@@ -2303,8 +2430,17 @@ async function doSave(){
       return;
     }
   }
+  if(online&&project.id!==savedId){
+    await loadKnownProjectNames();
+    if(knownProjectCount>=MAX_SAVED_PROJECTS){
+      showProjectLimit();
+      if(sb)sb.classList.remove("primary");
+      return;
+    }
+  }
   busy=true;refreshButtons();setStatus(t("st_saving"));
-  try{const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
+  try{project.editor.bindTuples=desiredBindings().map(bindKey);project.editor.auxChannels=auxConfigs().map(c=>c.ch);
+    const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
     /* Always refresh asset metadata: after a sound-pack replacement the cached
        size/CRC would make apply fail with a stale manifest. */
     await fetchAssets(v.files,true);
@@ -2312,12 +2448,13 @@ async function doSave(){
     if(missing.length){diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));renderDiag();throw new Error(t("v_assets_missing")+missing.join(", "));}
     v.payload.assets=v.files.map(f=>assets[f]).filter(Boolean);
     const r=await req("/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0}),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(wirePayload(v.payload))});
-    revision=Number(r.revision)||revision;savedId=project.id;savedSig=projectSig();
+    revision=Number(r.revision)||revision;savedId=project.id;savedSig=projectSig();knownProjectNames.add(normProjectName(project.name));updateSaveButton();
     let applied=false,applyErr="";
     try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});await applyOutputs();applied=true;}
     catch(e){applyErr=e&&e.message?e.message:String(e);}
     await refreshStatus();
     if(applied){
+      activeProjectId=project.id;referenceMode=false;
       setStatus(t("st_saved_version"));
     }
     else{
@@ -2325,7 +2462,18 @@ async function doSave(){
       renderDiag();
       setStatus(t("st_saved_not_applied")+": "+applyErr);
     }
+    if($("tm_saved")&&$("tm_saved").classList.contains("open"))refreshSavedProjects();
   }catch(e){setStatus(t("st_not_saved")+e.message);}finally{busy=false;refreshButtons();setTimeout(()=>{if(sb&&!busy)sb.classList.remove("primary");},400);}
+}
+function autoSaveProject(){
+  if(!online)return;
+  let tries=0;
+  const tick=()=>{
+    if(!online||tries++>100)return;
+    if(!busy){if(isDirty())doSave();return;}
+    setTimeout(tick,100);
+  };
+  tick();
 }
 function volumeBlock(){return project.blocks.find(b=>b.type==="volume");}
 async function applyVolumes(){
@@ -2362,8 +2510,7 @@ async function applyOutputs(){
 
 async function checkBlocks(){return testScheme();}
 function renderProjectFields(){
-  const n=$("p_name"),i=$("p_id");
-  if(n&&document.activeElement!==n)n.value=project.name||"";
+  const i=$("p_id");
   if(i&&document.activeElement!==i)i.value=project.id||"";
 }
 function chooseDeviceProject(items){
@@ -2379,9 +2526,13 @@ function chooseDeviceProject(items){
       const b=document.createElement("button");b.style.cssText="flex:1;text-align:left";
       b.textContent=(p.name||p.id)+" · #"+p.id+" · v"+p.revision;
       b.onclick=()=>{overlay.remove();resolve({load:p});};
-      const d=document.createElement("button");d.textContent="🗑";d.title=t("del");
-      d.onclick=()=>{overlay.remove();resolve({del:p});};
-      row.appendChild(b);row.appendChild(d);box.appendChild(row);
+      row.appendChild(b);
+      if(p.id!==REFERENCE_PROJECT_ID){
+        const d=document.createElement("button");d.textContent="🗑";d.title=t("del");
+        d.onclick=()=>{overlay.remove();resolve({del:p});};
+        row.appendChild(d);
+      }
+      box.appendChild(row);
     });
     const cancel=document.createElement("button");cancel.textContent=t("cancel");cancel.style.marginTop="8px";
     cancel.onclick=()=>{overlay.remove();resolve(null);};box.appendChild(cancel);
@@ -2392,23 +2543,14 @@ function chooseDeviceProject(items){
  * the device to legacy, so the editor falls back to the built-in project. */
 async function deleteDeviceProject(id,name){
   if(!id)return false;
+  if(id===REFERENCE_PROJECT_ID){setStatus(t("reference_readonly"));return false;}
   if(!confirm(t("confirm_delete_project")+(name||id)+"\u00bb?"))return false;
   await req("/api/sound/graph/delete?id="+encodeURIComponent(id),{method:"POST"});
-  const wasActive=(id===savedId)||(id===project.id);
-  if(wasActive){loadDefaultProject();setStatus(t("st_project_deleted_default"));}
+  const wasActive=(id===activeProjectId),wasLoaded=(id===savedId)||(id===project.id);
+  if(wasActive){loadDefaultProject();referenceMode=true;activeProjectId=REFERENCE_ID;setStatus(t("st_project_deleted_default"));}
+  else if(wasLoaded){loadDefaultProject();referenceMode=true;setStatus(t("st_project_deleted"));}
   else setStatus(t("st_project_deleted"));
   return true;
-}
-async function deleteActiveDeviceProject(){
-  if(busy)return;
-  if(!online){setStatus(t("offline"));return;}
-  busy=true;refreshButtons();
-  try{
-    const st=await req("/api/sound/graph/state");
-    if(!st.id||!(Number(st.revision)>0)){setStatus(t("st_no_active_project"));return;}
-    await deleteDeviceProject(st.id,st.name||st.id);
-  }catch(e){setStatus(t("st_load_error")+e.message);}
-  finally{busy=false;refreshButtons();}
 }
 async function deviceProjectsUI(){
   if(busy)return;
@@ -2423,6 +2565,256 @@ async function deviceProjectsUI(){
     if(!(await adoptActiveDeviceProject(action.load.id,action.load.revision,{manual:true})))setStatus(t("st_load_error")+t("st_no_editor_copy"));
   }catch(e){setStatus(t("st_load_error")+e.message);}
   finally{busy=false;refreshButtons();}
+}
+async function applyActiveProject(id,rev){
+  await req("/api/sound/graph/apply?"+qs({id,revision:rev}),{method:"POST"});
+}
+async function activateReference(){
+  if(busy)return;
+  if(!online){setStatus(t("offline"));return;}
+  busy=true;refreshButtons();
+  try{
+    await req("/api/sound/graph/reference",{method:"POST"});
+    loadDefaultProject();
+    ensureProjectTitle(project);
+    diagnostics=[];renderDiag();
+    referenceMode=true;activeProjectId=REFERENCE_ID;savedId="";revision=0;savedSig=projectSig();
+    render();
+    updateSaveButton();
+    setStatus(t("st_reference_active"));
+    await refreshSavedProjects();
+  }catch(e){setStatus(t("st_load_error")+e.message);}
+  finally{busy=false;refreshButtons();}
+}
+async function activateSavedProject(p){
+  if(busy)return;
+  if(!online){setStatus(t("offline"));return;}
+  busy=true;refreshButtons();
+  try{
+    if(!(await adoptActiveDeviceProject(p.id,p.revision,{manual:true})))throw new Error(t("st_no_editor_copy"));
+    await applyActiveProject(p.id,p.revision);
+    referenceMode=false;activeProjectId=p.id;
+    setStatus(t("st_project_activated")+project.name);
+    await refreshSavedProjects();
+  }catch(e){setStatus(t("st_load_error")+e.message);}
+  finally{busy=false;refreshButtons();}
+}
+function makeCloneName(base,n){
+  const root=String(base||t("default_project_name")).trim()||t("default_project_name");
+  const suffix=t("clone_suffix")+" "+(n||1);
+  const enc=new TextEncoder();
+  let trimmed=root;
+  while(trimmed.length>1&&enc.encode(trimmed+suffix).length>63)trimmed=trimmed.slice(0,-1);
+  return trimmed+suffix;
+}
+function uniqueCloneName(base,names){
+  const set=names||knownProjectNames;
+  for(let i=1;i<1000;i++){
+    const candidate=makeCloneName(base,i);
+    if(!set.has(normProjectName(candidate)))return candidate;
+  }
+  return makeCloneName(base,1);
+}
+function showProjectLimit(){
+  const overlay=document.createElement("div");overlay.setAttribute("id","projects_limit_dialog");
+  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999";
+  const box=document.createElement("div");
+  box.style.cssText="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:320px;max-width:90vw";
+  box.innerHTML='<h3 style="margin:0 0 8px">'+esc(t("projects_limit_title"))+'</h3><p class="hint" style="margin:0 0 10px">'+esc(t("projects_limit_text"))+'</p><div style="display:flex;justify-content:flex-end"><button id="projects_limit_ok" class="primary">'+esc(t("ok"))+'</button></div>';
+  box.querySelector("#projects_limit_ok").onclick=()=>overlay.remove();
+  overlay.appendChild(box);document.body.appendChild(overlay);
+}
+function askRenameProject(currentName){
+  return new Promise(resolve=>{
+    const overlay=document.createElement("div");overlay.setAttribute("id","rename_project_dialog");
+    overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999";
+    const box=document.createElement("div");
+    box.style.cssText="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:320px;max-width:90vw";
+    box.innerHTML='<h3 style="margin:0 0 8px">'+esc(t("rename_project_title"))+'</h3><p class="hint" style="margin:0 0 8px">'+esc(t("rename_project_hint"))+'</p><input id="rename_project_name" style="width:100%;margin:0 0 6px"><div id="rename_project_err" class="hint" style="color:var(--err);min-height:16px"></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px"><button id="rename_project_cancel">'+esc(t("cancel"))+'</button><button id="rename_project_create" class="primary">'+esc(t("rename"))+'</button></div>';
+    const input=box.querySelector("#rename_project_name"),err=box.querySelector("#rename_project_err");
+    input.value=currentName||"";
+    const close=val=>{overlay.remove();resolve(val);};
+    const submit=()=>{
+      const name=(input.value||"").trim();
+      if(!name){err.textContent=t("project_name_empty");input.focus();return;}
+      if(new TextEncoder().encode(name).length>63){err.textContent=t("project_name_long");input.focus();return;}
+      close(name);
+    };
+    box.querySelector("#rename_project_cancel").onclick=()=>close(null);
+    box.querySelector("#rename_project_create").onclick=submit;
+    input.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();submit();}else if(ev.key==="Escape"){ev.stopPropagation();close(null);}});
+    overlay.addEventListener("keydown",ev=>{if(ev.key==="Escape"){ev.stopPropagation();close(null);}});
+    overlay.appendChild(box);document.body.appendChild(overlay);input.focus();input.select();
+  });
+}
+function askCloneName(defaultName){
+  return new Promise(resolve=>{
+    const overlay=document.createElement("div");overlay.setAttribute("id","clone_project_dialog");
+    overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999";
+    const box=document.createElement("div");
+    box.style.cssText="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:320px;max-width:90vw";
+    box.innerHTML='<h3 style="margin:0 0 8px">'+esc(t("clone_project_title"))+'</h3><p class="hint" style="margin:0 0 8px">'+esc(t("clone_project_hint"))+'</p><input id="clone_project_name" style="width:100%;margin:0 0 6px"><div id="clone_project_err" class="hint" style="color:var(--err);min-height:16px"></div><div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px"><button id="clone_project_cancel">'+esc(t("cancel"))+'</button><button id="clone_project_create" class="primary">'+esc(t("clone"))+'</button></div>';
+    const input=box.querySelector("#clone_project_name"),err=box.querySelector("#clone_project_err");
+    input.value=defaultName||"";
+    const close=val=>{overlay.remove();resolve(val);};
+    const submit=()=>{
+      const name=(input.value||"").trim();
+      if(!name){err.textContent=t("project_name_empty");input.focus();return;}
+      if(new TextEncoder().encode(name).length>63){err.textContent=t("project_name_long");input.focus();return;}
+      close(name);
+    };
+    box.querySelector("#clone_project_cancel").onclick=()=>close(null);
+    box.querySelector("#clone_project_create").onclick=submit;
+    input.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();submit();}else if(ev.key==="Escape"){ev.stopPropagation();close(null);}});
+    overlay.addEventListener("keydown",ev=>{if(ev.key==="Escape"){ev.stopPropagation();close(null);}});
+    overlay.appendChild(box);document.body.appendChild(overlay);input.focus();input.select();
+  });
+}
+function prepareClone(data,name,exactName){
+  project=normalizeProject(clone(data));
+  project.name=exactName?String(name||"").trim():uniqueCloneName(name||project.name,knownProjectNames);
+  project.id=makeProjectId(project.id||project.name||"project");
+  ensureProjectTitle(project);
+  viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();selectedLink="";
+  revision=0;savedId="";savedSig=null;assets={};assetsReady=false;diagnostics=[];
+  referenceMode=false;
+  applyViewport();renderSnapBtn();historyReset();render();
+}
+async function cloneReferenceProject(){
+  if(busy)return;
+  const names=await loadKnownProjectNames();
+  if(knownProjectCount>=MAX_SAVED_PROJECTS){showProjectLimit();return;}
+  const suggested=uniqueCloneName(t("default_project_name"),names);
+  const entered=await askCloneName(suggested);
+  if(entered===null)return;
+  const name=uniqueProjectName(entered,names);
+  knownProjectNames.add(normProjectName(name));
+  busy=true;refreshButtons();
+  try{
+    prepareClone(defaultProject(),name,true);
+    busy=false;refreshButtons();
+    if(online)doSave();else setStatus(t("st_new_scheme"));
+  }catch(e){busy=false;refreshButtons();setStatus(t("st_load_error")+e.message);}
+}
+async function renameSavedProject(p){
+  if(busy)return;
+  const oldName=p.name||p.id;
+  const names=new Set(await loadKnownProjectNames());
+  names.delete(normProjectName(oldName));
+  const entered=await askRenameProject(oldName);
+  if(entered===null)return;
+  const finalName=uniqueProjectName(entered,names);
+  if(finalName===oldName)return;
+  const wasDirty=project.id===p.id?isDirty():false;
+  busy=true;refreshButtons();
+  try{
+    const full=await req("/api/sound/graph/project?"+qs({id:p.id,revision:p.revision}));
+    const doc=full.project;
+    if(!doc||typeof doc!=="object")throw new Error(t("st_no_editor_copy"));
+    doc.name=finalName;
+    if(doc.editor&&doc.editor.project){
+      doc.editor.project.name=finalName;
+      if(!doc.editor.project.editor)doc.editor.project.editor={snap:true};
+      if(doc.editor.project.editor.snap===undefined)doc.editor.project.editor.snap=true;
+      ensureProjectTitle(doc.editor.project);
+    }
+    const r=await req("/api/sound/graph/save?"+qs({id:p.id,expectedRevision:p.revision}),
+      {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(doc)});
+    if(activeProjectId===p.id){
+      try{await req("/api/sound/graph/apply?"+qs({id:p.id,revision:Number(r.revision)||p.revision}),{method:"POST"});}catch(e){}
+    }
+    if(project.id===p.id){
+      project.name=finalName;
+      ensureProjectTitle(project);
+      savedId=p.id;
+      revision=Number(r.revision)||revision;
+      if(!wasDirty)savedSig=projectSig();
+      render();
+    }
+    knownProjectNames.add(normProjectName(finalName));
+    await refreshSavedProjects();
+    setStatus(t("st_project_renamed")+finalName);
+  }catch(e){setStatus(t("st_not_saved")+e.message);}
+  finally{busy=false;refreshButtons();}
+}
+async function deleteSavedProject(p){
+  if(busy)return;
+  busy=true;refreshButtons();
+  try{
+    if(await deleteDeviceProject(p.id,p.name||p.id))await refreshSavedProjects();
+  }catch(e){setStatus(t("st_load_error")+e.message);}
+  finally{busy=false;refreshButtons();}
+}
+function projectRow(opts){
+  const row=document.createElement("div");row.className="tm-proj-row";
+  const pick=document.createElement("button");pick.type="button";
+  pick.className="tm-proj-pick"+(opts.active?" tm-proj-active":"");
+  pick.textContent=opts.active?"✓":"○";
+  pick.title=t("select_project");
+  pick.setAttribute("aria-pressed",opts.active?"true":"false");
+  pick.onclick=ev=>{ev.stopPropagation();opts.onPick();};
+  const name=document.createElement("button");name.type="button";
+  name.className="tm-proj-name"+(opts.active?" tm-proj-active":"");
+  name.textContent=opts.label;
+  name.title=opts.title||opts.label;
+  name.onclick=ev=>{ev.stopPropagation();opts.onPick();};
+  row.appendChild(pick);row.appendChild(name);
+  if(opts.onRename){
+    const rn=document.createElement("button");rn.type="button";rn.className="tm-proj-rename";
+    rn.innerHTML=PENCIL;rn.title=t("rename");rn.setAttribute("aria-label",t("rename"));
+    rn.onclick=ev=>{ev.stopPropagation();opts.onRename();};
+    row.appendChild(rn);
+  }
+  if(opts.onDelete){
+    const del=document.createElement("button");del.type="button";del.className="tm-proj-del";del.textContent="🗑";
+    del.title=t("del");del.setAttribute("aria-label",t("del"));
+    del.onclick=ev=>{ev.stopPropagation();opts.onDelete();};
+    row.appendChild(del);
+  }else if(!opts.onRename&&opts.onClone){
+    const cl=document.createElement("button");cl.type="button";cl.className="tm-proj-clone";
+    cl.innerHTML=CLONE;cl.title=t("clone");cl.setAttribute("aria-label",t("clone"));
+    cl.onclick=ev=>{ev.stopPropagation();opts.onClone();};
+    row.appendChild(cl);
+  }
+  return row;
+}
+async function refreshSavedProjects(){
+  const panel=$("saved_projects_panel");
+  if(!panel)return;
+  const refLabel=t("default_project_name");
+  const refRow=projectRow({active:activeProjectId===REFERENCE_ID,name:refLabel,
+    label:refLabel,title:refLabel,onPick:activateReference,onClone:cloneReferenceProject});
+  panel.innerHTML="";panel.appendChild(refRow);
+  if(!online){
+    const msg=document.createElement("div");msg.className="tm-sub-empty";msg.textContent=t("offline");
+    panel.appendChild(msg);return;
+  }
+  const loading=document.createElement("div");loading.className="tm-sub-empty";loading.textContent=t("projects_loading");
+  panel.appendChild(loading);
+  try{
+    const r=await req("/api/sound/graph/projects"),items=Array.isArray(r.projects)?r.projects:[];
+    const names=new Set([normProjectName(t("default_project_name"))]);
+    let count=0;
+    items.forEach(p=>{if(p.id!==REFERENCE_PROJECT_ID){count++;names.add(normProjectName(p.name||p.id));}});
+    knownProjectNames=names;
+    knownProjectCount=count;
+    panel.innerHTML="";panel.appendChild(refRow);
+    if(!items.length){
+      const msg=document.createElement("div");msg.className="tm-sub-empty";msg.textContent=t("st_no_projects");
+      panel.appendChild(msg);return;
+    }
+    items.forEach(p=>{
+      if(p.id===REFERENCE_PROJECT_ID)return;
+      const label=p.name||p.id;
+      panel.appendChild(projectRow({active:activeProjectId===p.id,name:p.name||p.id,label,
+        title:(p.name||p.id)+" · #"+p.id,onPick:()=>activateSavedProject(p),
+        onRename:()=>renameSavedProject(p),onDelete:()=>deleteSavedProject(p)}));
+    });
+  }catch(e){
+    panel.innerHTML="";panel.appendChild(refRow);
+    const msg=document.createElement("div");msg.className="tm-sub-empty";msg.textContent=t("st_load_error")+e.message;
+    panel.appendChild(msg);
+  }
 }
 /* Best-effort reverse compiler: rebuild an editable Mixes project from a
    compiled sound-graph payload (schema v1). It recognises the state patterns
@@ -2819,6 +3211,7 @@ async function importOutputs(){
 
 /* ---- scheme/mix simulator ------------------------------------------- */
 let sim=null;
+let simPanelLayout=null;
 function simulatorPayload(){
   if(viewMode==="scheme"){
     const s=activeScheme();if(!s)return null;
@@ -2845,6 +3238,63 @@ function simulatorPayload(){
   const pulseFns=new Set(mixBlocks.filter(b=>BY_TYPE[b.type]&&BY_TYPE[b.type].kind==="input"&&b.fxMode!=="hold"&&(b.fn===9||b.fn===10||isSingleShotBlock(b,mixLinks,mixBlocks))).map(b=>b.fn));
   return {payload:v.payload,title:project.name,autoFn:null,bindings:desiredBindings(),holdFns,pulseFns};
 }
+function simEffectKey(effect){
+  if(!effect)return "fx:?";
+  if(effect.id!=null&&effect.id!=="")return "fx:"+effect.id;
+  if(effect.fn!=null)return "fx:fn"+effect.fn;
+  return "fx:"+String(effect.entry);
+}
+function simChannelKey(ch){return ch.engine?"engine":simEffectKey(ch.effect);}
+function simChannelSpecs(payload,byId){
+  const specs=[];
+  const engine=payload.engine||{};
+  const engineIdx=byId[engine.entry];
+  if(engineIdx!=null&&(payload.transitions||[]).some(t=>t.source===engine.entry))specs.push({engine:true,entry:engineIdx,effect:null});
+  (payload.effects||[]).forEach(effect=>{if(byId[effect.entry]!=null)specs.push({engine:false,entry:byId[effect.entry],effect});});
+  return specs;
+}
+/* Only file/rate/loop changes require restarting a channel. Volume changes are
+   applied to the live gain so editing a volume block does not cut the sound. */
+function simAudioStructSig(st){
+  return st?[st.file||"",st.rate||1000,st.loop?1:0,st.loops|0].join("|"):"";
+}
+function simInitChannel(ch,states){
+  ch.state=ch.entry;
+  ch.elapsed=0;
+  ch.done=!states[ch.entry]||!states[ch.entry].file;
+  ch.playing=false;
+  ch.audio=null;
+  ch.audioEnded=false;
+  ch.loopsDone=0;
+  ch.audioTimer=0;
+  ch.entered=false;
+  ch.started=false;
+  ch.webSource=null;
+  ch.webGain=null;
+  ch.playToken=0;
+  ch.pending=null;
+  ch.pendingPrio=0;
+}
+function simPayloadSig(src){
+  return JSON.stringify({payload:src&&src.payload,title:src&&src.title,autoFn:src&&src.autoFn,
+    bindings:(src&&src.bindings)||[],hold:[...((src&&src.holdFns)||[])].sort((a,b)=>a-b),
+    pulse:[...((src&&src.pulseFns)||[])].sort((a,b)=>a-b)});
+}
+function simPanelSig(src){
+  const payload=(src&&src.payload)||{},fns=new Set();
+  (payload.transitions||[]).forEach(t=>{const c=t.condition;if(c&&c.fn!=null)fns.add(c.fn);});
+  (payload.effects||[]).forEach(e=>{if(e.fn!=null&&e.fn<=28)fns.add(e.fn);});
+  if(payload.engine&&payload.engine.fn<=28)fns.add(payload.engine.fn);
+  ((src&&src.bindings)||[]).forEach(b=>{if(b.fn>=0&&b.fn<=28)fns.add(b.fn);});
+  return JSON.stringify({title:(src&&src.title)||"",fns:[...fns].sort((a,b)=>a-b),
+    hold:[...((src&&src.holdFns)||[])].sort((a,b)=>a-b)});
+}
+function simPlaybackGain(ch,st){
+  const vb=volumeBlock();
+  const mGain=vb&&vb.master!=null?(vb.master|0)/100:1;
+  const cGain=vb?(ch.engine?(vb.engine!=null?vb.engine|0:100):(vb.effects!=null?vb.effects|0:100))/100:1;
+  return sim&&sim.muted?0:Math.min(0.85,Math.max(0.02,(st.volume|0)/100*mGain*cGain*0.75));
+}
 async function openSimulator(){
   unlockSimAudio();
   const src=simulatorPayload();
@@ -2867,15 +3317,16 @@ async function openSimulator(){
   closeSimulator();
   const p=src.payload,states=p.states||[];
   const byId={};states.forEach((s,i)=>byId[s.id]=i);
-  const engineIdx=byId[p.engine.entry];
-  const chans=[];
-  if(engineIdx!=null&&(p.transitions||[]).some(t=>t.source===p.engine.entry))chans.push({engine:true,entry:engineIdx});
-  (p.effects||[]).forEach(e=>{if(byId[e.entry]!=null)chans.push({engine:false,entry:byId[e.entry],effect:e});});
+  const chans=simChannelSpecs(p,byId).map(spec=>{
+    const ch={engine:spec.engine,entry:spec.entry,effect:spec.effect};
+    simInitChannel(ch,states);
+    return ch;
+  });
   sim={payload:p,byId,states,chans,bindings:src.bindings||[],holdFns:src.holdFns||new Set(),pulseFns:src.pulseFns||new Set(),title:src.title,autoFn:src.autoFn,autoPressed:false,running:false,timer:null,
     fnLevels:Array(29).fill(false),fnPress:0,fnRelease:0,engineOn:!(p.engine&&p.engine.fn<=28),speed:0,forward:true,
-    accel:0,prevSpeed:0,vars:{},log:[],last:0,outMask:0,logicActive:[],prevLogicMask:0,notchOffset:0,holdSpeed:0,holdValid:false,muted:false};
+    accel:0,prevSpeed:0,vars:{},log:[],last:0,outMask:0,logicActive:[],prevLogicMask:0,notchOffset:0,holdSpeed:0,holdValid:false,muted:false,
+    sig:simPayloadSig(src),panelSig:""};
   (p.variables||[]).forEach(v=>{sim.vars[v.name]=v.init|0;});
-  sim.chans.forEach(ch=>{ch.state=ch.entry;ch.elapsed=0;ch.done=!states[ch.entry].file;ch.playing=false;ch.audio=null;ch.audioEnded=false;ch.loopsDone=0;ch.audioTimer=0;ch.entered=false;ch.started=false;});
   buildSimPanel();
   simStart();
 }
@@ -3019,10 +3470,7 @@ function playSimAudio(ch,st){
   stopSimAudioOne(ch);
   if(!st.file)return;
   const tok=ch.playToken;
-  const vb=volumeBlock();
-  const mGain=vb&&vb.master!=null?(vb.master|0)/100:1;
-  const cGain=vb?(ch.engine?(vb.engine!=null?vb.engine|0:100):(vb.effects!=null?vb.effects|0:100))/100:1;
-  const vol=sim&&sim.muted?0:Math.min(0.85,Math.max(0.02,(st.volume|0)/100*mGain*cGain*0.75));
+  const vol=simPlaybackGain(ch,st);
   const nativeLoop=!!st.loop&&(st.loops||0)===0;
   ch.playing=true;ch.done=false;
   const ctx=unlockSimAudio();
@@ -3034,7 +3482,7 @@ function playSimAudio(ch,st){
       src.buffer=buf;
       src.loop=nativeLoop;
       src.playbackRate.value=Math.max(0.25,Math.min(4,(st.rate||1000)/1000));
-      gain.gain.value=sim&&sim.muted?0:vol;
+      gain.gain.value=vol;
       src.connect(gain);gain.connect(ctx.destination);
       ch.webSource=src;ch.webGain=gain;
       const realMs=Math.max(60,Math.round(buf.duration*1000/src.playbackRate.value));
@@ -3314,7 +3762,22 @@ function simStart(){
   renderSim();
   if(liveMode)liveUpdateFromSim(true);
 }
+function captureSimPanelLayout(){
+  const el=$("sim_panel");
+  if(!el)return simPanelLayout;
+  const body=$("sim_body");
+  simPanelLayout={left:el.style.left||"",top:el.style.top||"",right:el.style.right||"",bottom:el.style.bottom||"",
+    width:el.style.width||"",height:el.style.height||"",maxHeight:el.style.maxHeight||"",
+    scroll:body&&body.scrollTop?body.scrollTop:0};
+  return simPanelLayout;
+}
+function applySimPanelLayout(){
+  const el=$("sim_panel");if(!el||!simPanelLayout)return;
+  ["left","top","right","bottom","width","height","maxHeight"].forEach(k=>{if(simPanelLayout[k])el.style[k]=simPanelLayout[k];});
+  const body=$("sim_body");if(body)body.scrollTop=simPanelLayout.scroll||0;
+}
 function closeSimulator(){
+  captureSimPanelLayout();
   if(sim)simStop(false);
   if(sim)sim.chans.forEach(stopSimAudioOne);
   sim=null;
@@ -3323,6 +3786,7 @@ function closeSimulator(){
   if(liveMode){liveIds=new Set();liveBadges={};liveBadgeSig="";applyLiveHighlight(liveIds);liveState="";livePoll();}
 }
 function buildSimPanel(){
+  captureSimPanelLayout();
   const old=$("sim_panel");if(old)old.remove();
   const el=document.createElement("div");el.id="sim_panel";
   el.style.cssText="position:fixed;right:12px;bottom:12px;width:min(380px,92vw);min-width:280px;max-width:95vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;background:var(--panel);border:1px solid var(--line);border-radius:12px;z-index:9000;box-shadow:0 12px 36px rgba(0,0,0,.5);font-size:14px";
@@ -3345,6 +3809,7 @@ function buildSimPanel(){
       '<div style="font-weight:600;margin-bottom:4px;font-size:14px">'+esc(t("sim_log"))+'</div><div id="sim_log" style="font-family:monospace;font-size:13px;max-height:140px;overflow:auto"></div>'+
     '</div>';
   document.body.appendChild(el);
+  applySimPanelLayout();
   const hdr=$("sim_hdr"),resizer=$("sim_resize");
   if(hdr){
     hdr.addEventListener("pointerdown",ev=>{
@@ -3395,7 +3860,9 @@ function buildSimPanel(){
       b.onclick=()=>simPress(fn);
     }
   });
+  sim.panelSig=simPanelSig(sim);
   renderSim();
+  applySimPanelLayout();
 }
 function renderSim(){
   if(!sim)return;
@@ -3437,14 +3904,27 @@ function renderSim(){
 }
 
 /* ---- persistence ----------------------------------------------------- */
-function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId,savedSig}));}catch(e){}historyPush();}
+function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId,savedSig,referenceMode,activeProjectId}));}catch(e){}historyPush();updateSaveButton();}
 const projectSig=()=>JSON.stringify({m:project.mix,s:project.schemes,v:project.vars,id:project.id,name:project.name});
+function sigEquivalent(a,b){
+  if(a===b)return true;
+  if(!a||!b)return false;
+  try{const A=JSON.parse(a),B=JSON.parse(b);const core=x=>JSON.stringify({m:x.m,s:x.s,v:x.v,id:x.id,name:x.name});return core(A)===core(B);}catch(e){return false;}
+}
+function isDirty(){return savedSig===null||!sigEquivalent(savedSig,projectSig());}
+function updateSaveButton(){
+  const b=$("b_save");if(!b)return;
+  const dirty=isDirty();
+  b.textContent=(referenceMode?t("clone"):t("save"))+(dirty?"*":"");
+  b.classList.toggle("dirty",dirty);
+  b.title=referenceMode?t("reference_readonly"):t("save");
+}
 function historyReset(){history=[];hIndex=-1;lastSig=null;historyPush();}
 function historyPush(){const sig=projectSig();if(sig===lastSig)return;history=history.slice(0,hIndex+1);history.push(JSON.stringify(project));hIndex=history.length-1;lastSig=sig;if(history.length>100){history.shift();hIndex--;}}
 function afterRestore(){installGraphAccessors(project);viewMode=project.editor&&project.editor.mode==="scheme"?"scheme":"mix";activeSchemeId=(project.editor&&project.editor.activeScheme)||"";renamingSchemeId="";}
 function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);afterRestore();project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_undone"));}
 function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);afterRestore();project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_redone"));}
-function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";savedSig=d.savedSig||null;if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
+function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";savedSig=d.savedSig||null;referenceMode=!!d.referenceMode;activeProjectId=d.activeProjectId||REFERENCE_ID;if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
 /* The working copy lives in localStorage. A scratch draft that was never
  * written to a decoder must not hide the built-in project, so the previous
  * draft is archived before the built-in one replaces it. */
@@ -3453,8 +3933,11 @@ function backupDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(raw)loca
 function loadDefaultProject(){
   backupDraft();
   project=defaultProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";
-  selected="";selectedIds=new Set();revision=0;savedId="";savedSig=null;assets={};assetsReady=false;diagnostics=[];
-  applyViewport();renderSnapBtn();historyReset();render();refreshAssets();
+  selected="";selectedIds=new Set();revision=0;savedId="";assets={};assetsReady=false;diagnostics=[];
+  referenceMode=true;
+  applyViewport();renderSnapBtn();historyReset();
+  savedSig=projectSig();
+  render();refreshAssets();
   setStatus(t("st_default_loaded"));
 }
 /* A draft is scratch state until it is saved to a device. When the decoder
@@ -3987,7 +4470,7 @@ function liveIdsEqual(a,b){
  * only valid while the editor graph equals the graph applied on the device.
  * Any local edit (deleting a link, changing a scheme) invalidates it: mapping
  * stale device states through a new payload highlighted unrelated blocks. */
-function liveMappingFresh(){return !!savedId&&savedSig===projectSig();}
+function liveMappingFresh(){return !!savedId&&savedSig!==null&&sigEquivalent(savedSig,projectSig());}
 /* Inactive effect channels rest in their silent "<block>_off" entry state.
  * Highlighting them made every cue look active at once. */
 function liveStateActive(id){return !!id&&!/_off$/.test(id);}
@@ -4648,16 +5131,74 @@ function renderLegend(){
   h+='</div>';
   box.innerHTML=h;
 }
+/* Update the running simulator in place. Reusing the sim object, channels and
+ * audio nodes keeps a block click or a settings edit from jumping the panel
+ * back to its default corner or restarting a sound that did not change. */
+function hotReloadSimulator(src){
+  if(!sim)return;
+  const p=src.payload,states=p.states||[];
+  const byId={};states.forEach((s,i)=>byId[s.id]=i);
+  const oldStates=sim.states||[],oldChans=sim.chans||[],used=new Set(),running=!!sim.running;
+  const chans=simChannelSpecs(p,byId).map(spec=>{
+    let ch=null;
+    if(spec.engine)ch=oldChans.find(c=>!used.has(c)&&c.engine)||null;
+    else{const key=simEffectKey(spec.effect);ch=oldChans.find(c=>!used.has(c)&&!c.engine&&simChannelKey(c)===key)||null;}
+    if(ch)used.add(ch);
+    else{ch={engine:spec.engine,entry:spec.entry,effect:spec.effect};simInitChannel(ch,states);}
+    const oldSt=ch.state!=null?oldStates[ch.state]:null;
+    const oldStateId=oldSt?oldSt.id:null;
+    const newStateIdx=(oldStateId!=null&&byId[oldStateId]!=null)?byId[oldStateId]:null;
+    const wasStarted=!!ch.started;
+    ch.engine=spec.engine;ch.entry=spec.entry;ch.effect=spec.effect;
+    if(!wasStarted){
+      if(ch.playing)stopSimAudioOne(ch);
+      ch.state=ch.entry;ch.elapsed=0;ch.loopsDone=0;ch.done=!states[ch.entry].file;
+      ch.entered=false;ch.audioEnded=false;
+    }else if(newStateIdx==null){
+      stopSimAudioOne(ch);
+      ch.state=ch.entry;ch.elapsed=0;ch.loopsDone=0;ch.done=!states[ch.entry].file;
+      ch.entered=false;ch.started=false;ch.audioEnded=false;
+    }else{
+      const newSt=states[newStateIdx];
+      ch.state=newStateIdx;
+      if(simAudioStructSig(oldSt)!==simAudioStructSig(newSt)){
+        stopSimAudioOne(ch);
+        ch.done=!newSt.file;ch.audioEnded=false;ch.loopsDone=0;
+        if(running&&newSt.file)playSimAudio(ch,newSt);
+      }
+    }
+    return ch;
+  });
+  oldChans.forEach(ch=>{if(!used.has(ch))stopSimAudioOne(ch);});
+  sim.payload=p;sim.byId=byId;sim.states=states;sim.chans=chans;
+  sim.bindings=src.bindings||[];sim.holdFns=src.holdFns||new Set();sim.pulseFns=src.pulseFns||new Set();
+  const oldAuto=sim.autoFn;
+  sim.title=src.title;sim.autoFn=src.autoFn;
+  if(oldAuto!==sim.autoFn)sim.autoPressed=false;
+  const oldVars=sim.vars||{},vars={};
+  (p.variables||[]).forEach(v=>{vars[v.name]=Object.prototype.hasOwnProperty.call(oldVars,v.name)?oldVars[v.name]:(v.init|0);});
+  sim.vars=vars;
+  sim.sig=simPayloadSig(src);
+  if(simPanelSig(src)!==sim.panelSig)buildSimPanel();else renderSim();
+  if(sim.running){
+    if(sim.autoFn!=null&&!sim.autoPressed){sim.autoPressed=true;simPress(sim.autoFn,true);}
+    sim.chans.forEach(ch=>{const st=sim.states[ch.state];if(st&&st.file&&ch.started&&!ch.playing&&!ch.done)playSimAudio(ch,st);});
+  }
+  sim.chans.forEach(ch=>{
+    const st=sim.states[ch.state];if(!st||!ch.playing)return;
+    const vol=simPlaybackGain(ch,st);
+    if(ch.webGain)ch.webGain.gain.value=vol;
+    if(ch.audio)ch.audio.volume=vol;
+  });
+  if(liveMode)liveUpdateFromSim(true);
+}
 function refreshSimIfOpen(){
   if(!sim)return;
-  const wasRunning=sim.running,spd=sim.speed,fwd=sim.forward,engOn=sim.engineOn,fnLv=sim.fnLevels.slice(),notch=sim.notchOffset||0;
-  closeSimulator();
-  openSimulator().then(()=>{
-    if(!sim)return;
-    sim.speed=spd;sim.forward=fwd;sim.engineOn=engOn;sim.fnLevels=fnLv;sim.notchOffset=notch;
-    if(!wasRunning)simStop();
-    else renderSim();
-  });
+  let src=null;
+  try{src=simulatorPayload();}catch(e){return;}
+  if(!src||!src.payload||!src.payload.states){closeSimulator();return;}
+  if(simPayloadSig(src)===sim.sig)return;
+  try{hotReloadSimulator(src);}catch(e){/* keep the previous simulator rather than break the editor */}
 }
 function render(){liveCompileCache=null;liveMapCache=null;renderModeUI();renderProjectFields();computeReady();renderPalette();renderNodes();renderTexts();renderLinks();renderInspector();renderVars();renderSummary();renderLegend();renderReturnBar();applyLiveHighlight(liveMappingFresh()?liveIds:new Set());saveDraft();refreshSimIfOpen();}
 function isReady(b,graph){
@@ -4702,7 +5243,7 @@ function showInspectorOnMobile(){
   document.body.classList.remove("show-pal");
   document.body.classList.add("show-insp");
 }
-function refreshButtons(){$("b_save").disabled=busy||(!online&&viewMode!=="scheme");const v=$("b_validate");if(v)v.disabled=busy;const c=$("b_check_blocks");if(c)c.disabled=busy;const ld=$("b_load_device");if(ld)ld.disabled=!online||busy;const io=$("b_import_out");if(io)io.disabled=!online||busy;["b_device_projects","b_device_delete_active"].forEach(id=>{const e=$(id);if(e)e.disabled=!online||busy;});}
+function refreshButtons(){$("b_save").disabled=busy||(!online&&viewMode!=="scheme");const v=$("b_validate");if(v)v.disabled=busy;const c=$("b_check_blocks");if(c)c.disabled=busy;const ld=$("b_load_device");if(ld)ld.disabled=!online||busy;const io=$("b_import_out");if(io)io.disabled=!online||busy;updateSaveButton();}
 function renderSnapBtn(){$("b_snap").textContent=t("snap_a")+(project.editor.snap?t("snap_on"):t("snap_off"));$("b_snap").classList.toggle("on",!!project.editor.snap);$("stage").classList.toggle("grid-bg",!!project.editor.snap);}
 
 /* ---- interaction ----------------------------------------------------- */
@@ -5096,20 +5637,9 @@ function buildText(){
   return L.join("\r\n");
 }
 function exportText(){const blob=new Blob([buildText()],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=exportFileBase()+"-logic.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);setStatus(t("st_txt_saved"));}
-function exportCompiledSchemeJson(){
-  const v=validate();
-  const blob=new Blob([JSON.stringify(wirePayload(v.payload),null,2)],{type:"application/json;charset=utf-8"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download="scheme.json";
-  a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  setStatus(t("st_scheme_saved"));
-}
 
 /* ---- toolbar --------------------------------------------------------- */
-$("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();revision=0;savedId="";savedSig=null;assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
-$("b_default").onclick=()=>{if(!confirm(t("confirm_default")))return;loadDefaultProject();};
+$("b_new").onclick=newProjectUI;
 $("b_mode_mix").onclick=()=>switchMode("mix");
 $("b_mode_scheme").onclick=()=>switchMode("scheme");
 if($("b_export"))$("b_export").onclick=()=>{const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=project.id+".blocks.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
@@ -5117,13 +5647,10 @@ if($("b_import"))$("b_import").onclick=()=>$("f_import").click();
 if($("b_validate"))$("b_validate").onclick=doValidate;
 $("b_check_blocks").onclick=checkBlocks;
 if($("b_load_device"))$("b_load_device").onclick=loadDeviceProjectUI;
-if($("b_device_projects"))$("b_device_projects").onclick=deviceProjectsUI;
-if($("b_device_delete_active"))$("b_device_delete_active").onclick=deleteActiveDeviceProject;
 if($("b_import_out"))$("b_import_out").onclick=importOutputs;
   if($("b_sim"))$("b_sim").onclick=openSimulator;
   $("b_sim_top").onclick=openSimulator;
-const pn=$("p_name"),pi=$("p_id");
-if(pn)pn.addEventListener("change",e=>{project.name=(e.target.value||"").trim()||project.name;saveDraft();});
+const pi=$("p_id");
 if(pi)pi.addEventListener("change",e=>{const v=(e.target.value||"").trim();if(!/^[A-Za-z0-9_-]{1,31}$/.test(v)){setStatus(t("project_bad_id"));e.target.value=project.id;return;}project.id=v;savedId="";revision=0;saveDraft();});
 $("f_import").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const p=JSON.parse(await f.text());if(!p||p.format!=="sound-blocks")throw new Error(t("err_not_blocks_file"));project=normalizeProject(p);if(project.editor.snap===undefined)project.editor.snap=true;selected="";selectedIds=new Set();assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_imported"));}catch(err){alert(t("err_import")+err.message);}};
 $("b_snap").onclick=()=>{project.editor.snap=!project.editor.snap;renderSnapBtn();saveDraft();};
@@ -5151,7 +5678,6 @@ $("b_insp").onclick=()=>{document.body.classList.toggle("show-insp");document.bo
 $("b_text").onclick=()=>{textMode=!textMode;$("b_text").classList.toggle("on",textMode);$("stage").style.cursor=textMode?"crosshair":"";setStatus(textMode?t("text_adding"):t("ready"));};
 $("b_file_png").onclick=exportSchemePng;
 $("b_file_txt").onclick=exportText;
-if($("b_export_scheme"))$("b_export_scheme").onclick=exportCompiledSchemeJson;
 $("b_undo").onclick=undo;$("b_redo").onclick=redo;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&(ev.target.isContentEditable||/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)))return;
@@ -5188,28 +5714,45 @@ function applyStatic(){
   const b=$("b_lang");if(b){b.textContent=t("m_lang")+": "+lang.toUpperCase();b.setAttribute("title",t("lang_tip"));}
   renderPlayTargetBtn();
   applyTheme(document.documentElement.getAttribute("data-theme")||"dark");
+  updateSaveButton();
 }
 function toggleLang(){lang=(lang==="en")?"ru":"en";try{localStorage.setItem("aura_lang",lang);}catch(e){}localizeProjectNames(project);applyStatic();renderSnapBtn();historyReset();render();}
 $("b_lang").onclick=toggleLang;
 /* toolbar dropdown menus */
+function closeToolbarMenus(){
+  document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));
+  document.querySelectorAll("header.top .tm-sub.open").forEach(o=>o.classList.remove("open"));
+  const b=$("b_saved_projects");if(b)b.setAttribute("aria-expanded","false");
+}
 document.querySelectorAll("header.top .tm").forEach(tm=>{
   const btn=tm.querySelector(".tm-btn"),panel=tm.querySelector(".tm-panel");
   btn.addEventListener("click",ev=>{ev.stopPropagation();
     const open=tm.classList.contains("open");
-    document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));
+    closeToolbarMenus();
     if(!open){tm.classList.add("open");
       if(window.matchMedia&&window.matchMedia("(max-width:760px)").matches){panel.style.left="";panel.style.right="";}
       else{panel.style.left="0";panel.style.right="auto";const r=panel.getBoundingClientRect();if(r.right>window.innerWidth-8){panel.style.left="auto";panel.style.right="0";}}
     }
   });
 });
-document.addEventListener("click",()=>document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open")));
-window.addEventListener("keydown",ev=>{if(ev.key==="Escape"){document.querySelectorAll("header.top .tm.open").forEach(o=>o.classList.remove("open"));document.body.classList.remove("show-pal","show-insp");if(textMode){textMode=false;$("b_text").classList.remove("on");$("stage").style.cursor="";setStatus(t("ready"));}}});
+const savedBtn=$("b_saved_projects");
+if(savedBtn)savedBtn.addEventListener("click",ev=>{
+  ev.stopPropagation();
+  const sub=$("tm_saved");
+  if(!sub)return;
+  const open=!sub.classList.contains("open");
+  document.querySelectorAll("header.top .tm-sub.open").forEach(o=>o.classList.remove("open"));
+  sub.classList.toggle("open",open);
+  savedBtn.setAttribute("aria-expanded",open?"true":"false");
+  if(open)refreshSavedProjects();
+});
+document.addEventListener("click",()=>closeToolbarMenus());
+window.addEventListener("keydown",ev=>{if(ev.key==="Escape"){closeToolbarMenus();document.body.classList.remove("show-pal","show-insp");if(textMode){textMode=false;$("b_text").classList.remove("on");$("stage").style.cursor="";setStatus(t("ready"));}}});
 applyStatic();
 loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();if((window.matchMedia&&window.matchMedia("(max-width:760px)").matches)||viewMode==="scheme")fitViewport();else applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
 if($("boot_skip"))$("boot_skip").onclick=()=>{preloadCancel=true;bootSkipped=true;bootDone=true;hideBootOverlay();};
 startBootPreload();
-  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,liveMappingFresh:liveMappingFresh,adoptActiveDeviceProject:adoptActiveDeviceProject,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,deleteDeviceProject:deleteDeviceProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
+  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,liveMappingFresh:liveMappingFresh,adoptActiveDeviceProject:adoptActiveDeviceProject,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,deleteDeviceProject:deleteDeviceProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},meta:()=>({savedId,revision}),stateProbe:()=>({activeProjectId,referenceMode,online,busy,loadedId:project&&project.id,savedId,revision,dirty:isDirty()}),preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
 })();
 </script>
 </body>

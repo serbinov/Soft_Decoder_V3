@@ -18,6 +18,7 @@ import json
 import os
 import struct
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -242,7 +243,10 @@ def _load_pack(body):
                     GRAPH["revision"] = GRAPH.get("revision", 0) + 1
                     GRAPH["active"] = True
                     GRAPH["fault"] = False
+                    PROJECTS[doc.get("id", "locomotive_default")] = {
+                        "project": doc, "revision": GRAPH["revision"]}
                     _runner_reset()
+                    _save_persisted()
                     scheme_id = doc.get("id", "locomotive_default")
             except Exception as exc:
                 raise ValueError("некорректная схема в пакете: %s" % exc)
@@ -502,6 +506,52 @@ STATE["cv"][28] = 2       # CV29 28/128 speed steps
 
 # The active sound graph project and its revision.
 GRAPH = {"project": _new_graph(), "revision": 4, "active": True, "fault": False}
+# Saved projects by id; the firmware store keeps several revisions/projects, so
+# the preview must do the same or "New project" appears to overwrite the old one.
+PROJECTS = {GRAPH["project"]["id"]: {"project": GRAPH["project"], "revision": GRAPH["revision"]}}
+PERSIST_PATH = None
+
+
+def _load_persisted(port):
+    global PERSIST_PATH
+    PERSIST_PATH = os.path.join(tempfile.gettempdir(), "aura_preview_graph_%d.json" % port)
+    try:
+        with open(PERSIST_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        projects = data.get("projects")
+        if not isinstance(projects, dict):
+            return
+        loaded = {}
+        for pid, ent in projects.items():
+            if isinstance(pid, str) and isinstance(ent, dict) and isinstance(ent.get("project"), dict):
+                loaded[pid] = {"project": ent["project"], "revision": max(1, int(ent.get("revision") or 1))}
+        if not loaded:
+            return
+        PROJECTS.clear()
+        PROJECTS.update(loaded)
+        active_id = data.get("active_id") or ""
+        if active_id in PROJECTS:
+            GRAPH["project"] = PROJECTS[active_id]["project"]
+            GRAPH["revision"] = PROJECTS[active_id]["revision"]
+            GRAPH["active"] = bool(data.get("active", True))
+        else:
+            GRAPH["active"] = False
+        GRAPH["fault"] = False
+    except Exception:
+        pass
+
+
+def _save_persisted():
+    if not PERSIST_PATH:
+        return
+    try:
+        tmp = PERSIST_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"projects": PROJECTS, "active": GRAPH["active"],
+                       "active_id": GRAPH["project"].get("id", "")}, fh, ensure_ascii=False)
+        os.replace(tmp, PERSIST_PATH)
+    except Exception:
+        pass
 # Minimal graph runner for the preview: it keeps the same channel order as the
 # firmware (engine at index 0, then effects) and evaluates the saved schema-v1
 # transitions from the current F-key/motor state. This makes Live show the same
@@ -1176,18 +1226,54 @@ def handle_api(method, path, query, body):
         return 200, ok(format="sound-graph", schemaVersion=1, limits=GRAPH_LIMITS)
 
     if path == "/api/sound/graph/projects":
-        p = GRAPH["project"]
-        return 200, ok(projects=[{"id": p["id"], "name": p["name"], "revision": GRAPH["revision"]}])
+        return 200, ok(projects=[{"id": pid, "name": ent["project"].get("name", pid),
+                                  "revision": ent["revision"]}
+                                 for pid, ent in PROJECTS.items()])
 
     if path == "/api/sound/graph/project":
-        return 200, ok(project=GRAPH["project"], revision=GRAPH["revision"])
+        pid = q1(query, "id", "")
+        ent = PROJECTS.get(pid) if pid else None
+        if ent is None:
+            ent = {"project": GRAPH["project"], "revision": GRAPH["revision"]}
+        return 200, ok(project=ent["project"], revision=ent["revision"])
+
+    if path == "/api/sound/graph/reference":
+        GRAPH["active"] = False
+        GRAPH["fault"] = False
+        _runner_reset()
+        _save_persisted()
+        add_log("Граф", "выбран эталонный проект")
+        return 200, ok()
+
+    if path == "/api/sound/graph/delete":
+        pid = q1(query, "id", "")
+        if pid not in PROJECTS:
+            return 200, {"ok": False, "error": "project not found"}
+        was_active = GRAPH["project"].get("id") == pid
+        del PROJECTS[pid]
+        if was_active:
+            if PROJECTS:
+                nid = next(iter(PROJECTS))
+                GRAPH["project"] = PROJECTS[nid]["project"]
+                GRAPH["revision"] = PROJECTS[nid]["revision"]
+                GRAPH["active"] = True
+            else:
+                GRAPH["project"] = _new_graph()
+                GRAPH["revision"] = 0
+                GRAPH["active"] = False
+            GRAPH["fault"] = False
+            _runner_reset()
+        _save_persisted()
+        return 200, ok()
 
     if path == "/api/sound/graph/state":
         m = s["motor"]
-        return 200, ok(active=GRAPH["active"], fault=GRAPH["fault"],
-                       id=GRAPH["project"]["id"], projectId=GRAPH["project"]["id"],
-                       revision=GRAPH["revision"],
-                       engine=False, armed=True, states=_runner_states(),
+        active = bool(GRAPH["active"])
+        return 200, ok(active=active, fault=GRAPH["fault"],
+                       id=GRAPH["project"]["id"] if active else "",
+                       projectId=GRAPH["project"]["id"] if active else "",
+                       revision=GRAPH["revision"] if active else 0,
+                       engine=False, armed=True, states=_runner_states() if active else [0, 0, 0, 0, 0],
                        failedChannels=0, speed=m["speed"],
                        functions=_function_mask(), outputs=_output_mask(),
                        logic=_logic_mask())
@@ -1203,25 +1289,44 @@ def handle_api(method, path, query, body):
             incoming = json.loads(body.decode("utf-8")) if body else {}
         except (ValueError, UnicodeDecodeError):
             return 200, {"ok": False, "error": "invalid json"}
-        if isinstance(incoming, dict):
-            # The editor sends the compiled schema-v1 payload; keep the v2
-            # authoring layer so preview load/save round-trips the library.
-            if not incoming.get("effectTables"):
-                for key in ("effectTables", "sources", "blocks", "sinks", "wires"):
-                    if key in GRAPH["project"]:
-                        incoming[key] = GRAPH["project"][key]
-            GRAPH["project"] = incoming
-            _runner_reset()
+        if not isinstance(incoming, dict):
+            return 200, {"ok": False, "error": "invalid project"}
+        pid = q1(query, "id", incoming.get("id", ""))
         expected = as_int(q1(query, "expectedRevision"), 0)
-        GRAPH["revision"] = expected + 1 if expected else GRAPH["revision"] + 1
-        GRAPH["active"] = True
-        add_log("Граф", "сохранена версия %d" % GRAPH["revision"])
-        return 200, ok(revision=GRAPH["revision"])
-
-    if path == "/api/sound/graph/apply":
+        existing = PROJECTS.get(pid)
+        current = existing["revision"] if existing else 0
+        if expected != current:
+            return 200, {"ok": False, "error": "Stale expectedRevision"}
+        incoming["id"] = pid
+        # The editor sends the compiled schema-v1 payload; keep the v2
+        # authoring layer so preview load/save round-trips the library.
+        if not incoming.get("effectTables"):
+            src = existing["project"] if existing else None
+            if src:
+                for key in ("effectTables", "sources", "blocks", "sinks", "wires"):
+                    if key in src:
+                        incoming[key] = src[key]
+        revision = current + 1
+        PROJECTS[pid] = {"project": incoming, "revision": revision}
+        GRAPH["project"] = incoming
+        GRAPH["revision"] = revision
         GRAPH["active"] = True
         GRAPH["fault"] = False
         _runner_reset()
+        _save_persisted()
+        add_log("Граф", "сохранена версия %d" % revision)
+        return 200, ok(revision=revision)
+
+    if path == "/api/sound/graph/apply":
+        pid = q1(query, "id", "")
+        ent = PROJECTS.get(pid) if pid else None
+        if ent:
+            GRAPH["project"] = ent["project"]
+            GRAPH["revision"] = ent["revision"]
+        GRAPH["active"] = True
+        GRAPH["fault"] = False
+        _runner_reset()
+        _save_persisted()
         add_log("Граф", "применён проект %s" % GRAPH["project"].get("id", ""))
         return 200, ok()
 
@@ -1414,6 +1519,7 @@ def main():
     if port <= 0:
         port = 8080
     host = os.environ.get("PREVIEW_HOST", "127.0.0.1")
+    _load_persisted(port)
     server = ThreadingHTTPServer((host, port), Handler)
     url = "http://%s:%d/" % (host, port)
     try:

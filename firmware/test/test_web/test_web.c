@@ -4584,6 +4584,35 @@ static void test_graph_delete_project(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
 }
 
+static void test_graph_reference_post(void)
+{
+    httpd_req_t req = make_req(0);
+    uint32_t leases = mock_storage_access_leases;
+    mock_motor_speed = 0; mock_motor_applied_speed = 0;
+    mock_graph_select_err = ESP_OK; mock_graph_select_calls = 0;
+    mock_graph_status.active = true;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_select_calls);
+    TEST_ASSERT_FALSE(mock_graph_status.active);
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
+
+    mock_motor_speed = 1; mock_graph_select_calls = 0; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
+    TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_select_calls);
+
+    mock_motor_speed = 0; mock_graph_select_err = ESP_FAIL; mock_graph_select_calls = 0; reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_select_calls);
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
+    mock_graph_select_err = ESP_OK;
+}
+
 static void test_graph_get_roundtrip_assets_and_routes(void)
 {
     seed_graph(); httpd_req_t req = make_req(0);
@@ -4613,8 +4642,8 @@ static void test_graph_get_roundtrip_assets_and_routes(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
     TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
     reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
-    TEST_ASSERT_EQUAL_UINT32(62, s_route_count);
-    TEST_ASSERT_EQUAL_UINT32(62, mock_route_count);
+    TEST_ASSERT_EQUAL_UINT32(63, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(63, mock_route_count);
 }
 
 static void test_graph_referenced_uploads_fail_closed(void)
@@ -4752,6 +4781,7 @@ int main(void)
     RUN_TEST(test_graph_maintenance_and_binding_mutation_guards);
     RUN_TEST(test_graph_apply_motion_and_transaction_failures);
     RUN_TEST(test_graph_delete_project);
+    RUN_TEST(test_graph_reference_post);
     RUN_TEST(test_graph_get_roundtrip_assets_and_routes);
     RUN_TEST(test_graph_referenced_uploads_fail_closed);
     RUN_TEST(test_graph_factory_reset_selection_and_failure);

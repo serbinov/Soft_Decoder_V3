@@ -33,6 +33,18 @@ static const char *TAG = "motor";
  * 1 ms gives a generous window after the coast applies; the driver keeps the
  * outputs High-Z even after entering low-power sleep (~1 ms). */
 #define BEMF_SETTLE_US 1000
+/* A differential below 1/64 of the rail while the PID drives at >=90 % duty is
+ * a failed/stuck BEMF sense, not a valid zero-speed reading: a healthy motor
+ * at that duty produces far more back-EMF. This also catches a sense stuck at
+ * the same non-zero voltage on both nodes, which an exact-zero test missed. */
+#define BEMF_SENSE_ZERO_DIV 64U
+/* While the differential is below the noise floor, cap positive integral
+ * windup so a failed/stuck sense cannot hold medium duty at a low command. */
+#define BEMF_SENSE_INTEGRAL_MAX 2000.0f
+/* A valid motor at this target fraction (1/16 rail) must produce a measurable
+ * differential; below it only the integral cap applies, so legitimate slow
+ * creep is not faulted. */
+#define BEMF_SENSE_TARGET_DIV 16U
 
 static bool s_init;
 
@@ -145,6 +157,9 @@ static bool s_cal_drive_active;
 /* Interpolated rail-fraction curve indexed by applied speed 0..126. */
 static uint16_t s_cal_frac_table[127];
 static bool s_cal_valid;
+/* Serializes the NVS clear/reload paths with calibration admission without
+ * holding the motor control mutex across flash operations. */
+static bool s_cal_config_busy;
 static uint32_t s_last_duty;
 static float s_last_error;
 static float s_last_integral;
@@ -369,6 +384,8 @@ static void control_reset(void)
     s_bemf_valid = false;
     s_last_pid_ok = false;
     s_feedback_hold_valid = false;
+    s_feedback_clock_active = false;
+    s_feedback_since_us = 0;
 }
 
 /* Shared ADC1 (adc_oneshot). One unit serves the BEMF sample window, the rail
@@ -501,6 +518,13 @@ static bool bemf_cal_prepare_table(const settings_bemf_cal_t *cal, uint16_t tabl
     for (uint8_t i = 0; valid && i < cal->count; ++i) {
         uint8_t spd = cal->speed[i];
         uint16_t frac = cal->frac[i];
+        /* A documented curve may start at speed 0; use that fraction as the
+         * low-speed anchor instead of silently interpolating from zero. */
+        if (i == 0U && spd == 0U) {
+            table[0] = frac;
+            prev_frac = frac;
+            continue;
+        }
         if (spd > 126U || spd <= prev_speed) {
             continue;
         }
@@ -586,6 +610,7 @@ static void motor_tick(void)
     }
     if (reset_feedback_clock) {
         s_feedback_clock_active = false;
+        s_feedback_since_us = 0;
         s_feedback_hold_valid = false;
     }
     if (settings_cv_snapshot(s_tick_cv) != ESP_OK) {
@@ -733,9 +758,12 @@ static void motor_tick(void)
     }
 
     uint32_t rail = rail_snapshot();
+    uint32_t bemf_mag = s_bemf1_mv > s_bemf2_mv ? s_bemf1_mv - s_bemf2_mv : s_bemf2_mv - s_bemf1_mv;
+    bool sense_mag_low = rail > 300U && bemf_mag <= rail / BEMF_SENSE_ZERO_DIV;
     bool pid_ok = enabled && !calibration && s_bemf_adc_ready &&
                   s_bemf_valid && rail > 300U && applied > 0U;
     s_last_pid_ok = pid_ok;
+    float pid_target = 0.0f;
     if (pid_ok) {
         /* PID target back-EMF (as a fraction of the rail voltage): use the
          * stored/motor calibration curve when it is valid so the no-load RPM
@@ -752,10 +780,17 @@ static void motor_tick(void)
         frac = clampf(frac, 0.0f, s_bemf_max_fraction);
         portEXIT_CRITICAL(&s_output_mux);
         float target_bemf = frac * (float)rail;
+        pid_target = target_bemf;
         float error = target_bemf - s_bemf_filtered;
         float derivative = error - s_pid_prev_error;
         s_pid_prev_error = error;
 
+        /* A failed sense reads the same voltage on both nodes, so the error
+         * stays positive and the integral would otherwise wind up to its full
+         * clamp and hold medium duty at a low speed command. */
+        if (sense_mag_low && s_pid_integral > BEMF_SENSE_INTEGRAL_MAX) {
+            s_pid_integral = BEMF_SENSE_INTEGRAL_MAX;
+        }
         float corr = s_pid_kp * error + s_pid_ki * s_pid_integral + s_pid_kd * derivative;
         s_last_error = error;
         s_last_integral = s_pid_integral;
@@ -774,6 +809,9 @@ static void motor_tick(void)
         if (!saturating) {
             s_pid_integral = clampf(s_pid_integral + error, -20000.0f, 20000.0f);
         }
+        if (sense_mag_low && s_pid_integral > BEMF_SENSE_INTEGRAL_MAX) {
+            s_pid_integral = BEMF_SENSE_INTEGRAL_MAX;
+        }
         duty_final = (uint32_t)clamped;
     } else if (applied == 0U) {
         s_pid_integral = 0.0f;
@@ -782,14 +820,15 @@ static void motor_tick(void)
 
     int64_t now = esp_timer_get_time();
 
-    /* A BEMF sense stuck at zero stays "valid" while the PID drives the duty
-     * toward saturation; that is a failed sense, not a valid slow-speed zero.
-     * Only an exact-zero pair (both nodes equal) sustained at high drive is
-     * treated as loss, so a normal start (duty ramps up, BEMF then appears) is
-     * never faulted. */
-    bool sense_zero = enabled && !calibration && s_bemf_adc_ready && applied > 0U &&
-                      s_bemf_valid && s_bemf1_mv == 0U && s_bemf2_mv == 0U &&
-                      duty_final >= (LEDC_MAX * 9U / 10U);
+    /* A BEMF sense stuck near zero stays "valid" while the PID drives the duty
+     * up; that is a failed sense, not a valid slow-speed zero. A near-zero
+     * differential (both nodes equal, including a common stuck non-zero
+     * voltage) is a fault at high drive or at a target that a healthy motor
+     * must turn into measurable back-EMF. Below that target only the integral
+     * is capped, so legitimate slow creep is not faulted. */
+    bool sense_zero = pid_ok && sense_mag_low &&
+                      (duty_final >= (LEDC_MAX * 9U / 10U) ||
+                       pid_target >= (float)rail / (float)BEMF_SENSE_TARGET_DIV);
     if (sense_zero) {
         if (!s_zero_clock_active) {
             s_zero_clock_active = true;
@@ -814,7 +853,7 @@ static void motor_tick(void)
     }
 
     if ((enabled && !calibration && applied > 0U && !pid_ok &&
-         now - s_feedback_since_us >= FEEDBACK_FRESH_US) ||
+         s_feedback_clock_active && now - s_feedback_since_us >= FEEDBACK_FRESH_US) ||
         (sense_zero && now - s_zero_since_us >= FEEDBACK_FRESH_US)) {
         portENTER_CRITICAL(&s_output_mux);
         /* A concurrent STOP/disable supersedes this tick's fault decision. */
@@ -847,6 +886,13 @@ static void motor_tick(void)
             }
             if (applied == 0U) s_feedback_hold_valid = false;
         }
+    }
+    /* A new drive must get its own full feedback grace period. Without this the
+     * timestamp from the previous run makes the first rejected sample latch a
+     * fault immediately after a stop or calibration. */
+    if (applied == 0U) {
+        s_feedback_clock_active = false;
+        s_feedback_since_us = 0;
     }
     portENTER_CRITICAL(&s_output_mux);
     if (generation == s_output_generation && !s_inhibited && !s_feedback_fault && !s_stop_requested && !s_cal_cancelled) {
@@ -979,11 +1025,15 @@ esp_err_t motor_init(void)
     s_feedback_fault = false;
     s_feedback_reset_requested = false;
     s_feedback_clock_active = false;
+    s_feedback_since_us = 0;
     s_feedback_hold_valid = false;
+    s_zero_clock_active = false;
+    s_zero_since_us = 0;
     s_cal_cancelled = false;
     s_sample_active = false;
     s_cal_active = false;
     s_cal_task = NULL;
+    s_cal_config_busy = false;
     s_cal_result = MOTOR_BEMF_CAL_IDLE;
     s_cal_reason = MOTOR_BEMF_CAL_ERR_NONE;
     s_cal_error_code = ESP_OK;
@@ -1371,11 +1421,16 @@ static void bemf_cal_task(void *arg)
 
 esp_err_t motor_bemf_cal_start(void)
 {
-    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, 0) != pdTRUE) {
+    /* The motor tick owns this mutex for its BEMF coast window (~1 ms). A
+     * zero-time take made an operator start fail sporadically and be reported
+     * as "calibration running"; wait one tick instead. */
+    if (s_control_mutex == NULL ||
+        xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
         return ESP_ERR_INVALID_STATE;
     }
     portENTER_CRITICAL(&s_output_mux);
-    if (!s_init || s_inhibited || s_feedback_fault || s_cal_active || s_cal_task != NULL || !s_bemf_adc_ready ||
+    if (!s_init || s_inhibited || s_feedback_fault || s_cal_active || s_cal_config_busy ||
+        s_cal_task != NULL || !s_bemf_adc_ready ||
         s_bemf_mutex == NULL || s_control_mutex == NULL || s_rail_mv <= 300U ||
         esp_timer_get_time() - s_rail_update_us >= FEEDBACK_FRESH_US ||
         s_target_speed != 0U || s_applied_speed != 0U ||
@@ -1458,46 +1513,53 @@ void motor_bemf_cal_info(motor_bemf_cal_info_t *info)
     }
 }
 
-esp_err_t motor_bemf_cal_clear(void)
+/* Admit one BEMF configuration change (NVS clear/reload) without taking the
+ * motor control mutex across flash operations: a >100 ms erase would starve the
+ * 10 ms control tick and trip the independent motor-stall watchdog. */
+static bool cal_config_begin(void)
 {
-    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
-        return ESP_ERR_INVALID_STATE;
+    if (s_control_mutex == NULL) {
+        return false;
     }
     portENTER_CRITICAL(&s_output_mux);
-    bool busy = s_cal_active;
+    bool admitted = !s_cal_active && !s_cal_config_busy;
+    if (admitted) {
+        s_cal_config_busy = true;
+    }
     portEXIT_CRITICAL(&s_output_mux);
-    if (busy) {
-        xSemaphoreGive(s_control_mutex);
+    return admitted;
+}
+
+esp_err_t motor_bemf_cal_clear(void)
+{
+    if (!cal_config_begin()) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t err = settings_bemf_cal_clear();
     if (err == ESP_OK) {
         bemf_cal_reload();
-        portENTER_CRITICAL(&s_output_mux);
+    }
+    portENTER_CRITICAL(&s_output_mux);
+    s_cal_config_busy = false;
+    if (err == ESP_OK) {
         s_cal_result = MOTOR_BEMF_CAL_IDLE;
         s_cal_reason = MOTOR_BEMF_CAL_ERR_NONE;
         s_cal_error_code = ESP_OK;
         s_cal_step = 0;
-        portEXIT_CRITICAL(&s_output_mux);
     }
-    xSemaphoreGive(s_control_mutex);
+    portEXIT_CRITICAL(&s_output_mux);
     return err;
 }
 
 esp_err_t motor_bemf_cal_reload(void)
 {
-    if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    portENTER_CRITICAL(&s_output_mux);
-    bool busy = s_cal_active;
-    portEXIT_CRITICAL(&s_output_mux);
-    if (busy) {
-        xSemaphoreGive(s_control_mutex);
+    if (!cal_config_begin()) {
         return ESP_ERR_INVALID_STATE;
     }
     bemf_cal_reload();
-    xSemaphoreGive(s_control_mutex);
+    portENTER_CRITICAL(&s_output_mux);
+    s_cal_config_busy = false;
+    portEXIT_CRITICAL(&s_output_mux);
     return ESP_OK;
 }
 

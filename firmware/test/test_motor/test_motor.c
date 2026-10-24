@@ -149,6 +149,9 @@ bool settings_bemf_cal_validate(const settings_bemf_cal_t *cal)
     if (cal == NULL || cal->count < 2U || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) {
         return false;
     }
+    if (cal->speed[0] == 0U && cal->frac[0] != 0U) {
+        return false;
+    }
     for (uint8_t i = 0; i < cal->count; ++i) {
         if (cal->speed[i] > 126U || cal->frac[i] > 1024U ||
             (i > 0U && (cal->speed[i] <= cal->speed[i - 1U] || cal->frac[i] < cal->frac[i - 1U]))) {
@@ -373,6 +376,41 @@ static void test_bemf_cal_table_interpolation(void)
     /* Linear between (12,62) and (126,725). */
     TEST_ASSERT_EQUAL_UINT16(393, s_cal_frac_table[69]);
     TEST_ASSERT_EQUAL_UINT16(31, s_cal_frac_table[6]);
+}
+
+/* A manual curve may start at speed 0; the anchor must be zero because the
+ * motor is stopped, and a non-zero anchor must not become a step-1 target. */
+static void test_bemf_cal_table_uses_speed_zero_anchor(void)
+{
+    settings_bemf_cal_t cal;
+    memset(&cal, 0, sizeof(cal));
+    cal.count = 2;
+    cal.speed[0] = 0;
+    cal.frac[0] = 0;
+    cal.speed[1] = 126;
+    cal.frac[1] = 700;
+    bemf_cal_apply(&cal);
+
+    TEST_ASSERT_TRUE(s_cal_valid);
+    TEST_ASSERT_EQUAL_UINT16(0, s_cal_frac_table[0]);
+    TEST_ASSERT_EQUAL_UINT16(350, s_cal_frac_table[63]);
+    TEST_ASSERT_EQUAL_UINT16(700, s_cal_frac_table[126]);
+}
+
+static void test_bemf_cal_table_rejects_nonzero_speed_zero_anchor(void)
+{
+    settings_bemf_cal_t cal;
+    memset(&cal, 0, sizeof(cal));
+    cal.count = 2;
+    cal.speed[0] = 0;
+    cal.frac[0] = 300;
+    cal.speed[1] = 126;
+    cal.frac[1] = 700;
+    bemf_cal_apply(&cal);
+
+    TEST_ASSERT_FALSE(s_cal_valid);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cal_count);
+    TEST_ASSERT_EQUAL_UINT16(0, s_cal_frac_table[126]);
 }
 
 static void test_bemf_cal_table_invalid_when_low(void)
@@ -997,6 +1035,39 @@ static void test_motor_bemf_cal_clear_reload_active(void)
     s_cal_active = false;
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_reload());
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_clear());
+}
+
+static uint32_t g_control_mutex_takes;
+
+static void count_control_mutex_takes(SemaphoreHandle_t semaphore, TickType_t wait)
+{
+    (void)wait;
+    if (semaphore == s_control_mutex) {
+        ++g_control_mutex_takes;
+    }
+}
+
+/* NVS clear/reload must not hold (or need) the control mutex: a synchronous
+ * erase can exceed the 200 ms motor-stall watchdog deadline. */
+static void test_motor_bemf_cal_config_does_not_take_control_mutex(void)
+{
+    motor_set_rail_voltage_mv(1000);
+    g_control_mutex_takes = 0;
+    g_sem_take_hook = count_control_mutex_takes;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_reload());
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_clear());
+    g_sem_take_hook = NULL;
+    TEST_ASSERT_EQUAL_UINT32(0, g_control_mutex_takes);
+}
+
+/* A reload/clear in progress must exclude a new calibration admission. */
+static void test_motor_bemf_cal_config_busy_blocks_start(void)
+{
+    motor_set_rail_voltage_mv(1000);
+    s_cal_config_busy = true;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_bemf_cal_start());
+    TEST_ASSERT_FALSE(s_cal_active);
+    s_cal_config_busy = false;
 }
 
 static void test_motor_bemf_adc_dump_and_coast_read(void)
@@ -1848,6 +1919,49 @@ static void test_feedback_fault_requires_stop_or_explicit_disable_to_rearm(void)
     TEST_ASSERT_EQUAL_UINT32(speed_duty(63), mock_ledc_duty[LEDC_CHANNEL_1]);
 }
 
+/* A stop (or calibration) must re-arm the feedback grace period: a timestamp
+ * left from the previous run made the first rejected sample after a long idle
+ * latch a fault immediately instead of after the intended 100 ms. */
+static void test_feedback_clock_rearms_after_stop(void)
+{
+    motor_set_bemf_enabled(true);
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 1057; /* 800 mV valid feedback */
+    s_was_stopped = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(50, true));
+    motor_tick();
+    TEST_ASSERT_TRUE(s_last_pid_ok);
+    TEST_ASSERT_TRUE(s_feedback_clock_active);
+
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(0, true));
+    mock_timer_now_us += 10000;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+    TEST_ASSERT_FALSE(s_feedback_clock_active);
+
+    /* Long idle, then a new command whose first sample is rejected. */
+    mock_timer_now_us += 1000000;
+    mock_adc_raw[PIN_BEMF1 - 1] = 4095;
+    s_bemf_filtered = 0.0f;
+    s_bemf_valid = false;
+    motor_set_rail_voltage_mv(1000);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(50, true));
+    motor_tick();
+    TEST_ASSERT_FALSE(s_feedback_fault);
+    TEST_ASSERT_TRUE(s_feedback_clock_active);
+    TEST_ASSERT_EQUAL_INT64(mock_timer_now_us, s_feedback_since_us);
+
+    mock_timer_now_us += 50000;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_FALSE(s_feedback_fault);
+    mock_timer_now_us += 50000;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_feedback_fault);
+}
+
 static void test_feedback_split_adc_pair_holds_without_renewal(void)
 {
     feedback_reduced_drive();
@@ -1892,6 +2006,81 @@ static void test_feedback_stuck_zero_sense_latches_at_saturated_drive(void)
     TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
     TEST_ASSERT_EQUAL_UINT8(0, s_target_speed);
     TEST_ASSERT_TRUE(motor_is_inhibited());
+}
+
+/* A sense stuck at the same non-zero voltage on both nodes has a zero
+ * differential and previously defeated the exact-zero fault detector. */
+static void test_feedback_stuck_equal_nonzero_sense_latches(void)
+{
+    g_cv[3] = 0;
+    g_cv[5] = 255;
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 100; /* ~75 mV, equal on both nodes */
+    mock_adc_raw[PIN_BEMF2 - 1] = 100;
+    s_was_stopped = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(126, true));
+
+    mock_timer_now_us = 0;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_last_pid_ok);
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] >= (LEDC_MAX * 9U / 10U));
+    TEST_ASSERT_FALSE(s_feedback_fault);
+
+    mock_timer_now_us = 100000;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_feedback_fault);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT8(0, s_target_speed);
+}
+
+/* Medium-speed stuck sense may not reach the 90 % duty guard, but the PID
+ * target is already high enough that a healthy motor must produce BEMF. */
+static void test_feedback_stuck_zero_medium_speed_latches_without_saturation(void)
+{
+    g_cv[3] = 0;
+    g_cv[5] = 255;
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 0;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_was_stopped = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(50, true));
+
+    mock_timer_now_us = 0;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_last_pid_ok);
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] < (LEDC_MAX * 9U / 10U));
+    TEST_ASSERT_FALSE(s_feedback_fault);
+
+    mock_timer_now_us = 100000;
+    motor_set_rail_voltage_mv(1000);
+    motor_tick();
+    TEST_ASSERT_TRUE(s_feedback_fault);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+}
+
+/* Below the target threshold a near-zero differential is legitimate slow
+ * creep; the positive integral must stay bounded instead of winding up to a
+ * high duty on a low command. */
+static void test_feedback_near_zero_low_speed_integral_is_capped(void)
+{
+    g_cv[3] = 0;
+    g_cv[5] = 255;
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 0;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_was_stopped = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(10, true));
+
+    for (unsigned i = 0; i < 500U; ++i) {
+        motor_set_rail_voltage_mv(1000);
+        motor_tick();
+    }
+    TEST_ASSERT_FALSE(s_feedback_fault);
+    TEST_ASSERT_TRUE(s_pid_integral <= BEMF_SENSE_INTEGRAL_MAX + 0.1f);
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] < 300U);
 }
 
 static void test_cal_zero_measurements_abort_at_first_step(void)
@@ -2539,8 +2728,12 @@ int main(void)
     RUN_TEST(test_cal_save_cancel_before_admission_preserves_curve);
     RUN_TEST(test_cal_missing_adc_aborts_before_first_drive);
     RUN_TEST(test_feedback_fault_requires_stop_or_explicit_disable_to_rearm);
+    RUN_TEST(test_feedback_clock_rearms_after_stop);
     RUN_TEST(test_feedback_split_adc_pair_holds_without_renewal);
     RUN_TEST(test_feedback_stuck_zero_sense_latches_at_saturated_drive);
+    RUN_TEST(test_feedback_stuck_equal_nonzero_sense_latches);
+    RUN_TEST(test_feedback_stuck_zero_medium_speed_latches_without_saturation);
+    RUN_TEST(test_feedback_near_zero_low_speed_integral_is_capped);
     RUN_TEST(test_cal_zero_measurements_abort_at_first_step);
     RUN_TEST(test_cal_stale_rail_aborts_first_step_without_full_run);
     RUN_TEST(test_speed_duty_zero);
@@ -2548,6 +2741,8 @@ int main(void)
     RUN_TEST(test_speed_duty_non_monotonic_no_wrap);
     RUN_TEST(test_speed_duty_28_point_table);
     RUN_TEST(test_bemf_cal_table_interpolation);
+    RUN_TEST(test_bemf_cal_table_uses_speed_zero_anchor);
+    RUN_TEST(test_bemf_cal_table_rejects_nonzero_speed_zero_anchor);
     RUN_TEST(test_bemf_cal_table_invalid_when_low);
     RUN_TEST(test_bemf_cal_table_rejects_non_monotonic);
     RUN_TEST(test_bemf_cal_table_needs_two_points);
@@ -2585,6 +2780,8 @@ int main(void)
     RUN_TEST(test_motor_bemf_cal_start_states);
     RUN_TEST(test_motor_bemf_cal_info_paths);
     RUN_TEST(test_motor_bemf_cal_clear_reload_active);
+    RUN_TEST(test_motor_bemf_cal_config_does_not_take_control_mutex);
+    RUN_TEST(test_motor_bemf_cal_config_busy_blocks_start);
     RUN_TEST(test_motor_bemf_adc_dump_and_coast_read);
     RUN_TEST(test_motor_bemf_lock_null_mutex);
     RUN_TEST(test_motor_tick_pid_kick_and_integral_clamp);

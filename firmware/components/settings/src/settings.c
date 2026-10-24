@@ -897,6 +897,10 @@ esp_err_t settings_bemf_cal_load(settings_bemf_cal_t *cal)
 bool settings_bemf_cal_validate(const settings_bemf_cal_t *cal)
 {
     if (cal == NULL || cal->count < 2U || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) return false;
+    /* At speed 0 the motor is stopped, so a non-zero back-EMF anchor is
+     * physically impossible. Honouring it would make the PID target at speed
+     * step 1 close to full rail and command a runaway at minimum throttle. */
+    if (cal->speed[0] == 0U && cal->frac[0] != 0U) return false;
     for (size_t i = 0; i < cal->count; ++i) {
         if (cal->speed[i] > 126U || cal->frac[i] > 1024U) return false;
         if (i > 0U && (cal->speed[i] <= cal->speed[i - 1U] || cal->frac[i] < cal->frac[i - 1U])) return false;

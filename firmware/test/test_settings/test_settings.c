@@ -1300,13 +1300,14 @@ static void test_rev_m11_reject_curve_as_unit(void)
     settings_bemf_cal_t cal = { .count = 2, .speed = { 0, 126 }, .frac = { 0, 1024 } };
     TEST_ASSERT_TRUE(settings_bemf_cal_validate(&cal));
     TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_cal_save(&cal));
-    for (unsigned defect = 0; defect < 5; ++defect) {
+    for (unsigned defect = 0; defect < 6; ++defect) {
         settings_bemf_cal_t bad = cal;
         if (defect == 0) bad.count = 1;
         if (defect == 1) bad.speed[1] = 127;
         if (defect == 2) bad.speed[1] = 0;
         if (defect == 3) bad.frac[0] = 1025;
         if (defect == 4) { bad.frac[0] = 10; bad.frac[1] = 9; }
+        if (defect == 5) bad.frac[0] = 1; /* non-zero EMF at speed 0 */
         TEST_ASSERT_FALSE(settings_bemf_cal_validate(&bad));
         TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_cal_save(&bad));
         TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("bemf_cal", &bad, sizeof(bad)));

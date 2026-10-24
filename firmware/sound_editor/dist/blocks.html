@@ -324,7 +324,7 @@ ru:{
 doc_title:"Конструктор Блок Схем",brand_sub:"Конструктор Блок Схем",palette:"Палитра",
 connected:"Подключено",offline:"Нет связи",
   new:"Новый",import:"Импорт",export:"Экспорт",align:"Выровнять",fit_view:"Показать всё",dup:"Дубль",m_file:"Файл",m_edit:"Правка",m_canvas:"Холст",m_check:"Проверка",m_device:"Устройство",m_undo:"↶ Отменить",m_redo:"↷ Повторить",m_scheme:"Схема и связи",m_settings:"Настройки",m_theme:"Тема",theme_light:"светлая",theme_dark:"тёмная",m_lang:"Язык",m_copy:"Копировать",m_paste:"Вставить",copy_tip:"Копировать (Ctrl+C)",paste_tip:"Вставить (Ctrl+V)",
-snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",play_target_a:"Воспроизведение: ",play_pc_s:"ПК",play_dec_s:"декодер",play_target_tip:"Где прослушивать звуки: на компьютере или на декодере",live_inactive:"Live: граф не активен на устройстве",live_mismatch:"Live: на устройстве другая схема",live_offline:"Live: нет связи",confirm_del_scheme:"Удалить звуковую схему «",confirm_del_scheme_b:"»?",v_bad_band:"Некорректный диапазон скорости («От %» больше «До %»).",st_stopped:"Остановлено",fn_busy:"занята",st_all_fns_used:"Все клавиши F0..F28 уже используются",
+snap_a:"Сетка: ",snap_on:"вкл",snap_off:"выкл",play_target_a:"Воспроизведение: ",play_pc_s:"ПК",play_dec_s:"декодер",play_target_tip:"Где прослушивать звуки: на компьютере или на декодере",live_inactive:"Live: граф не активен на устройстве",live_mismatch:"Live: на устройстве другая схема",live_offline:"Live: нет связи",live_stale:"Live: схема изменена — сохраните её на устройстве",st_device_legacy_default:"На устройстве схема без редакторской копии. Загружен типовой проект; открыть или удалить старую схему можно в меню «Устройство».",confirm_del_scheme:"Удалить звуковую схему «",confirm_del_scheme_b:"»?",v_bad_band:"Некорректный диапазон скорости («От %» больше «До %»).",st_stopped:"Остановлено",fn_busy:"занята",st_all_fns_used:"Все клавиши F0..F28 уже используются",
 undo_tip:"Отменить (Ctrl+Z)",redo_tip:"Повторить (Ctrl+Y)",dup_tip:"Дублировать (Ctrl+D)",
 text_tip:"Добавить текст на поле",text_default:"Текст",text_adding:"Кликните по полю, чтобы добавить текст",text_label:"Текст",text_size:"Размер",text_color:"Цвет",text_hint:"Перетащите подпись; двойной клик — редактирование на поле.",bt_texts:"== Подписи ==",
 scheme_tip:"Схема и таблица связей",scheme_aria:"Схема и связи",
@@ -385,7 +385,7 @@ en:{
 doc_title:"Block Scheme Constructor",brand_sub:"Block Scheme Constructor",palette:"Palette",
 connected:"Connected",offline:"No connection",
 new:"New",import:"Import",export:"Export",align:"Align",fit_view:"Fit to view",dup:"Duplicate",m_file:"File",m_edit:"Edit",m_canvas:"Canvas",m_check:"Check",m_device:"Device",m_undo:"↶ Undo",m_redo:"↷ Redo",m_scheme:"Scheme & links",m_settings:"Settings",m_theme:"Theme",theme_light:"light",theme_dark:"dark",m_lang:"Language",m_copy:"Copy",m_paste:"Paste",copy_tip:"Copy (Ctrl+C)",paste_tip:"Paste (Ctrl+V)",
-snap_a:"Grid: ",snap_on:"on",snap_off:"off",play_target_a:"Playback: ",play_pc_s:"PC",play_dec_s:"decoder",play_target_tip:"Where to preview sounds: on the computer or on the decoder",live_inactive:"Live: graph is not active on the device",live_mismatch:"Live: a different scheme is active on the device",live_offline:"Live: no connection",confirm_del_scheme:"Delete sound scheme \"",confirm_del_scheme_b:"\"?",v_bad_band:"Invalid speed band (From % is greater than To %).",st_stopped:"Stopped",fn_busy:"in use",st_all_fns_used:"All F0..F28 keys are already in use",
+snap_a:"Grid: ",snap_on:"on",snap_off:"off",play_target_a:"Playback: ",play_pc_s:"PC",play_dec_s:"decoder",play_target_tip:"Where to preview sounds: on the computer or on the decoder",live_inactive:"Live: graph is not active on the device",live_mismatch:"Live: a different scheme is active on the device",live_offline:"Live: no connection",live_stale:"Live: the scheme changed — save it to the device",st_device_legacy_default:"The device scheme has no editor copy. The built-in project was loaded; open or delete the old scheme from the Device menu.",confirm_del_scheme:"Delete sound scheme \"",confirm_del_scheme_b:"\"?",v_bad_band:"Invalid speed band (From % is greater than To %).",st_stopped:"Stopped",fn_busy:"in use",st_all_fns_used:"All F0..F28 keys are already in use",
 undo_tip:"Undo (Ctrl+Z)",redo_tip:"Redo (Ctrl+Y)",dup_tip:"Duplicate (Ctrl+D)",
 text_tip:"Add text to the canvas",text_default:"Text",text_adding:"Click the canvas to add text",text_label:"Text",text_size:"Size",text_color:"Color",text_hint:"Drag the label; double-click to edit it on the canvas.",bt_texts:"== Labels ==",
 scheme_tip:"Diagram and link table",scheme_aria:"Diagram and links",
@@ -779,7 +779,7 @@ let project=null;
 let selected="",selectedIds=new Set(),marquee=null;
 let dragging=null,panning=null,linking=null,pinch=null,nodeDragMoved=false,nodeTapCandidate=null;
 let textMode=false,draggingText=null,editingText="";
-let online=false,busy=false,revision=0,savedId="",activeProjectAutoLoadDone=false;
+let online=false,busy=false,revision=0,savedId="",savedSig=null,activeProjectAutoLoadDone=false;
 let soundFiles=[],diagnostics=[],assets={},assetsReady=false;
 let history=[],hIndex=-1,lastSig=null;
 let readyIds=new Set(),selectedLink="",deviceBinds=[],deviceAux=[];
@@ -2198,16 +2198,27 @@ async function req(path,init){
   return data;
 }
 const qs=o=>Object.keys(o).map(k=>encodeURIComponent(k)+"="+encodeURIComponent(o[k])).join("&");
-async function adoptActiveDeviceProject(srvId,srvRev){
+async function adoptActiveDeviceProject(srvId,srvRev,opts){
+  const manual=!!(opts&&opts.manual);
   const requestedScheme=viewMode==="scheme";
   const full=await req("/api/sound/graph/project?"+qs({id:srvId,revision:srvRev}));
   let restored=null;
   const embedded=full&&full.project&&full.project.editor&&full.project.editor.project;
   if(embedded&&embedded.format==="sound-blocks"){
     project=normalizeProject(JSON.parse(JSON.stringify(embedded)));
+  }else if(!manual){
+    /* A graph without an editor copy is a legacy/foreign scheme: reverse
+       engineering it produces a crowded flat layout and warnings. Keep the
+       built-in project on automatic load and let the Device menu open it. */
+    loadDefaultProject();
+    savedId="";revision=0;savedSig=null;
+    diagnostics=[{message:t("st_device_legacy_default"),severity:"warning"}];
+    renderDiag();render();
+    setStatus(t("st_device_legacy_default"));
+    return true;
   }else{
     restored=reverseGraphToProject(full&&full.project,(full&&full.project&&full.project.name)||srvId);
-    if(!restored||!restored.project)return false;
+    if(!restored||!restored.project){setStatus(t("st_no_editor_copy"));return false;}
     project=restored.project;
   }
   viewMode=(requestedScheme&&(project.schemes||[]).length)?"scheme":"mix";
@@ -2222,7 +2233,7 @@ async function adoptActiveDeviceProject(srvId,srvRev){
   }
   selected="";selectedIds=new Set();selectedLink="";assets={};assetsReady=false;
   diagnostics=restored?(restored.warnings||[]):[];
-  savedId=srvId;revision=srvRev;
+  savedId=srvId;revision=srvRev;savedSig=projectSig();
   if(viewMode==="scheme")fitViewport();else applyViewport();
   renderSnapBtn();historyReset();render();
   if(restored){renderDiag();setTimeout(()=>{if(online)importOutputs();},200);}
@@ -2301,7 +2312,7 @@ async function doSave(){
     if(missing.length){diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));renderDiag();throw new Error(t("v_assets_missing")+missing.join(", "));}
     v.payload.assets=v.files.map(f=>assets[f]).filter(Boolean);
     const r=await req("/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0}),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(wirePayload(v.payload))});
-    revision=Number(r.revision)||revision;savedId=project.id;
+    revision=Number(r.revision)||revision;savedId=project.id;savedSig=projectSig();
     let applied=false,applyErr="";
     try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});await applyOutputs();applied=true;}
     catch(e){applyErr=e&&e.message?e.message:String(e);}
@@ -2409,7 +2420,7 @@ async function deviceProjectsUI(){
     const action=await chooseDeviceProject(items);
     if(!action)return;
     if(action.del){await deleteDeviceProject(action.del.id,action.del.name||action.del.id);return;}
-    if(!(await adoptActiveDeviceProject(action.load.id,action.load.revision)))setStatus(t("st_load_error")+t("st_no_editor_copy"));
+    if(!(await adoptActiveDeviceProject(action.load.id,action.load.revision,{manual:true})))setStatus(t("st_load_error")+t("st_no_editor_copy"));
   }catch(e){setStatus(t("st_load_error")+e.message);}
   finally{busy=false;refreshButtons();}
 }
@@ -2423,7 +2434,7 @@ function reverseGraphToProject(payload,fallbackName){
   const states=Array.isArray(payload&&payload.states)?payload.states:[];
   const trans=Array.isArray(payload&&payload.transitions)?payload.transitions:[];
   const byId={};states.forEach(s=>{if(s&&s.id)byId[s.id]=s;});
-  const suffix=id=>{const m=String(id||"").match(/_(off|play|loop|mute|end|ready|hold|short|start|idle|stop|run\d+|sp\d+|r\d+|e\d+|true|false|gate|w\d+)$/);return m?m[1]:null;};
+  const suffix=id=>{const m=String(id||"").match(/_(off|play|loop|mute|end|ready|hold|short|start|idle|stop|run\d*|sp\d+|r\d+|e\d+|true|false|gate|w\d+)$/);return m?m[1]:null;};
   const prefix=id=>{const s=suffix(id);return s?String(id).slice(0,-s.length-1):String(id||"");};
   const from=id=>trans.filter(t=>t&&t.source===id);
   const has=(p,s)=>!!byId[p+"_"+s];
@@ -2478,14 +2489,21 @@ function reverseGraphToProject(payload,fallbackName){
     if(!any&&isEffect&&["simple","loop","mute","end","random","horn"].indexOf(b.type)>=0)
       warnings.push({message:t("rev_no_trigger")+blockName(b),severity:"warning"});
   };
-  const runStates=p=>states.filter(s=>s&&prefix(s.id)===p&&/^run\d+$/.test(suffix(s.id)||"")).sort((a,b)=>states.indexOf(a)-states.indexOf(b));
+  const runStates=p=>states.filter(s=>s&&prefix(s.id)===p&&/^run\d*$/.test(suffix(s.id)||"")).sort((a,b)=>states.indexOf(a)-states.indexOf(b));
   const engineEntry=payload&&payload.engine&&payload.engine.entry||"engine_off";
-  const enginePrefix=prefix(engineEntry);
+  const engineLike=p=>!!(p&&(has(p,"idle")||has(p,"start")||runStates(p).length));
+  let enginePrefix=prefix(engineEntry);
+  /* Legacy graphs may point engine.entry at a shared silent state ("off"), so
+     the engine group is also recognised by its idle/run states. */
+  if(!engineLike(enginePrefix)){
+    const alt=[...new Set(states.map(s=>s&&prefix(s.id)))].find(p=>p&&p!==enginePrefix&&has(p,"idle")&&runStates(p).length);
+    if(alt)enginePrefix=alt;
+  }
   const engineRuns=runStates(enginePrefix);
-  if(enginePrefix&&(has(enginePrefix,"idle")||has(enginePrefix,"start")||engineRuns.length)){
+  if(engineLike(enginePrefix)){
     const idle=byId[enginePrefix+"_idle"],ranges={};
     if(idle)from(idle.id).forEach(t=>{
-      if(t&&t.condition&&t.condition.type==="speed"&&prefix(t.target)===enginePrefix&&/^run\d+$/.test(suffix(t.target)||""))
+      if(t&&t.condition&&t.condition.type==="speed"&&prefix(t.target)===enginePrefix&&/^run\d*$/.test(suffix(t.target)||""))
         ranges[suffix(t.target)]={from:fmtPct(t.condition.min),to:fmtPct(t.condition.max==null?255:t.condition.max)};
     });
     const run=engineRuns.map((s,i)=>{
@@ -2510,6 +2528,8 @@ function reverseGraphToProject(payload,fallbackName){
   const prefixes=[...new Set(states.map(s=>prefix(s.id)))];
   for(const p of prefixes){
     if(!p||p===enginePrefix||blocks.some(b=>b.id===p))continue;
+    /* A shared silent entry (e.g. "off") carries no sound and needs no block. */
+    if(!states.some(s=>s&&prefix(s.id)===p&&s.file))continue;
     const isEffect=effectPrefixes.has(p);
     let b=null;
     const gate=byId[p+"_gate"],entryState=byId[p+"_off"];
@@ -3417,14 +3437,14 @@ function renderSim(){
 }
 
 /* ---- persistence ----------------------------------------------------- */
-function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId}));}catch(e){}historyPush();}
+function saveDraft(){try{localStorage.setItem(STORE_KEY,JSON.stringify({project,revision,savedId,savedSig}));}catch(e){}historyPush();}
 const projectSig=()=>JSON.stringify({m:project.mix,s:project.schemes,v:project.vars,id:project.id,name:project.name});
 function historyReset(){history=[];hIndex=-1;lastSig=null;historyPush();}
 function historyPush(){const sig=projectSig();if(sig===lastSig)return;history=history.slice(0,hIndex+1);history.push(JSON.stringify(project));hIndex=history.length-1;lastSig=sig;if(history.length>100){history.shift();hIndex--;}}
 function afterRestore(){installGraphAccessors(project);viewMode=project.editor&&project.editor.mode==="scheme"?"scheme":"mix";activeSchemeId=(project.editor&&project.editor.activeScheme)||"";renamingSchemeId="";}
 function undo(){if(hIndex<=0)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex--;project=JSON.parse(history[hIndex]);afterRestore();project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_undone"));}
 function redo(){if(hIndex>=history.length-1)return;const v=JSON.parse(JSON.stringify(project.editor.viewport));hIndex++;project=JSON.parse(history[hIndex]);afterRestore();project.editor.viewport=v;lastSig=projectSig();selected="";selectedIds=new Set();render();setStatus(t("st_redone"));}
-function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
+function loadDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return;const d=JSON.parse(raw);if(d&&d.project&&d.project.format==="sound-blocks"){project=normalizeProject(d.project);revision=d.revision||0;savedId=d.savedId||"";savedSig=d.savedSig||null;if(project.editor.snap===undefined)project.editor.snap=true;}}catch(e){}}
 /* The working copy lives in localStorage. A scratch draft that was never
  * written to a decoder must not hide the built-in project, so the previous
  * draft is archived before the built-in one replaces it. */
@@ -3433,7 +3453,7 @@ function backupDraft(){try{const raw=localStorage.getItem(STORE_KEY);if(raw)loca
 function loadDefaultProject(){
   backupDraft();
   project=defaultProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";
-  selected="";selectedIds=new Set();revision=0;savedId="";assets={};assetsReady=false;diagnostics=[];
+  selected="";selectedIds=new Set();revision=0;savedId="";savedSig=null;assets={};assetsReady=false;diagnostics=[];
   applyViewport();renderSnapBtn();historyReset();render();refreshAssets();
   setStatus(t("st_default_loaded"));
 }
@@ -3963,6 +3983,11 @@ function liveIdsEqual(a,b){
   for(const id of a)if(!b.has(id))return false;
   return true;
 }
+/* Runner channels are mapped through the current compile, so highlighting is
+ * only valid while the editor graph equals the graph applied on the device.
+ * Any local edit (deleting a link, changing a scheme) invalidates it: mapping
+ * stale device states through a new payload highlighted unrelated blocks. */
+function liveMappingFresh(){return !!savedId&&savedSig===projectSig();}
 /* Inactive effect channels rest in their silent "<block>_off" entry state.
  * Highlighting them made every cue look active at once. */
 function liveStateActive(id){return !!id&&!/_off$/.test(id);}
@@ -4039,6 +4064,10 @@ async function livePoll(){
     if(project.id&&st.id&&st.id!==project.id){
       liveIds=new Set();liveBadges={};liveBadgeSig="";applyLiveHighlight(liveIds);
       liveSetState("mismatch");return;
+    }
+    if(!liveMappingFresh()){
+      liveIds=new Set();liveBadges={};liveBadgeSig="";applyLiveHighlight(liveIds);
+      liveSetState("stale");return;
     }
     const ids=liveBlockIds(st);
     const badges=liveOutputBadges(st);
@@ -4630,7 +4659,7 @@ function refreshSimIfOpen(){
     else renderSim();
   });
 }
-function render(){liveCompileCache=null;liveMapCache=null;renderModeUI();renderProjectFields();computeReady();renderPalette();renderNodes();renderTexts();renderLinks();renderInspector();renderVars();renderSummary();renderLegend();renderReturnBar();applyLiveHighlight(liveIds);saveDraft();refreshSimIfOpen();}
+function render(){liveCompileCache=null;liveMapCache=null;renderModeUI();renderProjectFields();computeReady();renderPalette();renderNodes();renderTexts();renderLinks();renderInspector();renderVars();renderSummary();renderLegend();renderReturnBar();applyLiveHighlight(liveMappingFresh()?liveIds:new Set());saveDraft();refreshSimIfOpen();}
 function isReady(b,graph){
   const g=graph||project;
   const cat=BY_TYPE[b.type];if(!cat)return false;
@@ -5079,7 +5108,7 @@ function exportCompiledSchemeJson(){
 }
 
 /* ---- toolbar --------------------------------------------------------- */
-$("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();revision=0;savedId="";assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
+$("b_new").onclick=()=>{if(!confirm(t("confirm_new")))return;project=newProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();revision=0;savedId="";savedSig=null;assets={};diagnostics=[];applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));};
 $("b_default").onclick=()=>{if(!confirm(t("confirm_default")))return;loadDefaultProject();};
 $("b_mode_mix").onclick=()=>switchMode("mix");
 $("b_mode_scheme").onclick=()=>switchMode("scheme");
@@ -5180,7 +5209,7 @@ applyStatic();
 loadDraft();if(!project||!(project.schemes||[]).length)project=defaultProject();(()=>{try{const q=new URLSearchParams(location.search).get("mode");if(q==="mix"||q==="scheme"){viewMode=q;project.editor.mode=q;if(q==="scheme"){if(!(project.schemes||[]).length){const s=newScheme();project.editor.activeScheme=s.id;}else if(!project.editor.activeScheme)project.editor.activeScheme=project.schemes[0].id;}activeSchemeId=project.editor.activeScheme||"";}}catch(e){}})();(()=>{let t="dark";try{const s=localStorage.getItem(THEME_KEY);if(s==="light"||s==="dark")t=s;}catch(e){}applyTheme(t);})();if((window.matchMedia&&window.matchMedia("(max-width:760px)").matches)||viewMode==="scheme")fitViewport();else applyViewport();renderSnapBtn();renderPlayTargetBtn();historyReset();render();
 if($("boot_skip"))$("boot_skip").onclick=()=>{preloadCancel=true;bootSkipped=true;bootDone=true;hideBootOverlay();};
 startBootPreload();
-  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,deleteDeviceProject:deleteDeviceProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
+  window.__blocks={buildText:buildText,buildSchemeSvg:buildSchemeSvg,exportFileBase:exportFileBase,alignBlocks:alignBlocks,fitViewport:fitViewport,zoomViewport:zoomViewport,playFile:playFile,stopPreview:stopPreview,blockDetailLines:blockDetailLines,project:()=>project,setProject:p=>{project=normalizeProject(p);render();},compile:compile,wirePayload:wirePayload,validate:validate,desiredBindings:desiredBindings,auxConfigs:auxConfigs,reverseGraphToProject:reverseGraphToProject,isReady:isReady,readyIds:()=>readyIds,testBlock:testBlock,testScheme:testScheme,openSimulator:openSimulator,closeSimulator:closeSimulator,sim:()=>sim,simStart:simStart,simStop:simStop,simTick:simTick,simPress:simPress,simReset:simReset,switchMode:switchMode,selectScheme:selectScheme,removeSchemeUI:removeSchemeUI,copySelected:copySelected,pasteClip:pasteClip,duplicateSelected:duplicateSelected,selectNode:selectNode,importOutputs:importOutputs,marqueeHits:marqueeHits,nodeHeight:nodeHeight,soundPlayTarget:soundPlayTarget,togglePlayTarget:togglePlayTarget,liveBlockIds:liveBlockIds,simActiveBlockIds:simActiveBlockIds,liveState:()=>liveState,liveMappingFresh:liveMappingFresh,adoptActiveDeviceProject:adoptActiveDeviceProject,startLivePolling:startLivePolling,liveOutputBadges:liveOutputBadges,simOutputBadges:simOutputBadges,nodeSummary:nodeSummary,refreshStatus:refreshStatus,loadDefaultProject:loadDefaultProject,deleteDeviceProject:deleteDeviceProject,shouldAdoptDefaultNoDeviceScheme:shouldAdoptDefaultNoDeviceScheme,resetAutoLoad:()=>{activeProjectAutoLoadDone=false;},setMeta:(id,rev)=>{savedId=id||"";revision=Number(rev)||0;},preloadStatus:()=>({done:bootDone,total:bootPreloadTotal,doneFiles:bootPreloadDone,buffered:Object.keys(simBufferCache).length,overlay:bootVisible}),preload:startBootPreload};
 })();
 </script>
 </body>

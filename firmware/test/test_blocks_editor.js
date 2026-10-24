@@ -918,7 +918,75 @@ test('31c. Deleting the active device project returns to the built-in project', 
   assert.equal(api.project().id, 'locomotive_default', 'built-in project loaded after deletion');
 });
 
-test('32. Header zoom buttons zoom in/out and fit the canvas', t => {
+const legacyGraph = () => ({
+  format: 'sound-graph', schemaVersion: 2, id: 'legacy', name: 'Legacy', hysteresis: 3,
+  engine: { entry: 'off', fn: 8 }, variables: [],
+  states: [
+    { id: 'off', name: 'off', file: '', loop: false, volume: 100, rate: 1000 },
+    { id: 'engine_idle', name: 'idle', file: 'engine_idle_loop.wav', loop: true, volume: 100, rate: 1000 },
+    { id: 'engine_run', name: 'run', file: 'engine_notch_2_loop.wav', loop: true, volume: 100, rate: 1000 },
+    { id: 'engine_stop', name: 'stop', file: 'engine_shutdown.wav', loop: false, volume: 100, rate: 1000 },
+    { id: 'horn_off', name: 'horn off', file: '', loop: false, volume: 100, rate: 1000 },
+    { id: 'horn_start', name: 'horn start', file: 'horn_low_start.wav', loop: false, volume: 100, rate: 1000 },
+    { id: 'horn_hold', name: 'horn loop', file: 'horn_low_loop.wav', loop: true, volume: 100, rate: 1000 },
+    { id: 'horn_end', name: 'horn end', file: 'horn_low_stop.wav', loop: false, volume: 100, rate: 1000 }
+  ],
+  transitions: [
+    { id: 't1', source: 'off', target: 'engine_idle', priority: 10, timing: 'immediate', condition: { type: 'engine_on' } },
+    { id: 't2', source: 'engine_idle', target: 'engine_run', priority: 1, timing: 'after_sample', condition: { type: 'speed', min: 1, max: 255 } },
+    { id: 't3', source: 'engine_run', target: 'engine_idle', priority: 1, timing: 'after_sample', condition: { type: 'speed', min: 0, max: 0 } },
+    { id: 't4', source: 'engine_idle', target: 'engine_stop', priority: 255, timing: 'immediate', condition: { type: 'engine_off' } },
+    { id: 't5', source: 'engine_run', target: 'engine_stop', priority: 255, timing: 'immediate', condition: { type: 'engine_off' } },
+    { id: 't6', source: 'engine_stop', target: 'off', priority: 10, timing: 'immediate', condition: { type: 'sample_done' } },
+    { id: 't7', source: 'horn_off', target: 'horn_start', priority: 10, timing: 'immediate', condition: { type: 'fn_press', fn: 2 } },
+    { id: 't8', source: 'horn_start', target: 'horn_hold', priority: 10, timing: 'immediate', condition: { type: 'sample_done' } },
+    { id: 't9', source: 'horn_start', target: 'horn_end', priority: 200, timing: 'immediate', condition: { type: 'fn_off', fn: 2 } }
+  ],
+  effects: [{ id: 'horn', entry: 'horn_off', fn: 2 }],
+  editor: { positions: {}, viewport: { x: 0, y: 0, zoom: 1 } }
+});
+
+const deviceFetch = (graph) => async url => {
+  if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: graph.id, revision: 1 };
+  if (url.startsWith('/api/sound/graph/project')) return { ok: true, revision: 1, project: graph };
+  if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+  if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+  if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+  return { ok: true };
+};
+
+test('33. A legacy engine graph (engine.entry on a shared silent state) restores cleanly', t => {
+  const { api } = createEditorFixture(t);
+  const restored = api.reverseGraphToProject(legacyGraph(), 'Legacy');
+  assert.equal(restored.warnings.length, 0, 'no reverse-compiler warnings');
+  const engine = restored.project.blocks.find(b => b.type === 'engine');
+  assert.ok(engine, 'engine block restored');
+  assert.equal(engine.files.idle, 'engine_idle_loop.wav');
+  assert.equal(engine.files.stop, 'engine_shutdown.wav');
+  assert.equal(engine.run.length, 1);
+  assert.equal(engine.run[0].file, 'engine_notch_2_loop.wav');
+});
+
+test('34. A device scheme without an editor copy does not replace the built-in project on load', async t => {
+  const { api } = createEditorFixture(t, { fetch: deviceFetch(legacyGraph()) });
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.project().id, 'locomotive_default', 'built-in project stays active');
+});
+
+test('35. That scheme can still be opened manually, and live mapping follows the saved graph', async t => {
+  const { api } = createEditorFixture(t, { fetch: deviceFetch(legacyGraph()) });
+  assert.equal(await api.adoptActiveDeviceProject('legacy', 1, { manual: true }), true);
+  assert.equal(api.project().id, 'legacy');
+  assert.equal(api.liveMappingFresh(), true, 'freshly loaded graph matches the device');
+
+  const draft = JSON.parse(JSON.stringify(api.project()));
+  draft.mix.links.pop();
+  api.setProject(draft);
+  assert.equal(api.liveMappingFresh(), false, 'editing invalidates live channel mapping');
+});
+
+test('36. Header zoom buttons zoom in/out and fit the canvas', t => {
   const { api, dom } = createEditorFixture(t);
   const p = api.project();
   p.editor.viewport = { x: 0, y: 0, zoom: 1 };

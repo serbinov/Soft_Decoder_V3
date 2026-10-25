@@ -1476,11 +1476,165 @@ static bool bemf_bool_query(const char *query, const char *key, bool *value)
     return true;
 }
 
+static int bemf_cal_key_index(const char *key, size_t len)
+{
+    static const char *const keys[] = {
+        "start", "mode", "points", "settle", "interval", "samples", "retries",
+        "apply_pid", "adaptive", "speeds",
+    };
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+        if (strlen(keys[i]) == len && strncmp(key, keys[i], len) == 0) return (int)i;
+    }
+    return -1;
+}
+
+static bool bemf_cal_query_keys_ok(const char *query)
+{
+    const char *p = query;
+    uint32_t seen = 0;
+    while (p != NULL && *p != '\0') {
+        const char *amp = strchr(p, '&');
+        size_t len = amp != NULL ? (size_t)(amp - p) : strlen(p);
+        const char *eq = memchr(p, '=', len);
+        if (eq == NULL || eq == p) return false;
+        int idx = bemf_cal_key_index(p, (size_t)(eq - p));
+        if (idx < 0 || (seen & (1UL << idx)) != 0) return false;
+        seen |= 1UL << idx;
+        p = amp != NULL ? amp + 1 : NULL;
+    }
+    return true;
+}
+
+static bool bemf_cal_mode_value(const char *value, motor_bemf_cal_mode_t *mode)
+{
+    if (strcasecmp(value, "auto") == 0 || strcasecmp(value, "adaptive") == 0) {
+        *mode = MOTOR_BEMF_MODE_AUTO;
+    } else if (strcasecmp(value, "fast") == 0) {
+        *mode = MOTOR_BEMF_MODE_FAST;
+    } else if (strcasecmp(value, "balanced") == 0) {
+        *mode = MOTOR_BEMF_MODE_BALANCED;
+    } else if (strcasecmp(value, "thorough") == 0) {
+        *mode = MOTOR_BEMF_MODE_THOROUGH;
+    } else if (strcasecmp(value, "custom") == 0) {
+        *mode = MOTOR_BEMF_MODE_CUSTOM;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static bool bemf_cal_int_value(const char *query, const char *key, long min, long max,
+                               int *out)
+{
+    if (!query_has_key(query, key)) return true;
+    char value[16];
+    if (!parse_query(query, key, value, sizeof(value))) return false;
+    char *end = NULL;
+    long v = strtol(value, &end, 10);
+    if (end == value || *end != '\0' || v < min || v > max) return false;
+    *out = (int)v;
+    return true;
+}
+
+static bool bemf_cal_bool_value(const char *query, const char *key, bool *out)
+{
+    if (!query_has_key(query, key)) return true;
+    char value[16];
+    if (!parse_query(query, key, value, sizeof(value))) return false;
+    if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+        strcasecmp(value, "yes") == 0) {
+        *out = true;
+    } else if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+               strcasecmp(value, "no") == 0) {
+        *out = false;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static bool bemf_cal_parse_speeds(const char *value, motor_bemf_cal_config_t *cfg)
+{
+    uint8_t n = 0;
+    int last = 0;
+    const char *p = value;
+    bool bad = false;
+    while (*p != '\0' && n < MOTOR_BEMF_CAL_MAX_POINTS) {
+        char *end = NULL;
+        long v = strtol(p, &end, 10);
+        if (end == p || v < 1 || v > 126 || v <= last) {
+            bad = true;
+            break;
+        }
+        cfg->speed[n++] = (uint8_t)v;
+        last = (int)v;
+        p = end;
+        while (*p == ' ') ++p;
+        if (*p == ',') {
+            ++p;
+            while (*p == ' ') ++p;
+        } else {
+            break;
+        }
+    }
+    while (*p == ' ') ++p;
+    if (bad || *p != '\0' || n < MOTOR_BEMF_CAL_MIN_POINTS) return false;
+    cfg->mode = MOTOR_BEMF_MODE_CUSTOM;
+    cfg->speed_count = n;
+    if (cfg->points < n) cfg->points = n;
+    return true;
+}
+
+static bool bemf_cal_parse_config(const char *query, motor_bemf_cal_config_t *cfg,
+                                  bool *has_options)
+{
+    if (!bemf_cal_query_keys_ok(query)) return false;
+    /* Leave unset fields at zero so motor_bemf_cal_start_ex() applies the
+     * selected mode's defaults; only explicit query options override them. */
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->mode = MOTOR_BEMF_MODE_AUTO;
+    *has_options = false;
+    if (query_has_key(query, "mode")) {
+        char value[16];
+        if (!parse_query(query, "mode", value, sizeof(value)) ||
+            !bemf_cal_mode_value(value, &cfg->mode)) return false;
+        *has_options = true;
+    }
+    int v = 0;
+    if (!bemf_cal_int_value(query, "points", 10, 16, &v)) return false;
+    if (query_has_key(query, "points")) { cfg->points = (uint8_t)v; *has_options = true; }
+    if (!bemf_cal_int_value(query, "settle", 100, 2000, &v)) return false;
+    if (query_has_key(query, "settle")) { cfg->settle_ms = (uint16_t)v; *has_options = true; }
+    if (!bemf_cal_int_value(query, "interval", 10, 80, &v)) return false;
+    if (query_has_key(query, "interval")) { cfg->interval_ms = (uint16_t)v; *has_options = true; }
+    if (!bemf_cal_int_value(query, "samples", 4, 32, &v)) return false;
+    if (query_has_key(query, "samples")) { cfg->samples = (uint8_t)v; *has_options = true; }
+    if (!bemf_cal_int_value(query, "retries", 0, 4, &v)) return false;
+    if (query_has_key(query, "retries")) { cfg->retries = (uint8_t)v; *has_options = true; }
+    bool bv = false;
+    if (!bemf_cal_bool_value(query, "apply_pid", &bv)) return false;
+    if (query_has_key(query, "apply_pid")) { cfg->apply_pid = bv; *has_options = true; }
+    bv = false;
+    if (!bemf_cal_bool_value(query, "adaptive", &bv)) return false;
+    if (query_has_key(query, "adaptive")) { cfg->adaptive = bv; *has_options = true; }
+    if (query_has_key(query, "speeds")) {
+        char value[128];
+        if (!parse_query(query, "speeds", value, sizeof(value)) ||
+            !bemf_cal_parse_speeds(value, cfg)) return false;
+        *has_options = true;
+    }
+    return true;
+}
+
 static int bemf_cal_action(const char *query)
 {
     bool value = false;
     if (query[0] == '\0') return 1; /* Existing bodyless callers start. */
-    if (bemf_bool_query(query, "start", &value) && value) return 1;
+    if (query_has_key(query, "start") && parse_bool(query, "start", false)) {
+        motor_bemf_cal_config_t cfg;
+        bool has_options = false;
+        return bemf_cal_parse_config(query, &cfg, &has_options) ? 1 : 0;
+    }
     if (bemf_bool_query(query, "reset", &value) && value) return 2;
     if (bemf_bool_query(query, "cancel", &value) && value) return 3;
     return 0;
@@ -1490,7 +1644,7 @@ static esp_err_t bemf_cal_get(httpd_req_t *req)
 {
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
-    char json[1024];
+    char json[1536];
     size_t used = 0;
     buf_appendf(json, sizeof(json), &used,
                 "{\"ok\":true,\"active\":%s,\"progress\":%u,\"total\":%u,"
@@ -1509,7 +1663,22 @@ static esp_err_t bemf_cal_get(httpd_req_t *req)
                     "%s{\"speed\":%u,\"frac\":%u}",
                     i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
     }
-    buf_appendf(json, sizeof(json), &used, "]}");
+    buf_appendf(json, sizeof(json), &used,
+                "],\"profile\":{\"mode\":%u,\"planned\":%u,\"measured\":%u,"
+                "\"stalled\":%u,\"ceiling\":%u,\"first\":%u,\"firstFrac\":%u,\"settle\":%u,"
+                "\"gain\":%u,\"kp\":%u,\"ki\":%u,\"kd\":%u,\"quality\":%u,"
+                "\"pidApplied\":%s}}",
+                (unsigned)info.profile.mode, (unsigned)info.profile.planned_points,
+                (unsigned)info.profile.measured_points,
+                (unsigned)info.profile.stalled_points,
+                (unsigned)info.profile.ceiling_speed,
+                (unsigned)info.profile.first_move_speed,
+                (unsigned)info.profile.first_frac,
+                (unsigned)info.profile.settle_ms_avg,
+                (unsigned)info.profile.plant_gain_x1000,
+                (unsigned)info.profile.kp_x100, (unsigned)info.profile.ki_x1000,
+                (unsigned)info.profile.kd_x100, (unsigned)info.profile.quality,
+                info.profile.pid_applied ? "true" : "false");
     return send_json(req, json);
 }
 
@@ -1542,6 +1711,11 @@ static esp_err_t bemf_cal_post(httpd_req_t *req)
         (query_err != ESP_OK && query_err != ESP_ERR_NOT_FOUND) ||
         !query_encoding_valid(query) || action == 0 || req->content_len != 0U)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid calibration action");
+    motor_bemf_cal_config_t cfg;
+    bool has_options = false;
+    if (action == 1 && !bemf_cal_parse_config(query, &cfg, &has_options)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid calibration profile");
+    }
     if (action == 3) {
         esp_err_t err = motor_bemf_cal_cancel();
         return send_json(req, err == ESP_OK ? "{\"ok\":true}" :
@@ -1560,10 +1734,16 @@ static esp_err_t bemf_cal_post(httpd_req_t *req)
                                   ? "{\"ok\":true}"
                                   : "{\"ok\":false,\"error\":\"calibration busy\"}");
     }
-    esp_err_t err = motor_bemf_cal_start();
+    if (!has_options) {
+        motor_bemf_cal_default_config(&cfg);
+    }
+    esp_err_t err = motor_bemf_cal_start_ex(&cfg);
     xSemaphoreGive(s_control_mutex);
     if (err == ESP_ERR_INVALID_STATE) {
         return send_json(req, "{\"ok\":false,\"error\":\"calibration running\"}");
+    }
+    if (err == ESP_ERR_INVALID_ARG) {
+        return send_json(req, "{\"ok\":false,\"error\":\"invalid profile\"}");
     }
     if (err != ESP_OK) {
         return send_json(req, "{\"ok\":false,\"error\":\"start failed\"}");

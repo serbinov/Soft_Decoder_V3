@@ -241,6 +241,8 @@
         <div class="tm-sub-panel" id="saved_projects_panel" role="menu"></div>
       </div>
       <button id="b_check_blocks" data-i18n="check_blocks">Проверить блоки</button>
+      <button id="b_pack_import" data-i18n="pack_import">Импорт звуков и схемы (.asp)</button>
+      <button id="b_pack_export" data-i18n="pack_export">Экспорт звуков и схемы (.asp)</button>
       <button id="b_file_png" data-i18n="download_png">Скачать картинку</button>
       <button id="b_file_txt" data-i18n="download_txt">Скачать текст</button>
     </div>
@@ -340,7 +342,7 @@ impout_tip:"Считать привязки выходов/логики с ус�
 to_decoder:"Выйти",theme_tip:"Светлая / тёмная тема",insp_tip:"Настройки",lang_tip:"Switch to English",zoom_group:"Масштаб",zoom_out:"Уменьшить масштаб",zoom_in:"Увеличить масштаб",zoom_fit:"Вписать в экран",
 ready_blocks:"Готовые блоки",palette_blocks:"Блоки",block_setup:"Настройка блока",check:"Проверка",
 select_hint:"Выберите блок на холсте или добавьте новый слева.",
-scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Экспорт блок-схемы в JPG",download_txt:"Экспорт блок-схемы в TXT",ready:"Готово",
+scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Экспорт блок-схемы в JPG",download_txt:"Экспорт блок-схемы в TXT",pack_import:"Импорт звуков и схемы (.asp)",pack_export:"Экспорт звуков и схемы (.asp)",st_pack_import_hint:"Импорт откроется в главном окне. После импорта вернитесь в редактор.",st_pack_updated:"Пакет импортирован, проект обновлён.",ready:"Готово",
 st_checking:"Проверка...",st_has_errors:"Есть ошибки",st_check_ok:"Проверка пройдена",st_error_prefix:"Ошибка: ",
 st_saving:"Сохранение...",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранено",st_saved_not_applied:"Сохранено, но не применено",st_not_applied:"Не применено: ",st_not_saved:"Не сохранено: ",
 st_applying:"Применение...",st_applied_prefix:"Применена версия ",st_applied_suffix:", выходы записаны",st_not_applied:"Не применено: ",
@@ -435,7 +437,7 @@ vars_title:"Variables",vars_builtins:"Built-in",vars_add:"+ Variable",vars_add_h
 mini_none:"No blocks.",lt_none:"No links.",lt_source:"Source",lt_target:"Target",lt_condition:"Condition",
 bd_run:" · start: ",bd_idle:" · idle: ",bd_stop:" · stop: ",bd_step_a:"step ",bd_prot_a:"margin ",bd_out_mid:" · output: ",bd_delay_a:", delay ",bd_delay_b:" ms",bd_random:" · randomly from:",bd_trigger:"trigger: ",tr_auto:"auto",bd_speed_a:"speed ",bd_speed_b:"% · margin ",bd_dir:"direction: ",bd_dir_fwd:"forward",bd_dir_rev:"reverse",bd_out_a:"output: ",
 bt_scheme:"Scheme: ",bt_counts_a:"Blocks: ",bt_counts_b:", links: ",bt_blocks:"== Blocks ==",bt_links:"== Links ==",
-st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",export_scheme:"Export scheme for pack (.json)",st_scheme_saved:"scheme.json saved for packing into .asp",
+st_no_scheme:"No scheme",st_png_saved:"Scheme saved as JPG",st_png_fail:"Failed to save JPG",st_txt_saved:"Scheme saved as TXT",export_scheme:"Export scheme for pack (.json)",st_scheme_saved:"scheme.json saved for packing into .asp",pack_import:"Import sounds & scheme (.asp)",pack_export:"Export sounds & scheme (.asp)",st_pack_import_hint:"The import opens in the main window. Return to the editor after importing.",st_pack_updated:"Pack imported, project updated.",
 confirm_new:"Create a new scheme? Unsaved changes will be lost.",new_project_title:"New project",new_project_hint:"Enter the project name. With a device connected, the project is saved immediately; unsaved changes to the current project will be lost.",create:"Create",project_name_empty:"The project name cannot be empty.",project_name_long:"The project name is longer than 63 bytes.",default_project:"ChME3 Locomotive",default_project_name:"ChME3 Locomotive",default_horn_scheme:"Horn (low)",default_whistle_scheme:"Whistle",default_bell_scheme:"Shunting radio",default_compressor_scheme:"Air compressor",default_coupler_scheme:"Coupler",default_uncoupler_scheme:"Uncoupler",default_sander_scheme:"Sander",default_fan_scheme:"Cooling fan",default_vent_scheme:"Air release",default_door_open_scheme:"Cab door: open",default_door_close_scheme:"Cab door: close",default_brake_scheme:"ChME3 Brake",confirm_default:"Load the default ChME3 locomotive project? Unsaved changes will be lost.",st_default_loaded:"Default ChME3 locomotive project loaded.",st_new_scheme:"New scheme",err_not_blocks_file:"This is not a blocks file",err_import:"Import failed: ",st_imported:"Scheme imported",cancel:"Cancel",load_device:"Load from device",check_blocks:"Check blocks",project_name:"Project name",project_id:"Project ID",project_bad_id:"ID: only A-Z, a-z, 0-9, _ and -, up to 31 characters.",st_no_projects:"No saved projects on the device.",st_no_editor_copy:"This project has no editor copy (only the graph was stored).",st_loaded_device:"Project loaded: ",st_load_error:"Load failed: ",st_restored:"Recovered graph",rev_no_trigger:"No trigger found for block: ",rev_unsupported:"States without an editor equivalent were skipped: ",rev_logic:"Logic block skipped (complex logic): ",st_no_outputs:"No output or logic bindings on the device.",st_engine_out_bind:"An engine output can drive sounds/logic, not an output block (no speed range).",st_imported_outputs_a:"Outputs imported: ",st_imported_outputs_b:", updated: ",st_import_error:"Output import failed: ",v_bad_project_id:"Invalid project ID.",v_bad_project_name:"Project name is empty or longer than 63 bytes.",
 st_writing_outputs:"Writing outputs...",st_outputs_written:"Outputs written",st_outputs_not_written:"Outputs not written: ",st_impout_a:"Outputs imported: ",st_impout_none:"No new outputs",
 device_projects:"Device projects…",device_delete_active:"Delete scheme from device",del:"Delete",confirm_delete_project:"Delete project from the device \"",st_project_deleted:"Project deleted from the device.",st_project_deleted_default:"Project deleted. Default ChME3 locomotive project loaded.",st_no_active_project:"No active scheme on the device.",saved_projects:"Saved projects",projects_loading:"Loading…",projects:"Projects",reference_project:"Reference project",clone:"Clone",clone_suffix:", copy",clone_project_title:"Clone project",clone_project_hint:"Enter the clone name. The copy is saved as a separate project.",st_reference_active:"Reference project is active.",st_project_activated:"Active project: ",st_clone_created:"Project copy created.",reference_readonly:"The reference project cannot be changed; saving creates a copy.",select_project:"Make active",projects_limit_title:"Project limit",projects_limit_text:"You can create at most 10 schemes. Delete an unnecessary scheme to free a slot.",ok:"OK",rename:"Rename",rename_project_title:"Rename project",rename_project_hint:"Enter a new project name.",st_project_renamed:"Project renamed: ",
@@ -792,6 +794,7 @@ const REFERENCE_ID="__reference__";
 const REFERENCE_PROJECT_ID="locomotive_default";
 const MAX_SAVED_PROJECTS=10;
 let activeProjectId=REFERENCE_ID,referenceMode=false;
+let packImportPending=false;
 let soundFiles=[],diagnostics=[],assets={},assetsReady=false;
 let history=[],hIndex=-1,lastSig=null;
 let readyIds=new Set(),selectedLink="",deviceBinds=[],deviceAux=[];
@@ -5678,6 +5681,19 @@ $("b_insp").onclick=()=>{document.body.classList.toggle("show-insp");document.bo
 $("b_text").onclick=()=>{textMode=!textMode;$("b_text").classList.toggle("on",textMode);$("stage").style.cursor=textMode?"crosshair":"";setStatus(textMode?t("text_adding"):t("ready"));};
 $("b_file_png").onclick=exportSchemePng;
 $("b_file_txt").onclick=exportText;
+if($("b_pack_import"))$("b_pack_import").onclick=()=>{
+  packImportPending=true;
+  window.open('/?pack=import#settings','aura_pack_import');
+  setStatus(t("st_pack_import_hint"));
+};
+if($("b_pack_export"))$("b_pack_export").onclick=()=>window.open('/?pack=export#settings','aura_pack_export');
+window.addEventListener("focus",async()=>{
+  if(!packImportPending)return;
+  packImportPending=false;
+  activeProjectAutoLoadDone=false;
+  let imported=false;try{imported=localStorage.getItem(STORE_KEY)===null;}catch(e){}
+  try{await refreshStatus();setStatus(imported?t("st_pack_updated"):t("ready"));}catch(e){}
+});
 $("b_undo").onclick=undo;$("b_redo").onclick=redo;
 window.addEventListener("keydown",ev=>{
   if(ev.target&&(ev.target.isContentEditable||/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)))return;

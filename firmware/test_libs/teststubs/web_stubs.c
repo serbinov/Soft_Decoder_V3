@@ -543,6 +543,12 @@ int mock_wifi_stop_calls = 0;
 int mock_wifi_set_storage_calls = 0;
 int mock_wifi_set_bandwidth_calls = 0;
 int mock_wifi_set_ps_calls = 0;
+int mock_wifi_set_max_tx_power_calls = 0;
+int8_t mock_wifi_last_tx_power = 0;
+int mock_wifi_set_max_tx_power_ret = 0;
+int mock_wifi_set_inactive_time_calls = 0;
+uint16_t mock_wifi_inactive_time_sec = 0;
+int mock_wifi_set_inactive_time_ret = 0;
 
 int mock_scan_start_ret = 0;
 int mock_scan_num_ret = 0;
@@ -645,6 +651,21 @@ esp_err_t esp_wifi_set_ps(wifi_ps_type_t type)
     (void)type;
     mock_wifi_set_ps_calls++;
     return ESP_OK;
+}
+
+esp_err_t esp_wifi_set_max_tx_power(int8_t power)
+{
+    mock_wifi_set_max_tx_power_calls++;
+    mock_wifi_last_tx_power = power;
+    return (esp_err_t)mock_wifi_set_max_tx_power_ret;
+}
+
+esp_err_t esp_wifi_set_inactive_time(wifi_interface_t ifx, uint16_t sec)
+{
+    (void)ifx;
+    mock_wifi_set_inactive_time_calls++;
+    mock_wifi_inactive_time_sec = sec;
+    return (esp_err_t)mock_wifi_set_inactive_time_ret;
 }
 
 /* ====================================================================== */
@@ -1313,6 +1334,8 @@ int mock_bemf_enabled = 1;
 int mock_bemf_cal_start_ret = 0;
 int mock_bemf_cal_clear_ret = 0;
 int mock_bemf_cal_start_calls = 0;
+int mock_bemf_cal_start_ex_calls = 0;
+motor_bemf_cal_config_t mock_bemf_cal_config;
 int mock_bemf_cal_clear_calls = 0;
 int mock_bemf_cal_cancel_ret = ESP_OK;
 int mock_bemf_cal_cancel_calls = 0;
@@ -1369,6 +1392,20 @@ void motor_bemf_base_info(motor_bemf_base_info_t *info)
 esp_err_t motor_bemf_cal_start(void)
 {
     mock_bemf_cal_start_calls++;
+    return (esp_err_t)mock_bemf_cal_start_ret;
+}
+
+void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg)
+{
+    if (cfg == NULL) return;
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->mode = MOTOR_BEMF_MODE_AUTO;
+}
+
+esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg)
+{
+    mock_bemf_cal_start_ex_calls++;
+    if (cfg != NULL) mock_bemf_cal_config = *cfg;
     return (esp_err_t)mock_bemf_cal_start_ret;
 }
 
@@ -1750,6 +1787,12 @@ void mock_web_reset(void)
     mock_wifi_set_storage_calls = 0;
     mock_wifi_set_bandwidth_calls = 0;
     mock_wifi_set_ps_calls = 0;
+    mock_wifi_set_max_tx_power_calls = 0;
+    mock_wifi_last_tx_power = 0;
+    mock_wifi_set_max_tx_power_ret = 0;
+    mock_wifi_set_inactive_time_calls = 0;
+    mock_wifi_inactive_time_sec = 0;
+    mock_wifi_set_inactive_time_ret = 0;
 
     mock_scan_start_ret = 0;
     mock_scan_num_ret = 0;

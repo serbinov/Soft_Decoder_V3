@@ -447,7 +447,12 @@ def _new_state():
         },
         "bemf": {"active": False, "progress": 0, "total": 10, "valid": True,
                  "stored": True, "use": False, "runId": 1, "result": "idle",
-                 "error": "none", "errorCode": 0},
+                 "error": "none", "errorCode": 0, "apply_pid": False,
+                 "profile": {"mode": 255, "planned": 10, "measured": 10,
+                             "stalled": 0, "ceiling": 0, "first": 12,
+                             "firstFrac": 200, "settle": 0, "gain": 0,
+                             "kp": 0, "ki": 0, "kd": 0, "quality": 0,
+                             "pidApplied": False}},
         "cv": [0] * CV_COUNT,
         "aux": [{"level": 100, "effect": 0} for _ in range(9)],
         "fmap": _new_fmap(),
@@ -891,13 +896,40 @@ def audio_status_json():
               effects_volume=a["effects"])
 
 
+def _bemf_start_config(query):
+    name = str(q1(query, "mode", "auto") or "auto").lower()
+    modes = {"auto": 0, "adaptive": 0, "fast": 1, "balanced": 2,
+             "thorough": 3, "custom": 4}
+    mode = modes.get(name, 0)
+    default_total = {0: 16, 1: 10, 2: 12, 3: 16, 4: 16}.get(mode, 16)
+    default_settle = {0: 600, 1: 400, 2: 500, 3: 600, 4: 500}.get(mode, 600)
+    speeds = str(q1(query, "speeds", "") or "")
+    if speeds:
+        count = len([s for s in speeds.split(",") if s.strip()])
+        if 10 <= count <= 16:
+            mode = 4
+            default_total = count
+    total = as_int(q1(query, "points"), default_total)
+    total = max(10, min(16, total))
+    settle = as_int(q1(query, "settle"), default_settle)
+    settle = max(100, min(2000, settle))
+    apply_pid = as_bool(q1(query, "apply_pid"), False)
+    return mode, total, settle, apply_pid
+
+
 def bemf_json():
     b = STATE["bemf"]
-    points = [{"speed": i * 12, "frac": min(100, 5 + i * 5)} for i in range(1, 11)]
+    profile = dict(b.get("profile") or {})
+    count = max(1, min(16, int(profile.get("measured") or 10)))
+    points = []
+    for i in range(count):
+        speed = int(round(12 + (126 - 12) * i / (count - 1))) if count > 1 else 12
+        frac = int(round(20 + 60 * i / (count - 1))) if count > 1 else 20
+        points.append({"speed": speed, "frac": frac})
     return ok(active=b["active"], progress=b["progress"], total=b["total"],
               valid=b["valid"], stored=b["stored"], use=b["use"],
               runId=b["runId"], result=b["result"], error=b["error"],
-              errorCode=b["errorCode"], points=points)
+              errorCode=b["errorCode"], points=points, profile=profile)
 
 
 def tracks_json():
@@ -1191,6 +1223,18 @@ def handle_api(method, path, query, body):
                 b["result"] = "succeeded"
                 b["stored"] = True
                 b["valid"] = True
+                p = b.setdefault("profile", {})
+                p["measured"] = b["total"]
+                p["stalled"] = 0
+                p["ceiling"] = 0
+                p["first"] = 12
+                p["firstFrac"] = 200
+                p["gain"] = 2400
+                p["kp"] = 42
+                p["ki"] = 21
+                p["kd"] = 5
+                p["quality"] = 88
+                p["pidApplied"] = bool(b.get("apply_pid"))
                 add_log("BEMF", "калибровка завершена и сохранена")
         return 200, bemf_json()
 
@@ -1199,16 +1243,33 @@ def handle_api(method, path, query, body):
         if as_bool(q1(query, "cancel"), False):
             b["active"] = False
             b["result"] = "cancelled"
+            p = b.setdefault("profile", {})
+            p["measured"] = b["progress"]
+            p["pidApplied"] = False
             add_log("BEMF", "калибровка отменена")
         elif as_bool(q1(query, "reset"), False):
             b["active"] = False
             b["stored"] = False
             b["valid"] = False
             b["result"] = "idle"
+            b["total"] = 10
+            b["apply_pid"] = False
+            b["profile"] = {"mode": 0, "planned": 0, "measured": 0,
+                            "stalled": 0, "ceiling": 0, "first": 0,
+                            "firstFrac": 0, "settle": 0, "gain": 0,
+                            "kp": 0, "ki": 0, "kd": 0, "quality": 0,
+                            "pidApplied": False}
             add_log("BEMF", "калибровка очищена")
         elif as_bool(q1(query, "start"), False):
-            b.update(active=True, progress=0, result="running", error="none",
-                     errorCode=0, runId=b["runId"] + 1)
+            mode, total, settle, apply_pid = _bemf_start_config(query)
+            b.update(active=True, progress=0, total=total, result="running",
+                     error="none", errorCode=0, runId=b["runId"] + 1,
+                     apply_pid=apply_pid)
+            b["profile"] = {"mode": mode, "planned": total, "measured": 0,
+                            "stalled": 0, "ceiling": 0, "first": 0,
+                            "firstFrac": 0, "settle": settle, "gain": 0,
+                            "kp": 0, "ki": 0, "kd": 0, "quality": 0,
+                            "pidApplied": False}
             add_log("BEMF", "калибровка запущена")
         return 200, ok()
 

@@ -419,6 +419,18 @@ label{color:var(--text);font-weight:600}
           <input type="checkbox" id="bemf_use" style="width:auto" onchange="setBemfUse()"><span data-i18n="bemf_use">Использовать BEMF для двигателя</span>
         </label>
       </div>
+      <div class="row" style="margin-bottom:8px;align-items:center;gap:8px">
+        <label for="bemf_cal_mode" class="muted" data-i18n="bemf_mode">Режим</label>
+        <select id="bemf_cal_mode" style="width:auto">
+          <option value="auto" selected data-i18n="bemf_mode_auto">Адаптивный (AUTO)</option>
+          <option value="fast" data-i18n="bemf_mode_fast">Быстрый (10 точек)</option>
+          <option value="balanced" data-i18n="bemf_mode_balanced">Сбалансированный (12)</option>
+          <option value="thorough" data-i18n="bemf_mode_thorough">Тщательный (16)</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+          <input type="checkbox" id="bemf_cal_apply_pid" style="width:auto"><span data-i18n="bemf_apply_pid">Применить рекомендованные PID</span>
+        </label>
+      </div>
       <div class="row" style="margin-bottom:8px">
         <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()" data-i18n="bemf_calibrate">Калибровать</button>
         <button class="btn danger" id="bemf_clear_btn" onclick="clearBemfCal()" data-i18n="bemf_reset">Сброс</button>
@@ -427,6 +439,21 @@ label{color:var(--text);font-weight:600}
       <div class="muted" id="bemf_status" data-i18n="bemf_status_idle">Статус: —</div>
       <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
       <div class="up-meta" id="bemf_meta"></div>
+      <div id="bemf_profile" style="display:none;margin-top:8px;padding:8px;border:1px solid #2a3040;border-radius:8px">
+        <div class="muted" style="margin-bottom:6px" data-i18n="bemf_profile_title">Параметры калибровки BEMF</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12px">
+          <div><span class="muted" data-i18n="bemf_profile_mode">Режим</span>: <b id="bemf_prof_mode">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_points">Точки</span>: <b id="bemf_prof_points">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_stalled">Пропущено (stall)</span>: <b id="bemf_prof_stalled">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_ceiling">Потолок</span>: <b id="bemf_prof_ceiling">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_first">Первый ход</span>: <b id="bemf_prof_first">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_settle">Средний settle</span>: <b id="bemf_prof_settle">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_gain">Наклон BEMF</span>: <b id="bemf_prof_gain">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_pid">PID (Kp/Ki/Kd)</span>: <b id="bemf_prof_pid">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_quality">Качество</span>: <b id="bemf_prof_quality">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_applied">PID применены</span>: <b id="bemf_prof_applied">—</b></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -674,7 +701,7 @@ info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Со�
 set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Конфигурация',grp_settings:'Настройки',grp_service:'Сервис',
 nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Звуки',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_pack_import:'Импорт звуков и схемы',nav_pack_export:'Экспорт звуков и схемы',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
-bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',
+bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode:'Режим',bemf_mode_auto:'Адаптивный (AUTO)',bemf_mode_fast:'Быстрый (10 точек)',bemf_mode_balanced:'Сбалансированный (12)',bemf_mode_thorough:'Тщательный (16)',bemf_apply_pid:'Применить рекомендованные PID',bemf_mode_custom:'Пользовательский',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки',bemf_profile_stalled:'Пропущено (stall)',bemf_profile_ceiling:'Потолок',bemf_profile_first:'Первый ход',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID применены',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
 bemf_status_idle:'Статус: —',
 bemf_lbl_idle:'Калибровка не выполнялась',bemf_lbl_running:'Калибровка идёт, не трогайте мотор...',bemf_lbl_saving:'Сохранение калибровки...',bemf_lbl_succeeded:'Новая калибровка завершена и сохранена',bemf_lbl_cancelled:'Калибровка отменена',bemf_lbl_failed:'Калибровка не удалась',
 bemf_rsn_adc:'ошибка АЦП',bemf_rsn_rail:'нет допустимого напряжения рельс',bemf_rsn_timeout:'таймаут',bemf_rsn_control:'остановка управления',bemf_rsn_curve:'некорректная кривая',bemf_rsn_storage:'ошибка сохранения',bemf_rsn_start:'ошибка запуска',
@@ -736,7 +763,7 @@ info_fw:'Firmware version',info_addr:'Address',info_state:'State',
 set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Configuration',grp_settings:'Settings',grp_service:'Service',
 nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sounds',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_pack_import:'Import sounds & scheme',nav_pack_export:'Export sounds & scheme',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
-bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',
+bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode:'Mode',bemf_mode_auto:'Adaptive (AUTO)',bemf_mode_fast:'Fast (10 points)',bemf_mode_balanced:'Balanced (12)',bemf_mode_thorough:'Thorough (16)',bemf_apply_pid:'Apply recommended PID',bemf_mode_custom:'Custom',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Points',bemf_profile_stalled:'Skipped (stall)',bemf_profile_ceiling:'Ceiling',bemf_profile_first:'First move',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID applied',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
 bemf_status_idle:'Status: —',
 bemf_lbl_idle:'Calibration has not been run',bemf_lbl_running:'Calibration in progress, do not touch the motor...',bemf_lbl_saving:'Saving calibration...',bemf_lbl_succeeded:'New calibration completed and stored',bemf_lbl_cancelled:'Calibration cancelled',bemf_lbl_failed:'Calibration failed',
 bemf_rsn_adc:'ADC error',bemf_rsn_rail:'no valid track voltage',bemf_rsn_timeout:'timeout',bemf_rsn_control:'control stop',bemf_rsn_curve:'invalid curve',bemf_rsn_storage:'storage error',bemf_rsn_start:'start error',
@@ -1115,15 +1142,23 @@ function renderMode(){
 var bemfPollTimer=null,bemfPollBusy=false,bemfPollActive=false,bemfActive=false;
 var bemfCommandBusy=false,bemfCancelBusy=false,bemfDiscoverTries=0,bemfUnknown=false,bemfUseBusy=false,bemfUseActual=null,bemfRevision=0,bemfUseRevision=0;
 function renderBemfButtons(){
-  byId('bemf_cal_btn').disabled=bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown;
-  byId('bemf_clear_btn').disabled=bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown;
+  var busy=bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown;
+  byId('bemf_cal_btn').disabled=busy;
+  byId('bemf_clear_btn').disabled=busy;
+  var m=byId('bemf_cal_mode');if(m)m.disabled=busy;
+  var p=byId('bemf_cal_apply_pid');if(p)p.disabled=busy;
   byId('bemf_cancel_btn').disabled=(!bemfActive&&!bemfUnknown)||bemfCancelBusy||bemfCommandBusy;
 }
 async function startBemfCal(){
   if(bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown)return;
   bemfCommandBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
-    var d=await api('/api/bemf/calibrate?start=1',{method:'POST',timeout:3000});
+    var modeEl=byId('bemf_cal_mode'),mode=modeEl&&modeEl.value?modeEl.value:'auto';
+    var url='/api/bemf/calibrate?start=1';
+    if(mode&&mode!=='auto')url+='&mode='+encodeURIComponent(mode);
+    var pidEl=byId('bemf_cal_apply_pid');
+    if(pidEl&&pidEl.checked)url+='&apply_pid=1';
+    var d=await api(url,{method:'POST',timeout:3000});
     if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
     log(t('tag_bemf'),t('bemf_log_started'));
   }catch(e){log(t('tag_bemf'),t('bemf_log_cal')+e.message);
@@ -1156,6 +1191,30 @@ function bemfStartPoll(immediate){
   if(!bemfPollTimer)bemfPollTimer=setInterval(loadBemfCal,1000);
   if(immediate!==false)loadBemfCal();
 }
+function renderBemfProfile(d){
+  var el=byId('bemf_profile');if(!el)return;
+  var p=d&&d.profile;
+  if(!p||!(Number(p.measured)>0)){el.style.display='none';return;}
+  var modes=[t('bemf_mode_auto'),t('bemf_mode_fast'),t('bemf_mode_balanced'),t('bemf_mode_thorough'),t('bemf_mode_custom')];
+  var mode=Number(p.mode)===255?t('bemf_mode_stored'):modes[Number(p.mode)];
+  setText('bemf_prof_mode',mode||'—');
+  var planned=Number(p.planned)||0,measured=Number(p.measured)||0;
+  setText('bemf_prof_points',planned>0?(measured+' / '+planned):String(measured));
+  setText('bemf_prof_stalled',String(Number(p.stalled)||0));
+  setText('bemf_prof_ceiling',Number(p.ceiling)>0?String(p.ceiling):'—');
+  if(Number(p.first)>0){
+    var pct=Math.round((Number(p.firstFrac)||0)/1024*100);
+    setText('bemf_prof_first',p.first+' ('+pct+'%)');
+  }else setText('bemf_prof_first','—');
+  setText('bemf_prof_settle',Number(p.settle)>0?(Number(p.settle)+' '+t('bemf_profile_unit_ms')):'—');
+  setText('bemf_prof_gain',Number(p.gain)>0?((Number(p.gain)/1000).toFixed(2)+' '+t('bemf_profile_unit_gain')):'—');
+  if(Number(p.kp)>0||Number(p.ki)>0||Number(p.kd)>0){
+    setText('bemf_prof_pid',(Number(p.kp)/100).toFixed(2)+' / '+(Number(p.ki)/1000).toFixed(3)+' / '+(Number(p.kd)/100).toFixed(2));
+  }else setText('bemf_prof_pid','—');
+  setText('bemf_prof_quality',Number(p.quality)>0?(Number(p.quality)+'%'):'—');
+  setText('bemf_prof_applied',p.pidApplied?t('bemf_profile_yes'):t('bemf_profile_no'));
+  el.style.display='block';
+}
 async function loadBemfCal(){
   if(bemfPollBusy||document.hidden||uploadBusy||rebooting)return;
   bemfPollBusy=true;
@@ -1184,6 +1243,7 @@ async function loadBemfCal(){
       setText('bemf_status',status);
     }
     setText('bemf_meta',d.stored&&result!=='succeeded'?t('bemf_prev'):(result==='running'?t('bemf_meta_running'):''));
+    renderBemfProfile(d);
     var useCb=byId('bemf_use');
     if(useCb&&!bemfUseBusy&&useRevision===bemfUseRevision&&typeof d.use!=='undefined'){
       bemfUseActual=(d.use===true||d.use==='true');useCb.checked=bemfUseActual;
@@ -3070,6 +3130,12 @@ function init(){
   initLang();
   initTheme();
   showPage(pageFromHash());
+  var packAction=(location.search||'').match(/[?&]pack=(import|export)/);
+  if(packAction){
+    showPage('settings');
+    showSetting('panel_snd');
+    if(packAction[1]==='export')setTimeout(function(){try{exportSoundPack();}catch(e){}},300);
+  }
   if(typeof addEventListener!=='undefined')addEventListener('hashchange',function(){showPage(pageFromHash());});
   if(typeof addEventListener!=='undefined')addEventListener('resize',function(){applySettingsMode();applyPanelSplit();});
   byId('device_name').addEventListener('input',onDeviceNameInput);

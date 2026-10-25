@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 #include "driver/uart.h"
@@ -354,9 +355,32 @@ static void send_bemf_header(const motor_bemf_cal_info_t *info)
  *   BEMF-RAW   -> dump raw BEMF measurement diagnostics
  *   BEMF-ADC   -> dump direct ADC raw counts (bemf1 bemf2 rail)
  *   BEMF-TEST  -> drive the motor at a speed, e.g. "BEMF-TEST 60" or "BEMF-TEST 60 rev"
- *   BEMF-CAL   -> start a calibration run (motor must be unloaded)
+ *   BEMF-CAL   -> start the legacy 10-point calibration (motor unloaded)
+ *   BEMF-CAL <mode> [points] [settle_ms] [interval_ms] [samples] [retries] [apply_pid]
+ *              -> adaptive calibration: AUTO, FAST, BALANCED, THOROUGH, CUSTOM
+ *   BEMF-CALSPD 12,18,24,... -> CUSTOM plan with at least 10 ascending speeds
+ *   BEMF-PROFILE? -> dump the last adaptive profile/recommended PID
  *   BEMF-CLR   -> clear the stored calibration
  */
+static bool bemf_parse_mode(const char *s, motor_bemf_cal_mode_t *mode)
+{
+    if (s == NULL || mode == NULL) return false;
+    if (strcasecmp(s, "AUTO") == 0 || strcasecmp(s, "ADAPTIVE") == 0) {
+        *mode = MOTOR_BEMF_MODE_AUTO;
+    } else if (strcasecmp(s, "FAST") == 0) {
+        *mode = MOTOR_BEMF_MODE_FAST;
+    } else if (strcasecmp(s, "BALANCED") == 0) {
+        *mode = MOTOR_BEMF_MODE_BALANCED;
+    } else if (strcasecmp(s, "THOROUGH") == 0) {
+        *mode = MOTOR_BEMF_MODE_THOROUGH;
+    } else if (strcasecmp(s, "CUSTOM") == 0) {
+        *mode = MOTOR_BEMF_MODE_CUSTOM;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 static void handle_bemf_cmd(const char *line)
 {
     if (strcmp(line, "BEMF?") == 0 || strcmp(line, "BEMF-HDR") == 0) {
@@ -407,8 +431,97 @@ static void handle_bemf_cmd(const char *line)
         send_line(buf);
         return;
     }
+    if (strcmp(line, "BEMF-PROFILE?") == 0) {
+        motor_bemf_cal_info_t info;
+        motor_bemf_cal_info(&info);
+        char buf[192];
+        snprintf(buf, sizeof(buf),
+                 "BEMF-PROFILE %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+                 (unsigned)info.profile.mode, (unsigned)info.profile.planned_points,
+                 (unsigned)info.profile.measured_points,
+                 (unsigned)info.profile.stalled_points,
+                 (unsigned)info.profile.ceiling_speed,
+                 (unsigned)info.profile.first_move_speed,
+                 (unsigned)info.profile.settle_ms_avg,
+                 (unsigned)info.profile.plant_gain_x1000,
+                 (unsigned)info.profile.kp_x100, (unsigned)info.profile.ki_x1000,
+                 (unsigned)info.profile.kd_x100, (unsigned)info.profile.quality,
+                 info.profile.pid_applied ? 1U : 0U, (unsigned)info.count);
+        send_line(buf);
+        return;
+    }
     if (strcmp(line, "BEMF-CAL") == 0) {
         esp_err_t err = motor_bemf_cal_start();
+        send_line(err == ESP_OK ? "BEMF-CAL-OK"
+                                : (err == ESP_ERR_INVALID_STATE ? "BEMF-ERR busy"
+                                                                : "BEMF-ERR start"));
+        return;
+    }
+    if (strncmp(line, "BEMF-CALSPD ", 12) == 0) {
+        motor_bemf_cal_config_t cfg = {0};
+        cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
+        cfg.settle_ms = 500;
+        cfg.settle_max_ms = 2000;
+        cfg.interval_ms = 40;
+        cfg.samples = 10;
+        cfg.retries = 1;
+        cfg.boost_ms = 120;
+        uint8_t n = 0;
+        int last = 0;
+        const char *p = line + 12;
+        bool bad = false;
+        while (*p != '\0' && n < MOTOR_BEMF_CAL_MAX_POINTS) {
+            char *end = NULL;
+            long v = strtol(p, &end, 10);
+            if (end == p || v < 1 || v > 126 || v <= last) {
+                bad = true;
+                break;
+            }
+            cfg.speed[n++] = (uint8_t)v;
+            last = (int)v;
+            p = end;
+            while (*p == ' ') ++p;
+            if (*p == ',') {
+                ++p;
+                while (*p == ' ') ++p;
+            } else {
+                break;
+            }
+        }
+        while (*p == ' ') ++p;
+        if (bad || *p != '\0' || n < MOTOR_BEMF_CAL_MIN_POINTS) {
+            send_line("BEMF-ERR args");
+            return;
+        }
+        cfg.speed_count = n;
+        cfg.points = n;
+        esp_err_t err = motor_bemf_cal_start_ex(&cfg);
+        send_line(err == ESP_OK ? "BEMF-CAL-OK"
+                                : (err == ESP_ERR_INVALID_STATE ? "BEMF-ERR busy"
+                                                                : "BEMF-ERR start"));
+        return;
+    }
+    if (strncmp(line, "BEMF-CAL ", 9) == 0) {
+        char mode[16] = {0};
+        int points = 0, settle = 0, interval = 0, samples = 0, retries = 0, apply = 0;
+        int n = sscanf(line + 9, "%15s %d %d %d %d %d %d", mode, &points, &settle,
+                       &interval, &samples, &retries, &apply);
+        motor_bemf_cal_mode_t m;
+        if (n < 1 || !bemf_parse_mode(mode, &m)) {
+            send_line("BEMF-ERR args");
+            return;
+        }
+        /* Leave unset fields at zero so start_ex() applies the selected
+         * mode's defaults (FAST 10, BALANCED 12, THOROUGH/AUTO 16). */
+        motor_bemf_cal_config_t cfg = {0};
+        cfg.mode = m;
+        if (n >= 2 && points > 0) cfg.points = (uint8_t)points;
+        if (n >= 3 && settle > 0) cfg.settle_ms = (uint16_t)settle;
+        if (n >= 4 && interval > 0) cfg.interval_ms = (uint16_t)interval;
+        if (n >= 5 && samples > 0) cfg.samples = (uint8_t)samples;
+        if (n >= 6) cfg.retries = (uint8_t)(retries < 0 ? 0 : retries);
+        if (n >= 7) cfg.apply_pid = apply != 0;
+        esp_err_t err = motor_bemf_cal_start_ex(&cfg);
         send_line(err == ESP_OK ? "BEMF-CAL-OK"
                                 : (err == ESP_ERR_INVALID_STATE ? "BEMF-ERR busy"
                                                                 : "BEMF-ERR start"));

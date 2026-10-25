@@ -18,6 +18,11 @@
 #undef TAG
 #endif
 #define TAG "web_wifi"
+/* Radio at full 20 dBm (unit: 0.25 dBm). The built-in antenna has little
+ * margin, so a lower PA setting shows up as retries and stalled transfers. */
+#define WIFI_MAX_TX_POWER_QDBM 80
+/* Free the single-client slot after this many idle seconds (default 300). */
+#define WIFI_AP_INACTIVE_SEC 120
 /* ---------- WiFi ---------- */
 
 static bool s_wifi_started;
@@ -102,18 +107,68 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     }
 }
 
-/* Pick the least-used of the three non-overlapping 2.4 GHz channels (1/6/11)
- * so the AP does not have to share the crowded default channel 1. Returns 1
- * (the historical default) on any scan problem. */
+/* The three non-overlapping 2.4 GHz channels. */
+static const uint8_t s_wifi_channels[3] = { 1, 6, 11 };
+
+/* Spectral overlap of a 20 MHz network on ap_ch with a 20 MHz AP candidate.
+ * Adjacent channels still share most of the band; two channels away share
+ * half of it, three channels away only the skirt. */
+static int wifi_overlap_pct(int cand, int ap_ch)
+{
+    int d = cand > ap_ch ? cand - ap_ch : ap_ch - cand;
+    switch (d) {
+        case 0: return 100;
+        case 1: return 60;
+        case 2: return 25;
+        case 3: return 8;
+        default: return 0;
+    }
+}
+
+/* Convert RSSI to an interference weight: a -40 dBm neighbour damages the
+ * link far more than a -80 dBm one, so do not count them equally. */
+static int wifi_rssi_weight(int rssi)
+{
+    if (rssi >= -50) return 100;
+    if (rssi >= -60) return 80;
+    if (rssi >= -70) return 55;
+    if (rssi >= -80) return 30;
+    if (rssi >= -90) return 10;
+    return 0; /* far below the noise floor: ignore */
+}
+
+/* Add one 20 MHz interferer to all candidate scores. */
+static void wifi_score_ap(int score[3], int ap_ch, int weight)
+{
+    if (ap_ch < 1 || ap_ch > 13) {
+        return; /* 40 MHz extension outside the 2.4 GHz band */
+    }
+    for (int k = 0; k < 3; ++k) {
+        score[k] += weight * wifi_overlap_pct((int)s_wifi_channels[k], ap_ch) / 100;
+    }
+}
+
+/* Pick the least-crowded of the three non-overlapping 2.4 GHz channels
+ * (1/6/11) so the AP does not have to share the crowded default channel 1.
+ * Visible APs contribute by spectral overlap, RSSI and occupied bandwidth:
+ * a strong 40 MHz AP on channel 1, for example, also buries channel 6.
+ * Returns 1 (the historical default) on any scan problem. */
 static uint8_t wifi_pick_channel(void)
 {
     wifi_scan_config_t sc = { 0 };
     sc.show_hidden = true;
-    /* Quick scan: the AP must come up fast after power-on. A full 13-channel
-     * 80..200 ms scan delayed association and DHCP by several seconds. */
-    sc.scan_time.active.min = 20;
-    sc.scan_time.active.max = 60;
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
+    /* Active probe scan. 40..100 ms per channel is a compromise between
+     * catching every beacon/probe response and keeping the boot fast; the
+     * earlier 20..60 ms scan regularly missed weaker neighbours and picked
+     * a busier channel. */
+    sc.scan_time.active.min = 40;
+    sc.scan_time.active.max = 100;
+    esp_err_t serr = esp_wifi_scan_start(&sc, true);
+    if (serr != ESP_OK) {
+        ESP_LOGW(TAG, "channel scan failed (%s), retrying", esp_err_to_name(serr));
+        serr = esp_wifi_scan_start(&sc, true);
+    }
+    if (serr != ESP_OK) {
         return 1;
     }
     uint16_t num = 0;
@@ -122,7 +177,7 @@ static uint8_t wifi_pick_channel(void)
         return 1;
     }
     if (num > 16U) {
-        num = 16U;
+        num = 16U; /* records are sorted by RSSI: the strongest ones matter */
     }
     wifi_ap_record_t recs[16];
     uint16_t got = num;
@@ -130,16 +185,19 @@ static uint8_t wifi_pick_channel(void)
         (void)esp_wifi_clear_ap_list();
         return 1;
     }
-    static const uint8_t chans[3] = { 1, 6, 11 };
     int score[3] = { 0, 0, 0 };
     for (uint16_t i = 0; i < got; ++i) {
-        if (recs[i].rssi < -80) {
-            continue; /* far away: barely contributes to channel load */
+        int weight = wifi_rssi_weight(recs[i].rssi);
+        if (weight == 0) {
+            continue;
         }
-        for (int k = 0; k < 3; ++k) {
-            if (recs[i].primary == chans[k]) {
-                score[k]++;
-            }
+        int primary = recs[i].primary;
+        wifi_score_ap(score, primary, weight);
+        /* HT40 uses a second 20 MHz half four channels away. */
+        if (recs[i].second == WIFI_SECOND_CHAN_ABOVE) {
+            wifi_score_ap(score, primary + 4, weight);
+        } else if (recs[i].second == WIFI_SECOND_CHAN_BELOW) {
+            wifi_score_ap(score, primary - 4, weight);
         }
     }
     int best = 0;
@@ -148,7 +206,10 @@ static uint8_t wifi_pick_channel(void)
             best = k;
         }
     }
-    return chans[best];
+    ESP_LOGI(TAG, "channel scan: %u APs, interference %d/%d/%d -> channel %u",
+             (unsigned)got, score[0], score[1], score[2],
+             (unsigned)s_wifi_channels[best]);
+    return s_wifi_channels[best];
 }
 
 /* Power save: stop the AP when no client has been connected for the configured
@@ -300,6 +361,14 @@ esp_err_t wifi_start(const settings_config_t *cfg)
 
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
+
+    /* Never let a reduced PHY setting shrink the link budget: this is the
+     * single biggest software knob for range and packet loss. */
+    err = esp_wifi_set_max_tx_power(WIFI_MAX_TX_POWER_QDBM);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "max TX power not applied: %s", esp_err_to_name(err));
+    }
+
     err = esp_netif_dhcps_start(ap_netif);
     if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
         (void)esp_wifi_stop();
@@ -310,6 +379,15 @@ esp_err_t wifi_start(const settings_config_t *cfg)
 
     /* No radio power-save: a sleeping AP radio throttles uploads to ~2 KB/s. */
     esp_wifi_set_ps(WIFI_PS_NONE);
+
+    /* The AP holds exactly one client. If a phone vanishes without sending a
+     * deauth (out of range, Wi-Fi toggled off), the default 300 s timeout
+     * keeps the slot busy and blocks a reconnect. 120 s still gives an idle
+     * but alive client plenty of margin (phones send null frames). */
+    err = esp_wifi_set_inactive_time(WIFI_IF_AP, WIFI_AP_INACTIVE_SEC);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "inactive time not applied: %s", esp_err_to_name(err));
+    }
 
     s_ap_sta_count = 0;
     s_ap_started_us = esp_timer_get_time();

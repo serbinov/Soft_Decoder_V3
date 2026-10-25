@@ -493,6 +493,34 @@ static void test_wifi_pick_channel_scores(void)
     TEST_ASSERT_TRUE(ch == 1 || ch == 6 || ch == 11);
 }
 
+static void test_wifi_pick_channel_adjacent_overlap(void)
+{
+    mock_scan_start_ret = ESP_OK;
+    mock_scan_num_ret = ESP_OK;
+    mock_scan_num = 2;
+    mock_scan_records_n = 2;
+    /* Strong APs on 2 and 10 bury channels 1 and 11; 6 is clear. Counting
+     * exact matches only (the old behaviour) would have picked channel 1. */
+    mock_scan_records[0].rssi = -40;
+    mock_scan_records[0].primary = 2;
+    mock_scan_records[1].rssi = -40;
+    mock_scan_records[1].primary = 10;
+    TEST_ASSERT_EQUAL_UINT8(6, wifi_pick_channel());
+}
+
+static void test_wifi_pick_channel_ht40(void)
+{
+    mock_scan_start_ret = ESP_OK;
+    mock_scan_num_ret = ESP_OK;
+    mock_scan_num = 1;
+    mock_scan_records_n = 1;
+    /* 40 MHz AP on 1+5 also occupies the lower half of channel 6. */
+    mock_scan_records[0].rssi = -40;
+    mock_scan_records[0].primary = 1;
+    mock_scan_records[0].second = WIFI_SECOND_CHAN_ABOVE;
+    TEST_ASSERT_EQUAL_UINT8(11, wifi_pick_channel());
+}
+
 /* ---------- function outputs / mapping ---------- */
 
 static void test_web_apply_function_bounds(void)
@@ -1136,6 +1164,32 @@ static void test_wifi_start_channel_chosen(void)
     TEST_ASSERT_EQUAL_UINT8(6, test_ap_config.ap.channel);
 }
 
+static void test_wifi_start_max_tx_power(void)
+{
+    settings_config_t cfg = make_wifi_cfg();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_set_max_tx_power_calls);
+    TEST_ASSERT_EQUAL_INT8(80, mock_wifi_last_tx_power);
+
+    /* A rejected TX power must not keep the access point from starting. */
+    mock_wifi_set_max_tx_power_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_INT(2, mock_wifi_set_max_tx_power_calls);
+}
+
+static void test_wifi_start_client_timeout(void)
+{
+    settings_config_t cfg = make_wifi_cfg();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_set_inactive_time_calls);
+    TEST_ASSERT_EQUAL_UINT16(120, mock_wifi_inactive_time_sec);
+
+    /* A rejected timeout must not keep the access point from starting. */
+    mock_wifi_set_inactive_time_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_INT(2, mock_wifi_set_inactive_time_calls);
+}
+
 static void test_wifi_start_ap_netif_null(void)
 {
     settings_config_t cfg = make_wifi_cfg();
@@ -1380,10 +1434,27 @@ static void test_bemf_cal_get(void)
     mock_bemf_cal_info.frac[0] = 512;
     mock_bemf_cal_info.speed[1] = 6;
     mock_bemf_cal_info.frac[1] = 1024;
+    mock_bemf_cal_info.profile.mode = MOTOR_BEMF_MODE_THOROUGH;
+    mock_bemf_cal_info.profile.planned_points = 16;
+    mock_bemf_cal_info.profile.measured_points = 14;
+    mock_bemf_cal_info.profile.stalled_points = 2;
+    mock_bemf_cal_info.profile.ceiling_speed = 120;
+    mock_bemf_cal_info.profile.first_move_speed = 5;
+    mock_bemf_cal_info.profile.first_frac = 100;
+    mock_bemf_cal_info.profile.settle_ms_avg = 600;
+    mock_bemf_cal_info.profile.plant_gain_x1000 = 2400;
+    mock_bemf_cal_info.profile.kp_x100 = 42;
+    mock_bemf_cal_info.profile.ki_x1000 = 21;
+    mock_bemf_cal_info.profile.kd_x100 = 5;
+    mock_bemf_cal_info.profile.quality = 88;
+    mock_bemf_cal_info.profile.pid_applied = true;
     mock_bemf_enabled = 1;
     TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":5,\"frac\":50"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"use\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"firstFrac\":100"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"quality\":88"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"pidApplied\":true"));
 }
 
 static void test_bemf_base_get(void)
@@ -1429,6 +1500,31 @@ static void test_bemf_cal_post_paths(void)
     mock_bemf_cal_clear_ret = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "calibration busy"));
+
+    reset_resp();
+    set_query("start=1&mode=thorough&points=16&settle=600&interval=50&samples=10&retries=2&apply_pid=1");
+    int before_ex = mock_bemf_cal_start_ex_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_EQUAL_INT(before_ex + 1, mock_bemf_cal_start_ex_calls);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_MODE_THOROUGH, mock_bemf_cal_config.mode);
+    TEST_ASSERT_EQUAL_UINT8(16, mock_bemf_cal_config.points);
+    TEST_ASSERT_EQUAL_UINT16(600, mock_bemf_cal_config.settle_ms);
+    TEST_ASSERT_EQUAL_UINT16(50, mock_bemf_cal_config.interval_ms);
+    TEST_ASSERT_EQUAL_UINT8(10, mock_bemf_cal_config.samples);
+    TEST_ASSERT_EQUAL_UINT8(2, mock_bemf_cal_config.retries);
+    TEST_ASSERT_TRUE(mock_bemf_cal_config.apply_pid);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+
+    reset_resp();
+    set_query("start=1&speeds=12,18,24,32,40,52,66,80,100,126");
+    before_ex = mock_bemf_cal_start_ex_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_EQUAL_INT(before_ex + 1, mock_bemf_cal_start_ex_calls);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_MODE_CUSTOM, mock_bemf_cal_config.mode);
+    TEST_ASSERT_EQUAL_UINT8(10, mock_bemf_cal_config.speed_count);
+    TEST_ASSERT_EQUAL_UINT8(12, mock_bemf_cal_config.speed[0]);
+    TEST_ASSERT_EQUAL_UINT8(126, mock_bemf_cal_config.speed[9]);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
 }
 
 static void test_bemf_use_get_post(void)
@@ -4825,6 +4921,8 @@ int main(void)
     RUN_TEST(test_wifi_pick_channel_num_fail);
     RUN_TEST(test_wifi_pick_channel_records_fail);
     RUN_TEST(test_wifi_pick_channel_scores);
+    RUN_TEST(test_wifi_pick_channel_adjacent_overlap);
+    RUN_TEST(test_wifi_pick_channel_ht40);
     RUN_TEST(test_web_apply_function_bounds);
     RUN_TEST(test_web_apply_function_mutex_null);
     RUN_TEST(test_web_apply_function_output_delta);
@@ -4848,6 +4946,8 @@ int main(void)
     RUN_TEST(test_wifi_start_sta_mode_fail);
     RUN_TEST(test_wifi_start_sta_start_fail);
     RUN_TEST(test_wifi_start_channel_chosen);
+    RUN_TEST(test_wifi_start_max_tx_power);
+    RUN_TEST(test_wifi_start_client_timeout);
     RUN_TEST(test_wifi_start_ap_netif_null);
     RUN_TEST(test_wifi_start_get_ip_fail);
     RUN_TEST(test_wifi_start_bad_ap_ip);

@@ -1,5 +1,8 @@
 import importlib.util
+import json
+import os
 from pathlib import Path
+import tempfile
 import unittest
 
 PACK = Path(__file__).resolve().parents[1] / "tools" / "pack_sounds.py"
@@ -25,6 +28,24 @@ class AspCryptoTests(unittest.TestCase):
         self.assertNotEqual(first[16:32], second[16:32], "salt must be random")
         self.assertNotEqual(first[32:44], second[32:44], "nonce must be random")
         self.assertEqual(MODULE.decrypt_asp(first, "correct horse"), plain)
+
+    def test_scheme_json_with_utf8_bom_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scheme = Path(tmp) / "scheme.json"
+            doc = {
+                "format": "sound-graph",
+                "schemaVersion": 1,
+                "id": "bom_test",
+                "name": "BOM test",
+                "states": [{"id": "s1", "name": "S1", "file": "a.wav"}],
+            }
+            # Windows editors commonly create UTF-8 files with a BOM.
+            with open(scheme, "w", encoding="utf-8-sig") as fh:
+                json.dump(doc, fh)
+            entries = [("a", 100, 22050, 1, 16, b"\x00\x00" * 16)]
+            raw = MODULE._prepare_scheme_payload(str(scheme), entries)
+            parsed = json.loads(raw.decode("utf-8"))
+            self.assertEqual(parsed["assets"][0]["file"], "a.wav")
 
     def test_wrong_password_and_tampering_are_rejected(self):
         plain = b"AURASP01" + b"payload" * 100

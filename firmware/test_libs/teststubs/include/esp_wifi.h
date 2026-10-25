@@ -69,9 +69,16 @@ typedef struct {
     } scan_time;
 } wifi_scan_config_t;
 
+typedef enum {
+    WIFI_SECOND_CHAN_NONE = 0,
+    WIFI_SECOND_CHAN_ABOVE,
+    WIFI_SECOND_CHAN_BELOW,
+} wifi_second_chan_t;
+
 typedef struct {
     int8_t rssi;
     uint8_t primary;
+    wifi_second_chan_t second;
 } wifi_ap_record_t;
 
 typedef struct {
@@ -108,5 +115,7 @@ esp_err_t esp_wifi_scan_get_ap_records(uint16_t *number, wifi_ap_record_t *ap_re
 esp_err_t esp_wifi_clear_ap_list(void);
 esp_err_t esp_wifi_set_bandwidth(wifi_interface_t interface, wifi_bandwidth_t bandwidth);
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t type);
+esp_err_t esp_wifi_set_max_tx_power(int8_t power);
+esp_err_t esp_wifi_set_inactive_time(wifi_interface_t ifx, uint16_t sec);
 
 #endif /* MOCK_ESP_WIFI_H */

@@ -11,6 +11,28 @@
 
 ## Релизы
 
+### 2026-10-25 — адаптивная калибровка BEMF
+
+- Добавлены профили `FAST` (10 точек), `BALANCED` (12), `THOROUGH`/`AUTO`
+  (14 + до 2 адаптивных) и `CUSTOM` (>=10 явных скоростей). Настройки:
+  `points`, `settle_ms`, `settle_max_ms`, `interval_ms`, `samples`, `retries`,
+  `boost_ms`, `adaptive`, `apply_pid`.
+- Каждая точка теперь ждёт сходимости BEMF (ограниченный settle), оценивает
+  качество и повторяется при шуме; нераскрутившаяся точка получает boost и
+  пропускается. Калибровка требует не менее 10 вращающихся точек.
+- Второй проход адаптивно добавляет точки в интервалах с наибольшим
+  наклоном/кривизной/низким качеством; при достижении acceptance ceiling
+  сохраняется частичная кривая.
+- Профиль прогона отдаёт recommended Kp/Ki/Kd, plant gain, quality, stalled/
+  ceiling/first-move; PID применяется в CV54/55/56 только с `apply_pid`.
+- Web UI: выбор режима калибровки; `POST /api/bemf/calibrate?start=1&mode=...`.
+  UART: `BEMF-CAL <MODE> [points] [settle] [interval] [samples] [retries] [apply_pid]`,
+  `BEMF-PROFILE?`. `BEMF-CAL` без режима остаётся легаси 10-точечным.
+- Исправлены: удержание высокого duty при BEMF выше ceiling (теперь decay),
+  инициализация фильтра первым отсчётом, ограничение цели по duty ступени,
+  нормализация PID по времени тика, клампинг trim, plausibility-fault для
+  залипшего датчика 2–80 % rail и проверка покоя перед калибровкой.
+
 ### 2026-10-22 — версия 0.11, исправления после архитектурного ревью
 
 - `POST /api/motor` и DC-режим `track` теперь обновляют общий motion-снимок
@@ -381,6 +403,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-25 (v0.11) — feat(motor,web): adaptive BEMF calibration and WiFi link tuning
 - 2026-10-25 (v0.11) — feat(editor): persistent project library, clone/rename and simulator hot reload
 - 2026-10-25 (v0.11) — fix(motor): harden BEMF sensing, calibration and feedback faults
 - 2026-10-24 (v0.11) — fix(editor): keep the built-in project for legacy graphs and stop stale live highlights

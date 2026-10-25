@@ -593,7 +593,7 @@ def _find_scheme_file(src_dir: str, explicit_path: str | None) -> str | None:
 
 def _prepare_scheme_payload(scheme_path: str, entries: list) -> bytes:
     """Load a sound-graph JSON, populate its assets[] manifest from the packed WAVs, and serialize."""
-    with open(scheme_path, "r", encoding="utf-8") as fh:
+    with open(scheme_path, "r", encoding="utf-8-sig") as fh:
         doc = json.load(fh)
     if not isinstance(doc, dict) or doc.get("format") != "sound-graph":
         raise SystemExit("%s: expected JSON with \"format\": \"sound-graph\"" % scheme_path)

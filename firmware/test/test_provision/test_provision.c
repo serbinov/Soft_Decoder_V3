@@ -213,6 +213,19 @@ esp_err_t motor_bemf_cal_start(void)
     return g_cal_start_err;
 }
 
+void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg)
+{
+    if (cfg == NULL) return;
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->mode = MOTOR_BEMF_MODE_AUTO;
+}
+
+esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg)
+{
+    (void)cfg;
+    return g_cal_start_err;
+}
+
 esp_err_t motor_bemf_cal_clear(void)
 {
     return g_cal_clear_err;

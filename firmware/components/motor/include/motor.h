@@ -63,6 +63,7 @@ int motor_adc_read_raw(int gpio_num);
  * stores the curve in NVS. Afterwards the PID targets the calibrated curve so
  * the no-load RPM is held even under load. */
 #define MOTOR_BEMF_CAL_MAX_POINTS 16
+#define MOTOR_BEMF_CAL_MIN_POINTS 10
 
 typedef enum {
     MOTOR_BEMF_CAL_IDLE,
@@ -72,6 +73,35 @@ typedef enum {
     MOTOR_BEMF_CAL_CANCELLED,
     MOTOR_BEMF_CAL_FAILED,
 } motor_bemf_cal_state_t;
+
+/* Adaptive calibration profiles. FAST is the legacy 10-point run and is kept
+ * for compatibility (and for the plain motor_bemf_cal_start() call). AUTO uses
+ * the thorough adaptive plan; CUSTOM honours the caller's speed list and
+ * windows. */
+typedef enum {
+    MOTOR_BEMF_MODE_AUTO = 0,
+    MOTOR_BEMF_MODE_FAST,
+    MOTOR_BEMF_MODE_BALANCED,
+    MOTOR_BEMF_MODE_THOROUGH,
+    MOTOR_BEMF_MODE_CUSTOM,
+} motor_bemf_cal_mode_t;
+/* Profile marker for a curve loaded from NVS/base without a live run. */
+#define MOTOR_BEMF_MODE_STORED 0xFFU
+
+typedef struct {
+    motor_bemf_cal_mode_t mode;
+    uint8_t points;          /* target total, 0 = mode default (min 10, max 16) */
+    uint16_t settle_ms;      /* minimum settle, 0 = mode default */
+    uint16_t settle_max_ms;  /* maximum settle, 0 = 4 x settle */
+    uint16_t interval_ms;    /* sample/probe interval, 0 = 40; max 80 */
+    uint8_t samples;         /* measured samples per point, 0 = mode default */
+    uint8_t retries;         /* point retries; 0 = mode default for non-custom */
+    uint16_t boost_ms;       /* first/stall boost, 0 = mode default */
+    bool adaptive;           /* CUSTOM only: allow adaptive insertion */
+    bool apply_pid;          /* apply the recommended Kp/Ki/Kd after success */
+    uint8_t speed_count;     /* CUSTOM: number of explicit speeds (>=10) */
+    uint8_t speed[MOTOR_BEMF_CAL_MAX_POINTS];
+} motor_bemf_cal_config_t;
 
 typedef enum {
     MOTOR_BEMF_CAL_ERR_NONE,
@@ -84,10 +114,30 @@ typedef enum {
     MOTOR_BEMF_CAL_ERR_START,
 } motor_bemf_cal_error_t;
 
+/* Result of the last adaptive run. The suggested PID gains are derived from
+ * the measured plant slope and settle time; they are informational unless
+ * motor_bemf_cal_config_t.apply_pid was set. */
+typedef struct {
+    uint8_t mode;             /* motor_bemf_cal_mode_t */
+    uint8_t planned_points;   /* points the planner aimed for */
+    uint8_t measured_points;  /* successful rotating points */
+    uint8_t stalled_points;   /* points that did not rotate */
+    uint8_t ceiling_speed;     /* first speed above the measurement ceiling, 0=none */
+    uint8_t first_move_speed;  /* lowest successful speed */
+    uint16_t first_frac;       /* BEMF at first_move_speed, x1024 */
+    uint16_t settle_ms_avg;    /* average accepted settle time */
+    uint16_t plant_gain_x1000; /* mV per duty count (x1000) */
+    uint16_t kp_x100;          /* suggested Kp x100 */
+    uint16_t ki_x1000;         /* suggested Ki x1000 */
+    uint16_t kd_x100;          /* suggested Kd x100 */
+    uint8_t quality;           /* average sample quality, 0..100 */
+    bool pid_applied;          /* suggested gains were written to CV54..56 */
+} motor_bemf_profile_t;
+
 typedef struct {
     bool active;      /* calibration running */
     uint8_t step;     /* current step while active (1-based) */
-    uint8_t total;    /* total steps */
+    uint8_t total;    /* total steps (can grow when adaptive points are added) */
     uint8_t count;    /* measured points (current run or stored) */
     uint8_t speed[MOTOR_BEMF_CAL_MAX_POINTS];
     uint16_t frac[MOTOR_BEMF_CAL_MAX_POINTS]; /* rail fraction * 1024 */
@@ -97,9 +147,18 @@ typedef struct {
     motor_bemf_cal_state_t result;
     motor_bemf_cal_error_t reason;
     esp_err_t error_code;
+    motor_bemf_profile_t profile;
 } motor_bemf_cal_info_t;
 
 esp_err_t motor_bemf_cal_start(void);
+/* Fill a configuration with AUTO defaults (adaptive, up to 16 points). */
+void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg);
+/* Start an adaptive/custom calibration. cfg.mode selects the profile; CUSTOM
+ * requires at least MOTOR_BEMF_CAL_MIN_POINTS explicit ascending speeds. The
+ * engine settles each point until stable, retries noisy points, skips a
+ * non-rotating point after a boost, inserts extra points where the curve is
+ * steep/uncertain, and saves a partial curve if the ceiling is reached. */
+esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg);
 /* Independent 10 ms safety caller: no mutex, ADC, NVS, allocation or waits.
  * Coasts on stale/low rail or an expired 100 ms worker-only drive lease. */
 void motor_bemf_cal_watchdog(void);
@@ -124,10 +183,11 @@ esp_err_t motor_bemf_cal_reload(void);
  * settings_bemf_use_save(). */
 void motor_set_bemf_enabled(bool enabled);
 bool motor_get_bemf_enabled(void);
-/* Measurement acceptance ceiling, fraction of rail x1024 (82..1024). Default
- * is the existing 85% rail-clamp heuristic, not a physical freewheel detector.
- * Targets never exceed this ceiling; increase only from measured hardware data.
- * Runtime-only: caller owns persistence if a setting is exposed. */
+/* Measurement acceptance ceiling, fraction of rail. Default is the 0.85
+ * rail-clamp heuristic, not a physical freewheel detector. Targets never exceed
+ * this ceiling and are additionally bounded by the per-step open-loop duty.
+ * The value is fixed at build time; increase it only from measured hardware
+ * data. */
 
 
 /* Raw BEMF measurement diagnostics for debugging the calibration / PID. */

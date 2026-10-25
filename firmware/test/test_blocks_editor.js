@@ -804,6 +804,8 @@ test('27j. Saved projects are in the File submenu and playback is a Settings ite
   assert.ok(!html.includes('id="b_device_projects"'), 'device menu items are removed');
   assert.ok(!html.includes('data-i18n="m_device"'), 'device menu is removed');
   assert.ok(html.includes('id="b_saved_projects"'), 'saved projects submenu exists');
+  assert.ok(html.includes('id="b_pack_import"'), 'ASP pack import is in the File menu');
+  assert.ok(html.includes('id="b_pack_export"'), 'ASP pack export is in the File menu');
   assert.ok(html.indexOf('id="b_play_target"') > html.indexOf('data-i18n="m_settings"'),
     'playback control is inside the Settings menu');
 

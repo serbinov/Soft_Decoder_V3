@@ -107,7 +107,10 @@ function Get-RunDetails([string]$action = "") {
     if (Test-Path -LiteralPath $fwb) { $fwBytes = (Get-Item -LiteralPath $fwb).Length }
     $snd = 0; $sndBytes = 0; $wavs = @()
     $isScheme = ($action -eq "flash_scheme")
-    if ($isScheme) {
+    $isFactory = ($action -eq "factory")
+    if ($isFactory) {
+        # Factory wipe leaves no sound library.
+    } elseif ($isScheme) {
         $manifest = Join-Path $repo "firmware\sound_editor\default_scheme_sounds.txt"
         if (Test-Path -LiteralPath $manifest -PathType Leaf) {
             $snd = @(Get-Content -LiteralPath $manifest -Encoding UTF8 |
@@ -161,6 +164,11 @@ function Get-ActionSpec([string]$action) {
         # Builds an .asp sound container from SOUND\ for the device web upload.
         # Does not need a ready release image.
         return @{ script = (Join-Path $web "make_sound_pack.ps1"); args = @(); needsRelease = $false }
+    }
+    if ($action -eq "factory") {
+        # Full internal-flash erase + release firmware + external NOR format.
+        # Destructive: requires a confirmed action and a ready release.
+        return @{ script = (Join-Path $web "factory_reset.ps1"); args = @() }
     }
     if ($action -eq "flash_sounds" -or $action -eq "flash_scheme") {
         # Build .asp from SOUND\ (full or default-scheme only), flash firmware,
@@ -243,7 +251,7 @@ $releaseFull = [IO.Path]::GetFullPath((Join-Path $repo "release"))
 $sndFull     = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }
 $utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
 $expectedOrigin = $prefix.TrimEnd("/")
-$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "ota")
+$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "ota", "factory")
 
 function Get-FormBody($ctx) {
     if (-not $ctx.Request.HasEntityBody) { return "" }

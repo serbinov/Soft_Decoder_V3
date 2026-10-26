@@ -1,4 +1,6 @@
 # Upload one complete AURA Sound Pack (.asp) over the serial provisioning link.
+# With -Wipe, skip the pack and send WIPE instead: the firmware formats the
+# external NOR (sounds, graph projects, sidecars) for a factory reset.
 #
 # Protocol (no Wi-Fi, framed pack transfer):
 #   PROV / PROV-CONFIRM / PROV-OK
@@ -14,22 +16,25 @@
 param(
     [string]$Port = "",
     [string]$Pack = "",
-    [int]$Baud = 921600
+    [int]$Baud = 921600,
+    [switch]$Wipe
 )
 
 $ErrorActionPreference = "Stop"
 
 $repo = Split-Path $PSScriptRoot -Parent
-if (-not $Pack) { $Pack = Join-Path $repo "release\ADDITIPUS_sounds.asp" }
-if (-not (Test-Path -LiteralPath $Pack -PathType Leaf)) {
-    Write-Host "[ERROR] Sound pack not found: $Pack" -ForegroundColor Red
-    Write-Host "[HINT]  Build it first: web_flasher\make_sound_pack.ps1" -ForegroundColor Yellow
-    exit 1
-}
-$len = (Get-Item -LiteralPath $Pack).Length
-if ($len -lt 16 -or $len -gt (15 * 1024 * 1024)) {
-    Write-Host "[ERROR] Invalid pack size: $len bytes" -ForegroundColor Red
-    exit 1
+if (-not $Wipe) {
+    if (-not $Pack) { $Pack = Join-Path $repo "release\ADDITIPUS_sounds.asp" }
+    if (-not (Test-Path -LiteralPath $Pack -PathType Leaf)) {
+        Write-Host "[ERROR] Sound pack not found: $Pack" -ForegroundColor Red
+        Write-Host "[HINT]  Build it first: web_flasher\make_sound_pack.ps1" -ForegroundColor Yellow
+        exit 1
+    }
+    $len = (Get-Item -LiteralPath $Pack).Length
+    if ($len -lt 16 -or $len -gt (15 * 1024 * 1024)) {
+        Write-Host "[ERROR] Invalid pack size: $len bytes" -ForegroundColor Red
+        exit 1
+    }
 }
 
 function Find-EspPort {
@@ -44,7 +49,11 @@ if (-not $Port) {
     exit 1
 }
 
-Write-Host ("[INFO] Pack : {0} ({1:N0} bytes)" -f $Pack, $len)
+if ($Wipe) {
+    Write-Host "[INFO] Mode : factory wipe (external storage)"
+} else {
+    Write-Host ("[INFO] Pack : {0} ({1:N0} bytes)" -f $Pack, $len)
+}
 Write-Host "[INFO] Port : $Port"
 
 $sp = New-Object System.IO.Ports.SerialPort
@@ -118,6 +127,32 @@ if (-not $started) {
     $sp.Close(); exit 1
 }
 Write-Host "[OK] Provisioning started (external NOR will be formatted)." -ForegroundColor Green
+
+if ($Wipe) {
+    Start-Sleep -Milliseconds 300
+    Write-Host "[INFO] Formatting external storage (WIPE)..." -ForegroundColor Cyan
+    try { $sp.Write("WIPE`n") } catch {
+        Write-Host "[ERROR] WIPE command failed: $_" -ForegroundColor Red
+        $sp.Close(); exit 1
+    }
+    $r = ReadUntil @("WIPE-OK", "WIPE-ERR", "PROV-ERR") 120000
+    if ($r -ne "WIPE-OK") {
+        if ($r) { Write-Host ("[ERROR] Firmware rejected WIPE ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red }
+        else { Write-Host "[ERROR] WIPE acknowledgement timed out." -ForegroundColor Red }
+        $sp.Close(); exit 1
+    }
+    Write-Host "[OK] External storage formatted." -ForegroundColor Green
+    try { $sp.Write("DONE`n") } catch { }
+    $r = ReadUntil @("DONE-OK", "PROV-ERR") 10000
+    if ($r -ne "DONE-OK") {
+        if ($r) { Write-Host ("[ERROR] Firmware rejected DONE ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red }
+        else { Write-Host "[ERROR] no DONE-OK acknowledgement; factory wipe is not confirmed." -ForegroundColor Red }
+        $sp.Close(); exit 1
+    }
+    Write-Host "[OK] Factory wipe complete, device restarting." -ForegroundColor Green
+    $sp.Close()
+    exit 0
+}
 
 # 2. Switch both sides to the fast baud. USB-Serial/JTAG ignores the baud rate;
 #    UART0 uses it for the bulk transfer.

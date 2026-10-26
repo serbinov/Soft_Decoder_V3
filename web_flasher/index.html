@@ -24,6 +24,8 @@
   button{background:#4da3ff;color:#04101f;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:13px}
   button:disabled{background:#3a4560;color:#7c869e;cursor:not-allowed}
   button.ghost{background:transparent;color:#4da3ff;border:1px solid #4da3ff}
+  button.danger{background:#c0392b;color:#fff}
+  button.danger:hover{background:#d64535}
   button.big{width:100%;font-size:15px;padding:12px;margin-top:4px}
   #status{font-size:13px;color:#4da3ff;margin-bottom:6px}
   #log{background:#0a0e18;border:1px solid #2a3350;border-radius:6px;padding:10px;height:340px;overflow:auto;
@@ -111,6 +113,12 @@
     </section>
 
     <section>
+      <h2>Заводской сброс</h2>
+      <button class="big danger" id="btn_factory">Стереть всё (до заводского состояния)</button>
+      <p class="hint">Полностью стирает внутреннюю flash (прошивка, NVS, CV, настройки, калибровки) и внешнюю память (звуки, схемы, служебные файлы), затем заново прошивает релиз. После завершения декодер в заводском состоянии: настройки по умолчанию, библиотека звуков пуста. Операция необратима.</p>
+    </section>
+
+    <section>
       <h2>Вывод</h2>
       <div id="status">Готово</div>
       <div id="log"></div>
@@ -146,10 +154,10 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + полный пакет звуков", flash_scheme: "Прошить + звуки схемы", ota: "Создать OTA", pack: "Создать звуковой контейнер" };
+const ACT_LABEL = { build: "Сборка прошивки", flash: "Прошить", flash_sounds: "Прошить + полный пакет звуков", flash_scheme: "Прошить + звуки схемы", ota: "Создать OTA", pack: "Создать звуковой контейнер", factory: "Заводской сброс (стереть всё)" };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function setAlert(msg, kind){ const el=$("alert"); if(!msg){el.style.display="none";el.textContent="";return;} el.className="alert "+(kind||""); el.textContent=msg; el.style.display="block"; }
-function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_pack","btn_flash","btn_flash_snd","btn_flash_scheme","btn_refresh"]) $(id).disabled=!on; }
+function setButtons(on){ for(const id of ["btn_build","btn_ota","btn_pack","btn_flash","btn_flash_snd","btn_flash_scheme","btn_factory","btn_refresh"]) $(id).disabled=!on; }
 
 /* ---------- colored log ---------- */
 let logBuf="";
@@ -249,7 +257,7 @@ $("tabbtn_stats").addEventListener("click", ()=>showTab("stats"));
 
 /* ---------- session nonce / action start ---------- */
 /* Mirrors the server's destructive-action list in start_flasher.ps1. */
-const DESTRUCTIVE_ACTIONS = new Set(["flash", "flash_sounds", "flash_scheme", "ota"]);
+const DESTRUCTIVE_ACTIONS = new Set(["flash", "flash_sounds", "flash_scheme", "ota", "factory"]);
 let sessionNonce = "";
 async function refreshSession(){
   const r = await fetch("/api/session", {cache:"no-store"});
@@ -334,6 +342,10 @@ $("btn_pack").addEventListener("click", ()=>run("pack", ACT_LABEL.pack));
 $("btn_flash").addEventListener("click", ()=>run("flash", ACT_LABEL.flash));
 $("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds", ACT_LABEL.flash_sounds));
 $("btn_flash_scheme").addEventListener("click", ()=>run("flash_scheme", ACT_LABEL.flash_scheme));
+$("btn_factory").addEventListener("click", ()=>{
+  if(!window.confirm("СТЕРЕТЬ ВСЁ: внутреннюю flash, NVS, настройки, CV, звуки и схемы? Восстановить данные будет невозможно.")) return;
+  run("factory", ACT_LABEL.factory);
+});
 window.addEventListener("load", ()=>{
   refreshSession().catch(e=>setAlert("Не удалось получить сессионный ключ: "+e.message, "warn"));
   refreshStatus(); refreshStats(); ping(); setInterval(ping, 3000);

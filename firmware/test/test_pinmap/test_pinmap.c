@@ -9,6 +9,9 @@
 #define static
 #include "../../components/pinmap/src/pinmap.c"
 #undef static
+/* The production board map uses the board-specific wrapper; keep the generic
+ * checker covered without leaving an unused static function in the firmware. */
+#define pinmap_check(pins, n) pinmap_check_impl((pins), (n), false)
 #include "../../test_libs/teststubs/stubs.c"
 
 void setUp(void)

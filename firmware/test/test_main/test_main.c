@@ -170,6 +170,7 @@ void track_recover_from_storage(const char *audio, const char *root,
     memset(out, 0, sizeof(*out));
 }
 esp_err_t web_init(void) { g_boot_mode = true; return g_web_err; }
+esp_err_t web_storage_recovery(void) { return ESP_OK; }
 esp_err_t track_init(void) { return g_track_err; }
 esp_err_t web_set_actuation_ready(bool ready)
 {
@@ -295,6 +296,10 @@ esp_err_t settings_cv_hard_reset(void)
     return ESP_OK;
 }
 void web_master_volume_changed(uint8_t volume) { g_volume = volume; }
+uint8_t settings_volume_pct_from_cv63(uint8_t cv63)
+{
+    return (uint8_t)(((uint16_t)cv63 * 100U + 127U) / 255U);
+}
 
 void vTaskDelay(TickType_t ticks)
 {

@@ -277,19 +277,6 @@ esp_err_t settings_manifest_remove_locked(void)
     return rm;
 }
 
-esp_err_t settings_manifest_remove(void)
-{
-    esp_err_t err = settings_metadata_lock();
-    if (err != ESP_OK) {
-        settings_manifest_result(err);
-        return err;
-    }
-    err = settings_manifest_remove_locked();
-    settings_manifest_result(err);
-    settings_metadata_unlock();
-    return err;
-}
-
 static esp_err_t manifest_load_owned(void)
 {
     FILE *f = fopen(MANIFEST_PATH, "r");

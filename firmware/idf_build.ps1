@@ -124,13 +124,22 @@ Write-Host ""
 # Activate the toolchain and run in a child PowerShell so a failure inside
 # ESP-IDF's export.ps1 cannot terminate this wrapper prematurely.
 $inner = @(
-    "`$env:IDF_PATH = " + (Quote-PS $idf),
-    "`$env:IDF_TOOLS_PATH = " + (Quote-PS $env:IDF_TOOLS_PATH),
-    "`$env:SOURCE_DATE_EPOCH = " + (Quote-PS $env:SOURCE_DATE_EPOCH),
-    ". " + (Quote-PS (Join-Path $idf "export.ps1")),
-    "Set-Location " + (Quote-PS $fw),
-    (($steps | ForEach-Object { $_ + '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }' }) -join "`n")
+    ("`$env:IDF_PATH = " + (Quote-PS $idf)),
+    ("`$env:IDF_TOOLS_PATH = " + (Quote-PS $env:IDF_TOOLS_PATH)),
+    ("`$env:SOURCE_DATE_EPOCH = " + (Quote-PS $env:SOURCE_DATE_EPOCH)),
+    (". " + (Quote-PS (Join-Path $idf "export.ps1"))),
+    ("Set-Location " + (Quote-PS $fw)),
+    ((($steps | ForEach-Object { $_ + '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }' }) -join "`n"))
 ) -join "`n"
 
-& powershell -NoProfile -ExecutionPolicy Bypass -Command $inner
-exit $LASTEXITCODE
+# ESP-IDF's export.ps1 writes its activation banner to stderr. With the
+# wrapper's ErrorActionPreference=Stop, PowerShell 5.1 turns that harmless
+# native-command stderr into a terminating NativeCommandError, so relax it
+# around the child and propagate the child's real exit code.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& powershell -NoProfile -ExecutionPolicy Bypass -Command $inner 2>&1 |
+    ForEach-Object { Write-Host $_ }
+$code = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+exit $code

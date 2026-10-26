@@ -1,4 +1,5 @@
 #include "audio_pack.h"
+#include "ima_adpcm.h"
 
 #include <string.h>
 
@@ -143,10 +144,10 @@ size_t audio_pack_wav_header(uint8_t *hdr, size_t cap, uint32_t data_len,
         if (cap < AUDIO_PACK_WAV_HDR_MAX || channels != 1U) {
             return 0;
         }
-        uint32_t block_align = AUDIO_PACK_ADPCM_BLOCK;
-        uint32_t samples_per_block = 505U;
+        uint32_t block_align = IMA_ADPCM_BLOCK_ALIGN;
+        uint32_t samples_per_block = IMA_ADPCM_SAMPLES_PER_BLOCK;
         uint32_t byte_rate = sample_rate * block_align / samples_per_block;
-        uint32_t total_samples = (data_len / block_align) * samples_per_block;
+        uint32_t total_samples = ima_adpcm_samples_for(data_len);
         memcpy(hdr, "RIFF", 4);
         wr32(hdr + 4, 52U + data_len);      /* 60-byte hdr + data - 8 */
         memcpy(hdr + 8, "WAVE", 4);

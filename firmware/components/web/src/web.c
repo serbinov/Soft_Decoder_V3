@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,14 +91,10 @@ static volatile int s_up_received;
 static volatile bool s_up_active;
 static volatile bool s_up_ota;
 static volatile uint8_t s_up_slot;
-/* Active async transfer request, used by the transfer supervisor to abort a
- * hung upload. Protected by s_control_state_mux (pointer only). */
-static httpd_req_t *s_up_req;
 static TaskHandle_t s_transfer_supervisor;
-static TaskHandle_t s_up_worker;
 static volatile bool s_up_aborted;
-/* True while the worker holds a storage lease. Only one of the worker and the
- * supervisor may release it (claim under s_control_state_mux). */
+/* Worker-only storage lease. The worker claims/releases it; the supervisor
+ * never touches another task's lease. */
 static bool s_up_lease_held;
 /* Worker-only TWDT subscription flag; fed only on real byte progress. */
 static bool s_transfer_wdt_subscribed;
@@ -135,6 +132,9 @@ static bool s_actuation_ready;
 static TaskHandle_t s_maintenance_owner;
 static bool s_maintenance_exclusive_fs;
 static uint32_t s_control_generation;
+/* Monotonic safety epoch: bumped by web_emergency_reset(). A function/motion
+ * apply that observed an older epoch must not leave outputs or sounds on. */
+static uint32_t s_safety_epoch;
 static unsigned s_mutation_count;
 static TaskHandle_t s_mutation_owner;
 static int64_t s_transfer_deadline;
@@ -625,17 +625,17 @@ static esp_err_t set_inhibited_retry(esp_err_t (*set)(bool), bool inhibited)
     return err;
 }
 
-/* Shared maintenance release. Normal callers must own the maintenance; the
- * transfer supervisor may force-release an owner that stopped responding.
- * `expected_owner == NULL` with force still requires an active maintenance. */
-static void maintenance_end_impl(bool force, TaskHandle_t expected_owner)
+/* Shared maintenance release. Only the task that owns the maintenance may
+ * release it: force-releasing another task's lease while it is still writing
+ * the filesystem is unsafe (it re-enables actuation under a live mutation).
+ * A truly stuck worker is handled by the task watchdog, not by stealing its
+ * locks. */
+static void maintenance_end_impl(void)
 {
     portENTER_CRITICAL(&s_control_state_mux);
     TaskHandle_t owner = s_maintenance_owner;
     portEXIT_CRITICAL(&s_control_state_mux);
-    if (force) {
-        if (owner == NULL || (expected_owner != NULL && owner != expected_owner)) return;
-    } else if (owner != xTaskGetCurrentTaskHandle()) {
+    if (owner != xTaskGetCurrentTaskHandle()) {
         return;
     }
     if (s_maintenance_exclusive_fs) storage_maintenance_end();
@@ -647,19 +647,7 @@ static void maintenance_end_impl(bool force, TaskHandle_t expected_owner)
         portEXIT_CRITICAL(&s_control_state_mux);
         return;
     }
-    /* The supervisor must never block behind a stuck worker holding the
-     * control mutex. If the bounded take fails, leave outputs inhibited and
-     * clear the maintenance owner (fail-safe). */
-    TickType_t wait = force ? pdMS_TO_TICKS(50) : portMAX_DELAY;
-    if (xSemaphoreTake(s_control_mutex, wait) != pdTRUE) {
-        if (force) {
-            portENTER_CRITICAL(&s_control_state_mux);
-            s_maintenance_owner = NULL;
-            s_maintenance_exclusive_fs = false;
-            s_actuation_ready = false;
-            portEXIT_CRITICAL(&s_control_state_mux);
-            ++s_control_generation;
-        }
+    if (xSemaphoreTake(s_control_mutex, portMAX_DELAY) != pdTRUE) {
         return;
     }
     bool ready = actuation_ready();
@@ -693,7 +681,7 @@ static void maintenance_end_impl(bool force, TaskHandle_t expected_owner)
 
 void web_maintenance_end(void)
 {
-    maintenance_end_impl(false, NULL);
+    maintenance_end_impl();
 }
 
 uint8_t web_get_voice_volume(uint8_t fn)
@@ -728,6 +716,11 @@ void web_master_volume_changed(uint8_t vol0_100)
 
 /* Effect-specific cycle period (ms): Mars ~1.75 Hz, beacon ~1.1 Hz, strobe
  * and ditch use their own cadence; others ignore it. */
+static uint8_t aux_level_to_pwm(uint8_t level)
+{
+    if (level > 100U) level = 100U;
+    return (uint8_t)((uint16_t)level * 255U / 100U);
+}
 static uint16_t aux_effect_period(uint8_t effect)
 {
     switch (effect) {
@@ -824,6 +817,32 @@ static uint16_t func_desired_locked(uint8_t fn, bool fn_on)
 static uint16_t s_logic_active;
 static int8_t s_logic_notch;
 
+static uint32_t safety_epoch_get(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    uint32_t epoch = s_safety_epoch;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    return epoch;
+}
+
+static void safety_epoch_bump(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    ++s_safety_epoch;
+    portEXIT_CRITICAL(&s_control_state_mux);
+}
+
+/* Force every light/AUX output off and drop the applied-output mirror. Used by
+ * the emergency path and by an in-flight apply that lost the safety epoch. */
+static void func_outputs_force_off_locked(void)
+{
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        (void)auxio_set_enabled(ch, false);
+    }
+    s_outputs_applied = 0;
+    s_logic_active = 0;
+}
+
 static void logic_collect_cb(void *ctx, uint8_t target_type, uint8_t target_id, bool active)
 {
     if (target_type != FUNC_TARGET_LOGIC || !active ||
@@ -911,13 +930,36 @@ void web_motion_changed(uint8_t speed, bool forward)
     if (s_motion_initialized && speed == s_motion_speed && forward == s_motion_forward) {
         return;
     }
+    /* Sample before waiting: an emergency reset that runs while this task is
+     * blocked on the function lock must invalidate this update. */
+    uint32_t epoch = safety_epoch_get();
     if (s_func_mutex != NULL) {
         (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
+    if (safety_epoch_get() != epoch) {
+        s_motion_speed = 0;
+        s_motion_forward = true;
+        s_motion_initialized = true;
+        func_outputs_force_off_locked();
+        sound_set_logic(false, false, false, false, s_logic_notch);
+        if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+        return;
     }
     s_motion_initialized = true;
     s_motion_speed = speed;
     s_motion_forward = forward;
     func_apply_all_locked();
+    /* An emergency reset may have run while the function lock was contended.
+     * Its outputs must win over this in-flight update. */
+    if (safety_epoch_get() != epoch) {
+        /* Discard the whole in-flight update, including its motion mirror, so a
+         * repeat of the same command cannot be swallowed by the early return. */
+        s_motion_speed = 0;
+        s_motion_forward = true;
+        s_motion_initialized = true;
+        func_outputs_force_off_locked();
+        sound_set_logic(false, false, false, false, s_logic_notch);
+    }
     if (s_func_mutex != NULL) {
         xSemaphoreGive(s_func_mutex);
     }
@@ -927,24 +969,23 @@ void web_motion_changed(uint8_t speed, bool forward)
 
 void web_emergency_reset(void)
 {
+    /* Invalidate every function/motion apply that is already in flight before
+     * touching the shared state. This is lock-free and cannot be starved by a
+     * handler that holds s_func_mutex across slow I/O. */
+    safety_epoch_bump();
     bool locked = false;
     if (s_func_mutex != NULL) {
         /* Never block a DCC/safety callback behind an HTTP handler that holds
          * the function lock across storage/NVS. If the lock is busy, clear the
-         * latched outputs and state directly; the safety guarantee takes
-         * precedence over lock discipline here (the next function apply is
-         * gated by s_actuation_ready/motion anyway). */
+         * latched outputs and state directly; the epoch check in the apply
+         * paths makes the reset win once that handler finishes. */
         locked = xSemaphoreTake(s_func_mutex, 0) == pdTRUE;
     }
     if (!locked) {
         ESP_LOGW(TAG, "emergency reset without function lock");
     }
     memset(s_fn, 0, sizeof(s_fn));
-    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
-        (void)auxio_set_enabled(ch, false);
-    }
-    s_outputs_applied = 0;
-    s_logic_active = 0;
+    func_outputs_force_off_locked();
     sound_set_logic(false, false, false, false, s_logic_notch);
     s_motion_speed = 0;
     s_motion_initialized = true;
@@ -1003,13 +1044,28 @@ void web_apply_function(uint8_t fn, bool state)
     if (fn >= SETTINGS_FUNC_MAP_COUNT) {
         return;
     }
+    uint32_t epoch = safety_epoch_get();
     if (s_func_mutex != NULL) {
         (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    }
+    /* An emergency reset may have completed while we were waiting for the
+     * function lock. Do not apply anything in that case. */
+    if (safety_epoch_get() != epoch) {
+        if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+        return;
     }
 
     bool changed = (s_fn[fn] != state);
     s_fn[fn] = state;
     func_apply_output_locked(fn);
+    if (safety_epoch_get() != epoch) {
+        /* web_emergency_reset() ran while this apply was in flight. */
+        s_fn[fn] = false;
+        func_outputs_force_off_locked();
+        sound_set_logic(false, false, false, false, s_logic_notch);
+        if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+        return;
+    }
 
     char sounds[48];
     size_t sounds_used = 0;
@@ -1018,7 +1074,7 @@ void web_apply_function(uint8_t fn, bool state)
     /* With an active sound scheme the engine owns the function-key routing and
      * the reserved engine voices, so the legacy slot mapping below is skipped. */
     bool scheme_on = sound_enabled();
-    if (changed && scheme_on) {
+    if (changed && scheme_on && safety_epoch_get() == epoch) {
         sound_function(fn, state);
     }
 
@@ -1039,6 +1095,7 @@ void web_apply_function(uint8_t fn, bool state)
                 const uint8_t want[2] = { slot_a, use_b ? slot_b : 0U };
                 for (uint8_t k = 0; k < 2U; ++k) {
                     bool started = false;
+                    if (safety_epoch_get() != epoch) break;
                     if (want[k] != 0U) {
                         for (size_t i = 0; i < count; ++i) {
                             if (s_func_tracks[i].slot == want[k] &&
@@ -1067,6 +1124,18 @@ void web_apply_function(uint8_t fn, bool state)
                 }
             }
         }
+    }
+
+    if (safety_epoch_get() != epoch) {
+        /* The reset must win even if it arrived after the output/sound phase. */
+        audio_voice_release_owned(s_legacy_voice[fn][0]);
+        audio_voice_release_owned(s_legacy_voice[fn][1]);
+        memset(s_legacy_voice[fn], 0, sizeof(s_legacy_voice[fn]));
+        sound_request_stop();
+        func_outputs_force_off_locked();
+        sound_set_logic(false, false, false, false, s_logic_notch);
+        s_fn[fn] = false;
+        changed = false;
     }
 
     if (changed) {
@@ -1592,29 +1661,46 @@ static esp_err_t control_source_post(httpd_req_t *req)
         xSemaphoreGive(s_control_mutex);
         return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
     }
+    settings_config_t previous = s_cfg;
     settings_config_t next = s_cfg;
     next.control_source = (strcasecmp(buf, "web") == 0 || strcmp(buf, "1") == 0) ? 1 : 0;
+    uint8_t cv29 = 0;
+    if (next.control_source == 0) {
+        esp_err_t err = settings_cv_read(29, &cv29);
+        if (err != ESP_OK) {
+            cfg_unlock();
+            xSemaphoreGive(s_control_mutex);
+            return send_json(req, "{\"ok\":false,\"error\":\"mode read failed\"}");
+        }
+    }
     motor_emergency_stop();
     audio_stop_all();
     sound_stop_all();
     web_emergency_reset();
-    if (next.control_source == 0) {
-        uint8_t cv29 = 0;
-        esp_err_t err = settings_cv_read(29, &cv29);
-        if (err == ESP_OK) err = settings_cv_write(29, cv29 & (uint8_t)~0x04U);
-        if (err == ESP_OK) err = settings_cv_commit();
-        if (err != ESP_OK) {
-            cfg_unlock();
-            xSemaphoreGive(s_control_mutex);
-            return send_json(req, "{\"ok\":false,\"error\":\"mode save failed\"}");
-        }
-    }
+    /* Persist the control source first. The state transition is only accepted
+     * after both stores succeed; otherwise the CV and config would disagree
+     * until the next reboot. */
     if (settings_save(&next) != ESP_OK) {
         cfg_unlock();
         xSemaphoreGive(s_control_mutex);
         return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
     }
     s_cfg = next;
+    if (next.control_source == 0) {
+        esp_err_t err = settings_cv_write(29, cv29 & (uint8_t)~0x04U);
+        if (err == ESP_OK) err = settings_cv_commit();
+        if (err != ESP_OK) {
+            /* Best effort: do not leave the RAM CV and the persisted config
+             * disagreeing when the second store fails. */
+            (void)settings_cv_write(29, cv29);
+            (void)settings_cv_commit();
+            (void)settings_save(&previous);
+            s_cfg = previous;
+            cfg_unlock();
+            xSemaphoreGive(s_control_mutex);
+            return send_json(req, "{\"ok\":false,\"error\":\"mode save failed\"}");
+        }
+    }
     ++s_control_generation;
     web_log_event("Источник", "%s", next.control_source == 1 ? "Веб" : "Рельсы");
     cfg_unlock();
@@ -2580,7 +2666,7 @@ static esp_err_t sound_file_get(httpd_req_t *req)
     esp_err_t err = ESP_OK;
     if (format == 0x0011U) {
         uint32_t blocks = data_len / IMA_ADPCM_BLOCK_ALIGN;
-        uint32_t total = blocks * IMA_ADPCM_SAMPLES_PER_BLOCK;
+        uint32_t total = ima_adpcm_samples_for(data_len);
         uint8_t hdr[AUDIO_PACK_WAV_HDR_MAX];
         size_t hlen = audio_pack_wav_header(hdr, sizeof(hdr), total * 2U, rate, 1, 16);
         if (hlen == 0U || fseek(f, (long)data_off, SEEK_SET) != 0 ||
@@ -2754,7 +2840,7 @@ static esp_err_t audio_stop_post(httpd_req_t *req)
     audio_voice_release_owned(s_preview_voice);
     memset(&s_preview_voice, 0, sizeof(s_preview_voice));
     s_preview_name[0] = '\0';
-    web_log_event("Звук", "стоп (все)");
+    web_log_event("Звук", "стоп предпрослушивания");
     return send_json(req, "{\"ok\":true}");
 }
 
@@ -3528,12 +3614,23 @@ static esp_err_t aux_cfg_post(httpd_req_t *req)
     if (!parse_u8(query, "effect", &fx) || (uint32_t)fx >= AUXIO_EFFECT_COUNT) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad effect");
     }
+    settings_aux_cfg_t previous = s_aux_cfg[ch];
     s_aux_cfg[ch].level = level;
     s_aux_cfg[ch].effect = fx;
-    uint8_t pwm = (uint8_t)((uint16_t)level * 255U / 100U);
-    (void)auxio_config(ch, pwm, 0, (auxio_effect_t)fx, aux_effect_period(fx));
     if (settings_aux_cfg_save(s_aux_cfg, SETTINGS_AUX_COUNT) != ESP_OK) {
+        s_aux_cfg[ch] = previous;
         return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+    }
+    uint8_t pwm = aux_level_to_pwm(level);
+    if (auxio_config(ch, pwm, 0, (auxio_effect_t)fx, aux_effect_period(fx)) != ESP_OK) {
+        /* Keep RAM, NVS and hardware on the same value when the driver rejects
+         * the new configuration. */
+        s_aux_cfg[ch] = previous;
+        (void)settings_aux_cfg_save(s_aux_cfg, SETTINGS_AUX_COUNT);
+        uint8_t prev_pwm = aux_level_to_pwm(previous.level);
+        (void)auxio_config(ch, prev_pwm, 0, (auxio_effect_t)previous.effect,
+                           aux_effect_period(previous.effect));
+        return send_json(req, "{\"ok\":false,\"error\":\"apply failed\"}");
     }
     web_log_event("AUX", "%s: уровень %u%%, эффект %u",
                   WEB_OUT_NAMES[ch], (unsigned)level, (unsigned)fx);
@@ -3812,7 +3909,7 @@ static esp_err_t cv_write_post(httpd_req_t *req)
     /* CV63 aliases the master volume: apply it live and keep the cached config
      * in sync so a later settings_save cannot revert it. */
     if (idx == 63U) {
-        web_master_volume_changed((uint8_t)((uint16_t)value * 100U / 255U));
+        web_master_volume_changed(settings_volume_pct_from_cv63(value));
     }
     /* Address / speed-step / consist CVs must take effect immediately (the
      * runtime config is cached inside the DCC decoder, not read per packet).
@@ -4174,13 +4271,23 @@ typedef struct {
     size_t file_count;
     char journal[160];
     bool journal_written;
+    /* Selection that was active before a bundled scheme replaced it, and the
+     * scheme this transaction installs (empty when the pack has no scheme). */
+    char old_selection[SG_ID_CAP];
+    uint32_t old_selection_rev;
+    bool old_selection_valid;
+    char new_selection[SG_ID_CAP];
+    bool new_selection_valid;
 } pack_tx_t;
 
 /* Durable pack-import journal. It is written (and fsynced) before the old
  * library is moved, and rewritten as COMMITTED only after the NVS track list
  * and on-storage manifest have both been confirmed. Boot recovery either
- * rolls a PREPARED transaction back or cleans up a COMMITTED one. */
-#define PACK_JOURNAL_MAGIC "AURAPKJ1"
+ * rolls a PREPARED transaction back (files + graph selection) or cleans up a
+ * COMMITTED one. */
+#define PACK_JOURNAL_MAGIC "AURAPKJ2"
+/* Older firmware wrote the same prefix without the selection fields. */
+#define PACK_JOURNAL_MAGIC_OLD "AURAPKJ1"
 #define PACK_JOURNAL_PREPARED 1U
 #define PACK_JOURNAL_COMMITTED 2U
 #define PACK_JOURNAL_MAX_NAMES 512U
@@ -4193,6 +4300,11 @@ typedef struct {
     uint32_t old_count;
     uint32_t new_count;
     char backup_dir[96];
+    char old_selection[SG_ID_CAP];
+    uint32_t old_selection_rev;
+    uint32_t old_selection_valid;
+    char new_selection[SG_ID_CAP];
+    uint32_t new_selection_valid;
 } pack_journal_hdr_t;
 
 static bool pack_name_in_index(const audio_pack_entry_t *idx, size_t count,
@@ -4204,6 +4316,34 @@ static bool pack_name_in_index(const audio_pack_entry_t *idx, size_t count,
         if (strcmp(idx[i].name, base) == 0) return true;
     }
     return false;
+}
+
+/* Remember the selected graph before a bundled scheme replaces it. Returns an
+ * error if the selection cannot be read: a rollback must not guess and replace
+ * a valid user selection with the legacy fallback. */
+static esp_err_t pack_capture_selection(pack_tx_t *tx)
+{
+    tx->old_selection[0] = '\0';
+    tx->old_selection_rev = 0;
+    tx->old_selection_valid = false;
+    bool selected = false;
+    esp_err_t err = ESP_FAIL;
+    for (unsigned attempt = 0; attempt < 3U; ++attempt) {
+        err = sg_store_selection(tx->old_selection, sizeof(tx->old_selection),
+                                 &tx->old_selection_rev, &selected);
+        if (err == ESP_OK) break;
+        if (attempt + 1U < 3U) vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (err != ESP_OK) {
+        tx->old_selection[0] = '\0';
+        tx->old_selection_rev = 0;
+        selected = false;
+        return err;
+    }
+    if (selected && sg_id_valid(tx->old_selection) && tx->old_selection_rev != 0U) {
+        tx->old_selection_valid = true;
+    }
+    return ESP_OK;
 }
 
 static esp_err_t pack_collect_old(pack_tx_t *tx)
@@ -4315,6 +4455,13 @@ static esp_err_t pack_journal_write(pack_tx_t *tx, uint32_t phase)
     hdr.old_count = (uint32_t)tx->old_count;
     hdr.new_count = (uint32_t)tx->new_count;
     snprintf(hdr.backup_dir, sizeof(hdr.backup_dir), "%s", tx->backup_dir);
+    snprintf(hdr.old_selection, sizeof(hdr.old_selection), "%s",
+             tx->old_selection_valid ? tx->old_selection : "");
+    hdr.old_selection_rev = tx->old_selection_valid ? tx->old_selection_rev : 0U;
+    hdr.old_selection_valid = tx->old_selection_valid ? 1U : 0U;
+    snprintf(hdr.new_selection, sizeof(hdr.new_selection), "%s",
+             tx->new_selection_valid ? tx->new_selection : "");
+    hdr.new_selection_valid = tx->new_selection_valid ? 1U : 0U;
     bool ok = fwrite(&hdr, 1, sizeof(hdr), f) == sizeof(hdr);
     if (ok && tx->old_count != 0U) {
         ok = fwrite(tx->old_names, sizeof(tx->old_names[0]), tx->old_count, f) == tx->old_count;
@@ -4357,6 +4504,15 @@ static bool pack_backup_cleanup(const char *backup_dir, char (*names)[WEB_LIB_NA
 /* Roll a PREPARED transaction back: remove published new files, restore every
  * old file from the backup directory, then reload the pre-pack metadata
  * manifest (it was only rewritten after a confirmed commit). */
+static bool pack_name_in_names(const char *name,
+                               char (*names)[WEB_LIB_NAME_MAX], size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        if (strcmp(name, names[i]) == 0) return true;
+    }
+    return false;
+}
+
 static bool pack_backup_restore(const char *backup_dir,
                                 char (*old_names)[WEB_LIB_NAME_MAX], size_t old_count,
                                 char (*new_names)[WEB_LIB_NAME_MAX], size_t new_count)
@@ -4367,12 +4523,34 @@ static bool pack_backup_restore(const char *backup_dir,
     for (size_t i = 0; i < new_count; ++i) {
         if (!pack_journal_name_ok(new_names[i])) continue;
         snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s", new_names[i]);
+        /* A name present in both lists may already have been restored by an
+         * interrupted earlier attempt: its backup was consumed and the
+         * canonical file is the old (good) copy. Never unlink that. */
+        if (pack_name_in_names(new_names[i], old_names, old_count)) {
+            snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, new_names[i]);
+            struct stat bs, cs;
+            if (stat(backup_path, &bs) != 0 && errno == ENOENT &&
+                stat(path, &cs) == 0) {
+                continue;
+            }
+        }
         if (remove(path) != 0 && errno != ENOENT) restored = false;
     }
     for (size_t i = 0; i < old_count; ++i) {
         if (!pack_journal_name_ok(old_names[i])) continue;
         snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s", old_names[i]);
         snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, old_names[i]);
+        struct stat st;
+        if (stat(backup_path, &st) != 0) {
+            if (errno == ENOENT) {
+                /* A retried rollback: this entry was already restored by the
+                 * previous attempt, so leave the canonical file alone. */
+                struct stat canonical;
+                if (stat(path, &canonical) == 0) continue;
+            }
+            restored = false;
+            continue;
+        }
         if (remove(path) != 0 && errno != ENOENT) {
             restored = false;
             continue;
@@ -4428,9 +4606,9 @@ static void pack_recover_orphan_backups(void)
     if (recovered) (void)settings_manifest_load();
 }
 
-/* Boot recovery entry, called from web_init() before the settings caches are
- * loaded. Safe to call when storage is absent; never blocks boot on a damaged
- * journal. */
+/* Boot recovery entry, called once from app_main() before the settings caches
+ * are loaded and before the sound graph is restored. Safe to call when storage
+ * is absent; never blocks boot on a damaged journal. */
 static esp_err_t web_recover_pack_journal(void)
 {
     if (!storage_is_mounted()) return ESP_ERR_INVALID_STATE;
@@ -4444,11 +4622,21 @@ static esp_err_t web_recover_pack_journal(void)
     }
     pack_journal_hdr_t hdr;
     memset(&hdr, 0, sizeof(hdr));
-    bool ok = fread(&hdr, 1, sizeof(hdr), f) == sizeof(hdr) &&
-              memcmp(hdr.magic, PACK_JOURNAL_MAGIC, 8) == 0 &&
-              (hdr.phase == PACK_JOURNAL_PREPARED || hdr.phase == PACK_JOURNAL_COMMITTED) &&
-              hdr.old_count <= PACK_JOURNAL_MAX_NAMES &&
-              hdr.new_count <= PACK_JOURNAL_MAX_NAMES;
+    const size_t prefix = offsetof(pack_journal_hdr_t, old_selection);
+    bool ok = fread(&hdr, 1, prefix, f) == prefix;
+    bool selection_known = ok && memcmp(hdr.magic, PACK_JOURNAL_MAGIC, 8) == 0;
+    bool legacy = ok && memcmp(hdr.magic, PACK_JOURNAL_MAGIC_OLD, 8) == 0;
+    if (selection_known) {
+        ok = fread(&hdr.old_selection, 1, sizeof(hdr) - prefix, f) == sizeof(hdr) - prefix;
+    } else if (legacy) {
+        memset(&hdr.old_selection, 0, sizeof(hdr) - prefix);
+    } else {
+        ok = false;
+    }
+    ok = ok && (selection_known || legacy) &&
+         (hdr.phase == PACK_JOURNAL_PREPARED || hdr.phase == PACK_JOURNAL_COMMITTED) &&
+         hdr.old_count <= PACK_JOURNAL_MAX_NAMES &&
+         hdr.new_count <= PACK_JOURNAL_MAX_NAMES;
     char (*old_names)[WEB_LIB_NAME_MAX] = NULL;
     char (*new_names)[WEB_LIB_NAME_MAX] = NULL;
     if (ok && hdr.old_count != 0U) {
@@ -4484,6 +4672,26 @@ static esp_err_t web_recover_pack_journal(void)
             cleaned = pack_backup_restore(hdr.backup_dir, old_names, hdr.old_count,
                                           new_names, hdr.new_count);
         }
+        /* Roll the graph selection back only if it still points at the scheme
+         * this failed transaction installed. A factory reset or a newer user
+         * selection must not be overwritten by an old journal. J1 journals
+         * carry no selection information at all. */
+        if (cleaned && selection_known && hdr.new_selection_valid != 0U &&
+            sg_id_valid(hdr.new_selection)) {
+            char current[SG_ID_CAP] = {0};
+            uint32_t current_rev = 0;
+            bool selected = false;
+            if (sg_store_selection(current, sizeof(current), &current_rev, &selected) != ESP_OK) {
+                cleaned = false;
+            } else if (selected && strcmp(current, hdr.new_selection) == 0) {
+                if (hdr.old_selection_valid != 0U && sg_id_valid(hdr.old_selection) &&
+                    hdr.old_selection_rev != 0U) {
+                    cleaned = sg_store_select(hdr.old_selection, hdr.old_selection_rev) == ESP_OK;
+                } else {
+                    cleaned = sg_store_select_legacy() == ESP_OK;
+                }
+            }
+        }
     }
     free(old_names);
     free(new_names);
@@ -4493,6 +4701,15 @@ static esp_err_t web_recover_pack_journal(void)
     }
     ESP_LOGW(TAG, "PACK: recovery incomplete, journal retained: %s", PACK_JOURNAL_PATH);
     return ESP_FAIL;
+}
+
+/* Public boot entry: recovery must run before the sound graph is restored from
+ * the selection file, so app_main calls it right after storage/settings init.
+ * It must not be repeated later: a partially completed rollback can only be
+ * retried safely while the graph is still inactive. */
+esp_err_t web_storage_recovery(void)
+{
+    return web_recover_pack_journal();
 }
 
 static bool pack_tx_commit_cleanup(pack_tx_t *tx)
@@ -4722,6 +4939,10 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
              (unsigned long)(uint32_t)esp_timer_get_time(),
              (unsigned long)++s_file_sequence);
     ptx->old_count = 0;
+    if (pack_capture_selection(ptx) != ESP_OK) {
+        errmsg = "cannot read graph selection";
+        goto fail_tx;
+    }
     if (pack_collect_old(ptx) != ESP_OK) {
         errmsg = "cannot enumerate library";
         goto fail_tx;
@@ -4830,6 +5051,14 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     /* Durable intent record before touching the old library. It records both
      * the backup directory and the names that will be published, so boot can
      * roll the transaction back after a power loss. */
+    /* Record which scheme this transaction installs. Boot rollback restores the
+     * old selection only while it still points at this scheme, so a factory
+     * reset or a newer user choice is never overwritten. */
+    ptx->new_selection[0] = '\0';
+    ptx->new_selection_valid = scheme_graph != NULL;
+    if (ptx->new_selection_valid) {
+        snprintf(ptx->new_selection, sizeof(ptx->new_selection), "%s", scheme_graph->id);
+    }
     if (pack_journal_write(ptx, PACK_JOURNAL_PREPARED) != ESP_OK) {
         errmsg = "recovery journal failed";
         goto fail_tx;
@@ -4942,10 +5171,14 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         goto fail_tx;
     }
     if (pack_journal_write(ptx, PACK_JOURNAL_COMMITTED) != ESP_OK) {
-        /* Metadata is committed but the cleanup intent is not durable. Keep
-         * everything; boot will treat the PREPARED journal as a rollback. */
-        ESP_LOGW(TAG, "PACK: commit journal write failed; backup retained");
-        recovery_pending = true;
+        /* The PREPARED journal would make the next boot roll the library and
+         * its graph selection back. Do not report success for a state that is
+         * about to be undone. Keep all artifacts so the rollback is complete. */
+        ESP_LOGE(TAG, "PACK: commit journal write failed; boot will roll back");
+        keep_recovery = true;
+        errmsg = "commit journal write failed; library will be rolled back on reboot";
+        errstatus = 500;
+        goto fail_tx;
     } else if (!pack_tx_commit_cleanup(ptx)) {
         recovery_pending = true;
     }
@@ -5137,12 +5370,13 @@ static esp_err_t sound_file_raw_get(httpd_req_t *req)
     uint32_t rate, data_off, data_len;
     if (!web_wav_probe(f, &format, &channels, &rate, &block_align, &bits, &spb,
                        &data_off, &data_len) ||
-        !((format == 1U && bits == 16U) || format == 0x0011U) ||
-        fseek(f, (long)data_off, SEEK_SET) != 0) {
+        !((format == 1U && bits == 16U) || format == 0x0011U)) {
         fclose(f);
         storage_access_end();
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported audio");
     }
+    fclose(f);
+    storage_access_end();
     char hdr_rate[16], hdr_ch[8], hdr_bits[8];
     snprintf(hdr_rate, sizeof(hdr_rate), "%lu", (unsigned long)rate);
     snprintf(hdr_ch, sizeof(hdr_ch), "%u", (unsigned)channels);
@@ -5152,28 +5386,36 @@ static esp_err_t sound_file_raw_get(httpd_req_t *req)
     httpd_resp_set_hdr(req, "X-Audio-Rate", hdr_rate);
     httpd_resp_set_hdr(req, "X-Audio-Channels", hdr_ch);
     httpd_resp_set_hdr(req, "X-Audio-Bits", hdr_bits);
-    /* Do not pin the storage lease for the whole (possibly slow) download:
-     * read one chunk under a short lease, release it for the network send, and
-     * fail closed if maintenance took exclusive ownership meanwhile. */
-    storage_access_end();
-    uint8_t buf[2048];
-    uint32_t left = data_len;
+    /* Read a whole window under one lease, release it, then send. Reopening per
+     * window (not per 2 KiB chunk) keeps the file handle valid across a possible
+     * unmount while avoiding hundreds of LittleFS opens for a large preview. */
+    uint8_t stack_buf[2048];
+    uint8_t *window = malloc(16384);
+    uint8_t *buf = window != NULL ? window : stack_buf;
+    size_t window_size = window != NULL ? 16384U : sizeof(stack_buf);
+    uint32_t offset = 0;
     esp_err_t err = ESP_OK;
-    while (err == ESP_OK && left > 0U) {
+    while (err == ESP_OK && offset < data_len) {
         if (storage_access_begin() != ESP_OK) { err = ESP_FAIL; break; }
-        size_t want = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
-        size_t got = fread(buf, 1, want, f);
+        FILE *chunk = fopen(path, "rb");
+        if (chunk == NULL) {
+            storage_access_end();
+            err = ESP_FAIL;
+            break;
+        }
+        size_t want = (data_len - offset) > window_size ? window_size
+                                                        : (size_t)(data_len - offset);
+        size_t got = 0;
+        if (fseek(chunk, (long)(data_off + offset), SEEK_SET) == 0) {
+            got = fread(buf, 1, want, chunk);
+        }
+        fclose(chunk);
         storage_access_end();
         if (got == 0U) { err = ESP_FAIL; break; }
-        left -= (uint32_t)got;
+        offset += (uint32_t)got;
         err = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)got);
     }
-    if (storage_access_begin() == ESP_OK) {
-        fclose(f);
-        storage_access_end();
-    } else {
-        fclose(f);
-    }
+    free(window);
     if (err != ESP_OK) return ESP_FAIL;
     return httpd_resp_send_chunk(req, NULL, 0);
 }
@@ -5651,38 +5893,28 @@ static bool transfer_claim_lease(void)
     return held;
 }
 
-/* Timeout action: mark the transfer aborted, close its socket, release any
- * storage lease, and force-release maintenance. Returns true when it aborted a
- * live transfer. Exposed (static) so the host test can simulate the supervisor
- * while an upload worker is stalled. */
+/* Timeout action: mark the transfer aborted. The worker owns its socket,
+ * storage lease and maintenance, so it releases them after the current I/O
+ * returns (all recv/send paths are bounded by the server timeouts). Touching
+ * the async request, lease or maintenance from this task would race with a
+ * worker that is completing normally. A worker that never returns is reset by
+ * the task watchdog; leaving actuation inhibited is the fail-safe outcome.
+ * Returns true when it aborted a live transfer. Exposed (static) so the host
+ * test can simulate the supervisor while an upload worker is stalled. */
 static bool transfer_supervisor_check(void)
 {
     portENTER_CRITICAL(&s_control_state_mux);
     bool active = s_up_active;
     bool already = s_up_aborted;
     int64_t deadline = s_transfer_deadline;
-    httpd_req_t *req = s_up_req;
-    TaskHandle_t worker = s_up_worker;
-    if (!active || already || deadline == 0 || req == NULL) {
-        portEXIT_CRITICAL(&s_control_state_mux);
-        return false;
-    }
-    if (esp_timer_get_time() < deadline) {
+    if (!active || already || deadline == 0 || esp_timer_get_time() < deadline) {
         portEXIT_CRITICAL(&s_control_state_mux);
         return false;
     }
     s_up_aborted = true;
     portEXIT_CRITICAL(&s_control_state_mux);
 
-    int fd = httpd_req_to_sockfd(req);
-    if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
-    if (transfer_claim_lease()) storage_access_end();
-    /* The worker may be stuck in a blocking syscall and never observe its own
-     * deadline; release the safety/storage gate from this task as a last
-     * resort. The worker's later web_maintenance_end() is a no-op because the
-     * owner is already cleared. */
-    maintenance_end_impl(true, worker);
-    ESP_LOGW(TAG, "transfer deadline exceeded; aborted socket/lease/maintenance");
+    ESP_LOGW(TAG, "transfer deadline exceeded; worker abort requested");
     return true;
 }
 
@@ -5700,8 +5932,6 @@ static void transfer_worker(void *arg)
     transfer_job_t *job = arg;
     portENTER_CRITICAL(&s_control_state_mux);
     s_maintenance_owner = xTaskGetCurrentTaskHandle();
-    s_up_worker = xTaskGetCurrentTaskHandle();
-    s_up_req = job->req;
     s_up_aborted = false;
     s_up_lease_held = false;
     portEXIT_CRITICAL(&s_control_state_mux);
@@ -5745,8 +5975,6 @@ static void transfer_worker(void *arg)
     int fd = httpd_req_to_sockfd(job->req);
     if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
     portENTER_CRITICAL(&s_control_state_mux);
-    s_up_req = NULL;
-    s_up_worker = NULL;
     s_up_aborted = false;
     portEXIT_CRITICAL(&s_control_state_mux);
     /* Complete wakes httpd to observe EOF and close the session. Do not queue
@@ -5798,18 +6026,12 @@ static esp_err_t transfer_start(httpd_req_t *req, esp_err_t (*handler)(httpd_req
     s_up_received = 0;
     s_up_slot = 0;
     s_up_ota = handler == ota_update_post;
-    portENTER_CRITICAL(&s_control_state_mux);
-    s_up_req = job->req;
-    portEXIT_CRITICAL(&s_control_state_mux);
     if (xTaskCreate(transfer_worker, "web_transfer", 16384, job, 6, NULL) != pdPASS) {
         (void)httpd_resp_send_err(job->req, HTTPD_500_INTERNAL_SERVER_ERROR, "worker creation failed");
         int fd = httpd_req_to_sockfd(job->req);
         if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
         (void)httpd_req_async_handler_complete(job->req);
         free(job); s_up_active = false;
-        portENTER_CRITICAL(&s_control_state_mux);
-        s_up_req = NULL;
-        portEXIT_CRITICAL(&s_control_state_mux);
         web_maintenance_end();
     }
     return ESP_OK;
@@ -5874,7 +6096,16 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
                      handler == audio_play_post || handler == bemf_cal_post || handler == bemf_use_post;
     esp_err_t err;
     if (actuation && !ready) err = send_json(req, "{\"ok\":false,\"error\":\"actuation not ready\"}");
-    else if (handler == audio_track_delete_post || handler == audio_library_delete_post) {
+    else if (handler == audio_library_delete_post) {
+        /* Deleting an unreferenced library asset must not inhibit the motor or
+         * the sound engine: a storage lease is enough to keep the filesystem
+         * mounted while the directory entry is removed. */
+        err = storage_access_begin();
+        if (err == ESP_OK) {
+            err = handler(req);
+            storage_access_end();
+        } else err = send_json(req, "{\"ok\":false,\"error\":\"storage unavailable or maintenance\"}");
+    } else if (handler == audio_track_delete_post) {
         err = web_maintenance_begin(false);
         if (err == ESP_OK) {
             err = storage_access_begin();
@@ -6022,11 +6253,9 @@ esp_err_t web_init(void)
     if (s_func_mutex == NULL || s_cfg_mutex == NULL || control_err != ESP_OK ||
         s_evlog_mutex == NULL)
         return ESP_ERR_NO_MEM;
-    /* Finish/roll back an interrupted sound-pack import before the settings
-     * caches are loaded for the session. */
-    if (web_recover_pack_journal() == ESP_FAIL) {
-        ESP_LOGW(TAG, "Sound pack recovery incomplete; previous library kept for next boot");
-    }
+    /* Storage recovery is done once from app_main(), before the sound graph is
+     * restored. Repeating it here could retry a partially restored rollback
+     * after the graph is already live. */
     esp_err_t load_err = settings_load(&s_cfg);
     if (load_err != ESP_OK) return load_err;
     (void)audio_set_volume(s_cfg.master_volume);
@@ -6066,7 +6295,7 @@ esp_err_t web_init(void)
             if ((uint32_t)s_aux_cfg[i].effect >= AUXIO_EFFECT_COUNT) {
                 s_aux_cfg[i].effect = AUXIO_EFFECT_STEADY;
             }
-            uint8_t pwm = (uint8_t)((uint16_t)s_aux_cfg[i].level * 255U / 100U);
+            uint8_t pwm = aux_level_to_pwm(s_aux_cfg[i].level);
             load_err = auxio_config(i, pwm, 0, (auxio_effect_t)s_aux_cfg[i].effect,
                                     aux_effect_period(s_aux_cfg[i].effect));
             if (load_err != ESP_OK) return load_err;

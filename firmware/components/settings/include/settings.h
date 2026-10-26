@@ -33,7 +33,6 @@
 /* Function (F) mapping: how each DCC function key drives sound slots and/or
  * AUX/light outputs, gated by the driving direction and the speed state. */
 #define SETTINGS_FUNC_MAP_COUNT 29  /* F0..F28 */
-#define SETTINGS_FUNC_SLOTS     2   /* up to two sound slots per function */
 
 /* Output bits within settings_func_map_t.aux_mask. */
 #define SETTINGS_FUNC_OUT_F0F   (1u << 0)
@@ -76,6 +75,7 @@ typedef struct {
     char ap_ip[SETTINGS_IP_MAX]; /* access point address, default 192.168.100.1 */
     uint8_t auto_off_min;       /* wifi auto-off timeout (0=off) */
     uint8_t master_volume;
+    uint8_t cv63_exact;         /* exact 0..255 CV63 value behind master_volume */
     uint8_t engine_volume;
     uint8_t effects_volume;
     uint8_t active_slot;
@@ -130,6 +130,8 @@ esp_err_t settings_cv_read(uint16_t idx, uint8_t *out);
 esp_err_t settings_cv_snapshot(uint8_t out[SETTINGS_CV_COUNT + 1]);
 esp_err_t settings_cv_write(uint16_t idx, uint8_t value);
 esp_err_t settings_cv_commit(void);
+/* Lossless CV63 -> percent conversion used by the config alias. */
+uint8_t settings_volume_pct_from_cv63(uint8_t cv63);
 /* Stage a CV commit to run later from settings_pending_flush() (never blocks
  * the DCC/service-mode task in a flash write). */
 void settings_cv_commit_deferred(void);
@@ -180,9 +182,6 @@ esp_err_t settings_func_bind_remove(func_binding_t *bind, size_t *count, size_t 
  * callers must not delete old WAVs until this backup succeeds. Worker retries. */
 esp_err_t settings_manifest_sync(void);
 esp_err_t settings_manifest_load(void);
-/* Drop the on-storage metadata backup so a factory reset is not undone by boot
- * recovery. Missing file / unmounted storage is a no-op success. */
-esp_err_t settings_manifest_remove(void);
 /* Persistent recovery marker: partial restores must be retried even if tracks
  * were already saved. Marker is cleared only after ALL metadata saves succeed. */
 esp_err_t settings_recovery_pending(bool *out);

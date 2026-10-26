@@ -462,7 +462,7 @@ firmware/
   `audio_set/get_volume`, `audio_is_playing`, `audio_validate_wav`,
   `audio_voice_alloc/play/release_owned`, `audio_voice_get_state/completion`,
   `audio_voice_set_rate_owned` (permille 500..3000). Голос 19 зарезервирован под
-  звуковой движок; эффектам доступны голоса 0..18.
+  звуковой движок, голос 18 — под SELFTEST/HIL; эффектам доступны голоса 0..17.
 - Анти-щёлчок: линейный фейд 2 блока на старте/стопе (`s_fade_blocks`).
 - Зависимости: `esp_driver_gpio esp_driver_i2s pinmap storage`.
 - Задачи: **`audio_mix`**, стек 4096, prio 7, ядро 1 (блок 256 сэмплов ≈ 11.6 мс).
@@ -877,8 +877,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 ## 12. Аудио
 
 - Один I2S-канал, 22050 Гц, моно, 16 бит, DMA 6×512 кадров.
-- 20 голосов (`AUDIO_MAX_VOICES`): голоса 0..18 динамические (до 19 FX),
-  голос 19 зарезервирован под двигатель.
+- 20 голосов (`AUDIO_MAX_VOICES`): голоса 0..17 динамические (до 18 FX),
+  голос 18 зарезервирован под SELFTEST/HIL, голос 19 под двигатель.
   PCM16 WAV, 1–2 канала, sample rate 1..192000 Гц → линейный ресемплинг →
   сумма с громкостями → клиппинг. Максимальная комбинация требует замера throughput.
 - `MIX_BLOCK = 256` сэмплов на блок.

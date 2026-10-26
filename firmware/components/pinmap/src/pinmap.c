@@ -55,12 +55,6 @@ static esp_err_t pinmap_check_impl(const int *pins, size_t n, bool allow_board_s
     return ESP_OK;
 }
 
-/* Generic assignment check: strapping pins are rejected. */
-static esp_err_t pinmap_check(const int *pins, size_t n)
-{
-    return pinmap_check_impl(pins, n, false);
-}
-
 /* Board-specific check: only the documented strap pins are allowed. */
 static esp_err_t pinmap_check_board(const int *pins, size_t n)
 {

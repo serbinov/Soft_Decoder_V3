@@ -49,6 +49,9 @@ static bool s_hold_valid;
 static uint8_t s_hold_speed;
 static int8_t s_notch_offset;
 static bool s_control_armed = true;
+/* HIL-only manual speed override: sound_set_speed() is not used by the normal
+ * motor path, but the 20 ms task would otherwise overwrite it immediately. */
+static bool s_manual_speed;
 static uint32_t s_task_iter_cap;   /* test hook: 0 = run forever */
 static bool s_fn_state[SOUND_FN_COUNT];
 
@@ -197,13 +200,18 @@ static void sound_speed_locked(uint8_t speed, bool forward, bool applied)
 }
 void sound_set_speed(uint8_t speed, bool forward)
 {
-    sound_lock(); sound_speed_locked(speed,forward,false);
+    sound_lock();
+    /* HIL override: a zero speed releases it so the normal motor-follow path
+     * resumes on the next applied-speed update. */
+    s_manual_speed = speed != 0U;
+    sound_speed_locked(speed,forward,false);
     sound_unlock();
 }
 static void sound_applied_speed(uint8_t speed, bool forward, unsigned epoch)
 {
     sound_lock();
-    if (epoch == atomic_load(&s_motion_epoch) && !atomic_load(&s_stop_requested)) {
+    if (!s_manual_speed && epoch == atomic_load(&s_motion_epoch) &&
+        !atomic_load(&s_stop_requested)) {
         sound_speed_locked(speed,forward,true);
     }
     sound_unlock();
@@ -232,6 +240,7 @@ void sound_function(uint8_t fn, bool state)
 static void runtime_reset_locked(void)
 {
     atomic_fetch_add(&s_motion_epoch,1);
+    s_manual_speed = false;
     s_motion_ready = (s_speed == 0);
     if (s_graph_runner) {
         sg_runner_reset(s_graph_runner);

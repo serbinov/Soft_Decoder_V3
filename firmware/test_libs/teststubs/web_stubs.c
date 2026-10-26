@@ -853,6 +853,11 @@ esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
     return (esp_err_t)mock_cv_read_ret;
 }
 
+uint8_t settings_volume_pct_from_cv63(uint8_t cv63)
+{
+    return (uint8_t)(((uint16_t)cv63 * 100U + 127U) / 255U);
+}
+
 esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
 {
     mock_cv_write_calls++;
@@ -1110,6 +1115,7 @@ void sound_function(uint8_t fn, bool state)
     mock_sound_last_state = state;
 }
 void sound_stop_all(void) { mock_sound_stop_all_calls++; }
+void sound_request_stop(void) { mock_sound_stop_all_calls++; }
 void sound_set_volumes(uint8_t engine, uint8_t effects) { (void)engine; (void)effects; }
 int mock_sound_logic_calls;
 bool mock_sound_logic_mute;
@@ -1606,6 +1612,8 @@ esp_err_t mock_graph_save_err, mock_graph_read_err, mock_graph_select_err;
 esp_err_t mock_graph_assets_err, mock_graph_prepare_err, mock_graph_reference_err;
 bool mock_graph_referenced;
 unsigned mock_graph_save_calls, mock_graph_select_calls, mock_graph_commit_calls;
+char mock_graph_selected_id[64];
+bool mock_graph_selected;
 uint32_t mock_graph_primed;
 sound_graph_status_t mock_graph_status;
 struct sound_graph_prepared { char id[SG_ID_CAP]; uint32_t revision; };
@@ -1669,6 +1677,16 @@ esp_err_t sg_store_select(const char *id, uint32_t revision)
 {
     (void)id; (void)revision; ++mock_graph_select_calls; return mock_graph_select_err;
 }
+esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision, bool *selected)
+{
+    if (id == NULL || capacity == 0U || revision == NULL || selected == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    snprintf(id, capacity, "%s", mock_graph_selected_id);
+    *revision = mock_graph_selected ? 3U : 0U;
+    *selected = mock_graph_selected;
+    return ESP_OK;
+}
 esp_err_t sg_store_select_legacy(void) { ++mock_graph_select_calls; return mock_graph_select_err; }
 int mock_graph_delete_calls;
 esp_err_t mock_graph_delete_err;
@@ -1715,6 +1733,8 @@ void mock_web_reset(void)
     mock_graph_assets_err = mock_graph_prepare_err = mock_graph_reference_err = ESP_OK;
     mock_graph_referenced = false;
     mock_graph_save_calls = mock_graph_select_calls = mock_graph_commit_calls = 0;
+    mock_graph_selected_id[0] = '\0';
+    mock_graph_selected = false;
     mock_graph_primed = 0; memset(&mock_graph_status, 0, sizeof(mock_graph_status));
     mock_motor_applied_speed = 0;
     mock_httpd_reset();

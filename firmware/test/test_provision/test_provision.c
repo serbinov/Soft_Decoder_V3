@@ -973,6 +973,27 @@ static void test_provision_run_fw_path(void)
     TEST_ASSERT_TRUE(tx_has("DONE-OK"));
 }
 
+static void test_provision_run_wipe(void)
+{
+    feed("PROV-CONFIRM\nWIPE\nDONE\n");
+    TEST_ASSERT_TRUE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("WIPE-OK"));
+    TEST_ASSERT_EQUAL_INT(1, g_storage_format_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_tracks_save_calls);
+    TEST_ASSERT_TRUE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(1, mock_esp_restart_calls);
+}
+
+static void test_provision_run_wipe_failure(void)
+{
+    g_storage_format_err = ESP_FAIL;
+    feed("PROV-CONFIRM\nWIPE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("WIPE-ERR storage"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(0, mock_esp_restart_calls);
+}
+
 /* ---- provision_try / listener ---- */
 
 static void test_provision_try_paths(void)
@@ -1634,6 +1655,8 @@ int main(void)
     RUN_TEST(test_provision_run_bad_put_slot);
     RUN_TEST(test_provision_run_command_timeout);
     RUN_TEST(test_provision_run_fw_path);
+    RUN_TEST(test_provision_run_wipe);
+    RUN_TEST(test_provision_run_wipe_failure);
     RUN_TEST(test_provision_try_paths);
     RUN_TEST(test_provision_listener_start);
     RUN_TEST(test_provision_listener_subscribes_to_twdt);

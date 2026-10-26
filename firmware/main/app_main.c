@@ -170,7 +170,7 @@ static esp_err_t on_dcc_cv_write(uint16_t cv, uint8_t value, bool service_mode)
     if (cv == 63U || (cv == 8U && value == 8U)) {
         uint8_t volume = 0;
         (void)settings_cv_read(63U, &volume);
-        web_master_volume_changed((uint8_t)((uint16_t)volume * 100U / 255U));
+        web_master_volume_changed(settings_volume_pct_from_cv63(volume));
     }
     web_log_event("CV", "CV %u = %u (%s)", (unsigned)cv, (unsigned)value,
                   service_mode ? "сервис" : "DCC");
@@ -561,6 +561,12 @@ void app_main(void)
     }
 
     ensure_audio_dir();
+
+    /* Finish/roll back an interrupted sound-pack import before
+     * restore_sound_graph() reads the selection record. */
+    if (web_storage_recovery() == ESP_FAIL) {
+        ESP_LOGW(TAG, "Sound pack recovery incomplete; previous library kept for next boot");
+    }
 
     ESP_ERROR_CHECK(motor_init());
     if (s_brownout_latched) {

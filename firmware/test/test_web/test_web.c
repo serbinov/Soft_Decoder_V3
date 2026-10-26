@@ -436,9 +436,7 @@ void setUp(void)
     test_manifest_load_calls = 0;
     test_rename_fail_at = test_rename_fail_at_second = 0;
     s_cfg_mutex = (SemaphoreHandle_t)1;
-    s_up_req = NULL;
     s_transfer_supervisor = NULL;
-    s_up_worker = NULL;
     s_up_active = false;
     s_up_aborted = false;
     s_up_lease_held = false;
@@ -2830,15 +2828,17 @@ static void test_aux_cfg_get_post(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
 
     reset_resp();
+    int config_calls_before = mock_auxio_config_calls;
     mock_aux_save_ret = ESP_FAIL;
     set_query("ch=1&level=50&effect=0");
     TEST_ASSERT_EQUAL(ESP_OK, aux_cfg_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    TEST_ASSERT_EQUAL_INT(config_calls_before, mock_auxio_config_calls);
 
     reset_resp();
     mock_aux_save_ret = 0;
     TEST_ASSERT_EQUAL(ESP_OK, aux_cfg_post(&req));
-    TEST_ASSERT_EQUAL_INT(2, mock_auxio_config_calls);
+    TEST_ASSERT_EQUAL_INT(config_calls_before + 1, mock_auxio_config_calls);
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
 }
 
@@ -5396,6 +5396,84 @@ static void test_pack_journal_prepared_rolls_back_at_boot(void)
     TEST_ASSERT_EQUAL_UINT32(1, test_manifest_load_calls);
 }
 
+static void test_pack_journal_retry_preserves_restored_overlap(void)
+{
+    char names[1][WEB_LIB_NAME_MAX];
+    memset(names, 0, sizeof(names));
+    snprintf(names[0], sizeof(names[0]), "same.wav");
+    MKDIR("web_tmp/audio/.pbretry");
+    FILE *f = fopen("web_tmp/audio/same.wav", "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("OLD", f);
+    fclose(f);
+
+    pack_tx_t tx;
+    memset(&tx, 0, sizeof(tx));
+    snprintf(tx.backup_dir, sizeof(tx.backup_dir), "%s", "web_tmp/audio/.pbretry");
+    snprintf(tx.journal, sizeof(tx.journal), "%s", PACK_JOURNAL_PATH);
+    tx.old_names = names;
+    tx.old_count = 1;
+    tx.new_names = names;
+    tx.new_count = 1; /* same name in both lists: previous attempt restored it */
+    TEST_ASSERT_EQUAL(ESP_OK, pack_journal_write(&tx, PACK_JOURNAL_PREPARED));
+
+    TEST_ASSERT_EQUAL(ESP_OK, web_recover_pack_journal());
+    f = fopen("web_tmp/audio/same.wav", "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    char data[4] = {0};
+    TEST_ASSERT_EQUAL_UINT32(3, (uint32_t)fread(data, 1, 3, f));
+    fclose(f);
+    TEST_ASSERT_EQUAL_STRING("OLD", data);
+    TEST_ASSERT_FALSE(file_exists(PACK_JOURNAL_PATH));
+    TEST_ASSERT_FALSE(dir_exists("web_tmp/audio/.pbretry"));
+}
+
+static void test_pack_rollback_respects_newer_selection(void)
+{
+    char old_names[1][WEB_LIB_NAME_MAX];
+    memset(old_names, 0, sizeof(old_names));
+    snprintf(old_names[0], sizeof(old_names[0]), "old.wav");
+    MKDIR("web_tmp/audio/.pbsel");
+    FILE *f = fopen("web_tmp/audio/.pbsel/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("OLD", f);
+    fclose(f);
+
+    pack_tx_t tx;
+    memset(&tx, 0, sizeof(tx));
+    snprintf(tx.backup_dir, sizeof(tx.backup_dir), "%s", "web_tmp/audio/.pbsel");
+    snprintf(tx.journal, sizeof(tx.journal), "%s", PACK_JOURNAL_PATH);
+    tx.old_names = old_names;
+    tx.old_count = 1;
+    snprintf(tx.old_selection, sizeof(tx.old_selection), "previous");
+    tx.old_selection_rev = 2;
+    tx.old_selection_valid = true;
+    snprintf(tx.new_selection, sizeof(tx.new_selection), "packid");
+    tx.new_selection_valid = true;
+
+    /* Factory reset / newer choice: current selection is not the failed pack. */
+    snprintf(mock_graph_selected_id, sizeof(mock_graph_selected_id), "other");
+    mock_graph_selected = true;
+    mock_graph_select_calls = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, pack_journal_write(&tx, PACK_JOURNAL_PREPARED));
+    TEST_ASSERT_EQUAL(ESP_OK, web_recover_pack_journal());
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_select_calls);
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
+
+    /* Still on the failed pack scheme: restore the previous selection. */
+    MKDIR("web_tmp/audio/.pbsel");
+    f = fopen("web_tmp/audio/.pbsel/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("OLD", f);
+    fclose(f);
+    snprintf(mock_graph_selected_id, sizeof(mock_graph_selected_id), "packid");
+    mock_graph_selected = true;
+    mock_graph_select_calls = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, pack_journal_write(&tx, PACK_JOURNAL_PREPARED));
+    TEST_ASSERT_EQUAL(ESP_OK, web_recover_pack_journal());
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_select_calls);
+}
+
 static void test_pack_journal_committed_cleans_backups(void)
 {
     char old_names[1][WEB_LIB_NAME_MAX];
@@ -5828,6 +5906,8 @@ int main(void)
     RUN_TEST(test_upload_name_validation_and_lowercase);
     RUN_TEST(test_library_delete_refuses_track_and_binding);
     RUN_TEST(test_pack_journal_prepared_rolls_back_at_boot);
+    RUN_TEST(test_pack_journal_retry_preserves_restored_overlap);
+    RUN_TEST(test_pack_rollback_respects_newer_selection);
     RUN_TEST(test_pack_journal_committed_cleans_backups);
     RUN_TEST(test_pack_success_removes_journal);
     RUN_TEST(test_cv_write_reloads_multifunction_cvs);

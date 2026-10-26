@@ -842,13 +842,6 @@ void dcc_set_address(uint16_t addr, bool long_addr)
     portEXIT_CRITICAL(&s_cfg_mux);
 }
 
-void dcc_set_speed_step_mode(bool mode_14)
-{
-    portENTER_CRITICAL(&s_cfg_mux);
-    s_speed_mode_14 = mode_14;
-    portEXIT_CRITICAL(&s_cfg_mux);
-}
-
 void dcc_set_consist(uint8_t address, bool reverse_dir)
 {
     portENTER_CRITICAL(&s_cfg_mux);

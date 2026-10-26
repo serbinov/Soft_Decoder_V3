@@ -14,7 +14,6 @@ typedef void (*dcc_reset_cb_t)(void);
 
 esp_err_t dcc_init(void);
 void dcc_set_address(uint16_t addr, bool long_addr);
-void dcc_set_speed_step_mode(bool mode_14);
 void dcc_set_consist(uint8_t address, bool reverse_dir);
 
 /* Re-read CV1/17/18/19/21/22/29 through the registered CV read callback and

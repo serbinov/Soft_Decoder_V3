@@ -63,6 +63,11 @@ static uint8_t cv_to_volume_pct(uint8_t cv)
     return (uint8_t)(((uint16_t)cv * 100U + 127U) / 255U);
 }
 
+uint8_t settings_volume_pct_from_cv63(uint8_t cv63)
+{
+    return cv_to_volume_pct(cv63);
+}
+
 static uint32_t record_crc32(const uint8_t *data, size_t len)
 {
     uint32_t crc = UINT32_MAX;
@@ -337,6 +342,22 @@ esp_err_t settings_load(settings_config_t *cfg)
     LOAD(nvs_read_str("ap_ip", cfg->ap_ip, sizeof(cfg->ap_ip), "192.168.100.1"));
     LOAD(nvs_read_u8("auto_off", &cfg->auto_off_min, 0));
     LOAD(nvs_read_u8("mvol", &cfg->master_volume, 20));
+    /* CV63 is stored separately so an exact 0..255 value survives a reboot
+     * instead of being re-quantized through the 0..100 % config field. */
+    uint8_t cv63_exact = 0;
+    esp_err_t cv63_err = nvs_get_u8(s_h, "cv63x", &cv63_exact);
+    if (cv63_err == ESP_OK) {
+        cfg->cv63_exact = cv63_exact;
+    } else if (cv63_err == ESP_ERR_NVS_NOT_FOUND) {
+        cfg->cv63_exact = volume_pct_to_cv(cfg->master_volume);
+    } else if (blob_error_is_unusable(cv63_err)) {
+        nvs_discard_unusable_key("cv63x");
+        cfg->cv63_exact = volume_pct_to_cv(cfg->master_volume);
+    } else {
+        xSemaphoreGive(s_lock);
+        return cv63_err;
+    }
+    cfg->master_volume = cv_to_volume_pct(cfg->cv63_exact);
     LOAD(nvs_read_u8("evol", &cfg->engine_volume, 20));
     LOAD(nvs_read_u8("fvol", &cfg->effects_volume, 20));
     LOAD(nvs_read_u8("slot", &cfg->active_slot, 0));
@@ -348,7 +369,7 @@ esp_err_t settings_load(settings_config_t *cfg)
     s_cfg_valid = true;
     portENTER_CRITICAL(&s_cv_mux);
     s_master_volume = cfg->master_volume;
-    s_cv[63] = volume_pct_to_cv(cfg->master_volume);
+    s_cv[63] = cfg->cv63_exact;
     portEXIT_CRITICAL(&s_cv_mux);
     xSemaphoreGive(s_lock);
     return ESP_OK;
@@ -366,6 +387,7 @@ static esp_err_t settings_store_locked(const settings_config_t *cfg)
     STORE(nvs_set_str(s_h, "ap_ip", cfg->ap_ip));
     STORE(nvs_set_u8(s_h, "auto_off", cfg->auto_off_min));
     STORE(nvs_set_u8(s_h, "mvol", cfg->master_volume));
+    STORE(nvs_set_u8(s_h, "cv63x", cfg->cv63_exact));
     STORE(nvs_set_u8(s_h, "evol", cfg->engine_volume));
     STORE(nvs_set_u8(s_h, "fvol", cfg->effects_volume));
     STORE(nvs_set_u8(s_h, "slot", cfg->active_slot));
@@ -373,6 +395,26 @@ static esp_err_t settings_store_locked(const settings_config_t *cfg)
     STORE(nvs_set_str(s_h, "dev_name", cfg->device_name));
 #undef STORE
     return nvs_commit(s_h);
+}
+
+/* Keep the exact CV63 field consistent with the 0..100 % view. Callers cache
+ * settings_config_t themselves, so an unchanged volume must not trust their
+ * possibly stale cv63_exact copy: the live settings value is authoritative. */
+static void normalize_cv63(settings_config_t *cfg, const settings_config_t *current,
+                           bool current_valid)
+{
+    if (!current_valid) {
+        cfg->cv63_exact = volume_pct_to_cv(cfg->master_volume);
+        return;
+    }
+    if (cfg->cv63_exact != 0U && cv_to_volume_pct(cfg->cv63_exact) == cfg->master_volume) {
+        return;
+    }
+    if (cfg->master_volume == current->master_volume) {
+        cfg->cv63_exact = current->cv63_exact;
+        return;
+    }
+    cfg->cv63_exact = volume_pct_to_cv(cfg->master_volume);
 }
 
 esp_err_t settings_save(const settings_config_t *cfg)
@@ -383,12 +425,18 @@ esp_err_t settings_save(const settings_config_t *cfg)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    s_cfg = *cfg;
+    settings_config_t stored = *cfg;
+    normalize_cv63(&stored, &s_cfg, s_cfg_valid);
+    s_cfg = stored;
     s_cfg_valid = true;
-    esp_err_t err = settings_store_locked(cfg);
+    esp_err_t err = settings_store_locked(&stored);
     portENTER_CRITICAL(&s_cv_mux);
-    s_master_volume = cfg->master_volume;
-    s_cv[63] = volume_pct_to_cv(cfg->master_volume);
+    s_master_volume = stored.master_volume;
+    if (s_cv[63] != stored.cv63_exact) {
+        s_cv[63] = stored.cv63_exact;
+        s_cv_pending = true;
+        ++s_cv_generation;
+    }
     s_pending = err != ESP_OK;
     s_pending_us = esp_timer_get_time();
     s_last_error = err;
@@ -405,11 +453,17 @@ esp_err_t settings_save_deferred(const settings_config_t *cfg)
     if (xSemaphoreTake(s_lock, 0) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    s_cfg = *cfg;
+    settings_config_t stored = *cfg;
+    normalize_cv63(&stored, &s_cfg, s_cfg_valid);
+    s_cfg = stored;
     s_cfg_valid = true;
     portENTER_CRITICAL(&s_cv_mux);
-    s_master_volume = cfg->master_volume;
-    s_cv[63] = volume_pct_to_cv(cfg->master_volume);
+    s_master_volume = stored.master_volume;
+    if (s_cv[63] != stored.cv63_exact) {
+        s_cv[63] = stored.cv63_exact;
+        s_cv_pending = true;
+        ++s_cv_generation;
+    }
     s_pending_us = esp_timer_get_time();
     s_pending = true;
     portEXIT_CRITICAL(&s_cv_mux);
@@ -529,6 +583,7 @@ esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
         }
         if (!s_cfg_valid) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
         s_cfg.master_volume = vol;
+        s_cfg.cv63_exact = value;
         portENTER_CRITICAL(&s_cv_mux);
         s_cv[63] = value;
         s_master_volume = vol;
@@ -571,6 +626,7 @@ esp_err_t settings_cv_reset_to_factory(void)
     cv_set_defaults();
     s_master_volume = 20U;
     s_cfg.master_volume = 20U;
+    s_cfg.cv63_exact = s_cv[63];
     ++s_cv_generation;
     s_cv_pending = true;
     s_pending_us = esp_timer_get_time();
@@ -600,6 +656,7 @@ esp_err_t settings_factory_reset(void)
         s_pending = false;
         s_master_volume = 20U;
         s_cfg.master_volume = 20U;
+        s_cfg.cv63_exact = s_cv[63];
         s_cfg_valid = false;
         s_recovery_marker = false;
         portEXIT_CRITICAL(&s_cv_mux);

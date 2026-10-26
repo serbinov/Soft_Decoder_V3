@@ -109,7 +109,6 @@ static const char *TAG = "motor";
 #define BEMF_CHECK_DUTY_MAX     (LEDC_MAX / 2U)   /* ~50 % */
 #define BEMF_CHECK_SPIN_CHUNK_MS 10U
 #define BEMF_CHECK_SPIN_LIMIT_MS 300U
-#define BEMF_CHECK_STABLE_DIV    32U              /* ~3 % of rail */
 #define BEMF_CHECK_FLOOR_DIV     64U              /* noise floor above static noise */
 #define BEMF_CHECK_FLOOR_MIN_MV  8U
 #define BEMF_CHECK_STATIC_DIFF_DIV 16U
@@ -251,7 +250,6 @@ static uint16_t s_pid_reload;
 #define BEMF_CAL_PREFLIGHT_SETTLE_MAX_MS 350U
 #define BEMF_CAL_PREFLIGHT_SAMPLES       4U
 #define BEMF_CAL_PREFLIGHT_REVERSE_MS    200U
-#define BEMF_CAL_PREFLIGHT_DRIVE_MS      150U
 
 /* Linear speed target: back-EMF (as a fraction of the rail voltage) ramps
  * linearly from BEMF_TARGET_START_FRAC at speed 1 to the full-speed value at

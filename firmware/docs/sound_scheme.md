@@ -42,7 +42,8 @@ continuously (`engine.hold` is then irrelevant).
   the whole sequence. A timeout loop keeps `elapsed_ms` across internal sample
   replays: the timeout covers the whole loop run, not one WAV.
   The engine (voice 19 reserved for the prime mover) plays effects on
-  independent voices 0..18 (19 simultaneous effects).
+  independent voices 0..17 (18 simultaneous effects). Voice 18 is reserved for
+  SELFTEST/HIL playback.
 
 `func_binding_t` (`components/settings/include/func_types.h`) is the runtime
 routing for outputs and logic: `FUNC_TARGET_OUTPUT` (F0F/F0R/AUX1..7),
@@ -115,8 +116,8 @@ through `audio_voice_set_volume_live` and restored when effects end. A state's
 ## 5. Limits
 
 `states` 192 (`SG_MAX_STATES`, at most 144 sounding + 96 silent), `transitions` 250,
-`effects` 32 channels (19 can sound simultaneously; one voice is reserved for
-the engine), `assets` 128, `variables` 16, JSON body ≤ 128 KiB.
+`effects` 32 channels (18 can sound simultaneously; voice 18 is reserved for
+SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON body ≤ 128 KiB.
 
 ---
 

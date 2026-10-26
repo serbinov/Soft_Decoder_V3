@@ -10,7 +10,9 @@
 
 /* Sentinel for an unassigned voice handle. */
 #define AUDIO_VOICE_NONE 0xFF
-#define AUDIO_DYNAMIC_VOICES 19 /* voice 19 belongs exclusively to the sound engine */
+/* Voices 0..17 are dynamically allocated; 18 is reserved for SELFTEST/HIL and
+ * 19 belongs exclusively to the sound engine. */
+#define AUDIO_DYNAMIC_VOICES 18
 
 typedef struct {
     uint8_t voice;
@@ -47,8 +49,9 @@ esp_err_t audio_set_inhibited(bool inhibited);
  * mutex contention on an initialized mixer is never treated as quiet. */
 bool audio_is_quiescent(void);
 
-/* Atomic ownership API. alloc excludes 18/19. play updates the handle to the
- * new playback generation; stale play/release cannot affect another owner.
+/* Atomic ownership API. alloc excludes 18 (selftest) and 19 (engine). play
+ * updates the handle to the new playback generation; stale play/release cannot
+ * affect another owner.
  * EOF frees the allocator slot, so callers must query/reallocate before replay. */
 esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out);
 esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,

@@ -1116,6 +1116,31 @@ static void test_master_volume_roundtrip_keeps_live_copies_in_sync(void)
     s_cfg_valid = false;
     TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
     TEST_ASSERT_EQUAL_UINT8(cv_to_volume_pct(200), cfg.master_volume);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &cv63));
+    TEST_ASSERT_EQUAL_UINT8(200, cv63); /* exact value survives the reload */
+}
+
+/* A caller may cache settings_config_t and update only master_volume (the web
+ * layer does). An unrelated save with that stale cv63_exact must not revert the
+ * exact CV63 value or the volume on the next boot. */
+static void test_stale_config_cache_cannot_revert_cv63(void)
+{
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    settings_config_t stale = cfg;
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(63, 200));
+    stale.master_volume = cv_to_volume_pct(200);
+    stale.auto_off_min = 7; /* unrelated setting written by the same cache */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save(&stale));
+
+    s_cfg_valid = false;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(cv_to_volume_pct(200), cfg.master_volume);
+    uint8_t cv63 = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &cv63));
+    TEST_ASSERT_EQUAL_UINT8(200, cv63);
+    TEST_ASSERT_EQUAL_UINT8(7, cfg.auto_off_min);
 }
 
 static void test_cv7_migrated_from_old_blob(void)
@@ -1696,6 +1721,7 @@ int main(void)
     RUN_TEST(test_bemf_cal_clear_missing_key_is_ok);
     RUN_TEST(test_cv63_master_volume_alias);
     RUN_TEST(test_master_volume_roundtrip_keeps_live_copies_in_sync);
+    RUN_TEST(test_stale_config_cache_cannot_revert_cv63);
     RUN_TEST(test_cv7_migrated_from_old_blob);
     RUN_TEST(test_func_bind_roundtrip);
     RUN_TEST(test_func_bind_legacy_convert);

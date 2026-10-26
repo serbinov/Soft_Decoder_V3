@@ -8,6 +8,12 @@
 
 esp_err_t web_init(void);
 
+/* Finish/roll back an interrupted sound-pack transaction on external storage.
+ * Must run exactly once, after storage_mount()/settings_init() and before the
+ * sound graph is restored from its selection record. Safe to call when storage
+ * is absent; returns ESP_ERR_INVALID_STATE in that case. */
+esp_err_t web_storage_recovery(void);
+
 /* Append a control event to the journal shown in the web UI (exposed via
  * /api/log). Safe to call from any task; text is truncated if too long. */
 void web_log_event(const char *tag, const char *fmt, ...);

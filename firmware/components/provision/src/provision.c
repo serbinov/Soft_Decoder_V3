@@ -1506,6 +1506,28 @@ static bool provision_transfer(bool *maintenance_started)
             send_line("FW-DONE");
             continue;
         }
+        if (strncmp(cmd, "WIPE", 4) == 0) {
+            /* Factory wipe over the already-confirmed provisioning session:
+             * format the external NOR (sounds, graph projects, sidecars) and
+             * let DONE persist an empty track list. Internal NVS is erased by
+             * the host's full-chip erase before this handshake. */
+            if (!storage_is_mounted()) {
+                esp_err_t merr = storage_mount();
+                if (merr != ESP_OK) {
+                    send_line("WIPE-ERR mount");
+                    return false;
+                }
+            }
+            esp_err_t werr = storage_format();
+            if (werr != ESP_OK) {
+                ESP_LOGE(TAG, "provision: WIPE format failed (%s)", esp_err_to_name(werr));
+                send_line("WIPE-ERR storage");
+                return false;
+            }
+            s_install_formatted = true;
+            send_line("WIPE-OK");
+            continue;
+        }
         if (strncmp(cmd, "PUT", 3) != 0) {
             continue;
         }

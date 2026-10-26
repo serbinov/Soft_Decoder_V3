@@ -55,23 +55,33 @@ static void on_dcc_speed(uint8_t speed128, bool forward)
     if (web_control_rails_begin(NULL)) {
         /* Log every decoded speed change so the actual command received from
          * the throttle can be compared with what the motor does (only on a
-         * change, so a refreshing command station does not flood the log). */
+         * change or an accept/reject transition, so a refreshing command
+         * station does not flood the log). */
         static bool have_last;
         static uint8_t last_speed;
         static bool last_forward;
-        if (!have_last || speed128 != last_speed || forward != last_forward) {
-            have_last = true;
-            last_speed = speed128;
-            last_forward = forward;
-            ESP_LOGI(TAG, "DCC speed: %u %s", (unsigned)speed128,
-                     forward ? "fwd" : "rev");
-        }
-        if (motor_set_speed(speed128, forward) == ESP_OK) {
+        static bool last_ok;
+        bool changed = !have_last || speed128 != last_speed || forward != last_forward;
+        esp_err_t err = motor_set_speed(speed128, forward);
+        if (err == ESP_OK) {
+            if (changed || !last_ok) {
+                ESP_LOGI(TAG, "DCC speed: %u %s", (unsigned)speed128,
+                         forward ? "fwd" : "rev");
+            }
             track_note_dcc_motor_command();
         /* Re-evaluate the function direction/speed gates (web.c skips the
          * update when nothing actually changed). */
             web_motion_changed(speed128, forward);
+        } else if (changed || last_ok) {
+            ESP_LOGW(TAG, "DCC speed rejected: %u %s (%s, inhibited=%d, cal=%d)",
+                     (unsigned)speed128, forward ? "fwd" : "rev",
+                     esp_err_to_name(err), (int)motor_is_inhibited(),
+                     (int)motor_bemf_cal_active());
         }
+        have_last = true;
+        last_speed = speed128;
+        last_forward = forward;
+        last_ok = (err == ESP_OK);
         web_control_rails_end();
     }
 }
@@ -236,6 +246,57 @@ static void safety_step(bool *timeout_active)
     *timeout_active = timed_out;
 }
 
+static esp_err_t seed_builtin_graph(uint32_t *revision, bool *seeded)
+{
+    size_t seed_length = 0;
+    const char *seed = default_scheme_blob(&seed_length);
+    if (revision) { *revision = 0; }
+    if (seeded) { *seeded = false; }
+    if (seed == NULL || seed_length == 0) { return ESP_ERR_INVALID_ARG; }
+    return sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed, seed_length,
+                                 revision, seeded);
+}
+
+/* Read a committed revision and hand it to the runtime. Returns an error on the
+ * first failing stage; json/graph are released on every path. */
+static esp_err_t install_graph_from_store(const char *id, uint32_t revision,
+                                          sg_diagnostic_t *diagnostic)
+{
+    char *json = NULL;
+    size_t length = 0;
+    uint32_t actual = 0;
+    sg_graph_t *graph = malloc(sizeof(*graph));
+    if (graph == NULL) { return ESP_ERR_NO_MEM; }
+    esp_err_t err = sg_store_read(id, revision, &json, &length, &actual);
+    if (err == ESP_OK) { err = sg_parse(json, length, graph, diagnostic); }
+    if (err == ESP_OK) { err = sg_assets_validate(graph, diagnostic); }
+    if (err == ESP_OK) { err = sound_graph_install(graph, id, actual); }
+    free(json);
+    free(graph);
+    return err;
+}
+
+/* Seed and install the built-in project after the selected graph failed.
+ * sg_store_seed_default() refuses to replace an existing graph selection, so
+ * clear the broken selection first; the legacy marker only unlocks seeding and
+ * never restores legacy slot audio. Exactly one attempt is made. */
+static esp_err_t restore_builtin_graph(char *id, size_t capacity, uint32_t *revision,
+                                       sg_diagnostic_t *diagnostic)
+{
+    if (!storage_is_mounted()) { return ESP_ERR_INVALID_STATE; }
+    esp_err_t err = sg_store_select_legacy();
+    if (err != ESP_OK) { return err; }
+    uint32_t seed_revision = 0;
+    bool seeded = false;
+    err = seed_builtin_graph(&seed_revision, &seeded);
+    if (err != ESP_OK) { return err; }
+    err = install_graph_from_store(SG_DEFAULT_PROJECT_ID, seed_revision, diagnostic);
+    if (err != ESP_OK) { return err; }
+    snprintf(id, capacity, "%s", SG_DEFAULT_PROJECT_ID);
+    *revision = seed_revision;
+    return ESP_OK;
+}
+
 static void restore_sound_graph(void)
 {
     if (!storage_is_mounted()) { return; }
@@ -243,47 +304,65 @@ static void restore_sound_graph(void)
     uint32_t revision = 0;
     bool selected = false;
     esp_err_t err = sg_store_selection(id, sizeof(id), &revision, &selected);
-    if (err == ESP_OK && !selected) {
+    if (err != ESP_OK) {
+        /* Unreadable selection record: try the factory project once. */
+        sg_diagnostic_t diagnostic = { 0 };
+        esp_err_t selection_err = err;
+        err = restore_builtin_graph(id, sizeof(id), &revision, &diagnostic);
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "Sound selection unavailable (%s); built-in project installed",
+                     esp_err_to_name(selection_err));
+        } else {
+            sound_graph_fail_closed();
+            ESP_LOGW(TAG, "Sound selection failed (%s) and built-in restore failed: %s (%s)",
+                     esp_err_to_name(selection_err), esp_err_to_name(err),
+                     diagnostic.message);
+        }
+        return;
+    }
+    if (!selected) {
         /* No graph selected: the built-in ChME3 project is the factory scheme.
          * A project saved earlier wins (even if the selection record was lost),
          * so user edits are never replaced by the built-in copy. */
-        size_t seed_length = 0;
-        const char *seed = default_scheme_blob(&seed_length);
         uint32_t seed_revision = 0;
         bool seeded = false;
-        if (seed && seed_length &&
-            sg_store_seed_default(SG_DEFAULT_PROJECT_ID, seed, seed_length,
-                                  &seed_revision, &seeded) == ESP_OK) {
+        esp_err_t seed_err = seed_builtin_graph(&seed_revision, &seeded);
+        if (seed_err == ESP_OK) {
             snprintf(id, sizeof(id), "%s", SG_DEFAULT_PROJECT_ID);
             revision = seed_revision;
             selected = true;
             ESP_LOGI(TAG, "Built-in sound scheme %s (revision %lu)",
                      seeded ? "installed" : "restored", (unsigned long)revision);
+        } else {
+            ESP_LOGW(TAG, "Built-in sound scheme seed failed: %s", esp_err_to_name(seed_err));
         }
     }
-    if (err == ESP_OK && !selected) { return; }
-    char *json = NULL;
-    size_t length = 0;
-    uint32_t actual = 0;
-    sg_graph_t *graph = NULL;
+    if (!selected) { return; }
     sg_diagnostic_t diagnostic = { 0 };
-    if (err == ESP_OK) {
-        graph = malloc(sizeof(*graph));
-        if (graph == NULL) { err = ESP_ERR_NO_MEM; }
-    }
-    if (err == ESP_OK) { err = sg_store_read(id, revision, &json, &length, &actual); }
-    if (err == ESP_OK) { err = sg_parse(json, length, graph, &diagnostic); }
-    if (err == ESP_OK) { err = sg_assets_validate(graph, &diagnostic); }
-    if (err == ESP_OK) { err = sound_graph_install(graph, id, actual); }
+    err = install_graph_from_store(id, revision, &diagnostic);
     if (err != ESP_OK) {
-        /* A selected graph is not permission to resurrect legacy F-slot audio.
-         * Keep routing ownership but remain silent until explicit recovery. */
-        sound_graph_fail_closed();
-        ESP_LOGW(TAG, "Selected sound graph unavailable: %s (%s)",
+        if (strcmp(id, SG_DEFAULT_PROJECT_ID) == 0 || !storage_is_mounted()) {
+            /* A selected graph is not permission to resurrect legacy F-slot
+             * audio. Keep routing ownership but remain silent. */
+            sound_graph_fail_closed();
+            ESP_LOGW(TAG, "Sound graph unavailable: %s (%s)",
+                     esp_err_to_name(err), diagnostic.message);
+            return;
+        }
+        ESP_LOGW(TAG, "Selected sound graph unavailable: %s (%s); restoring built-in project",
                  esp_err_to_name(err), diagnostic.message);
+        sg_diagnostic_t fallback_diagnostic = { 0 };
+        esp_err_t fallback_err = restore_builtin_graph(id, sizeof(id), &revision,
+                                                       &fallback_diagnostic);
+        if (fallback_err == ESP_OK) {
+            ESP_LOGW(TAG, "Selected sound graph replaced by the built-in project (revision %lu)",
+                     (unsigned long)revision);
+        } else {
+            sound_graph_fail_closed();
+            ESP_LOGW(TAG, "Built-in restore failed: %s (%s)",
+                     esp_err_to_name(fallback_err), fallback_diagnostic.message);
+        }
     }
-    free(json);
-    free(graph);
 }
 
 static void safety_task(void *arg)

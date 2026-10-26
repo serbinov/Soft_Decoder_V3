@@ -697,6 +697,55 @@ static void test_func_eval_conditions(void)
                                               NULL, NULL, test_vars_get, vars));
 }
 
+/* ---- web_util_same_origin ---- */
+
+static void test_same_origin_accepts_missing_and_matching(void)
+{
+    /* Non-browser clients keep working. */
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, NULL, NULL));
+    TEST_ASSERT_TRUE(web_util_same_origin("", "", "unused"));
+
+    TEST_ASSERT_TRUE(web_util_same_origin("http://192.168.4.1", NULL, "192.168.4.1"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://EXAMPLE.com:80", NULL, "example.com"));
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://192.168.4.1/index.html?x=1", "192.168.4.1"));
+
+    /* Authority only: paths/queries/fragments and default ports are ignored. */
+    TEST_ASSERT_TRUE(web_util_same_origin("http://host:80/some/path?q=1#frag", NULL, "host"));
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://host:80/some/path", "HOST"));
+    TEST_ASSERT_TRUE(web_util_same_origin("https://host:443/a", NULL, "host"));
+    TEST_ASSERT_TRUE(web_util_same_origin("https://host", NULL, "host"));
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "HTTPS://Example.COM/path", "example.com"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://[::1]:80", NULL, "[::1]"));
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://[::1]/x", "[::1]:80"));
+}
+
+static void test_same_origin_rejects_mismatch_and_malformed(void)
+{
+    TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example", NULL, "192.168.4.1"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://192.168.4.1:8080", NULL, "192.168.4.1"));
+    TEST_ASSERT_FALSE(web_util_same_origin("https://host", NULL, "host:80"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, "host:443"));
+    TEST_ASSERT_FALSE(web_util_same_origin(NULL, "http://evil.example/", "192.168.4.1"));
+
+    /* Origin, when present, wins over a matching Referer. */
+    TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example", "http://good.example", "good.example"));
+
+    TEST_ASSERT_FALSE(web_util_same_origin("null", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("NULL", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, NULL));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, ""));
+
+    /* Malformed schemes/authorities must fail closed. */
+    TEST_ASSERT_FALSE(web_util_same_origin("http://", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host:abc", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host:80:90", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("ftp://host", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://user@host", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("host", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http:/host", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://ho st", NULL, "ho st"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -731,6 +780,8 @@ int main(void)
     RUN_TEST(test_func_eval_dir_state_gates);
     RUN_TEST(test_func_eval_callbacks);
     RUN_TEST(test_func_eval_conditions);
+    RUN_TEST(test_same_origin_accepts_missing_and_matching);
+    RUN_TEST(test_same_origin_rejects_mismatch_and_malformed);
     RUN_TEST(test_fuzz_random_inputs);
     return UNITY_END();
 }

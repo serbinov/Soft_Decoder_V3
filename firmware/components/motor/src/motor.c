@@ -25,6 +25,12 @@ static const char *TAG = "motor";
 #define LEDC_MODE    LEDC_LOW_SPEED_MODE
 #define LEDC_TIMER   LEDC_TIMER_0
 #define LEDC_MAX     1023U
+/* Minimum duty for speed step 1 on the CV2/CV5/CV6 curve, so the first notch
+ * produces visible creep instead of a zero-duty step while the sound layer
+ * already reports applied speed 1. 16/1023 is about 1.6 %. Table mode
+ * (CV67..CV94) is intentionally not clamped because those users set every
+ * step explicitly. */
+#define MOTOR_CREEP_MIN_DUTY 16U
 #define MOTOR_TICK_MS 10
 #define FEEDBACK_FRESH_US 100000 /* Existing track freshness software deadline. */
 #define KICK_TICKS   (120 / MOTOR_TICK_MS)
@@ -271,7 +277,10 @@ static void load_pid(void)
 }
 
 /* Map speed step 0..126 to PWM duty 0..1023 using either the CV67-CV94
- * 28-point table (CV29 bit 4) or the Vstart/Vmid/Vhigh curve (CV2/5/6). */
+ * 28-point table (CV29 bit 4) or the Vstart/Vmid/Vhigh curve (CV2/5/6).
+ * On the CV2/5/6 curve step 1 is clamped up to MOTOR_CREEP_MIN_DUTY so the
+ * default Vstart=0 still moves the motor at the first speed notch; step 0 is
+ * always 0 and table mode is untouched. */
 static uint32_t speed_duty(uint8_t speed)
 {
     if (speed == 0U) {
@@ -327,7 +336,14 @@ static uint32_t speed_duty(uint8_t speed)
         return vh;
     }
     if (speed <= 63U) {
-        return vs + (vm - vs) * (speed - 1U) / 62U;
+        uint32_t duty = vs + (vm - vs) * (speed - 1U) / 62U;
+        /* With the factory Vstart=0 the formula yields 0 at step 1. Clamp that
+         * one step up to a conservative creep duty; speed 0 already returned
+         * above and every other step keeps its curve value. */
+        if (speed == 1U && duty < MOTOR_CREEP_MIN_DUTY) {
+            duty = MOTOR_CREEP_MIN_DUTY;
+        }
+        return duty;
     }
     return vm + (vh - vm) * (speed - 63U) / 63U;
 }
@@ -1673,7 +1689,10 @@ static bemf_cal_pt_t bemf_cal_read_point(uint32_t generation, uint32_t duty,
                                                : s_bemf2_mv - s_bemf1_mv;
         uint32_t stall = rail / BEMF_CAL_STALL_DIV;
         if (stall < BEMF_CAL_STALL_MV) stall = BEMF_CAL_STALL_MV;
-        if (mag <= stall) {
+        /* A slow or geared rotor can still be at rest during the first
+         * settle window. Do not classify that as a stall until the caller's
+         * minimum settle time has elapsed. */
+        if (mag <= stall && elapsed >= settle_min) {
             return BEMF_CAL_PT_STALL;
         }
         if ((float)mag > (float)rail * s_bemf_max_fraction) {
@@ -1909,12 +1928,14 @@ static void bemf_cal_finish(uint32_t generation, settings_bemf_cal_t *cal,
     if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) == pdTRUE) {
         control_reset();
         xSemaphoreGive(s_control_mutex);
-    } else {
-        succeeded = false;
-        if (reason == MOTOR_BEMF_CAL_ERR_NONE) {
-            reason = MOTOR_BEMF_CAL_ERR_CONTROL;
-            code = ESP_ERR_TIMEOUT;
-        }
+    } else if (succeeded) {
+        /* The curve is already stored and active. The motor tick owns the
+         * reset flag, so a busy control mutex only defers cleanup; it must not
+         * turn a successful calibration into a control failure. */
+        ESP_LOGW(TAG, "BEMF calibration saved; control reset deferred to motor tick");
+    } else if (reason == MOTOR_BEMF_CAL_ERR_NONE) {
+        reason = MOTOR_BEMF_CAL_ERR_CONTROL;
+        code = ESP_ERR_TIMEOUT;
     }
     portENTER_CRITICAL(&s_output_mux);
     s_cal_profile = prof;
@@ -2508,7 +2529,14 @@ static void bemf_cal_adaptive_task(void *arg)
     }
 
     if (complete) {
-        if (r_n < BEMF_CAL_MIN_PLAN) {
+        /* A full plan is not always reachable: the acceptance ceiling can end
+         * the sweep early and low-speed stalls can skip points. Accept a
+         * validated partial curve when it has at least two points and its last
+         * measured fraction is trusted; the monotonic fill below extends it
+         * flat to the top speed. */
+        bool accept_partial = r_n >= 2U &&
+                              r_frac[r_n - 1U] >= SETTINGS_BEMF_CAL_MIN_END_FRAC;
+        if (r_n < BEMF_CAL_MIN_PLAN && !accept_partial) {
             portENTER_CRITICAL(&s_output_mux);
             if (generation == s_output_generation && !s_cal_cancelled) {
                 bemf_cal_worker_fail_locked(MOTOR_BEMF_CAL_ERR_CURVE, ESP_ERR_INVALID_STATE);
@@ -2516,6 +2544,13 @@ static void bemf_cal_adaptive_task(void *arg)
             portEXIT_CRITICAL(&s_output_mux);
             complete = false;
         } else {
+            if (r_n < BEMF_CAL_MIN_PLAN) {
+                ESP_LOGW(TAG, "BEMF calibration saving partial curve: %u points, "
+                              "last speed %u, frac %u/%u (minimum %u)",
+                         (unsigned)r_n, (unsigned)r_spd[r_n - 1U],
+                         (unsigned)r_frac[r_n - 1U], (unsigned)BEMF_CAL_FRAC_SCALE,
+                         (unsigned)SETTINGS_BEMF_CAL_MIN_END_FRAC);
+            }
             cal.count = r_n;
             for (uint8_t i = 0; i < r_n; ++i) {
                 uint16_t f = r_frac[i];

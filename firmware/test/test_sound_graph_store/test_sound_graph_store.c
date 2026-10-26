@@ -211,6 +211,43 @@ static void test_corruption_is_safe_failure(void)
     TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_store_selection(id, sizeof(id), &revision, &selected)); TEST_ASSERT_TRUE(selected);
     free(json);
 }
+static void test_list_skips_corrupt_project(void)
+{
+    char *bad = fixture("bad", "", NULL);
+    char *good = fixture(SG_DEFAULT_PROJECT_ID, "", NULL);
+    TEST_ASSERT_EQUAL_UINT32(1, save_json("bad", 0, bad));
+    TEST_ASSERT_EQUAL_UINT32(1, save_json(SG_DEFAULT_PROJECT_ID, 0, good));
+
+    /* One corrupt commit record must not hide the healthy project. */
+    write_bytes("graphs/bad.1.commit", "SGP1 00", 7);
+
+    sg_store_descriptor_t list[4]; size_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_list(list, 4, &count));
+    TEST_ASSERT_EQUAL_UINT(1, count);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, list[0].id);
+
+    /* Capacity exhaustion is still reported, not treated as corruption. */
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_INVALID_SIZE, sg_store_list(list, 0, &count));
+
+    /* The corrupt project is unrelated, so factory seeding adopts the
+     * healthy saved project instead of failing the whole list scan. */
+    uint32_t revision = 0; bool seeded = true;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_seed_default(SG_DEFAULT_PROJECT_ID, good,
+                                                        strlen(good), &revision, &seeded));
+    TEST_ASSERT_FALSE(seeded);
+    TEST_ASSERT_EQUAL_UINT32(1, revision);
+    char id[SG_ID_CAP]; uint32_t selected_rev = 0; bool selected = false;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_selection(id, sizeof(id), &selected_rev, &selected));
+    TEST_ASSERT_TRUE(selected);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, id);
+    TEST_ASSERT_EQUAL_UINT32(1, selected_rev);
+
+    /* All entries corrupt: an empty directory subset is a success. */
+    write_bytes("graphs/" SG_DEFAULT_PROJECT_ID ".latest", "SGP1 00", 7);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_list(list, 4, &count));
+    TEST_ASSERT_EQUAL_UINT(0, count);
+    free(bad); free(good);
+}
 static void test_truncated_saved_json_and_pointer(void)
 {
     char *json = fixture("a", "", NULL); save_json("a", 0, json);
@@ -584,6 +621,36 @@ static void test_seed_default_builds_manifest_and_defers_to_saved_project(void)
     TEST_ASSERT_FALSE(selected);
     free(missing);
 }
+static void test_seed_default_accepts_non_terminated_blob(void)
+{
+    make_wav();
+    char *text = fixture(SG_DEFAULT_PROJECT_ID, "loop.wav", NULL);
+    size_t len = strlen(text);
+    /* The EMBED_FILES blob is exactly this many bytes and has no NUL. */
+    char *blob = malloc(len);
+    TEST_ASSERT_NOT_NULL(blob);
+    memcpy(blob, text, len);
+    free(text);
+
+    uint32_t revision = 0;
+    bool seeded = false;
+    TEST_ASSERT_EQUAL_INT(ESP_OK,
+                          sg_store_seed_default(SG_DEFAULT_PROJECT_ID, blob, len,
+                                                &revision, &seeded));
+    TEST_ASSERT_TRUE(seeded);
+    free(blob);
+
+    char *out = NULL; size_t out_len = 0; uint32_t actual = 0;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_read(SG_DEFAULT_PROJECT_ID, revision,
+                                                &out, &out_len, &actual));
+    TEST_ASSERT_NOT_NULL(strstr(out, "\"assets\":[{\"file\":\"loop.wav\",\"crc32\":\"16fa94f8\""));
+    TEST_ASSERT_NULL(strstr(out, "\"assets\":[]"));
+    sg_graph_t *graph = malloc(sizeof(*graph));
+    sg_diagnostic_t diag;
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_parse(out, out_len, graph, &diag));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_assets_validate(graph, &diag));
+    free(graph); free(out);
+}
 int main(void)
 {
     UNITY_BEGIN();
@@ -592,6 +659,7 @@ int main(void)
     RUN_TEST(test_invalid_json_version_and_limits);
     RUN_TEST(test_selection_two_projects_and_legacy);
     RUN_TEST(test_corruption_is_safe_failure);
+    RUN_TEST(test_list_skips_corrupt_project);
     RUN_TEST(test_truncated_saved_json_and_pointer);
     RUN_TEST(test_failures_preserve_latest_and_skip_orphans);
     RUN_TEST(test_every_save_write_failure);
@@ -611,5 +679,6 @@ int main(void)
     RUN_TEST(test_invalid_arguments_and_missing_selection_target);
     RUN_TEST(test_native_atomic_pointer_replacement);
     RUN_TEST(test_seed_default_builds_manifest_and_defers_to_saved_project);
+    RUN_TEST(test_seed_default_accepts_non_terminated_blob);
     return UNITY_END();
 }

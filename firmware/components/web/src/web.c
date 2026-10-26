@@ -485,11 +485,11 @@ static esp_err_t maintenance_reserve_checked(bool stopped)
     if (!actuation_ready() && audio_err == ESP_ERR_INVALID_STATE) audio_err = ESP_OK;
     if (err == ESP_OK) err = audio_err;
     if (err != ESP_OK) {
-        /* A failed sound reset is not safe to undo: its old runtime may still
-         * be armed. Require an explicit readiness recovery instead. */
-        portENTER_CRITICAL(&s_control_state_mux);
-        s_actuation_ready = false;
-        portEXIT_CRITICAL(&s_control_state_mux);
+        /* The reserve failed before quiescence, so nothing was mutated. Abort
+         * the maintenance and let web_maintenance_end() apply the existing
+         * re-inhibit/readiness rule (a transient timeout can recover there).
+         * Do not force readiness closed here: a one-shot timeout would
+         * otherwise latch the decoder unusable until an explicit recovery. */
         web_maintenance_end();
     }
     return err;
@@ -529,6 +529,19 @@ esp_err_t web_maintenance_begin(bool exclusive_fs)
     return err;
 }
 
+/* Releasing readiness is a short, bounded operation: a transient runtime
+ * timeout must not permanently latch actuation off. Only ESP_ERR_TIMEOUT is
+ * retried (INVALID_STATE means the subsystem is not initialised at all). */
+static esp_err_t set_inhibited_retry(esp_err_t (*set)(bool), bool inhibited)
+{
+    esp_err_t err = set(inhibited);
+    for (unsigned attempt = 1U; attempt < 3U && err == ESP_ERR_TIMEOUT; ++attempt) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        err = set(inhibited);
+    }
+    return err;
+}
+
 void web_maintenance_end(void)
 {
     if (s_maintenance_owner != xTaskGetCurrentTaskHandle()) return;
@@ -543,8 +556,17 @@ void web_maintenance_end(void)
     }
     (void)xSemaphoreTake(s_control_mutex, portMAX_DELAY);
     bool ready = actuation_ready();
-    esp_err_t sound_err = sound_set_inhibited(!ready);
-    esp_err_t audio_err = audio_set_inhibited(!ready);
+    esp_err_t sound_err;
+    esp_err_t audio_err;
+    if (ready) {
+        /* Un-inhibit attempts happen before the final state update; the
+         * retries are bounded to two 10 ms waits. */
+        sound_err = set_inhibited_retry(sound_set_inhibited, false);
+        audio_err = set_inhibited_retry(audio_set_inhibited, false);
+    } else {
+        sound_err = sound_set_inhibited(true);
+        audio_err = audio_set_inhibited(true);
+    }
     if (ready && (sound_err != ESP_OK || audio_err != ESP_OK)) {
         ready = false;
         (void)sound_set_inhibited(true);
@@ -777,8 +799,17 @@ void web_motion_changed(uint8_t speed, bool forward)
 
 void web_emergency_reset(void)
 {
-    if (s_func_mutex != NULL &&
-        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+    bool locked = false;
+    if (s_func_mutex != NULL) {
+        locked = xSemaphoreTake(s_func_mutex, portMAX_DELAY) == pdTRUE;
+    }
+    /* Emergency clearing must never depend on the lock being available: the
+     * caller is already stopping the locomotive, so a lost mutex would leave
+     * AUX/lights latched. Only a NULL/deleted mutex (or a failed take) reaches
+     * this path; clear the state unlocked and report it. */
+    if (!locked) {
+        ESP_LOGW(TAG, "emergency reset without function lock");
+    }
     memset(s_fn, 0, sizeof(s_fn));
     for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
         (void)auxio_set_enabled(ch, false);
@@ -788,7 +819,7 @@ void web_emergency_reset(void)
     sound_set_logic(false, false, false, false, s_logic_notch);
     s_motion_speed = 0;
     s_motion_initialized = true;
-    if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+    if (locked) xSemaphoreGive(s_func_mutex);
 }
 
 void web_func_audio_slots(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b)
@@ -1311,11 +1342,60 @@ static esp_err_t graph_reference_post(httpd_req_t *req)
     maintenance = err == ESP_OK;
     if (err == ESP_OK) err = maintenance_quiesce(false);
     if (err == ESP_OK) { err = storage_access_begin(); lease = err == ESP_OK; }
-    if (err == ESP_OK) err = sg_store_select_legacy();
+
+    sg_store_descriptor_t *projects = NULL;
+    sg_graph_t *graph = NULL;
+    sound_graph_prepared_t *prepared = NULL;
+    sg_diagnostic_t diag = {0};
+    char *json = NULL;
+    size_t json_len = 0;
+    uint32_t revision = 0, actual = 0;
+    bool found = false;
+
+    if (err == ESP_OK) {
+        projects = calloc(SG_STORE_MAX_PROJECTS, sizeof(*projects));
+        if (projects == NULL) err = ESP_ERR_NO_MEM;
+    }
+    if (err == ESP_OK) {
+        size_t count = 0;
+        err = sg_store_list(projects, SG_STORE_MAX_PROJECTS, &count);
+        for (size_t i = 0; err == ESP_OK && i < count; ++i) {
+            if (strcmp(projects[i].id, SG_DEFAULT_PROJECT_ID) == 0 &&
+                (!found || projects[i].revision > revision)) {
+                revision = projects[i].revision;
+                found = true;
+            }
+        }
+        if (err == ESP_OK && !found) err = ESP_ERR_NOT_FOUND;
+    }
+    if (err == ESP_OK) {
+        graph = malloc(sizeof(*graph));
+        if (graph == NULL) err = ESP_ERR_NO_MEM;
+    }
+    if (err == ESP_OK) err = sg_store_read(SG_DEFAULT_PROJECT_ID, revision, &json, &json_len, &actual);
+    if (err == ESP_OK) err = sg_parse(json, json_len, graph, &diag);
+    free(json);
+    if (err == ESP_OK) err = sg_assets_validate(graph, &diag);
+    if (err == ESP_OK) err = sound_graph_prepare(graph, SG_DEFAULT_PROJECT_ID, actual, &prepared);
+    if (err == ESP_OK) err = sg_store_select(SG_DEFAULT_PROJECT_ID, actual);
+    if (err == ESP_OK) {
+        sound_graph_commit(prepared); prepared = NULL;
+        uint32_t levels = 0;
+        if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+        for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) if (s_fn[fn]) levels |= 1UL << fn;
+        sound_graph_prime_functions(levels);
+        if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
+    }
+    sound_graph_prepared_free(prepared); free(graph); free(projects);
     if (lease) storage_access_end();
     if (maintenance) web_maintenance_end();
-    if (err != ESP_OK) return graph_result_error(req, err);
-    sound_graph_deactivate();
+    if (err == ESP_ERR_NOT_FOUND) return graph_error(req, "404 Not Found", "default project not installed");
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "reference install failed: %s", esp_err_to_name(err));
+        if (diag.message[0] && err != ESP_ERR_NO_MEM && err != ESP_ERR_TIMEOUT)
+            return graph_diagnostic_response(req, &diag, false);
+        return graph_result_error(req, err);
+    }
     return send_json(req, "{\"ok\":true}");
 }
 
@@ -4885,8 +4965,33 @@ static esp_err_t transfer_start(httpd_req_t *req, esp_err_t (*handler)(httpd_req
     return ESP_OK;
 }
 
+/* Browser CSRF guard: a mutating request with an Origin/Referer must name the
+ * same authority as Host. Requests without either header (curl, device-to-
+ * device clients) remain accepted. */
+static bool request_same_origin(httpd_req_t *req)
+{
+    char origin[256] = { 0 };
+    char referer[512] = { 0 };
+    char host[256] = { 0 };
+    esp_err_t origin_err = httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin));
+    esp_err_t referer_err = httpd_req_get_hdr_value_str(req, "Referer", referer, sizeof(referer));
+    esp_err_t host_err = httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+    if ((origin_err != ESP_OK && origin_err != ESP_ERR_NOT_FOUND) ||
+        (referer_err != ESP_OK && referer_err != ESP_ERR_NOT_FOUND) ||
+        (host_err != ESP_OK && host_err != ESP_ERR_NOT_FOUND)) {
+        return false;
+    }
+    return web_util_same_origin(origin_err == ESP_OK ? origin : NULL,
+                                referer_err == ESP_OK ? referer : NULL,
+                                host_err == ESP_OK ? host : NULL);
+}
+
 static esp_err_t mutation_dispatch(httpd_req_t *req)
 {
+    if (!request_same_origin(req)) {
+        return close_rejected_body(req,
+            httpd_resp_send_err(req, (httpd_err_code_t)403, "cross-origin request"));
+    }
     char query[WEB_QUERY_MAX] = { 0 };
     esp_err_t query_err = httpd_req_get_url_query_str(req, query, sizeof(query));
     if (httpd_req_get_url_query_len(req) >= sizeof(query) ||

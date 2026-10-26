@@ -104,6 +104,52 @@ static void cal_ceiling_adc(int channel)
     }
 }
 
+/* Partial-run curve: low speeds stall, the next few speeds are measurable,
+ * then the acceptance ceiling ends the sweep before a full plan is reached. */
+static void cal_partial_high_end_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        uint8_t spd = s_target_speed;
+        int raw = 0;
+        if (spd >= 50U) {
+            raw = 1200; /* ~93% of the rail: above the 85% acceptance ceiling. */
+        } else if (spd >= 20U) {
+            raw = 60 + (int)spd * 5; /* Trusted end fraction, above the minimum. */
+        }
+        mock_adc_raw[PIN_BEMF1 - 1] = raw;
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    }
+}
+
+static void cal_partial_low_end_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        uint8_t spd = s_target_speed;
+        int raw = 0;
+        if (spd >= 50U) {
+            raw = 1200; /* Above the ceiling. */
+        } else if (spd >= 20U) {
+            raw = 20; /* Measurable but ends below SETTINGS_BEMF_CAL_MIN_END_FRAC. */
+        }
+        mock_adc_raw[PIN_BEMF1 - 1] = raw;
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    }
+}
+
+/* BEMF is zero for the first 200 ms and then rises: a slow rotor that starts
+ * moving well before the minimum settle time must not be classified as stalled. */
+static void cal_late_start_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        mock_adc_raw[PIN_BEMF1 - 1] =
+            g_now_ticks < 200U ? 0 : 60 + (int)s_target_speed * 5;
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    }
+}
+
 /* Synthetic motor for adaptive tests: freewheel BEMF follows the last driven
  * duty, with an optional friction deadband. */
 static uint16_t g_synth_scale = 500;
@@ -301,7 +347,7 @@ static void cv_defaults(void)
 {
     memset(g_cv, 0, sizeof(g_cv));
     g_cv[1] = 3;
-    g_cv[2] = 0;   /* Vstart */
+    g_cv[2] = 0;   /* Vstart: step 1 is lifted to MOTOR_CREEP_MIN_DUTY */
     g_cv[5] = 255; /* Vhigh: full */
     g_cv[6] = 128; /* Vmid: half */
     g_cv[7] = 4;
@@ -395,8 +441,9 @@ static void test_speed_duty_zero(void)
 static void test_speed_duty_linear_curve(void)
 {
     /* Factory curve: CV2=0 (Vstart=0), CV5=255 (Vhigh=1020), CV6=128 (Vmid=512).
-     * The lowest steps must stay small so setting a small speed really creeps. */
-    TEST_ASSERT_EQUAL_UINT32(0, speed_duty(1));
+     * Step 1 is lifted to the creep minimum so the first speed notch still
+     * moves the motor; higher steps keep their curve values. */
+    TEST_ASSERT_EQUAL_UINT32(MOTOR_CREEP_MIN_DUTY, speed_duty(1));
     TEST_ASSERT_EQUAL_UINT32(74, speed_duty(10)); /* 512 * 9 / 62 */
     TEST_ASSERT_EQUAL_UINT32(512, speed_duty(63));
     TEST_ASSERT_EQUAL_UINT32(1020, speed_duty(126));
@@ -2380,6 +2427,93 @@ static void test_adaptive_calibration_skips_stalled_points(void)
     TEST_ASSERT_TRUE(g_cal.speed[0] > 5U); /* low-speed points were skipped */
 }
 
+/* A ceiling or skipped low-speed points can leave fewer than the planned
+ * minimum number of points. A validated partial curve ending above the trust
+ * threshold is usable and must be saved instead of failing as CURVE. */
+static void test_adaptive_calibration_accepts_trusted_partial_curve(void)
+{
+    g_delay_hook = refresh_calibration_rail;
+    g_adc_hook = cal_partial_high_end_adc;
+    motor_set_rail_voltage_mv(1000);
+
+    motor_bemf_cal_config_t cfg;
+    motor_bemf_cal_default_config(&cfg);
+    cfg.mode = MOTOR_BEMF_MODE_THOROUGH;
+    cfg.points = 16;
+    cfg.settle_ms = 160;
+    cfg.settle_max_ms = 480;
+    cfg.samples = 4;
+    cfg.retries = 1;
+    cfg.interval_ms = 40;
+    g_create_hook = finish_task_before_create_returns;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
+
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+    TEST_ASSERT_TRUE(g_cal_valid);
+    TEST_ASSERT_TRUE(g_cal.count >= 2U);
+    TEST_ASSERT_TRUE(g_cal.count < BEMF_CAL_MIN_PLAN);
+    TEST_ASSERT_EQUAL_UINT8(g_cal.count, s_cal_profile.measured_points);
+    TEST_ASSERT_TRUE(s_cal_profile.ceiling_speed == 52U);
+    TEST_ASSERT_TRUE(g_cal.frac[g_cal.count - 1U] >= SETTINGS_BEMF_CAL_MIN_END_FRAC);
+}
+
+/* The same partial shape is still rejected when its last measured fraction is
+ * below the trust threshold. */
+static void test_adaptive_calibration_rejects_untrusted_partial_curve(void)
+{
+    g_delay_hook = refresh_calibration_rail;
+    g_adc_hook = cal_partial_low_end_adc;
+    motor_set_rail_voltage_mv(1000);
+
+    motor_bemf_cal_config_t cfg;
+    motor_bemf_cal_default_config(&cfg);
+    cfg.mode = MOTOR_BEMF_MODE_THOROUGH;
+    cfg.points = 16;
+    cfg.settle_ms = 160;
+    cfg.settle_max_ms = 480;
+    cfg.samples = 4;
+    cfg.retries = 1;
+    cfg.interval_ms = 40;
+    g_create_hook = finish_task_before_create_returns;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
+
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_CURVE, s_cal_reason);
+    TEST_ASSERT_EQUAL_UINT8(3, s_cal_profile.measured_points);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_FALSE(g_cal_valid);
+}
+
+/* The first probe returns zero BEMF, but the rotor starts before settle_min.
+ * The point must be measured, not classified as a stall. */
+static void test_cal_low_bemf_before_settle_min_is_not_stall(void)
+{
+    g_delay_hook = refresh_calibration_rail;
+    g_adc_hook = cal_late_start_adc;
+    motor_set_rail_voltage_mv(1000);
+
+    motor_bemf_cal_config_t cfg = {0};
+    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
+    cfg.points = 10;
+    cfg.settle_ms = 600;
+    cfg.settle_max_ms = 1200;
+    cfg.samples = 4;
+    cfg.retries = 0; /* No boost retry: the first attempt itself must succeed. */
+    cfg.interval_ms = 40;
+    cfg.speed_count = 10;
+    const uint8_t speeds[10] = { 5, 20, 35, 50, 65, 80, 95, 108, 118, 126 };
+    memcpy(cfg.speed, speeds, sizeof(speeds));
+    g_create_hook = finish_task_before_create_returns;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
+
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, s_cal_result);
+    TEST_ASSERT_TRUE(g_cal_valid);
+    TEST_ASSERT_EQUAL_UINT8(10, g_cal.count);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cal_profile.stalled_points);
+    TEST_ASSERT_EQUAL_UINT8(5, g_cal.speed[0]);
+}
+
 static void test_custom_calibration_speeds(void)
 {
     g_delay_hook = refresh_calibration_rail;
@@ -3036,6 +3170,40 @@ static void test_cal_apply_control_failure_latched_before_cleanup_cancel(void)
     TEST_ASSERT_TRUE(g_cal_valid); /* Save completed before runtime admission failed. */
 }
 
+static unsigned g_saving_acquire_count;
+
+static void fail_cleanup_acquire_after_save(SemaphoreHandle_t semaphore, TickType_t wait)
+{
+    TEST_ASSERT_TRUE(semaphore == s_control_mutex);
+    TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(MOTOR_TICK_MS), wait);
+    if (s_cal_result == MOTOR_BEMF_CAL_SAVING) {
+        ++g_saving_acquire_count;
+        if (g_saving_acquire_count == 2U) {
+            /* Second SAVING acquire is the post-save cleanup. */
+            mock_sem_take_fail = 1;
+            g_sem_take_hook = NULL;
+        }
+    }
+}
+
+static void test_cal_cleanup_lock_timeout_after_save_reports_success(void)
+{
+    start_valid_calibration();
+    g_delay_hook = refresh_calibration_rail;
+    g_saving_acquire_count = 0;
+    g_sem_take_hook = fail_cleanup_acquire_after_save;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+
+    TEST_ASSERT_EQUAL_UINT32(2, g_saving_acquire_count);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, s_cal_result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NONE, s_cal_reason);
+    TEST_ASSERT_EQUAL(ESP_OK, s_cal_error_code);
+    TEST_ASSERT_TRUE(g_cal_valid);
+    TEST_ASSERT_EQUAL_UINT8(BEMF_CAL_POINTS, g_cal.count);
+    TEST_ASSERT_TRUE(s_reset_requested);
+    TEST_ASSERT_FALSE(s_cal_active);
+}
+
 static void test_cal_cancel_before_storage_failure_detection_keeps_cancelled(void)
 {
     start_valid_calibration();
@@ -3056,6 +3224,7 @@ int main(void)
     RUN_TEST(test_cal_save_failure_latched_before_cleanup_cancel_preserves_runtime);
     RUN_TEST(test_cal_curve_failure_latched_before_cleanup_cancel);
     RUN_TEST(test_cal_apply_control_failure_latched_before_cleanup_cancel);
+    RUN_TEST(test_cal_cleanup_lock_timeout_after_save_reports_success);
     RUN_TEST(test_cal_cancel_before_storage_failure_detection_keeps_cancelled);
     RUN_TEST(test_cal_control_mutex_failure_reports_control_and_releases_reservation);
     RUN_TEST(test_cal_full_invalid_curve_reports_curve_preserves_old_runtime);
@@ -3101,6 +3270,9 @@ int main(void)
     RUN_TEST(test_cal_stops_at_ceiling_and_saves_partial_curve);
     RUN_TEST(test_adaptive_calibration_inserts_points);
     RUN_TEST(test_adaptive_calibration_skips_stalled_points);
+    RUN_TEST(test_adaptive_calibration_accepts_trusted_partial_curve);
+    RUN_TEST(test_adaptive_calibration_rejects_untrusted_partial_curve);
+    RUN_TEST(test_cal_low_bemf_before_settle_min_is_not_stall);
     RUN_TEST(test_custom_calibration_speeds);
     RUN_TEST(test_custom_calibration_rejects_bad_speeds);
     RUN_TEST(test_adaptive_calibration_applies_recommended_pid);

@@ -256,6 +256,231 @@ void sanitize_name(const char *in, char *out, size_t out_len)
     out[w] = '\0';
 }
 
+typedef struct {
+    const char *host;
+    size_t host_len;
+    unsigned port;
+    bool has_port;
+} web_util_authority_t;
+
+static char web_util_ascii_lower(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool web_util_ascii_ieq(const char *a, size_t alen, const char *b, size_t blen)
+{
+    if (alen != blen) {
+        return false;
+    }
+    for (size_t i = 0; i < alen; ++i) {
+        if (web_util_ascii_lower(a[i]) != web_util_ascii_lower(b[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool web_util_ws(char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+static bool web_util_ascii_alnum(char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+}
+
+static bool web_util_parse_port(const char *s, size_t len, unsigned *port)
+{
+    if (s == NULL || port == NULL || len == 0U || len > 5U) {
+        return false;
+    }
+    unsigned value = 0U;
+    for (size_t i = 0; i < len; ++i) {
+        if (s[i] < '0' || s[i] > '9') {
+            return false;
+        }
+        value = value * 10U + (unsigned)(s[i] - '0');
+    }
+    if (value > 65535U) {
+        return false;
+    }
+    *port = value;
+    return true;
+}
+
+/* Parse `host[:port]` or `[ipv6][:port]` without a scheme or path. */
+static bool web_util_parse_authority(const char *s, size_t len, web_util_authority_t *out)
+{
+    if (s == NULL || out == NULL || len == 0U) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)s[i];
+        if (c <= 0x20U || c >= 0x7fU || c == '@' || c == '/' || c == '?' || c == '#') {
+            return false;
+        }
+    }
+    if (s[0] == '[') {
+        size_t close = 1U;
+        while (close < len && s[close] != ']') {
+            ++close;
+        }
+        if (close == len || close == 1U) {
+            return false;
+        }
+        for (size_t i = 1U; i < close; ++i) {
+            char c = s[i];
+            if (!(web_util_ascii_alnum(c) || c == ':' || c == '.' || c == '-' || c == '%')) {
+                return false;
+            }
+        }
+        out->host = s;
+        out->host_len = close + 1U;
+        size_t rest = close + 1U;
+        if (rest == len) {
+            return true;
+        }
+        if (s[rest] != ':' || !web_util_parse_port(s + rest + 1U, len - rest - 1U, &out->port)) {
+            return false;
+        }
+        out->has_port = true;
+        return true;
+    }
+    size_t colon = len;
+    for (size_t i = 0; i < len; ++i) {
+        if (s[i] == ':') {
+            colon = i;
+            break;
+        }
+    }
+    if (colon == 0U) {
+        return false;
+    }
+    for (size_t i = 0; i < colon; ++i) {
+        char c = s[i];
+        if (!(web_util_ascii_alnum(c) || c == '-' || c == '.' || c == '_')) {
+            return false;
+        }
+    }
+    out->host = s;
+    out->host_len = colon;
+    if (colon == len) {
+        return true;
+    }
+    if (!web_util_parse_port(s + colon + 1U, len - colon - 1U, &out->port)) {
+        return false;
+    }
+    out->has_port = true;
+    return true;
+}
+
+/* Extract the authority from `scheme://authority[/path][?query]` and report
+ * the scheme's default port. Only http/https are accepted. */
+static bool web_util_parse_origin_url(const char *value, web_util_authority_t *out,
+                                      unsigned *default_port)
+{
+    const char *p = value;
+    while (web_util_ws(*p)) {
+        ++p;
+    }
+    const char *end = p + strlen(p);
+    while (end > p && web_util_ws(end[-1])) {
+        --end;
+    }
+    size_t len = (size_t)(end - p);
+    if (len == 0U) {
+        return false;
+    }
+    size_t sep = 0U;
+    while (sep + 2U < len && !(p[sep] == ':' && p[sep + 1U] == '/' && p[sep + 2U] == '/')) {
+        ++sep;
+    }
+    if (sep + 2U >= len) {
+        return false;
+    }
+    if (sep == 4U && web_util_ascii_ieq(p, 4U, "http", 4U)) {
+        *default_port = 80U;
+    } else if (sep == 5U && web_util_ascii_ieq(p, 5U, "https", 5U)) {
+        *default_port = 443U;
+    } else {
+        return false;
+    }
+    const char *authority = p + sep + 3U;
+    size_t authority_len = len - sep - 3U;
+    size_t used = 0U;
+    while (used < authority_len && authority[used] != '/' && authority[used] != '?' &&
+           authority[used] != '#') {
+        ++used;
+    }
+    return web_util_parse_authority(authority, used, out);
+}
+
+static bool web_util_parse_host_header(const char *value, web_util_authority_t *out)
+{
+    const char *p = value;
+    while (web_util_ws(*p)) {
+        ++p;
+    }
+    const char *end = p + strlen(p);
+    while (end > p && web_util_ws(end[-1])) {
+        --end;
+    }
+    return web_util_parse_authority(p, (size_t)(end - p), out);
+}
+
+bool web_util_same_origin(const char *origin, const char *referer, const char *host)
+{
+    const char *source = NULL;
+    if (origin != NULL) {
+        const char *p = origin;
+        while (web_util_ws(*p)) {
+            ++p;
+        }
+        if (*p != '\0') {
+            source = origin;
+        }
+    }
+    if (source == NULL && referer != NULL) {
+        const char *p = referer;
+        while (web_util_ws(*p)) {
+            ++p;
+        }
+        if (*p != '\0') {
+            source = referer;
+        }
+    }
+    if (source == NULL) {
+        return true; /* Non-browser client without Origin/Referer. */
+    }
+    {
+        const char *p = source;
+        while (web_util_ws(*p)) {
+            ++p;
+        }
+        if (web_util_ascii_ieq(p, strlen(p), "null", 4U)) {
+            return false;
+        }
+    }
+    if (host == NULL) {
+        return false;
+    }
+    web_util_authority_t source_authority;
+    web_util_authority_t host_authority;
+    unsigned default_port = 0U;
+    if (!web_util_parse_origin_url(source, &source_authority, &default_port) ||
+        !web_util_parse_host_header(host, &host_authority)) {
+        return false;
+    }
+    unsigned source_port = source_authority.has_port ? source_authority.port : default_port;
+    unsigned host_port = host_authority.has_port ? host_authority.port : default_port;
+    return source_port == host_port &&
+           web_util_ascii_ieq(source_authority.host, source_authority.host_len,
+                              host_authority.host, host_authority.host_len);
+}
+
 /* Direction / speed gates: a function only drives its output while its
  * configured motion condition holds. */
 static bool func_cond_ok(const settings_func_map_t *m, bool motion_forward,

@@ -1,5 +1,6 @@
 #include "sound_graph_store.h"
 #include "audio.h"
+#include "esp_log.h"
 #include "storage.h"
 
 #include <dirent.h>
@@ -27,6 +28,7 @@
 
 #define SG_PATH_CAP 256U
 #define SG_SCAN_BYTES (32U * 1024U * 1024U)
+static const char *TAG = "sound_graph_store";
 static atomic_flag s_store_busy = ATOMIC_FLAG_INIT;
 
 static esp_err_t diagnostic(sg_diagnostic_t *d, esp_err_t err, const char *message)
@@ -411,6 +413,17 @@ static esp_err_t selection_probe(bool *exists, bool *legacy)
     return err;
 }
 
+/* Bounded literal search: the embedded scheme blob has no NUL terminator. */
+static const char *bounded_find(const char *hay, size_t hay_len,
+                                const char *needle, size_t needle_len)
+{
+    if (needle_len > hay_len) { return NULL; }
+    for (size_t i = 0; i + needle_len <= hay_len; ++i) {
+        if (hay[i] == needle[0] && !memcmp(hay + i, needle, needle_len)) { return hay + i; }
+    }
+    return NULL;
+}
+
 /* Serialize one asset entry for the built-in project's manifest. */
 static int seed_asset_json(char *out, size_t cap, bool first, const sg_asset_t *a)
 {
@@ -479,17 +492,35 @@ esp_err_t sg_store_seed_default(const char *id, const char *json, size_t len,
         if (!earlier) { ++unique; }
     }
 
-    /* `"assets":[]` is the placeholder written by the editor build. */
-    const char *placeholder = "\"assets\":[]";
-    const char *at = err == ESP_OK ? strstr(json, placeholder) : NULL;
+    /* `"assets":[]` is the placeholder written by the editor build. The blob
+     * is not NUL-terminated, so all offsets come from `len`, never strlen. */
+    static const char placeholder[] = "\"assets\":[]";
+    static const char assets_open[] = "\"assets\":[";
+    const size_t placeholder_len = sizeof(placeholder) - 1U;
+    const char *at = err == ESP_OK ? bounded_find(json, len, placeholder, placeholder_len) : NULL;
     if (err == ESP_OK && !at) { err = ESP_ERR_INVALID_ARG; }
-    size_t head = err == ESP_OK ? (size_t)(at - json) + strlen("\"assets\":[") : 0;
-    size_t tail_off = err == ESP_OK ? (size_t)(at - json) + strlen(placeholder) : 0;
-    size_t tail_len = err == ESP_OK ? strlen(json + tail_off) : 0;
-    size_t cap = err == ESP_OK ? head + unique * 256U + 2U + tail_len + 1U : 0;
+    size_t head = err == ESP_OK ? (size_t)(at - json) + sizeof(assets_open) - 1U : 0;
+    size_t tail_off = err == ESP_OK ? (size_t)(at - json) + placeholder_len : 0;
+    size_t tail_len = err == ESP_OK ? len - tail_off : 0;
+    size_t cap = 0;
     char *out = NULL;
     size_t used = 0;
-    if (err == ESP_OK && (cap > SG_MAX_JSON || !(out = malloc(cap)))) { err = cap > SG_MAX_JSON ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM; }
+    if (err == ESP_OK) {
+        size_t extra;
+        if (unique > (SIZE_MAX - 2U) / 256U) {
+            err = ESP_ERR_INVALID_SIZE;
+        } else {
+            extra = unique * 256U + 2U;
+            if (head > SG_MAX_JSON || extra > SG_MAX_JSON - head ||
+                tail_len > SG_MAX_JSON - head - extra) {
+                err = ESP_ERR_INVALID_SIZE;
+            } else {
+                cap = head + extra + tail_len + 1U;
+                out = malloc(cap);
+                if (!out) { err = ESP_ERR_NO_MEM; }
+            }
+        }
+    }
 
     if (err == ESP_OK) {
         memcpy(out, json, head);
@@ -513,8 +544,9 @@ esp_err_t sg_store_seed_default(const char *id, const char *json, size_t len,
     }
     if (err == ESP_OK) {
         out[used++] = ']';
-        memcpy(out + used, json + tail_off, tail_len + 1U);
+        memcpy(out + used, json + tail_off, tail_len);
         used += tail_len;
+        out[used] = 0;
         /* The parsed graph is no longer needed; drop it before the store saves
          * another copy so the peak heap stays within a normal editor save. */
         free(graph);
@@ -637,20 +669,37 @@ esp_err_t sg_store_list(sg_store_descriptor_t *out, size_t cap, size_t *count)
         if (++entries > SG_STORE_MAX_ENTRIES) { err = ESP_ERR_INVALID_SIZE; break; }
         size_t n = strlen(entry->d_name);
         if (n <= 7 || strcmp(entry->d_name + n - 7, ".latest")) { continue; }
-        if (n - 7 >= SG_ID_CAP) { err = ESP_FAIL; break; }
-        char id[SG_ID_CAP]; memcpy(id, entry->d_name, n - 7); id[n - 7] = 0;
-        if (!sg_id_valid(id)) { err = ESP_FAIL; break; }
-        if (*count >= cap || *count >= SG_STORE_MAX_PROJECTS) { err = ESP_ERR_INVALID_SIZE; break; }
-        char *json = NULL; size_t len = 0; uint32_t revision;
-        err = read_locked(id, 0, &json, &len, &revision);
-        if (err == ESP_OK && (bytes += len) > SG_SCAN_BYTES) { err = ESP_ERR_INVALID_SIZE; }
-        sg_graph_t *graph = err == ESP_OK ? malloc(sizeof(*graph)) : NULL;
-        if (err == ESP_OK && !graph) { err = ESP_ERR_NO_MEM; }
-        if (err == ESP_OK) { err = sg_parse(json, len, graph, NULL); }
-        if (err == ESP_OK) {
-            strcpy(out[*count].id, id); strcpy(out[*count].name, graph->name);
-            out[*count].revision = revision; ++*count;
+        /* A malformed name is one broken project entry, not a reason to hide
+         * the remaining healthy projects from the caller. */
+        if (n - 7 >= SG_ID_CAP) {
+            ESP_LOGW(TAG, "Skipping project with overlong id: %s", entry->d_name);
+            continue;
         }
+        char id[SG_ID_CAP]; memcpy(id, entry->d_name, n - 7); id[n - 7] = 0;
+        if (!sg_id_valid(id)) {
+            ESP_LOGW(TAG, "Skipping project with invalid id: %s", id);
+            continue;
+        }
+        if (*count >= cap || *count >= SG_STORE_MAX_PROJECTS) { err = ESP_ERR_INVALID_SIZE; break; }
+        char *json = NULL; size_t len = 0; uint32_t revision = 0;
+        err = read_locked(id, 0, &json, &len, &revision);
+        if (err == ESP_ERR_NO_MEM) { free(json); break; }
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Skipping unreadable project '%s' (error %d)", id, (int)err);
+            free(json); err = ESP_OK;
+            continue;
+        }
+        if ((bytes += len) > SG_SCAN_BYTES) { free(json); err = ESP_ERR_INVALID_SIZE; break; }
+        sg_graph_t *graph = malloc(sizeof(*graph));
+        if (!graph) { free(json); err = ESP_ERR_NO_MEM; break; }
+        err = sg_parse(json, len, graph, NULL);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Skipping project '%s' with invalid JSON (error %d)", id, (int)err);
+            free(graph); free(json); err = ESP_OK;
+            continue;
+        }
+        strcpy(out[*count].id, id); strcpy(out[*count].name, graph->name);
+        out[*count].revision = revision; ++*count;
         free(graph); free(json);
     }
     if (closedir(dir)) { err = ESP_FAIL; }

@@ -4180,9 +4180,9 @@ function renderNodes(){
     el.style.left=b.x+"px";el.style.top=b.y+"px";el.dataset.id=b.id;el.style.borderColor=color;
     if(b.type==="engine")el.style.minHeight=Math.max(80,40+(engineRuns(b).length+1)*20)+"px";
     const hasChainPlay=viewMode!=="mix"||project.links.some(l=>l.to===b.id);
-    el.innerHTML='<div class="hd" data-drag="'+b.id+'" style="background:'+hexA(color,0.30)+'"><b>'+esc(title)+'</b>'+(sameLabel(title,typeLabel)?'':'<span class="tt" title="'+esc(t("block_type"))+': '+esc(typeLabel)+'">'+esc(typeLabel)+'</span>')+(readyIds.has(b.id)?'<span class="okbadge" title="'+esc(t("tip_configured"))+'">✓</span>':'')+(blockPreviewFile(b)&&hasChainPlay?'<button class="chain" data-chain="'+b.id+'" title="'+esc(t("tip_play"))+'" aria-label="'+esc(t("tip_play"))+'">▶</button>':'')+'<button class="x" data-del="'+b.id+'" title="'+esc(t("tip_del_block"))+'" aria-label="'+esc(t("tip_del_block"))+'">'+TRASH+'</button></div>'+
+    el.innerHTML='<div class="hd" data-drag="'+esc(b.id)+'" style="background:'+hexA(color,0.30)+'"><b>'+esc(title)+'</b>'+(sameLabel(title,typeLabel)?'':'<span class="tt" title="'+esc(t("block_type"))+': '+esc(typeLabel)+'">'+esc(typeLabel)+'</span>')+(readyIds.has(b.id)?'<span class="okbadge" title="'+esc(t("tip_configured"))+'">✓</span>':'')+(blockPreviewFile(b)&&hasChainPlay?'<button class="chain" data-chain="'+esc(b.id)+'" title="'+esc(t("tip_play"))+'" aria-label="'+esc(t("tip_play"))+'">▶</button>':'')+'<button class="x" data-del="'+esc(b.id)+'" title="'+esc(t("tip_del_block"))+'" aria-label="'+esc(t("tip_del_block"))+'">'+TRASH+'</button></div>'+
       '<div class="bd"><span class="live-badge" data-live-badge></span>'+nodeSummary(b)+"</div>"+
-      (hasIn?'<div class="port in" data-in="'+b.id+'"><span class="lbl">'+esc(t("port_in"))+'</span></div>':'')+
+      (hasIn?'<div class="port in" data-in="'+esc(b.id)+'"><span class="lbl">'+esc(t("port_in"))+'</span></div>':'')+
       (hasOut?outPortsHtml(b):'');
     box.appendChild(el);
   }
@@ -4235,11 +4235,11 @@ function portLabel(p){return ({on:t("lc_fx_on"),off:t("lc_fx_off"),hold:t("lc_fx
 function outPortsHtml(b){
   const cat=BY_TYPE[b.type];
   if(b.type==="engine"){
-    return '<div class="outports">'+enginePorts(b).map(p=>{const label=enginePortLabel(b,p);return '<div class="port out" data-out="'+b.id+'" data-port="'+p+'" title="'+esc((p==="eng_idle"||p==="eng_brake")?label:t("lc_speed")+label)+'"><span class="lbl">'+esc(label)+'</span></div>';}).join("")+'</div>';
+    return '<div class="outports">'+enginePorts(b).map(p=>{const label=enginePortLabel(b,p);return '<div class="port out" data-out="'+esc(b.id)+'" data-port="'+p+'" title="'+esc((p==="eng_idle"||p==="eng_brake")?label:t("lc_speed")+label)+'"><span class="lbl">'+esc(label)+'</span></div>';}).join("")+'</div>';
   }
   const ports=cat.outputs;
-  if(!ports||!ports.length)return '<div class="port out" data-out="'+b.id+'" data-port="out"><span class="lbl">'+esc(t("port_out"))+'</span></div>';
-  const html=ports.map((p,i)=>'<div class="port out" data-out="'+b.id+'" data-port="'+p+'" title="'+esc(portLabel(p))+'"><span class="lbl">'+esc(portLabel(p))+'</span></div>').join("");
+  if(!ports||!ports.length)return '<div class="port out" data-out="'+esc(b.id)+'" data-port="out"><span class="lbl">'+esc(t("port_out"))+'</span></div>';
+  const html=ports.map((p,i)=>'<div class="port out" data-out="'+esc(b.id)+'" data-port="'+p+'" title="'+esc(portLabel(p))+'"><span class="lbl">'+esc(portLabel(p))+'</span></div>').join("");
   return ports.length>1?'<div class="outports">'+html+'</div>':html;
 }
 function outPortOf(l){const a=project.blocks.find(x=>x.id===l.from);const cat=a?BY_TYPE[a.type]:null;
@@ -4261,8 +4261,8 @@ function renderLinks(){
   const byId={};project.blocks.forEach(b=>byId[b.id]=b);let html="";
   for(const l of project.links){const a=byId[l.from],c=byId[l.to];if(!a||!c||BY_TYPE[a.type].kind==="output"||BY_TYPE[a.type].kind==="logicout")continue;
     const p1=portPos(l.from,"out",outPortOf(l)),p2=portPos(l.to,"in"),d=curve(p1.x,p1.y,p2.x-10,p2.y);
-    html+='<path class="link-hit" data-link="'+l.id+'" d="'+d+'"></path>';
-    html+='<path class="link'+(selectedLink===l.id?" sel":"")+'" data-link="'+l.id+'" marker-end="url(#arrow)" d="'+d+'"></path>';}
+    html+='<path class="link-hit" data-link="'+esc(l.id)+'" d="'+d+'"></path>';
+    html+='<path class="link'+(selectedLink===l.id?" sel":"")+'" data-link="'+esc(l.id)+'" marker-end="url(#arrow)" d="'+d+'"></path>';}
   $("linkLayer").innerHTML=html;
   $("linkLayer").querySelectorAll("[data-link]").forEach(p=>{
     p.onclick=ev=>{ev.stopPropagation();selectedLink=p.getAttribute("data-link");selected="";selectedIds=new Set();render();showInspectorOnMobile();};

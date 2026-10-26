@@ -89,6 +89,13 @@ int web_mock_fclose(FILE *f);
 
 #define static
 #include "../../components/web/src/web_util.c"
+
+/* Header injection for CSRF tests. web_stubs.c exposes a single generic mock
+ * header, so route Origin/Referer/Host through dedicated buffers while
+ * delegating every existing header (Content-Type, X-File-Name, ...) to it. */
+esp_err_t test_web_hdr_value_str(httpd_req_t *req, const char *field, char *val,
+                                 size_t val_size);
+#define httpd_req_get_hdr_value_str test_web_hdr_value_str
 #define xTaskCreate test_capture_task
 #define esp_ota_set_boot_partition test_ordered_boot
 #define audio_is_quiescent test_audio_quiet
@@ -105,6 +112,7 @@ int web_mock_fclose(FILE *f);
 #define open test_binary_open
 #include "../../components/web/src/web.c"
 #include "../../components/web/src/web_wifi.c"
+#undef httpd_req_get_hdr_value_str
 #undef xTaskCreate
 #undef esp_ota_set_boot_partition
 #undef audio_is_quiescent
@@ -120,13 +128,37 @@ int web_mock_fclose(FILE *f);
 #undef rename
 #undef open
 #include "../../test_libs/teststubs/stubs.c"
+#define sg_store_list sg_store_list_stub
 #include "../../test_libs/teststubs/web_stubs.c"
+#undef sg_store_list
+
+/* web_stubs.c lists a single fixed "demo" project. The reference action needs
+ * the built-in project to be present, so retain the shared mock implementation
+ * and add a controllable wrapper rather than duplicating the store mocks. */
+static bool test_list_default_project;
+static uint32_t test_list_default_revision;
+
+esp_err_t sg_store_list(sg_store_descriptor_t *out, size_t capacity, size_t *count)
+{
+    esp_err_t err = sg_store_list_stub(out, capacity, count);
+    if (err != ESP_OK || !test_list_default_project) return err;
+    if (*count >= capacity || *count >= SG_STORE_MAX_PROJECTS) return ESP_ERR_INVALID_SIZE;
+    snprintf(out[*count].id, sizeof(out[*count].id), "%s", SG_DEFAULT_PROJECT_ID);
+    snprintf(out[*count].name, sizeof(out[*count].name), "ChME3 Locomotive");
+    out[*count].revision = test_list_default_revision;
+    ++*count;
+    return ESP_OK;
+}
 
 static void *test_pending_transfer;
 static unsigned test_boot_calls, test_complete_calls;
 static bool test_complete_gate_closed;
 static bool test_quiet_block, test_require_metadata, test_boot_order_error;
 static esp_err_t test_sound_inhibit_err, test_aux_enable_err;
+static int test_sound_inhibit_fail_remaining;
+static int test_sound_inhibit_calls;
+static bool test_sound_inhibit_last;
+static char test_origin_hdr[256], test_referer_hdr[512], test_host_hdr[256];
 static wifi_config_t test_ap_config;
 static esp_err_t test_ip_err, test_dhcp_stop_err, test_dhcp_start_err, test_dns_err;
 static esp_err_t test_manifest_err;
@@ -151,7 +183,19 @@ esp_err_t test_ordered_boot(const esp_partition_t *partition)
 bool test_audio_quiet(void) { return !test_quiet_block && audio_is_quiescent(); }
 esp_err_t test_sound_inhibit(bool inhibited)
 {
-    return test_sound_inhibit_err != ESP_OK ? test_sound_inhibit_err : sound_set_inhibited(inhibited);
+    ++test_sound_inhibit_calls;
+    test_sound_inhibit_last = inhibited;
+    if (test_sound_inhibit_err != ESP_OK) {
+        esp_err_t err = test_sound_inhibit_err;
+        /* fail_remaining == 0 keeps the historical persistent injection;
+         * a positive count clears the injected error after N calls. */
+        if (test_sound_inhibit_fail_remaining > 0 &&
+            --test_sound_inhibit_fail_remaining == 0) {
+            test_sound_inhibit_err = ESP_OK;
+        }
+        return err;
+    }
+    return sound_set_inhibited(inhibited);
 }
 esp_err_t test_aux_enabled(uint8_t channel, bool enabled)
 {
@@ -213,6 +257,34 @@ int test_binary_open(const char *path, int flags, int mode)
     return open(path, flags, mode);
 }
 
+esp_err_t test_web_hdr_value_str(httpd_req_t *req, const char *field, char *val,
+                                 size_t val_size)
+{
+    const char *injected = NULL;
+    if (strcmp(field, "Origin") == 0) {
+        injected = test_origin_hdr;
+    } else if (strcmp(field, "Referer") == 0) {
+        injected = test_referer_hdr;
+    } else if (strcmp(field, "Host") == 0) {
+        injected = test_host_hdr;
+    }
+    if (injected == NULL) {
+        return httpd_req_get_hdr_value_str(req, field, val, val_size);
+    }
+    if (val == NULL || val_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (injected[0] == '\0') {
+        val[0] = '\0';
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (strlen(injected) >= val_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    snprintf(val, val_size, "%s", injected);
+    return ESP_OK;
+}
+
 /* ---------- helpers ---------- */
 
 static httpd_req_t make_req(size_t content_len)
@@ -227,6 +299,13 @@ static httpd_req_t make_req(size_t content_len)
 static void set_query(const char *q)
 {
     snprintf(mock_query, sizeof(mock_query), "%s", q != NULL ? q : "");
+}
+
+static void set_csrf_headers(const char *origin, const char *referer, const char *host)
+{
+    snprintf(test_origin_hdr, sizeof(test_origin_hdr), "%s", origin != NULL ? origin : "");
+    snprintf(test_referer_hdr, sizeof(test_referer_hdr), "%s", referer != NULL ? referer : "");
+    snprintf(test_host_hdr, sizeof(test_host_hdr), "%s", host != NULL ? host : "");
 }
 
 static void set_body(const void *data, size_t len)
@@ -270,6 +349,8 @@ static void clear_files(void)
 void setUp(void)
 {
     mock_web_reset();
+    test_list_default_project = false;
+    test_list_default_revision = 0;
     mock_nvs_reset();
     clear_files();
     MKDIR("web_tmp");
@@ -302,6 +383,10 @@ void setUp(void)
     test_complete_gate_closed = false;
     test_quiet_block = test_require_metadata = test_boot_order_error = false;
     test_sound_inhibit_err = test_aux_enable_err = ESP_OK;
+    test_sound_inhibit_fail_remaining = 0;
+    test_sound_inhibit_calls = 0;
+    test_sound_inhibit_last = false;
+    set_csrf_headers(NULL, NULL, NULL);
     mock_current_task_handle = (TaskHandle_t)1;
     mock_task_create_ok = 1;
     mock_task_create_fail_after = -1;
@@ -400,7 +485,8 @@ static void test_emergency_post_cuts_all_and_clears_functions(void)
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, emergency_post(&req));
     TEST_ASSERT_EQUAL_UINT32(generation + 1U, s_control_generation);
-    TEST_ASSERT_TRUE(s_fn[1]); /* function mutex also failed: best effort */
+    /* A failed function-mutex take must still clear the function state. */
+    TEST_ASSERT_FALSE(s_fn[1]);
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
     mock_sem_take_fail = 0;
     s_fn[1] = false;
@@ -897,6 +983,35 @@ static void test_web_emergency_reset_clears_outputs(void)
     TEST_ASSERT_EQUAL_UINT8(0, s_motion_speed);
     TEST_ASSERT_TRUE(s_motion_initialized);
     TEST_ASSERT_FALSE(mock_sound_logic_drive_hold);
+
+    /* Even when the function mutex cannot be taken, emergency reset must
+     * clear the latched outputs instead of returning early. */
+    s_fn[1] = true;
+    s_fn[2] = true;
+    mock_auxio_enabled_state[AUXIO_CH_F0F] = 1;
+    mock_auxio_enabled_state[AUXIO_CH_AUX7] = 1;
+    s_outputs_applied = (uint16_t)((1U << AUXIO_CH_F0F) | (1U << AUXIO_CH_AUX7));
+    s_logic_active = (uint16_t)(1U << (FUNC_LOGIC_COAST - 1U));
+    s_motion_speed = 30;
+    mock_sem_take_fail = 1;
+    web_emergency_reset();
+    mock_sem_take_fail = 0;
+    for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) TEST_ASSERT_FALSE(s_fn[fn]);
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[ch]);
+    }
+    TEST_ASSERT_EQUAL_UINT16(0, s_outputs_applied);
+    TEST_ASSERT_EQUAL_UINT16(0, s_logic_active);
+    TEST_ASSERT_EQUAL_UINT8(0, s_motion_speed);
+
+    /* A NULL mutex follows the same unlocked fallback. */
+    s_fn[3] = true;
+    s_outputs_applied = (uint16_t)(1U << AUXIO_CH_AUX7);
+    s_func_mutex = NULL;
+    web_emergency_reset();
+    s_func_mutex = (SemaphoreHandle_t)1;
+    TEST_ASSERT_FALSE(s_fn[3]);
+    TEST_ASSERT_EQUAL_UINT16(0, s_outputs_applied);
 }
 
 static void test_all_logic_actions(void)
@@ -3839,6 +3954,39 @@ static void test_maintenance_owner_quiescence_and_timeout(void)
     TEST_ASSERT_FALSE(web_maintenance_active());
 }
 
+static void test_maintenance_transient_inhibit_timeout_keeps_ready(void)
+{
+    s_actuation_ready = true;
+    /* One-shot ESP_ERR_TIMEOUT from the reserve inhibit. */
+    test_sound_inhibit_err = ESP_ERR_TIMEOUT;
+    test_sound_inhibit_fail_remaining = 1;
+    test_sound_inhibit_calls = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_maintenance_begin(false));
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_TRUE(actuation_ready());
+    TEST_ASSERT_FALSE(motor_is_inhibited());
+    TEST_ASSERT_FALSE(mock_sound_inhibited);
+    TEST_ASSERT_FALSE(mock_audio_inhibited);
+    TEST_ASSERT_FALSE(test_sound_inhibit_last);
+}
+
+static void test_maintenance_persistent_inhibit_timeout_closes_ready(void)
+{
+    s_actuation_ready = true;
+    /* Persistent timeout: the bounded retries still fail, so readiness must
+     * close and motor/sound/audio must be re-inhibited. */
+    test_sound_inhibit_err = ESP_ERR_TIMEOUT;
+    test_sound_inhibit_fail_remaining = 0;
+    test_sound_inhibit_calls = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_maintenance_begin(false));
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_FALSE(actuation_ready());
+    TEST_ASSERT_TRUE(motor_is_inhibited());
+    TEST_ASSERT_TRUE(mock_audio_inhibited);
+    TEST_ASSERT_TRUE(test_sound_inhibit_last);
+    TEST_ASSERT_TRUE(test_sound_inhibit_calls >= 5);
+}
+
 static void test_preinit_maintenance_and_readiness(void)
 {
     s_control_mutex = NULL;
@@ -4504,6 +4652,12 @@ static const char graph_fixture[] =
     "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
     "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
 
+static const char default_graph_fixture[] =
+    "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"" SG_DEFAULT_PROJECT_ID "\",\"name\":\"ChME3\","
+    "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":3,"
+    "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+    "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
+
 static httpd_req_t graph_request(esp_err_t (*handler)(httpd_req_t *), const char *body)
 {
     httpd_req_t req = make_req(body ? strlen(body) : 0);
@@ -4511,6 +4665,58 @@ static httpd_req_t graph_request(esp_err_t (*handler)(httpd_req_t *), const char
     if (body) set_body(body, req.content_len);
     s_route_handlers[63] = handler; req.user_ctx = &s_route_handlers[63];
     return req;
+}
+
+static int test_mutation_calls;
+static esp_err_t test_mutation_handler(httpd_req_t *req)
+{
+    (void)req;
+    ++test_mutation_calls;
+    return ESP_OK;
+}
+
+static void test_mutation_dispatch_csrf_guard(void)
+{
+    httpd_req_t req = make_req(0);
+    s_route_handlers[63] = test_mutation_handler;
+    req.user_ctx = &s_route_handlers[63];
+    test_mutation_calls = 0;
+
+    /* Cross-origin POST is rejected before the handler runs. */
+    set_csrf_headers("http://evil.example", NULL, "192.168.4.1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(403, mock_resp_send_err_code);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_send_err_msg, "cross-origin"));
+    TEST_ASSERT_EQUAL_INT(0, test_mutation_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, s_mutation_count);
+
+    /* A matching Origin (default port normalised) is accepted. */
+    set_csrf_headers("http://192.168.4.1:80", NULL, "192.168.4.1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(1, test_mutation_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, s_mutation_count);
+    TEST_ASSERT_EQUAL_INT(0, mock_resp_send_err_code);
+
+    /* A matching Referer is also accepted. */
+    set_csrf_headers(NULL, "http://192.168.4.1/index.html", "192.168.4.1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(2, test_mutation_calls);
+
+    /* Non-browser clients (no Origin/Referer) keep working. */
+    set_csrf_headers(NULL, NULL, NULL);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(3, test_mutation_calls);
+
+    /* Origin: null is rejected. */
+    set_csrf_headers("null", NULL, "192.168.4.1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(403, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(3, test_mutation_calls);
 }
 
 static void seed_graph(void)
@@ -4685,28 +4891,98 @@ static void test_graph_reference_post(void)
     httpd_req_t req = make_req(0);
     uint32_t leases = mock_storage_access_leases;
     mock_motor_speed = 0; mock_motor_applied_speed = 0;
+
+    /* Success: the latest built-in revision is selected and installed. */
+    snprintf(mock_graph_json, sizeof(mock_graph_json), "%s", default_graph_fixture);
+    mock_graph_revision = 4;
+    test_list_default_project = true;
+    test_list_default_revision = 4;
     mock_graph_select_err = ESP_OK; mock_graph_select_calls = 0;
-    mock_graph_status.active = true;
+    mock_graph_commit_calls = 0; mock_graph_primed = 0;
+    memset(&mock_graph_status, 0, sizeof(mock_graph_status));
+    mock_graph_status.active = false;
+    snprintf(mock_graph_status.id, sizeof(mock_graph_status.id), "previous");
+    mock_graph_status.revision = 7;
+    s_fn[2] = true;
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
     TEST_ASSERT_EQUAL_INT(1, mock_graph_select_calls);
-    TEST_ASSERT_FALSE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_INT(1, mock_graph_commit_calls);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, mock_graph_status.id);
+    TEST_ASSERT_EQUAL_UINT32(4, mock_graph_status.revision);
+    TEST_ASSERT_TRUE((mock_graph_primed & (1U << 2)) != 0U);
     TEST_ASSERT_FALSE(web_maintenance_active());
     TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
+    s_fn[2] = false;
 
-    mock_motor_speed = 1; mock_graph_select_calls = 0; reset_resp();
+    /* Motor stopped admission still rejects before any selection. */
+    mock_motor_speed = 1;
+    mock_graph_select_calls = 0; mock_graph_commit_calls = 0;
+    mock_graph_status.active = true;
+    snprintf(mock_graph_status.id, sizeof(mock_graph_status.id), "previous");
+    mock_graph_status.revision = 7;
+    reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
     TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
     TEST_ASSERT_EQUAL_INT(0, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_commit_calls);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_graph_status.id);
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
 
-    mock_motor_speed = 0; mock_graph_select_err = ESP_FAIL; mock_graph_select_calls = 0; reset_resp();
+    /* Missing built-in project is a clear error and keeps the live graph. */
+    mock_motor_speed = 0;
+    test_list_default_project = false;
+    mock_graph_revision = 0;
+    mock_graph_select_calls = 0; mock_graph_commit_calls = 0;
+    mock_graph_status.active = true;
+    snprintf(mock_graph_status.id, sizeof(mock_graph_status.id), "previous");
+    mock_graph_status.revision = 7;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
+    TEST_ASSERT_EQUAL_STRING("404 Not Found", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "default project not installed"));
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_commit_calls);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_graph_status.id);
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
+
+    /* Selector failure keeps the previous graph active and releases admission. */
+    test_list_default_project = true;
+    mock_graph_revision = 4;
+    mock_graph_select_err = ESP_FAIL;
+    mock_graph_select_calls = 0; mock_graph_commit_calls = 0;
+    reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
     TEST_ASSERT_EQUAL_INT(1, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_commit_calls);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_graph_status.id);
     TEST_ASSERT_FALSE(web_maintenance_active());
     TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
-    mock_graph_select_err = ESP_OK;
+
+    /* Install preparation failure does not select or replace the live graph. */
+    mock_graph_select_err = ESP_OK; mock_graph_prepare_err = ESP_FAIL;
+    mock_graph_select_calls = 0; mock_graph_commit_calls = 0;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, graph_reference_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_select_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_graph_commit_calls);
+    TEST_ASSERT_TRUE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_STRING("previous", mock_graph_status.id);
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    TEST_ASSERT_EQUAL_UINT32(leases, mock_storage_access_leases);
+
+    mock_graph_prepare_err = ESP_OK;
+    test_list_default_project = false;
+    test_list_default_revision = 0;
 }
 
 static void test_graph_get_roundtrip_assets_and_routes(void)
@@ -4881,6 +5157,7 @@ int main(void)
     RUN_TEST(test_graph_get_roundtrip_assets_and_routes);
     RUN_TEST(test_graph_referenced_uploads_fail_closed);
     RUN_TEST(test_graph_factory_reset_selection_and_failure);
+    RUN_TEST(test_mutation_dispatch_csrf_guard);
     RUN_TEST(test_named_upload_preserves_persisted_mds_reference);
     RUN_TEST(test_named_replacement_failure_preserves_original);
     RUN_TEST(test_named_slot_rebind_retains_other_project_assets);
@@ -4893,6 +5170,8 @@ int main(void)
     RUN_TEST(test_combined_ota_transaction_heap_failure_leaves_originals);
     RUN_TEST(test_startup_and_source_leases);
     RUN_TEST(test_maintenance_owner_quiescence_and_timeout);
+    RUN_TEST(test_maintenance_transient_inhibit_timeout_keeps_ready);
+    RUN_TEST(test_maintenance_persistent_inhibit_timeout_closes_ready);
     RUN_TEST(test_preinit_maintenance_and_readiness);
     RUN_TEST(test_shared_aux_and_retry_failed_apply);
     RUN_TEST(test_empty_canonical_store_and_live_remove);

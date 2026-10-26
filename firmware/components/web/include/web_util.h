@@ -39,6 +39,12 @@ void url_decode(const char *input, char *output, size_t out_len);
 /* Keep [A-Za-z0-9_.-] and UTF-8 bytes (>= 0x80); replace the rest with '_'. */
 void sanitize_name(const char *in, char *out, size_t out_len);
 
+/* CSRF guard for mutating requests. Returns true when neither Origin nor
+ * Referer is present (non-browser clients), or when the present header's
+ * scheme://authority matches Host (case-insensitive, default ports
+ * normalised). Origin: null and malformed values are rejected. */
+bool web_util_same_origin(const char *origin, const char *referer, const char *host);
+
 /* Output mask (SETTINGS_FUNC_OUT_*) a function must drive given its mapping,
  * its on/off state and the current motion. F0F+F0R together mean the
  * directional head light. */

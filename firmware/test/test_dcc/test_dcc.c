@@ -462,7 +462,7 @@ static void test_dcc_broadcast_reset(void)
 
 static void test_dcc_broadcast_estop(void)
 {
-    const uint8_t packet[] = {0x00, 0x61, 0x61};
+    const uint8_t packet[] = {0x00, 0x50, 0x50};
     feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(0, g_reset_calls);
@@ -498,31 +498,41 @@ static void test_dcc_broadcast_unknown_instruction(void)
     TEST_ASSERT_EQUAL_INT(0, g_fn_calls);
 }
 
-/* 28-step: скорость — 5-битный код (SSSS<<1)|F0. */
+/* 28-step: скорость — 5-битный код (SSSS<<1)|C. Код 1 — e-stop, коды 2..29 —
+ * первые 28 ходовых ступеней. */
 static void test_dcc_28step_code_mapping(void)
 {
+    const uint8_t estop[] = {0x03, 0x50, 0x53}; /* code 1 */
+    feed_packet(estop, sizeof(estop), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_emergency_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+
+    g_emergency_calls = 0;
     const struct {
         uint8_t instr;
         uint16_t expected;
         bool fwd;
     } cases[] = {
-        { 0x42, 1,   false }, /* code 4 -> step 1 */
-        { 0x52, 5,   false }, /* code 5 -> step 2 */
-        { 0x59, 70,  false }, /* code 19 -> step 16 */
-        { 0x7F, 126, true  }, /* code 31 -> full 126 */
+        { 0x41, 1,   false }, /* code 2 -> step 1, reverse */
+        { 0x61, 1,   true  }, /* code 2 -> step 1 */
+        { 0x71, 5,   true  }, /* code 3 -> step 2 */
+        { 0x62, 10,  true  }, /* code 4 -> step 3 */
+        { 0x7E, 126, true  }, /* code 29 -> last running step */
+        { 0x7F, 126, true  }, /* code 31 -> clamped */
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         g_speed_calls = 0;
         uint8_t packet[] = {0x03, cases[i].instr, 0x00};
         packet[2] = (uint8_t)(0x03 ^ cases[i].instr);
         feed_packet(packet, sizeof(packet), 12);
+        TEST_ASSERT_EQUAL_INT(0, g_emergency_calls);
         TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
         TEST_ASSERT_EQUAL_UINT16(cases[i].expected, g_speed);
         TEST_ASSERT_EQUAL(cases[i].fwd, g_forward);
     }
 }
 
-/* Длинный адрес 8444 + 28-step: инструкция 0x49 -> скорость 70, реверс. */
+/* Длинный адрес 8444 + 28-step: инструкция 0x49 -> скорость 75, реверс. */
 static void test_dcc_long_address_28step(void)
 {
     s_decoder_addr = 8444;
@@ -532,7 +542,7 @@ static void test_dcc_long_address_28step(void)
     feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(65, g_speed);
+    TEST_ASSERT_EQUAL_UINT16(75, g_speed);
     TEST_ASSERT_FALSE(g_forward);
 }
 
@@ -647,7 +657,7 @@ static void test_dcc_reload_config_long_address(void)
     const uint8_t packet[] = {0xE0, 0xFC, 0x49, 0x55};
     feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(65, g_speed);
+    TEST_ASSERT_EQUAL_UINT16(75, g_speed);
     TEST_ASSERT_FALSE(g_forward);
 
     /* The previous short address is no longer ours. */
@@ -1165,10 +1175,14 @@ static void test_address_partitions_and_signal_clock(void)
 
 static void test_stop_emergency_vectors_all_modes(void)
 {
-    const uint8_t emergency[][3] = {{0x03,0x61,0x62}, {0x03,0x71,0x72}};
-    const uint8_t stop[][3] = {{0x03,0x60,0x63}, {0x03,0x70,0x73}};
+    const uint8_t emergency14[][3] = {{0x03,0x61,0x62}, {0x03,0x71,0x72}};
+    const uint8_t stop14[][3] = {{0x03,0x60,0x63}, {0x03,0x70,0x73}};
+    const uint8_t emergency28[][3] = {{0x03,0x50,0x53}, {0x03,0x70,0x73}};
+    const uint8_t stop28[][3] = {{0x03,0x40,0x43}, {0x03,0x60,0x63}};
     for (int mode = 0; mode < 2; mode++) {
         s_speed_mode_14 = mode != 0;
+        const uint8_t (*emergency)[3] = (mode != 0) ? emergency14 : emergency28;
+        const uint8_t (*stop)[3] = (mode != 0) ? stop14 : stop28;
         for (int i = 0; i < 2; i++) {
             feed_packet(emergency[i], 3, 12);
             TEST_ASSERT_EQUAL_INT(mode * 2 + i + 1, g_emergency_calls);

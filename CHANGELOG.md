@@ -403,6 +403,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-26 (v0.11) — fix(firmware): correct DCC speed, BEMF calibration and sound recovery
 - 2026-10-25 (v0.11) — feat(motor,web): adaptive BEMF calibration and WiFi link tuning
 - 2026-10-25 (v0.11) — feat(editor): persistent project library, clone/rename and simulator hot reload
 - 2026-10-25 (v0.11) — fix(motor): harden BEMF sensing, calibration and feedback faults

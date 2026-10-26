@@ -42,11 +42,13 @@ static bool g_bound_safety;
 static unsigned g_safety_delays;
 static jmp_buf g_safety_exit;
 static bool g_graph_selected;
+static bool g_selection_is_graph;
 static char g_install_id[SG_ID_CAP];
 static uint32_t g_install_revision;
-static int g_seed_calls;
+static int g_seed_calls, g_legacy_select_calls;
 static esp_err_t g_seed_err;
 static bool g_storage_mounted;
+static bool g_graph_reading_default;
 static esp_err_t g_selection_err, g_graph_read_err, g_graph_parse_err, g_graph_assets_err;
 static esp_err_t g_sound_init_err;
 static int g_listener, g_confirm, g_hard_reset_calls;
@@ -69,6 +71,7 @@ storage_backend_t storage_get_backend(void) { return STORAGE_BACKEND_NONE; }
 bool storage_is_mounted(void) { return g_storage_mounted; }
 void motor_bemf_cal_watchdog(void) { ++g_cal_watchdog_calls; }
 bool motor_bemf_cal_active(void) { return g_cal_active; }
+bool motor_is_inhibited(void) { return (g_mask & MOTOR_INHIBIT_CONTROL) != 0; }
 esp_err_t settings_init(void) { return ESP_OK; }
 esp_err_t audio_init(void) { return ESP_OK; }
 esp_err_t sound_init(void) { return g_sound_init_err; }
@@ -77,6 +80,9 @@ esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision, bool
     snprintf(id, capacity, "%s", "saved_graph");
     *revision = 2;
     *selected = g_graph_selected;
+    /* A corrupt record still belongs to graph mode, which seed_default refuses
+     * to overwrite until the caller clears the selection. */
+    g_selection_is_graph = g_graph_selected || g_selection_err != ESP_OK;
     return g_selection_err;
 }
 const char *default_scheme_blob(size_t *length)
@@ -94,15 +100,26 @@ esp_err_t sg_store_seed_default(const char *id, const char *json, size_t length,
     ++g_seed_calls;
     if (revision) { *revision = 0; }
     if (seeded) { *seeded = false; }
+    /* Mirrors the store: a selected graph is never replaced. */
+    if (g_selection_is_graph) { return ESP_ERR_INVALID_STATE; }
     if (g_seed_err != ESP_OK) { return g_seed_err; }
     if (revision) { *revision = 7; }
     if (seeded) { *seeded = true; }
+    g_selection_is_graph = true;
+    return ESP_OK;
+}
+esp_err_t sg_store_select_legacy(void)
+{
+    ++g_legacy_select_calls;
+    g_selection_is_graph = false;
     return ESP_OK;
 }
 esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *length, uint32_t *actual)
 {
-    (void)id;
-    if (g_graph_read_err != ESP_OK) { return g_graph_read_err; }
+    /* Per-attempt failures: the selected project can break while the built-in
+     * fallback loaded afterwards still succeeds. */
+    g_graph_reading_default = strcmp(id, SG_DEFAULT_PROJECT_ID) == 0;
+    if (!g_graph_reading_default && g_graph_read_err != ESP_OK) { return g_graph_read_err; }
     *out = malloc(3);
     memcpy(*out, "{}", 3);
     *length = 2;
@@ -113,12 +130,12 @@ esp_err_t sg_parse(const char *json, size_t length, sg_graph_t *out, sg_diagnost
 {
     (void)json; (void)length; (void)diag;
     memset(out, 0, sizeof(*out));
-    return g_graph_parse_err;
+    return g_graph_reading_default ? ESP_OK : g_graph_parse_err;
 }
 esp_err_t sg_assets_validate(const sg_graph_t *graph, sg_diagnostic_t *diag)
 {
     (void)graph; (void)diag;
-    return g_graph_assets_err;
+    return g_graph_reading_default ? ESP_OK : g_graph_assets_err;
 }
 esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t revision)
 {
@@ -307,11 +324,13 @@ void setUp(void)
     g_bound_safety = false;
     g_safety_delays = 0;
     g_graph_selected = false;
+    g_selection_is_graph = false;
     g_storage_mounted = true;
     g_selection_err = g_graph_read_err = g_graph_parse_err = g_graph_assets_err = ESP_OK;
     g_sound_init_err = ESP_OK;
     g_seed_err = ESP_ERR_INVALID_STATE;
-    g_seed_calls = 0;
+    g_seed_calls = g_legacy_select_calls = 0;
+    g_graph_reading_default = true;
     g_install_id[0] = 0;
     g_install_revision = 0;
     g_volume = g_listener = g_confirm = g_hard_reset_calls = 0;
@@ -699,20 +718,71 @@ static void test_persistence_worker_skips_recovered_timeout_cleanup(void)
 
 static void test_selected_graph_restores_without_legacy_fallback(void)
 {
+    /* No selection and no successful seed: boot stays silent. */
     restore_sound_graph();
     TEST_ASSERT_EQUAL(0, g_graph_installs);
+    TEST_ASSERT_EQUAL(0, g_graph_faults);
+    g_seed_calls = 0;
+
+    /* A saved selection is installed from its own revision. */
     g_graph_selected = true;
     restore_sound_graph();
     TEST_ASSERT_EQUAL(1, g_graph_installs);
+    TEST_ASSERT_EQUAL_STRING("saved_graph", g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(2, g_install_revision);
     TEST_ASSERT_EQUAL(0, g_graph_faults);
+
+    /* A broken selected project is replaced by the built-in graph, not by
+     * legacy F-slot audio. */
+    g_seed_err = ESP_OK;
     g_graph_read_err = ESP_ERR_NOT_FOUND;
     restore_sound_graph();
-    TEST_ASSERT_EQUAL(1, g_graph_installs);
-    TEST_ASSERT_EQUAL(1, g_graph_faults);
-    g_graph_read_err = ESP_OK;
+    TEST_ASSERT_EQUAL(2, g_graph_installs);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(7, g_install_revision);
+    TEST_ASSERT_EQUAL(0, g_graph_faults);
+    TEST_ASSERT_EQUAL_INT(1, g_seed_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_sound_stops);
+    TEST_ASSERT_EQUAL_INT(0, g_sound_requests);
+}
+
+static void test_selected_graph_read_failure_restores_builtin(void)
+{
+    g_graph_selected = true;
+    g_seed_err = ESP_OK;
+    g_graph_read_err = ESP_ERR_NOT_FOUND;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(1, g_graph_installs);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(7, g_install_revision);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_faults);
+    TEST_ASSERT_EQUAL_INT(1, g_seed_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_legacy_select_calls);
+}
+
+static void test_selected_graph_asset_failure_restores_builtin(void)
+{
+    g_graph_selected = true;
+    g_seed_err = ESP_OK;
     g_graph_assets_err = ESP_FAIL;
     restore_sound_graph();
-    TEST_ASSERT_EQUAL(2, g_graph_faults);
+    TEST_ASSERT_EQUAL_INT(1, g_graph_installs);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(7, g_install_revision);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_faults);
+    TEST_ASSERT_EQUAL_INT(1, g_seed_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_legacy_select_calls);
+}
+
+static void test_selected_graph_and_builtin_failure_fails_closed(void)
+{
+    g_graph_selected = true;
+    g_seed_err = ESP_FAIL;
+    g_graph_read_err = ESP_ERR_NOT_FOUND;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(1, g_graph_faults);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_installs);
+    TEST_ASSERT_EQUAL_INT(1, g_seed_calls);
 }
 
 static void test_boot_seeds_builtin_scheme_when_nothing_is_selected(void)
@@ -783,6 +853,9 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_selected_graph_restores_without_legacy_fallback);
+    RUN_TEST(test_selected_graph_read_failure_restores_builtin);
+    RUN_TEST(test_selected_graph_asset_failure_restores_builtin);
+    RUN_TEST(test_selected_graph_and_builtin_failure_fails_closed);
     RUN_TEST(test_boot_seeds_builtin_scheme_when_nothing_is_selected);
     RUN_TEST(test_boot_without_sounds_stays_silent_not_failed);
     RUN_TEST(test_corrupt_selection_and_missing_storage_fail_safe);

@@ -388,24 +388,37 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     if ((instr & 0xC0U) == 0x40U && payload_len == 1U && speed_allowed) {
         bool forward = (instr & 0x20U) != 0;
         forward ^= reverse ^ (via_consist && consist_reverse);
-        uint8_t nibble = instr & 0x0FU;
-        if (nibble == 1U) {
-            if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
-            return;
-        }
-        if (is_broadcast && nibble != 0U) return;
-        s_function_forward = forward;
-        uint8_t speed = 0;
         if (mode14) {
             uint8_t step14 = instr & 0x0FU;
+            if (step14 == 1U) {
+                if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
+                return;
+            }
+            if (is_broadcast && step14 != 0U) return;
+            s_function_forward = forward;
+            uint8_t speed = 0;
             if (step14 >= 2U) {
                 speed = (uint8_t)(((uint16_t)(step14 - 1U) * 126U) / 14U);
             }
             emit_function(0, (instr & 0x10U) != 0, function_via_consist, forward, cv21, cv22);
-        } else {
-            uint8_t code = (uint8_t)(((instr & 0x0FU) << 1) | ((instr & 0x10U) >> 4));
-            if (nibble >= 2U) {
-                speed = (uint8_t)(1U + ((uint32_t)(code - 4U) * 125U) / 27U);
+            if (s_speed_cb != NULL) {
+                s_speed_cb(speed, forward);
+            }
+            return;
+        }
+        uint8_t code = (uint8_t)(((instr & 0x0FU) << 1) | ((instr & 0x10U) >> 4));
+        if (code == 1U) {
+            if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
+            return;
+        }
+        if (is_broadcast && code != 0U) return;
+        s_function_forward = forward;
+        uint8_t speed = 0;
+        if (code >= 2U) {
+            if (code >= 29U) {
+                speed = 126U;
+            } else {
+                speed = (uint8_t)(1U + ((uint32_t)(code - 2U) * 125U) / 27U);
             }
         }
         if (s_speed_cb != NULL) {

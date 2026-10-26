@@ -1608,13 +1608,38 @@ static void test_bemf_cal_get(void)
     mock_bemf_cal_info.profile.kd_x100 = 5;
     mock_bemf_cal_info.profile.quality = 88;
     mock_bemf_cal_info.profile.pid_applied = true;
+    mock_bemf_cal_info.phase = MOTOR_BEMF_CAL_PHASE_CURVE;
+    mock_bemf_cal_info.profile.phase = MOTOR_BEMF_CAL_PHASE_CURVE;
+    mock_bemf_cal_info.profile.sensor_ok = true;
+    mock_bemf_cal_info.profile.optimal_us = 340;
+    mock_bemf_cal_info.profile.dwell_ms = 1000;
     mock_bemf_enabled = 1;
     TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":5,\"frac\":50"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"use\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"phase\":\"curve\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sensorOk\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"optimalUs\":340"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"dwellMs\":1000"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"firstFrac\":100"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"quality\":88"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"pidApplied\":true"));
+}
+
+static void test_bemf_phase_names(void)
+{
+    httpd_req_t req = make_req(0);
+    const char *phases[] = {"idle", "preflight", "window", "curve", "saving"};
+    for (unsigned i = 0; i < 5; ++i) {
+        reset_resp();
+        memset(&mock_bemf_cal_info, 0, sizeof(mock_bemf_cal_info));
+        mock_bemf_cal_info.phase = (uint8_t)i;
+        mock_bemf_cal_info.profile.phase = (uint8_t)i;
+        TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_get(&req));
+        char expected[48];
+        snprintf(expected, sizeof(expected), "\"phase\":\"%s\"", phases[i]);
+        TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, expected));
+    }
 }
 
 static void test_bemf_base_get(void)
@@ -1710,14 +1735,15 @@ static void test_bemf_status_names_and_previous_curve(void)
 {
     httpd_req_t req = make_req(0);
     const char *results[] = {"idle", "running", "saving", "succeeded", "cancelled", "failed"};
-    const char *errors[] = {"none", "adc", "rail", "timeout", "control", "curve", "storage", "start"};
+    const char *errors[] = {"none", "adc", "rail", "timeout", "control", "curve",
+                            "storage", "start", "sensor", "no-rise"};
     mock_bemf_cal_info.run_id = 42;
     mock_bemf_cal_info.valid = mock_bemf_cal_info.stored = true;
     mock_bemf_cal_info.count = 1;
     mock_bemf_cal_info.speed[0] = 5;
     mock_bemf_cal_info.frac[0] = 512;
     mock_bemf_cal_info.error_code = ESP_FAIL;
-    for (unsigned i = 0; i < 8; ++i) {
+    for (unsigned i = 0; i < 10; ++i) {
         reset_resp();
         mock_bemf_cal_info.result = (motor_bemf_cal_state_t)(i % 6);
         mock_bemf_cal_info.reason = (motor_bemf_cal_error_t)i;
@@ -5690,6 +5716,7 @@ int main(void)
     RUN_TEST(test_mode_get);
     RUN_TEST(test_mode_post);
     RUN_TEST(test_bemf_cal_get);
+    RUN_TEST(test_bemf_phase_names);
     RUN_TEST(test_bemf_base_get);
     RUN_TEST(test_bemf_cal_post_paths);
     RUN_TEST(test_bemf_use_get_post);

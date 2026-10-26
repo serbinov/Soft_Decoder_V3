@@ -225,4 +225,14 @@ esp_err_t settings_bemf_cal_clear(void);
 esp_err_t settings_bemf_use_load(bool *out_enabled);
 esp_err_t settings_bemf_use_save(bool enabled);
 
+/* Adaptive BEMF measurement window: the delay after PWM-off before the sample
+ * is taken. Default is the legacy 1000 us; the accepted range is 100..2000 us.
+ * Stored in its own NVS key so a sensor check can tune it independently of the
+ * calibration curve. */
+#define SETTINGS_BEMF_WINDOW_DEFAULT_US 1000U
+#define SETTINGS_BEMF_WINDOW_MIN_US     100U
+#define SETTINGS_BEMF_WINDOW_MAX_US     2000U
+esp_err_t settings_bemf_window_load(uint16_t *out_us);
+esp_err_t settings_bemf_window_save(uint16_t us);
+
 #endif

@@ -1,21 +1,21 @@
 # Sound-related CVs
 
-Firmware 0.11. All values are 0..255 unless noted. CV7 is read-only (decoder
+Firmware 0.12. All values are 0..255 unless noted. CV7 is read-only (decoder
 version, mirrors `version.txt`); CV8 = 8 triggers a CV factory reset.
 
 | CV | Name | Default | Meaning |
 |---|---|---|---|
 | 63 | Master volume (alias) | 20 | Bidirectional alias of the persisted master volume (`mvol`). Read/write via the normal CV API; applied by the audio mixer. |
 | 30 | Sound options (legacy) | 0 | Stored for compatibility; the graph engine does not read it. |
-| 114 | Chuff / exhaust rate (legacy) | 57 | Stored for compatibility; not consumed in 0.11. |
-| 115 | Bell ring rate (legacy) | 5 | Stored for compatibility; not consumed in 0.11. |
-| 116 | Dynamic brake rate (legacy) | 30 | Stored for compatibility; not consumed in 0.11. |
+| 114 | Chuff / exhaust rate (legacy) | 57 | Stored for compatibility; not consumed in 0.12. |
+| 115 | Bell ring rate (legacy) | 5 | Stored for compatibility; not consumed in 0.12. |
+| 116 | Dynamic brake rate (legacy) | 30 | Stored for compatibility; not consumed in 0.12. |
 
-## Current sound control (0.11)
+## Current sound control (0.12)
 
 The graph sound engine is the only sound behaviour model; the legacy MDS/table
 subsystem that used CV30 and the CV114–116 rate mapping was removed
-(see `sound_scheme.md`). In 0.11:
+(see `sound_scheme.md`). In 0.12:
 
 - playback `rate` and `volume` are properties of a graph state, authored in the
   block editor (`/sound-editor/blocks.html`);

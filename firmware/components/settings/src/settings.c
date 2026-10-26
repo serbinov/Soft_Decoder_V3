@@ -106,7 +106,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
-#define SETTINGS_CV7_VERSION 11
+#define SETTINGS_CV7_VERSION 12
 #define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
@@ -1101,6 +1101,46 @@ esp_err_t settings_bemf_use_save(bool enabled)
         return ESP_ERR_TIMEOUT;
     }
     esp_err_t err = nvs_set_u8(s_h, "bemf_use", enabled ? 1U : 0U);
+    if (err == ESP_OK) {
+        err = nvs_commit(s_h);
+    }
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+/* Adaptive BEMF sample window (us). Missing key returns the legacy default.
+ * A stored value outside the accepted range is rejected so callers fall back to
+ * the default instead of silently shortening or stalling the sample. */
+esp_err_t settings_bemf_window_load(uint16_t *out_us)
+{
+    if (out_us == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t value = SETTINGS_BEMF_WINDOW_DEFAULT_US;
+    esp_err_t err = nvs_get_u16(s_h, "bemf_win", &value);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        *out_us = SETTINGS_BEMF_WINDOW_DEFAULT_US;
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (value < SETTINGS_BEMF_WINDOW_MIN_US || value > SETTINGS_BEMF_WINDOW_MAX_US) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_us = value;
+    return ESP_OK;
+}
+
+esp_err_t settings_bemf_window_save(uint16_t us)
+{
+    if (us < SETTINGS_BEMF_WINDOW_MIN_US || us > SETTINGS_BEMF_WINDOW_MAX_US) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = nvs_set_u16(s_h, "bemf_win", us);
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }

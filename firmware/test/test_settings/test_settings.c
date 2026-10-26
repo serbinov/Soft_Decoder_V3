@@ -697,6 +697,45 @@ static void test_bemf_use_null_arg(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_use_load(NULL));
 }
 
+/* ---- Adaptive BEMF sample window ---- */
+
+static void test_bemf_window_default_and_roundtrip(void)
+{
+    uint16_t us = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_load(&us));
+    TEST_ASSERT_EQUAL_UINT16(SETTINGS_BEMF_WINDOW_DEFAULT_US, us);
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_save(240));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_load(&us));
+    TEST_ASSERT_EQUAL_UINT16(240, us);
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_save(SETTINGS_BEMF_WINDOW_MIN_US));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_load(&us));
+    TEST_ASSERT_EQUAL_UINT16(SETTINGS_BEMF_WINDOW_MIN_US, us);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_save(SETTINGS_BEMF_WINDOW_MAX_US));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_window_load(&us));
+    TEST_ASSERT_EQUAL_UINT16(SETTINGS_BEMF_WINDOW_MAX_US, us);
+}
+
+static void test_bemf_window_invalid_values(void)
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_window_load(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      settings_bemf_window_save(SETTINGS_BEMF_WINDOW_MIN_US - 1U));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      settings_bemf_window_save(SETTINGS_BEMF_WINDOW_MAX_US + 1U));
+
+    /* A stored out-of-range value must be rejected, not silently applied. */
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u16(s_h, "bemf_win", 50));
+    uint16_t us = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_window_load(&us));
+
+    /* Persistence errors propagate from save. */
+    g_set_error = ESP_ERR_TIMEOUT;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_window_save(300));
+    g_set_error = ESP_OK;
+}
+
 /* ---- Factory reset ---- */
 
 static void test_store_api_invalid_args(void)
@@ -1641,6 +1680,8 @@ int main(void)
     RUN_TEST(test_bemf_cal_null_args);
     RUN_TEST(test_bemf_use_default_and_roundtrip);
     RUN_TEST(test_bemf_use_null_arg);
+    RUN_TEST(test_bemf_window_default_and_roundtrip);
+    RUN_TEST(test_bemf_window_invalid_values);
     RUN_TEST(test_factory_reset);
     RUN_TEST(test_factory_reset_clears_all_stores);
     RUN_TEST(test_factory_reset_keeps_metadata_when_manifest_removal_fails);

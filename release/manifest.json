@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "0.11",
+  "version": "0.12",
   "chip": "esp32s3",
   "flash_size": 4194304,
   "files": [
@@ -9,8 +9,8 @@
       "offset": 0,
       "role": "bootloader",
       "chip": "esp32s3",
-      "size": 21136,
-      "sha256": "8e002aa1a2a86582b0d1bc48e432155b6e4606cc3ff21ffbc36e869798062be2",
+      "size": 21072,
+      "sha256": "14e3328d4d321fbb935fedfc1b09e5bf7cbdca6453433e2d3b8664d4329bdaa2",
       "image_hash_appended": true
     },
     {
@@ -82,36 +82,58 @@
       "offset": 131072,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1344944,
-      "sha256": "6a9f5c72ccf940a5b9e24ac641c6f1dc00fe76cd149fd0115a6e6fa205b46532",
+      "size": 1406928,
+      "sha256": "91f7a8e44b90dda066567a4a4bc0ecc295a5ee8ded44d7d0ca214ec63c9f4e4d",
       "image_hash_appended": true,
-      "version": "0.11",
+      "version": "0.12",
       "project": "soft_decoder_v3",
       "idf": "v6.0"
     },
     {
-      "path": "ADDITIPUS_AURA-X_v0.11.bin",
+      "path": "ADDITIPUS_AURA-X_v0.12.bin",
       "offset": null,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1344944,
-      "sha256": "6a9f5c72ccf940a5b9e24ac641c6f1dc00fe76cd149fd0115a6e6fa205b46532",
+      "size": 1406928,
+      "sha256": "91f7a8e44b90dda066567a4a4bc0ecc295a5ee8ded44d7d0ca214ec63c9f4e4d",
       "image_hash_appended": true,
-      "version": "0.11",
+      "version": "0.12",
       "project": "soft_decoder_v3",
       "idf": "v6.0"
     },
     {
-      "path": "ADDITIPUS_AURA-X_v0.11_OTA.bin",
+      "path": "ADDITIPUS_AURA-X_v0.12_OTA.bin",
       "offset": null,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1344944,
-      "sha256": "6a9f5c72ccf940a5b9e24ac641c6f1dc00fe76cd149fd0115a6e6fa205b46532",
+      "size": 1406928,
+      "sha256": "91f7a8e44b90dda066567a4a4bc0ecc295a5ee8ded44d7d0ca214ec63c9f4e4d",
       "image_hash_appended": true,
-      "version": "0.11",
+      "version": "0.12",
       "project": "soft_decoder_v3",
       "idf": "v6.0"
+    },
+    {
+      "path": "ADDITIPUS_scheme_sounds.asp",
+      "offset": null,
+      "role": "sound_pack",
+      "format": "AURASP01",
+      "encrypted": false,
+      "legacy": false,
+      "size": 1115634,
+      "sha256": "77a48ffbc0c35f45c3d95e4425dadd43873b477b05ede5ae31e64323e8e3e368",
+      "files": 71
+    },
+    {
+      "path": "ADDITIPUS_sounds.asp",
+      "offset": null,
+      "role": "sound_pack",
+      "format": "AURASP01",
+      "encrypted": false,
+      "legacy": false,
+      "size": 3919437,
+      "sha256": "52fdabf3bd509c72db0922d38d6fad321117151b0a089092f99fa7a298ba5f56",
+      "files": 303
     }
   ]
 }

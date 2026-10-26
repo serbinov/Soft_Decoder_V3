@@ -292,6 +292,21 @@ esp_err_t motor_bemf_cal_reload(void)
     return ESP_OK;
 }
 
+static esp_err_t g_bemf_check_err = ESP_OK;
+static motor_bemf_check_t g_bemf_check_result;
+static int g_bemf_check_calls;
+static bool g_bemf_check_spin;
+
+esp_err_t motor_bemf_check(motor_bemf_check_t *out, bool spin)
+{
+    ++g_bemf_check_calls;
+    g_bemf_check_spin = spin;
+    if (out != NULL) {
+        *out = g_bemf_check_result;
+    }
+    return g_bemf_check_err;
+}
+
 esp_err_t motor_set_speed(uint8_t speed128, bool forward)
 {
     ++g_motor_speed_calls;
@@ -546,6 +561,14 @@ void setUp(void)
     g_motor_speed_calls = g_motor_inhibit_calls = 0;
     g_motor_last_speed = 0;
     g_motor_last_fwd = false;
+    g_bemf_check_err = ESP_OK;
+    memset(&g_bemf_check_result, 0, sizeof(g_bemf_check_result));
+    g_bemf_check_result.ok = true;
+    g_bemf_check_result.static_ok = true;
+    g_bemf_check_result.optimal_us = 340;
+    g_bemf_check_result.rail_mv = 1000;
+    g_bemf_check_calls = 0;
+    g_bemf_check_spin = false;
     install_session_reset();
     s_usbjtag_ok = false;
     s_provisioning = false;
@@ -704,6 +727,64 @@ static void test_bemf_set_command(void)
     tx_reset();
     handle_bemf_cmd("BEMF=12,100,126,700");
     TEST_ASSERT_TRUE(tx_has("BEMF-ERR save"));
+}
+
+static void test_bemf_check_command(void)
+{
+    g_bemf_check_result.optimal_us = 340;
+    g_bemf_check_result.offset_mv = 3;
+    g_bemf_check_result.noise_mv = 2;
+    g_bemf_check_result.bemf_mv = 400;
+    g_bemf_check_result.rail_mv = 1000;
+
+    tx_reset();
+    handle_bemf_cmd("BEMF-CHECK");
+    TEST_ASSERT_TRUE(tx_has("BEMF-CHECK-OK optimal_us=340 offset=3 noise=2 bemf=400 rail=1000"));
+    TEST_ASSERT_EQUAL_INT(1, g_bemf_check_calls);
+    TEST_ASSERT_FALSE(g_bemf_check_spin);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_begin_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
+
+    tx_reset();
+    handle_bemf_cmd("BEMF-CHECK spin");
+    TEST_ASSERT_TRUE(tx_has("BEMF-CHECK-OK"));
+    TEST_ASSERT_TRUE(g_bemf_check_spin);
+    TEST_ASSERT_EQUAL_INT(2, g_bemf_check_calls);
+
+    tx_reset();
+    handle_bemf_cmd("BEMF-CHECK foo");
+    TEST_ASSERT_TRUE(tx_has("BEMF-CHECK-ERR reason=args"));
+    TEST_ASSERT_EQUAL_INT(2, g_bemf_check_calls);
+
+    /* A completed check failure is reported with its reason. */
+    g_bemf_check_err = ESP_FAIL;
+    g_bemf_check_result.ok = false;
+    g_bemf_check_result.reason = MOTOR_BEMF_CHECK_ERR_NO_RISE;
+    tx_reset();
+    handle_bemf_cmd("BEMF-CHECK spin");
+    TEST_ASSERT_TRUE(tx_has("BEMF-CHECK-ERR reason=no-rise"));
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+
+    /* Busy admission does not touch the motor. */
+    g_web_ready = false;
+    tx_reset();
+    handle_bemf_cmd("BEMF-CHECK");
+    TEST_ASSERT_TRUE(tx_has("BEMF-CHECK-ERR reason=busy"));
+    g_web_ready = true;
+
+    /* Uninhibit failure is reported and the cleanup still runs. */
+    g_bemf_check_err = ESP_OK;
+    g_bemf_check_result.ok = true;
+    g_motor_inhibit_err = ESP_FAIL;
+    tx_reset();
+    handle_bemf_cmd("BEMF-CHECK");
+    TEST_ASSERT_TRUE(tx_has("BEMF-CHECK-ERR reason=motor"));
+    TEST_ASSERT_EQUAL_INT(1, g_motor_es_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    g_motor_inhibit_err = ESP_OK;
 }
 
 /* ---- FW upload ---- */
@@ -1539,6 +1620,7 @@ int main(void)
     RUN_TEST(test_bemf_cal_commands);
     RUN_TEST(test_bemf_cvset_and_test);
     RUN_TEST(test_bemf_set_command);
+    RUN_TEST(test_bemf_check_command);
     RUN_TEST(test_provision_fw_errors);
     RUN_TEST(test_provision_fw_success_and_write_errors);
     RUN_TEST(test_provision_fw_chunk_ack);

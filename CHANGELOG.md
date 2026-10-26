@@ -464,6 +464,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-26 (v0.12) — release: 0.12 firmware binaries
 - 2026-10-26 (v0.11) — fix(firmware): close global review findings
 - 2026-10-26 (v0.11) — fix(firmware): correct DCC speed, BEMF calibration and sound recovery
 - 2026-10-25 (v0.11) — feat(motor,web): adaptive BEMF calibration and WiFi link tuning

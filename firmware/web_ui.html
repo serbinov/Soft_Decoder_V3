@@ -447,6 +447,9 @@ label{color:var(--text);font-weight:600}
           <div><span class="muted" data-i18n="bemf_profile_stalled">Пропущено (stall)</span>: <b id="bemf_prof_stalled">—</b></div>
           <div><span class="muted" data-i18n="bemf_profile_ceiling">Потолок</span>: <b id="bemf_prof_ceiling">—</b></div>
           <div><span class="muted" data-i18n="bemf_profile_first">Первый ход</span>: <b id="bemf_prof_first">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_sensor">Датчик BEMF</span>: <b id="bemf_prof_sensor">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_window">Окно замера</span>: <b id="bemf_prof_window">—</b></div>
+          <div><span class="muted" data-i18n="bemf_profile_dwell">Выдержка</span>: <b id="bemf_prof_dwell">—</b></div>
           <div><span class="muted" data-i18n="bemf_profile_settle">Средний settle</span>: <b id="bemf_prof_settle">—</b></div>
           <div><span class="muted" data-i18n="bemf_profile_gain">Наклон BEMF</span>: <b id="bemf_prof_gain">—</b></div>
           <div><span class="muted" data-i18n="bemf_profile_pid">PID (Kp/Ki/Kd)</span>: <b id="bemf_prof_pid">—</b></div>
@@ -701,10 +704,11 @@ info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Со�
 set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Конфигурация',grp_settings:'Настройки',grp_service:'Сервис',
 nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Звуки',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_pack_import:'Импорт звуков и схемы',nav_pack_export:'Экспорт звуков и схемы',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
-bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode:'Режим',bemf_mode_auto:'Адаптивный (AUTO)',bemf_mode_fast:'Быстрый (10 точек)',bemf_mode_balanced:'Сбалансированный (12)',bemf_mode_thorough:'Тщательный (16)',bemf_apply_pid:'Применить рекомендованные PID',bemf_mode_custom:'Пользовательский',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки',bemf_profile_stalled:'Пропущено (stall)',bemf_profile_ceiling:'Потолок',bemf_profile_first:'Первый ход',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID применены',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
+bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode:'Режим',bemf_mode_auto:'Адаптивный (AUTO)',bemf_mode_fast:'Быстрый (10 точек)',bemf_mode_balanced:'Сбалансированный (12)',bemf_mode_thorough:'Тщательный (16)',bemf_apply_pid:'Применить рекомендованные PID',bemf_mode_custom:'Пользовательский',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки',bemf_profile_stalled:'Пропущено (stall)',bemf_profile_ceiling:'Потолок',bemf_profile_first:'Первый ход',bemf_profile_sensor:'Датчик BEMF',bemf_profile_window:'Окно замера',bemf_profile_dwell:'Выдержка',bemf_profile_unit_us:'мкс',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID применены',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
 bemf_status_idle:'Статус: —',
 bemf_lbl_idle:'Калибровка не выполнялась',bemf_lbl_running:'Калибровка идёт, не трогайте мотор...',bemf_lbl_saving:'Сохранение калибровки...',bemf_lbl_succeeded:'Новая калибровка завершена и сохранена',bemf_lbl_cancelled:'Калибровка отменена',bemf_lbl_failed:'Калибровка не удалась',
-bemf_rsn_adc:'ошибка АЦП',bemf_rsn_rail:'нет допустимого напряжения рельс',bemf_rsn_timeout:'таймаут',bemf_rsn_control:'остановка управления',bemf_rsn_curve:'некорректная кривая',bemf_rsn_storage:'ошибка сохранения',bemf_rsn_start:'ошибка запуска',
+bemf_phase_preflight:'проверка датчика BEMF...',bemf_phase_window:'подбор окна замера...',bemf_phase_curve:'измерение кривой...',bemf_phase_saving:'сохранение...',
+bemf_rsn_adc:'ошибка АЦП',bemf_rsn_rail:'нет допустимого напряжения рельс',bemf_rsn_timeout:'таймаут',bemf_rsn_control:'остановка управления',bemf_rsn_curve:'некорректная кривая',bemf_rsn_storage:'ошибка сохранения',bemf_rsn_start:'ошибка запуска',bemf_rsn_sensor:'датчик BEMF',bemf_rsn_no_rise:'датчик BEMF: нет движения',
 bemf_wait_cleanup:'; ожидание завершения очистки',
 bemf_prev:'Сохраненная предыдущая калибровка доступна для двигателя.',
 bemf_meta_running:'Калибровка идёт, не трогайте мотор...',
@@ -763,10 +767,11 @@ info_fw:'Firmware version',info_addr:'Address',info_state:'State',
 set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Configuration',grp_settings:'Settings',grp_service:'Service',
 nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sounds',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_pack_import:'Import sounds & scheme',nav_pack_export:'Export sounds & scheme',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
-bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode:'Mode',bemf_mode_auto:'Adaptive (AUTO)',bemf_mode_fast:'Fast (10 points)',bemf_mode_balanced:'Balanced (12)',bemf_mode_thorough:'Thorough (16)',bemf_apply_pid:'Apply recommended PID',bemf_mode_custom:'Custom',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Points',bemf_profile_stalled:'Skipped (stall)',bemf_profile_ceiling:'Ceiling',bemf_profile_first:'First move',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID applied',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
+bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode:'Mode',bemf_mode_auto:'Adaptive (AUTO)',bemf_mode_fast:'Fast (10 points)',bemf_mode_balanced:'Balanced (12)',bemf_mode_thorough:'Thorough (16)',bemf_apply_pid:'Apply recommended PID',bemf_mode_custom:'Custom',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Points',bemf_profile_stalled:'Skipped (stall)',bemf_profile_ceiling:'Ceiling',bemf_profile_first:'First move',bemf_profile_sensor:'BEMF sensor',bemf_profile_window:'Sample window',bemf_profile_dwell:'Dwell',bemf_profile_unit_us:'µs',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID applied',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
 bemf_status_idle:'Status: —',
 bemf_lbl_idle:'Calibration has not been run',bemf_lbl_running:'Calibration in progress, do not touch the motor...',bemf_lbl_saving:'Saving calibration...',bemf_lbl_succeeded:'New calibration completed and stored',bemf_lbl_cancelled:'Calibration cancelled',bemf_lbl_failed:'Calibration failed',
-bemf_rsn_adc:'ADC error',bemf_rsn_rail:'no valid track voltage',bemf_rsn_timeout:'timeout',bemf_rsn_control:'control stop',bemf_rsn_curve:'invalid curve',bemf_rsn_storage:'storage error',bemf_rsn_start:'start error',
+bemf_phase_preflight:'BEMF sensor check...',bemf_phase_window:'selecting the sample window...',bemf_phase_curve:'measuring the curve...',bemf_phase_saving:'saving...',
+bemf_rsn_adc:'ADC error',bemf_rsn_rail:'no valid track voltage',bemf_rsn_timeout:'timeout',bemf_rsn_control:'control stop',bemf_rsn_curve:'invalid curve',bemf_rsn_storage:'storage error',bemf_rsn_start:'start error',bemf_rsn_sensor:'BEMF sensor',bemf_rsn_no_rise:'BEMF sensor: no movement',
 bemf_wait_cleanup:'; waiting for cleanup to finish',
 bemf_prev:'The previously stored calibration is available for the motor.',
 bemf_meta_running:'Calibration in progress, do not touch the motor...',
@@ -1206,6 +1211,9 @@ function renderBemfProfile(d){
     var pct=Math.round((Number(p.firstFrac)||0)/1024*100);
     setText('bemf_prof_first',p.first+' ('+pct+'%)');
   }else setText('bemf_prof_first','—');
+  setText('bemf_prof_sensor',p.sensorOk?t('bemf_profile_yes'):'—');
+  setText('bemf_prof_window',Number(p.optimalUs)>0?(Number(p.optimalUs)+' '+t('bemf_profile_unit_us')):'—');
+  setText('bemf_prof_dwell',Number(p.dwellMs)>0?(Number(p.dwellMs)+' '+t('bemf_profile_unit_ms')):'—');
   setText('bemf_prof_settle',Number(p.settle)>0?(Number(p.settle)+' '+t('bemf_profile_unit_ms')):'—');
   setText('bemf_prof_gain',Number(p.gain)>0?((Number(p.gain)/1000).toFixed(2)+' '+t('bemf_profile_unit_gain')):'—');
   if(Number(p.kp)>0||Number(p.ki)>0||Number(p.kd)>0){
@@ -1232,10 +1240,13 @@ async function loadBemfCal(){
     if(result==='running'&&Number(d.total)>0){
       bar.style.display='block';
       barIn.style.width=Math.round((Number(d.progress)||0)/Number(d.total)*100)+'%';
-      setText('bemf_status',t('bemf_step')+(Number(d.progress)||0)+t('bemf_step_of')+d.total);
+      var phases={preflight:t('bemf_phase_preflight'),window:t('bemf_phase_window'),curve:t('bemf_phase_curve'),saving:t('bemf_phase_saving')};
+      var runStatus=t('bemf_step')+(Number(d.progress)||0)+t('bemf_step_of')+d.total;
+      if(phases[d.phase])runStatus+=' · '+phases[d.phase];
+      setText('bemf_status',runStatus);
     }else{
       bar.style.display='none';
-      var reasons={adc:t('bemf_rsn_adc'),rail:t('bemf_rsn_rail'),timeout:t('bemf_rsn_timeout'),control:t('bemf_rsn_control'),curve:t('bemf_rsn_curve'),storage:t('bemf_rsn_storage'),start:t('bemf_rsn_start')};
+      var reasons={adc:t('bemf_rsn_adc'),rail:t('bemf_rsn_rail'),timeout:t('bemf_rsn_timeout'),control:t('bemf_rsn_control'),curve:t('bemf_rsn_curve'),storage:t('bemf_rsn_storage'),start:t('bemf_rsn_start'),sensor:t('bemf_rsn_sensor'),'no-rise':t('bemf_rsn_no_rise')};
       var labels={idle:t('bemf_lbl_idle'),running:t('bemf_lbl_running'),saving:t('bemf_lbl_saving'),succeeded:t('bemf_lbl_succeeded'),cancelled:t('bemf_lbl_cancelled'),failed:t('bemf_lbl_failed')};
       var status=labels[result]||labels.failed;
       if((result==='failed'||result==='cancelled')&&reasons[d.error])status+=': '+reasons[d.error];
@@ -2662,9 +2673,9 @@ var cvDB=[
   {index:105,name:{ru:'Пользовательский ID 1',en:'User ID 1'},value:0,desc:{ru:'CV105: пользовательский идентификатор (хранится)',en:'CV105: user identifier (stored)'}},
   {index:106,name:{ru:'Пользовательский ID 2',en:'User ID 2'},value:0,desc:{ru:'CV106: пользовательский идентификатор (хранится)',en:'CV106: user identifier (stored)'}},
   {index:63,name:{ru:'Громкость (общая)',en:'Volume (master)'},value:20,desc:{ru:'Общая громкость звука (алиас мастер-громкости), 0..255',en:'Overall sound volume (alias of master volume), 0..255'}},
-  {index:114,name:{ru:'Звук: разгон звука (устарело)',en:'Sound: acceleration (legacy)'},value:57,desc:{ru:'Резерв: раньше задавал rate двигателя; в 0.11 не используется (rate задаётся в блоке)',en:'Reserved: used to set the engine rate; unused in 0.11 (rate is authored per state)'}},
-  {index:115,name:{ru:'Звук: звонок (устарело)',en:'Sound: bell rate (legacy)'},value:5,desc:{ru:'Резерв: раньше задавал rate звонка; в 0.11 не используется',en:'Reserved: used to set the bell rate; unused in 0.11'}},
-  {index:116,name:{ru:'Звук: тормоз (устарело)',en:'Sound: brake rate (legacy)'},value:30,desc:{ru:'Резерв: раньше задавал rate динамического тормоза; в 0.11 не используется',en:'Reserved: used to set the dynamic-brake rate; unused in 0.11'}},
+  {index:114,name:{ru:'Звук: разгон звука (устарело)',en:'Sound: acceleration (legacy)'},value:57,desc:{ru:'Резерв: раньше задавал rate двигателя; в 0.12 не используется (rate задаётся в блоке)',en:'Reserved: used to set the engine rate; unused in 0.12 (rate is authored per state)'}},
+  {index:115,name:{ru:'Звук: звонок (устарело)',en:'Sound: bell rate (legacy)'},value:5,desc:{ru:'Резерв: раньше задавал rate звонка; в 0.12 не используется',en:'Reserved: used to set the bell rate; unused in 0.12'}},
+  {index:116,name:{ru:'Звук: тормоз (устарело)',en:'Sound: brake rate (legacy)'},value:30,desc:{ru:'Резерв: раньше задавал rate динамического тормоза; в 0.12 не используется',en:'Reserved: used to set the dynamic-brake rate; unused in 0.12'}},
   {index:54,name:{ru:'BEMF PID — Kp',en:'BEMF PID — Kp'},value:128,desc:{ru:'Пропорциональный коэффициент регулятора BEMF (0=BEMF выкл, 255=максимум)',en:'BEMF regulator proportional gain (0=BEMF off, 255=max)'}},
   {index:55,name:{ru:'BEMF PID — Ki',en:'BEMF PID — Ki'},value:60,desc:{ru:'Интегральный коэффициент регулятора BEMF',en:'BEMF regulator integral gain'}},
   {index:56,name:{ru:'BEMF PID — Kd',en:'BEMF PID — Kd'},value:32,desc:{ru:'Дифференциальный коэффициент регулятора BEMF',en:'BEMF regulator derivative gain'}},

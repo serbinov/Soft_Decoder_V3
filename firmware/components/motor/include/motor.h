@@ -93,6 +93,8 @@ typedef struct {
     uint8_t points;          /* target total, 0 = mode default (min 10, max 16) */
     uint16_t settle_ms;      /* minimum settle, 0 = mode default */
     uint16_t settle_max_ms;  /* maximum settle, 0 = 4 x settle */
+    uint16_t dwell_ms;       /* full drive time at a new speed before measuring,
+                              * 0 = mode default (1000 ms); max 5000 */
     uint16_t interval_ms;    /* sample/probe interval, 0 = 40; max 80 */
     uint8_t samples;         /* measured samples per point, 0 = mode default */
     uint8_t retries;         /* point retries; 0 = mode default for non-custom */
@@ -103,6 +105,9 @@ typedef struct {
     uint8_t speed[MOTOR_BEMF_CAL_MAX_POINTS];
 } motor_bemf_cal_config_t;
 
+#define MOTOR_BEMF_CAL_DWELL_DEFAULT_MS 1000U
+#define MOTOR_BEMF_CAL_DWELL_MAX_MS     5000U
+
 typedef enum {
     MOTOR_BEMF_CAL_ERR_NONE,
     MOTOR_BEMF_CAL_ERR_ADC,
@@ -112,19 +117,36 @@ typedef enum {
     MOTOR_BEMF_CAL_ERR_CURVE,
     MOTOR_BEMF_CAL_ERR_STORAGE,
     MOTOR_BEMF_CAL_ERR_START,
+    MOTOR_BEMF_CAL_ERR_SENSOR,   /* static sensor / window / polarity preflight */
+    MOTOR_BEMF_CAL_ERR_NO_RISE,  /* no movement found up to the probe ceiling */
 } motor_bemf_cal_error_t;
+
+/* Calibration phases. The adaptive run executes PREFLIGHT (static sensor +
+ * first-movement probe), WINDOW (delay sweep at the first moving speed), CURVE
+ * (the measured curve) and SAVING. A failure keeps the phase where it stopped. */
+typedef enum {
+    MOTOR_BEMF_CAL_PHASE_IDLE = 0,
+    MOTOR_BEMF_CAL_PHASE_PREFLIGHT,
+    MOTOR_BEMF_CAL_PHASE_WINDOW,
+    MOTOR_BEMF_CAL_PHASE_CURVE,
+    MOTOR_BEMF_CAL_PHASE_SAVING,
+} motor_bemf_cal_phase_t;
 
 /* Result of the last adaptive run. The suggested PID gains are derived from
  * the measured plant slope and settle time; they are informational unless
  * motor_bemf_cal_config_t.apply_pid was set. */
 typedef struct {
     uint8_t mode;             /* motor_bemf_cal_mode_t */
+    uint8_t phase;            /* motor_bemf_cal_phase_t */
     uint8_t planned_points;   /* points the planner aimed for */
     uint8_t measured_points;  /* successful rotating points */
     uint8_t stalled_points;   /* points that did not rotate */
     uint8_t ceiling_speed;     /* first speed above the measurement ceiling, 0=none */
-    uint8_t first_move_speed;  /* lowest successful speed */
+    uint8_t first_move_speed;  /* lowest successful speed (preflight probe) */
     uint16_t first_frac;       /* BEMF at first_move_speed, x1024 */
+    uint16_t optimal_us;       /* selected PWM-off sample window */
+    uint16_t dwell_ms;         /* configured full-speed dwell per new point */
+    bool sensor_ok;            /* preflight static/probe/window/polarity passed */
     uint16_t settle_ms_avg;    /* average accepted settle time */
     uint16_t plant_gain_x1000; /* mV per duty count (x1000) */
     uint16_t kp_x100;          /* suggested Kp x100 */
@@ -136,6 +158,7 @@ typedef struct {
 
 typedef struct {
     bool active;      /* calibration running */
+    uint8_t phase;    /* motor_bemf_cal_phase_t */
     uint8_t step;     /* current step while active (1-based) */
     uint8_t total;    /* total steps (can grow when adaptive points are added) */
     uint8_t count;    /* measured points (current run or stored) */
@@ -206,9 +229,65 @@ typedef struct {
     int32_t integral;
     int32_t corr;
     bool pid_ok;
+    bool bemf_acquired;       /* valid feedback was seen during this motion */
+    bool open_loop_fallback;  /* driving from the speed curve, not the PID */
+    uint16_t window_us;       /* active PWM-off settle window */
     int32_t target;
 } motor_bemf_diag_t;
 void motor_bemf_diag(motor_bemf_diag_t *d);
+
+/* BEMF sensor verification + adaptive measurement-window selection.
+ *
+ * The check always runs the static part: with the bridge coasting it samples
+ * both terminals at several delays, verifies a near-zero differential, checks
+ * the offset/noise and rejects stuck/high or saturated nodes.
+ *
+ * With spin=true it additionally drives the motor open-loop for <=300 ms
+ * (forward, and again reverse for polarity), coasts and sweeps the delays to
+ * find the earliest stable BEMF plateau. On success the selected window is
+ * stored in NVS and used by subsequent samples. The spin check is explicit and
+ * bounded; the caller must release the motor inhibit first.
+ *
+ * Returns ESP_OK only when out->ok is true, ESP_ERR_INVALID_ARG for a NULL
+ * result, ESP_ERR_INVALID_STATE when the motor is busy/inhibited/not at rest,
+ * and ESP_FAIL when the check completed but failed (out->reason explains it).
+ * `optimal_us` is <= the legacy 1000 us default for spin checks; a static-only
+ * success leaves it 0 because no window was selected. */
+typedef enum {
+    MOTOR_BEMF_CHECK_OK = 0,
+    MOTOR_BEMF_CHECK_ERR_BUSY,
+    MOTOR_BEMF_CHECK_ERR_INHIBITED,
+    MOTOR_BEMF_CHECK_ERR_CONTROL,
+    MOTOR_BEMF_CHECK_ERR_RAIL,
+    MOTOR_BEMF_CHECK_ERR_ADC,
+    MOTOR_BEMF_CHECK_ERR_STUCK_LOW,
+    MOTOR_BEMF_CHECK_ERR_STUCK_HIGH,
+    MOTOR_BEMF_CHECK_ERR_STATIC,
+    MOTOR_BEMF_CHECK_ERR_NOISE,
+    MOTOR_BEMF_CHECK_ERR_NO_RISE,
+    MOTOR_BEMF_CHECK_ERR_CEILING,
+    MOTOR_BEMF_CHECK_ERR_NO_PLATEAU,
+    MOTOR_BEMF_CHECK_ERR_TOO_LATE,
+    MOTOR_BEMF_CHECK_ERR_POLARITY,
+    MOTOR_BEMF_CHECK_ERR_STOPPED,
+    MOTOR_BEMF_CHECK_ERR_MOTOR,
+} motor_bemf_check_reason_t;
+
+typedef struct {
+    bool ok;
+    bool static_ok;
+    bool spin_ok;
+    bool polarity_ok;
+    uint16_t optimal_us;
+    uint16_t rise_us;
+    uint16_t offset_mv;
+    uint16_t noise_mv;
+    uint16_t bemf_mv;
+    uint16_t rail_mv;
+    uint16_t duty;
+    uint8_t reason;   /* motor_bemf_check_reason_t */
+} motor_bemf_check_t;
+esp_err_t motor_bemf_check(motor_bemf_check_t *out, bool spin);
 
 /* Direct raw ADC read of the BEMF and rail sense pins (diagnostics). */
 esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw);

@@ -1,6 +1,6 @@
 # Sound engine (`components/sound`)
 
-Version: firmware 0.11. The graph engine is the **single** sound behaviour
+Version: firmware 0.12. The graph engine is the **single** sound behaviour
 model. The legacy MDS/table sound-scheme subsystem (`sound_store`, `sound_scheme_t`,
 `.mds` files, `/api/sound/*`) has been removed; there is no migration path.
 

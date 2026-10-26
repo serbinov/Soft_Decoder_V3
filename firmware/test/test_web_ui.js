@@ -310,7 +310,7 @@ test('rapid BEMF starts and resets are blocked while POST is pending', async t =
 
 test('terminal BEMF failure distinguishes previous stored curve from new success', async t => {
   const { context, element, intervals } = fixture(t);
-  const reasons = ['adc', 'rail', 'timeout', 'control', 'curve', 'storage', 'start'];
+  const reasons = ['adc', 'rail', 'timeout', 'control', 'curve', 'storage', 'start', 'sensor', 'no-rise'];
   for (const error of reasons) {
     context.api = async () => ({ ok: true, active: false, result: 'failed', error,
       stored: true, valid: true, runId: 8 });
@@ -324,6 +324,34 @@ test('terminal BEMF failure distinguishes previous stored curve from new success
   await context.loadBemfCal();
   assert.match(element('bemf_status').textContent, /Новая калибровка завершена и сохранена/);
   assert.equal(element('bemf_meta').textContent, '');
+});
+
+test('BEMF phase and sensor error text are shown', async t => {
+  const { context, element } = fixture(t);
+  context.api = async () => ({ ok: true, active: true, result: 'running', phase: 'preflight',
+    progress: 1, total: 12 });
+  await context.loadBemfCal();
+  assert.match(element('bemf_status').textContent, /проверка датчика BEMF/);
+
+  context.api = async () => ({ ok: true, active: false, result: 'failed', error: 'sensor',
+    stored: true, valid: true, runId: 9 });
+  await context.loadBemfCal();
+  assert.match(element('bemf_status').textContent, /датчик BEMF/);
+  assert.doesNotMatch(element('bemf_status').textContent, /некорректная кривая/);
+
+  context.api = async () => ({ ok: true, active: false, result: 'failed', error: 'no-rise',
+    stored: true, valid: true, runId: 10 });
+  await context.loadBemfCal();
+  assert.match(element('bemf_status').textContent, /нет движения/);
+
+  context.api = async () => ({ ok: true, active: false, result: 'succeeded', valid: true,
+    profile: { mode: 0, measured: 2, planned: 12, first: 66, firstFrac: 409,
+      optimalUs: 340, dwellMs: 1000, sensorOk: true } });
+  await context.loadBemfCal();
+  assert.equal(element('bemf_prof_first').textContent, '66 (40%)');
+  assert.equal(element('bemf_prof_sensor').textContent, 'да');
+  assert.equal(element('bemf_prof_window').textContent, '340 мкс');
+  assert.equal(element('bemf_prof_dwell').textContent, '1000 мс');
 });
 
 test('saving and terminal cleanup reservations keep polling and disable start/reset', async t => {

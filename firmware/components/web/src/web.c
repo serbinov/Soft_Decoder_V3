@@ -56,6 +56,7 @@ static const char *TAG = "web";
 #endif
 #define UPLOAD_MAX (2 * 1024 * 1024)
 #define WEB_QUERY_MAX 1400
+#define WEB_PATH_MAX 640
 
 /* File-I/O wrappers used by the combined-OTA sound writer; overridable so the
  * host tests can inject fwrite/fflush/fclose failures. */
@@ -1686,6 +1687,18 @@ static const char *bemf_result_name(motor_bemf_cal_state_t result)
     }
 }
 
+static const char *bemf_phase_name(uint8_t phase)
+{
+    switch (phase) {
+    case MOTOR_BEMF_CAL_PHASE_IDLE: return "idle";
+    case MOTOR_BEMF_CAL_PHASE_PREFLIGHT: return "preflight";
+    case MOTOR_BEMF_CAL_PHASE_WINDOW: return "window";
+    case MOTOR_BEMF_CAL_PHASE_CURVE: return "curve";
+    case MOTOR_BEMF_CAL_PHASE_SAVING: return "saving";
+    default: return "idle";
+    }
+}
+
 static const char *bemf_error_name(motor_bemf_cal_error_t reason)
 {
     switch (reason) {
@@ -1697,6 +1710,8 @@ static const char *bemf_error_name(motor_bemf_cal_error_t reason)
     case MOTOR_BEMF_CAL_ERR_CURVE: return "curve";
     case MOTOR_BEMF_CAL_ERR_STORAGE: return "storage";
     case MOTOR_BEMF_CAL_ERR_START: return "start";
+    case MOTOR_BEMF_CAL_ERR_SENSOR: return "sensor";
+    case MOTOR_BEMF_CAL_ERR_NO_RISE: return "no-rise";
     default: return "start";
     }
 }
@@ -1879,13 +1894,14 @@ static esp_err_t bemf_cal_get(httpd_req_t *req)
 {
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
-    char json[1536];
+    char json[1792];
     size_t used = 0;
     buf_appendf(json, sizeof(json), &used,
-                "{\"ok\":true,\"active\":%s,\"progress\":%u,\"total\":%u,"
+                "{\"ok\":true,\"active\":%s,\"phase\":\"%s\",\"progress\":%u,\"total\":%u,"
                 "\"valid\":%s,\"stored\":%s,\"use\":%s,"
                 "\"runId\":%lu,\"result\":\"%s\",\"error\":\"%s\",\"errorCode\":%d,\"points\":[",
                 info.active ? "true" : "false",
+                bemf_phase_name(info.phase),
                 (unsigned)info.step, (unsigned)info.total,
                 info.valid ? "true" : "false",
                 info.stored ? "true" : "false",
@@ -1899,11 +1915,17 @@ static esp_err_t bemf_cal_get(httpd_req_t *req)
                     i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
     }
     buf_appendf(json, sizeof(json), &used,
-                "],\"profile\":{\"mode\":%u,\"planned\":%u,\"measured\":%u,"
+                "],\"profile\":{\"mode\":%u,\"phase\":\"%s\",\"sensorOk\":%s,"
+                "\"optimalUs\":%u,\"dwellMs\":%u,\"planned\":%u,\"measured\":%u,"
                 "\"stalled\":%u,\"ceiling\":%u,\"first\":%u,\"firstFrac\":%u,\"settle\":%u,"
                 "\"gain\":%u,\"kp\":%u,\"ki\":%u,\"kd\":%u,\"quality\":%u,"
                 "\"pidApplied\":%s}}",
-                (unsigned)info.profile.mode, (unsigned)info.profile.planned_points,
+                (unsigned)info.profile.mode,
+                bemf_phase_name(info.profile.phase),
+                info.profile.sensor_ok ? "true" : "false",
+                (unsigned)info.profile.optimal_us,
+                (unsigned)info.profile.dwell_ms,
+                (unsigned)info.profile.planned_points,
                 (unsigned)info.profile.measured_points,
                 (unsigned)info.profile.stalled_points,
                 (unsigned)info.profile.ceiling_speed,
@@ -2303,7 +2325,12 @@ static bool web_lib_base_name(const char *in, char *out, size_t out_len)
  * references agree with the ingest normalization. */
 static bool web_lib_resolve_path(const char *base, char *path, size_t cap)
 {
-    snprintf(path, cap, WEB_AUDIO_DIR "/%s.wav", base);
+    char safe_base[WEB_LIB_NAME_MAX];
+    size_t base_len = strlen(base);
+    if (base_len >= sizeof(safe_base)) return false;
+    memcpy(safe_base, base, base_len + 1U);
+
+    snprintf(path, cap, WEB_AUDIO_DIR "/%s.wav", safe_base);
     FILE *f = fopen(path, "rb");
     if (f != NULL) {
         fclose(f);
@@ -2317,8 +2344,11 @@ static bool web_lib_resolve_path(const char *base, char *path, size_t cap)
         if (!web_name_is_wav(ent->d_name)) continue;
         char cand[WEB_LIB_NAME_MAX];
         if (!web_lib_base_name(ent->d_name, cand, sizeof(cand))) continue;
-        if (strcasecmp(cand, base) == 0) {
-            snprintf(path, cap, WEB_AUDIO_DIR "/%s", ent->d_name);
+        if (strcasecmp(cand, safe_base) == 0) {
+            size_t name_len = strlen(ent->d_name);
+            if (name_len >= sizeof(cand)) continue;
+            memcpy(cand, ent->d_name, name_len + 1U);
+            snprintf(path, cap, WEB_AUDIO_DIR "/%s", cand);
             found = true;
             break;
         }
@@ -4368,7 +4398,7 @@ static void pack_recover_orphan_backups(void)
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
         if (strncmp(ent->d_name, ".pb", 3) != 0) continue;
-        char dir[224];
+        char dir[WEB_PATH_MAX];
         snprintf(dir, sizeof(dir), WEB_AUDIO_DIR "/%s", ent->d_name);
         DIR *bd = opendir(dir);
         if (bd == NULL) {
@@ -4378,7 +4408,7 @@ static void pack_recover_orphan_backups(void)
         struct dirent *be;
         while ((be = readdir(bd)) != NULL) {
             if (!pack_journal_name_ok(be->d_name)) continue;
-            char canonical[224], backup[224];
+            char canonical[WEB_PATH_MAX], backup[WEB_PATH_MAX * 2];
             snprintf(canonical, sizeof(canonical), WEB_AUDIO_DIR "/%s", be->d_name);
             snprintf(backup, sizeof(backup), "%s/%s", dir, be->d_name);
             (void)remove(canonical);
@@ -5682,19 +5712,16 @@ static void transfer_worker(void *arg)
     transfer_deadline_set(esp_timer_get_time() + 120000000);
     s_transfer_reboot = false;
     esp_err_t err = maintenance_quiesce(false);
-    bool lease = false;
     if (err == ESP_OK && !transfer_aborted()) {
         err = storage_access_begin();
         if (err == ESP_OK) {
             portENTER_CRITICAL(&s_control_state_mux);
             s_up_lease_held = true;
             portEXIT_CRITICAL(&s_control_state_mux);
-            lease = true;
             /* The supervisor may have aborted between the lease acquisition and
              * publishing s_up_lease_held. */
             if (transfer_aborted()) {
                 if (transfer_claim_lease()) storage_access_end();
-                lease = false;
                 err = ESP_ERR_TIMEOUT;
             }
         }

@@ -47,6 +47,9 @@ static const esp_partition_t *s_pending_boot;
 #define PROV_BEMF_TEST_MAX_SPEED 60U
 #define PROV_BEMF_TEST_MAX_MS    5000U
 #define PROV_BEMF_TEST_DEF_MS    2000U
+/* Let the motor task consume the inhibit's stop/reset before the check takes
+ * its admission snapshot. */
+#define PROV_BEMF_CHECK_SETTLE_MS 20U
 /* Keep enough LittleFS headroom for metadata, directory entries and the
  * temporary staging tree before a destructive format. */
 #define PROV_INSTALL_RESERVE     (256U * 1024U)
@@ -648,6 +651,8 @@ static void send_bemf_header(const motor_bemf_cal_info_t *info)
  *   BEMF=...   -> store coefficients (pairs "spd,frac", comma separated)
  *   BEMF-RAW   -> dump raw BEMF measurement diagnostics
  *   BEMF-ADC   -> dump direct ADC raw counts (bemf1 bemf2 rail)
+ *   BEMF-CHECK [spin] -> verify the BEMF sensor; "spin" also selects and
+ *                        stores the adaptive PWM-off sample window
  *   BEMF-TEST  -> bounded drive, e.g. "BEMF-TEST 60 [rev] [ms]" (max 60/5 s)
  *   BEMF-CAL   -> start the legacy 10-point calibration (motor unloaded)
  *   BEMF-CAL <mode> [points] [settle_ms] [interval_ms] [samples] [retries] [apply_pid]
@@ -691,6 +696,74 @@ static esp_err_t bemf_test_run(uint8_t speed, bool forward, uint16_t ms)
         err = ESP_FAIL;
     }
     web_maintenance_end();
+    return err;
+}
+
+static const char *bemf_check_reason_name(uint8_t reason)
+{
+    switch (reason) {
+    case MOTOR_BEMF_CHECK_OK: return "ok";
+    case MOTOR_BEMF_CHECK_ERR_BUSY: return "busy";
+    case MOTOR_BEMF_CHECK_ERR_INHIBITED: return "inhibited";
+    case MOTOR_BEMF_CHECK_ERR_CONTROL: return "control";
+    case MOTOR_BEMF_CHECK_ERR_RAIL: return "rail";
+    case MOTOR_BEMF_CHECK_ERR_ADC: return "adc";
+    case MOTOR_BEMF_CHECK_ERR_STUCK_LOW: return "stuck-low";
+    case MOTOR_BEMF_CHECK_ERR_STUCK_HIGH: return "stuck-high";
+    case MOTOR_BEMF_CHECK_ERR_STATIC: return "static";
+    case MOTOR_BEMF_CHECK_ERR_NOISE: return "noise";
+    case MOTOR_BEMF_CHECK_ERR_NO_RISE: return "no-rise";
+    case MOTOR_BEMF_CHECK_ERR_CEILING: return "ceiling";
+    case MOTOR_BEMF_CHECK_ERR_NO_PLATEAU: return "no-plateau";
+    case MOTOR_BEMF_CHECK_ERR_TOO_LATE: return "too-late";
+    case MOTOR_BEMF_CHECK_ERR_POLARITY: return "polarity";
+    case MOTOR_BEMF_CHECK_ERR_STOPPED: return "stopped";
+    case MOTOR_BEMF_CHECK_ERR_MOTOR: return "motor";
+    default: return "unknown";
+    }
+}
+
+/* Explicit, bounded sensor check. Takes the maintenance lease, releases the
+ * inhibit only for the check and always forces the bridge back into inhibit. */
+static esp_err_t bemf_check_run(bool spin, motor_bemf_check_t *out)
+{
+    if (out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out, 0, sizeof(*out));
+    out->reason = MOTOR_BEMF_CHECK_OK;
+    if (!web_actuation_ready() || web_maintenance_active()) {
+        out->reason = MOTOR_BEMF_CHECK_ERR_BUSY;
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = web_maintenance_begin(false);
+    if (err != ESP_OK) {
+        out->reason = MOTOR_BEMF_CHECK_ERR_BUSY;
+        return err;
+    }
+    err = motor_set_inhibited(false);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(PROV_BEMF_CHECK_SETTLE_MS));
+        err = motor_bemf_check(out, spin);
+    }
+    esp_err_t stop_err = motor_set_inhibited(true);
+    if (err == ESP_OK && stop_err != ESP_OK) {
+        err = stop_err;
+    }
+    uint8_t applied = 255;
+    motor_get_applied_speed(&applied, NULL);
+    if (stop_err != ESP_OK || applied != 0U) {
+        motor_emergency_stop();
+        applied = 255;
+        motor_get_applied_speed(&applied, NULL);
+    }
+    if (err == ESP_OK && applied != 0U) {
+        err = ESP_FAIL;
+    }
+    web_maintenance_end();
+    if (err != ESP_OK && out->reason == MOTOR_BEMF_CHECK_OK) {
+        out->reason = MOTOR_BEMF_CHECK_ERR_MOTOR;
+    }
     return err;
 }
 
@@ -761,6 +834,37 @@ static void handle_bemf_cmd(const char *line)
         char buf[64];
         snprintf(buf, sizeof(buf), "BEMF-COAST %u %u", (unsigned)b1, (unsigned)b2);
         send_line(buf);
+        return;
+    }
+    if (strcmp(line, "BEMF-CHECK") == 0 || strncmp(line, "BEMF-CHECK ", 11) == 0) {
+        const char *arg = line + 10;
+        while (*arg == ' ') {
+            ++arg;
+        }
+        bool spin = false;
+        if (*arg != '\0') {
+            if (strcasecmp(arg, "spin") != 0) {
+                send_line("BEMF-CHECK-ERR reason=args");
+                return;
+            }
+            spin = true;
+        }
+        motor_bemf_check_t r;
+        esp_err_t err = bemf_check_run(spin, &r);
+        if (err == ESP_OK && r.ok) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "BEMF-CHECK-OK optimal_us=%u offset=%u noise=%u bemf=%u rail=%u",
+                     (unsigned)r.optimal_us, (unsigned)r.offset_mv,
+                     (unsigned)r.noise_mv, (unsigned)r.bemf_mv,
+                     (unsigned)r.rail_mv);
+            send_line(buf);
+        } else {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "BEMF-CHECK-ERR reason=%s",
+                     bemf_check_reason_name(r.reason));
+            send_line(buf);
+        }
         return;
     }
     if (strcmp(line, "BEMF-PROFILE?") == 0) {

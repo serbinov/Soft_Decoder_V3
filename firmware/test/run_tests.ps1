@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $tmp  = $env:TEMP
+$isWindows = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
 
 # --- locate compiler -------------------------------------------------------
 $cc = $env:DCC_TEST_CC
@@ -40,6 +41,30 @@ if (-not $cc) {
     exit 1
 }
 Write-Host "Compiler: $cc"
+
+# Native stderr (Python unittest writes its report there) must be shown instead
+# of being turned into a terminating PowerShell error by $ErrorActionPreference.
+function Invoke-TestProcess {
+    param([string]$Exe, [string[]]$Arguments, [string]$Label)
+    Write-Host "=== $Label ===" -ForegroundColor Cyan
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object {
+            # Native stderr becomes ErrorRecord objects under PowerShell 5.1.
+            # Print the actual message (including empty lines) instead of the
+            # RemoteException type name, so Python unittest output is intact.
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                Write-Host $_.Exception.Message
+            } else {
+                Write-Host $_
+            }
+        }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
 
 # --- Unity framework -------------------------------------------------------
 $unitySrc = "$tmp\unity_clone\src"
@@ -71,7 +96,9 @@ $inc = @(
 $suites = @("test_dcc", "test_settings", "test_motor", "test_auxio",
             "test_web_util", "test_track", "test_audio", "test_pinmap",
             "test_track_manifest", "test_storage", "test_track_recover", "test_provision",
-            "test_selftest", "test_web", "test_sound_graph", "test_sound_graph_store", "test_audio_pack", "test_main")
+            "test_selftest", "test_web", "test_sound_graph", "test_sound_graph_store",
+            "test_audio_pack", "test_main", "test_concurrency",
+            "test_motor_concurrency")
 $failed = 0
 if ($Only.Count -gt 0) {
     foreach ($name in $Only) {
@@ -94,8 +121,17 @@ foreach ($suite in $suites) {
         # component translation unit only, so Unity keeps its own statics.
         $names = $srcs | ForEach-Object { $_.FullName }
         $extra = @()
-if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
-& $cc $inc $names "$unitySrc\unity.c" $extra -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
+        if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
+        $suiteFlags = @()
+        if ($suite -eq "test_concurrency" -or $suite -eq "test_motor_concurrency") {
+            $suiteFlags += "-DMOCK_FREERTOS_REAL_SYNC"
+            if (-not $isWindows) { $suiteFlags += "-pthread" }
+        }
+        if ($suite -eq "test_motor_concurrency") {
+            # Reuse the host LEDC register shim used by test_motor.
+            $suiteFlags += "-I$root\test\test_motor"
+        }
+& $cc $inc $names "$unitySrc\unity.c" $suiteFlags $extra -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
         $buildExit = $LASTEXITCODE
     } catch {
         Write-Host "BUILD FAILED: $_"
@@ -107,35 +143,38 @@ if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") 
     if ($LASTEXITCODE -ne 0) { $failed++ }
 }
 
+# --- non-C suites: discover Node and Python independently ------------------
+# Missing tools always make the run incomplete: never print "ALL TEST SUITES
+# PASSED" after silently skipping a language.
 $node = Get-Command node -ErrorAction SilentlyContinue
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
+$missingTools = @()
+if (-not $node)   { $missingTools += "Node.js" }
+if (-not $python) { $missingTools += "Python" }
+foreach ($tool in $missingTools) {
+    Write-Host "ERROR: required test tool missing: $tool" -ForegroundColor Red
+    $failed++
+}
+
 if ($node) {
-    Write-Host "=== test_web_ui (Node.js) ===" -ForegroundColor Cyan
-    & $node.Source --test "$root\test\test_web_ui.js"
-    if ($LASTEXITCODE -ne 0) { $failed++ }
-    Write-Host "=== test_blocks_editor (Node.js) ===" -ForegroundColor Cyan
-    & $node.Source --test "$root\test\test_blocks_editor.js"
-    if ($LASTEXITCODE -ne 0) { $failed++ }
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if ($python) {
-        Write-Host "=== test_pack_integration (Node.js + Python) ===" -ForegroundColor Cyan
-        & $node.Source --test "$root\test\test_pack_integration.js"
-        if ($LASTEXITCODE -ne 0) { $failed++ }
-        Write-Host "=== test_sound_editor_assets (Python) ===" -ForegroundColor Cyan
-        & $python.Source "$root\test\test_sound_editor_assets.py"
-        if ($LASTEXITCODE -ne 0) { $failed++ }
-        Write-Host "=== test_release_artifacts (Python) ===" -ForegroundColor Cyan
-        & $python.Source "$root\test\test_release_artifacts.py"
-        if ($LASTEXITCODE -ne 0) { $failed++ }
-        Write-Host "=== test_pack_crypto (Python) ===" -ForegroundColor Cyan
-        & $python.Source "$root\test\test_pack_crypto.py"
-        if ($LASTEXITCODE -ne 0) { $failed++ }
-    } else {
-        Write-Warning "Python not found: real .asp import/export tests were NOT run."
-    }
+    if ((Invoke-TestProcess $node.Source @("--test", "$root\test\test_web_ui.js") "test_web_ui (Node.js)") -ne 0) { $failed++ }
+    if ((Invoke-TestProcess $node.Source @("--test", "$root\test\test_blocks_editor.js") "test_blocks_editor (Node.js)") -ne 0) { $failed++ }
+}
+if ($python) {
+    if ((Invoke-TestProcess $python.Source @("$root\test\test_sound_editor_assets.py") "test_sound_editor_assets (Python)") -ne 0) { $failed++ }
+    if ((Invoke-TestProcess $python.Source @("$root\test\test_release_artifacts.py") "test_release_artifacts (Python)") -ne 0) { $failed++ }
+    if ((Invoke-TestProcess $python.Source @("$root\test\test_pack_crypto.py") "test_pack_crypto (Python)") -ne 0) { $failed++ }
+}
+if ($node -and $python) {
+    if ((Invoke-TestProcess $node.Source @("--test", "$root\test\test_pack_integration.js") "test_pack_integration (Node.js + Python)") -ne 0) { $failed++ }
 } else {
-    Write-Warning "Node.js not found: JavaScript regressions were NOT run."
+    Write-Host "SKIP test_pack_integration (requires both Node.js and Python)" -ForegroundColor Yellow
 }
 
 Write-Host ""
+if ($missingTools.Count -gt 0) {
+    Write-Host "INCOMPLETE: missing required tool(s): $($missingTools -join ', ')" -ForegroundColor Red
+}
 if ($failed -eq 0) { Write-Host "ALL TEST SUITES PASSED" -ForegroundColor Green }
 else { Write-Host "$failed suite(s) FAILED" -ForegroundColor Red; exit 1 }

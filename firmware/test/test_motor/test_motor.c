@@ -405,6 +405,8 @@ void setUp(void)
     s_bemf_reject_high = false;
     s_plausibility_clock_active = false;
     s_plausibility_since_us = 0;
+    s_sat_clock_active = false;
+    s_sat_since_us = 0;
     s_last_pid_us = 0;
     s_target_clamp_warned = false;
     s_pid_integral = 0.0f;
@@ -436,6 +438,21 @@ void tearDown(void)
 static void test_speed_duty_zero(void)
 {
     TEST_ASSERT_EQUAL_UINT32(0, speed_duty(0));
+}
+
+/* Regression: the creep floor used to lift only step 1, so the low end went
+ * 16, 8, 16 ... and speed 2 was slower than speed 1. */
+static void test_speed_duty_low_end_is_monotonic(void)
+{
+    cv_defaults();
+    uint32_t previous = speed_duty(0);
+    for (uint8_t speed = 1; speed <= 126U; ++speed) {
+        uint32_t duty = speed_duty(speed);
+        TEST_ASSERT_TRUE(duty >= previous);
+        previous = duty;
+    }
+    TEST_ASSERT_EQUAL_UINT32(MOTOR_CREEP_MIN_DUTY, speed_duty(2));
+    TEST_ASSERT_EQUAL_UINT32(MOTOR_CREEP_MIN_DUTY, speed_duty(3));
 }
 
 static void test_speed_duty_linear_curve(void)
@@ -701,6 +718,63 @@ static void test_motor_tick_kickstart(void)
     /* Kick duty = Vhigh * CV65 / 255 = 400 dominates the open-loop duty. */
     TEST_ASSERT_EQUAL_UINT32(400, mock_ledc_duty[LEDC_CHANNEL_0]);
     TEST_ASSERT_EQUAL_UINT8((uint8_t)(KICK_TICKS - 1), s_kick_left);
+}
+
+/* A kickstart burst must not survive a throttle reduction, a stop or a
+ * direction change. */
+static void test_motor_tick_kickstart_clears_on_reduction_stop_and_reverse(void)
+{
+    motor_set_bemf_enabled(false);
+    motor_tick(); /* consume the enable reset */
+    motor_set_rail_voltage_mv(1000);
+    g_cv[3] = 0;
+    g_cv[5] = 100;
+    g_cv[6] = 0;
+    g_cv[65] = 255;
+    s_target_speed = 50;
+    s_target_forward = true;
+    s_applied_speed = 0;
+    s_applied_forward = true;
+    s_was_stopped = true;
+    s_ramp_acc = 0;
+
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(50, s_applied_speed);
+    TEST_ASSERT_TRUE(s_kick_left > 0U);
+    TEST_ASSERT_EQUAL_UINT32(400, mock_ledc_duty[LEDC_CHANNEL_0]);
+
+    /* Throttle reduction cancels the burst before the next duty write. */
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(20, true));
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(20, s_applied_speed);
+    TEST_ASSERT_EQUAL_UINT8(0, s_kick_left);
+    TEST_ASSERT_EQUAL_UINT32(0, s_kick_duty);
+    TEST_ASSERT_EQUAL_UINT32(speed_duty(20), mock_ledc_duty[LEDC_CHANNEL_0]);
+
+    /* A stop cancels it too. */
+    s_target_speed = 50;
+    s_applied_speed = 50;
+    s_kick_left = 10;
+    s_kick_duty = 900;
+    s_was_stopped = false;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(0, true));
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+    TEST_ASSERT_EQUAL_UINT8(0, s_kick_left);
+    TEST_ASSERT_EQUAL_UINT32(0, s_kick_duty);
+
+    /* A direction change cancels the burst before the bridge flips. */
+    g_cv[4] = 0;
+    s_target_speed = 50;
+    s_target_forward = false;
+    s_applied_speed = 50;
+    s_applied_forward = true;
+    s_kick_left = 10;
+    s_kick_duty = 900;
+    s_was_stopped = false;
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(0, s_kick_left);
+    TEST_ASSERT_EQUAL_UINT32(0, s_kick_duty);
 }
 
 static void test_motor_tick_reverse_drives_other_channel(void)
@@ -1120,6 +1194,8 @@ static void test_bemf_cal_task_runs(void)
     bemf_cal_task((void *)(uintptr_t)s_output_generation);
     TEST_ASSERT_FALSE(s_cal_active);
     TEST_ASSERT_TRUE(g_cal_valid);
+    TEST_ASSERT_EQUAL_UINT8(BEMF_CAL_POINTS, s_cal_profile.measured_points);
+    TEST_ASSERT_TRUE(s_cal_profile.quality > 0U);
     /* Calibration must leave the motor truly stopped, not at step 126. */
     TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, s_pid_integral);
@@ -1612,6 +1688,22 @@ static void test_failed_calibration_preserves_stored_curve(void)
     TEST_ASSERT_EQUAL_UINT32(0, s_last_duty);
 }
 
+/* A failed legacy run must publish the points it really measured (zero here)
+ * and its real quality, not the old hard-coded measured=planned/quality=100. */
+static void test_legacy_calibration_failure_reports_actual_profile(void)
+{
+    motor_set_rail_voltage_mv(1000);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start());
+    mock_adc_ok = 0;
+    bemf_cal_task((void *)(uintptr_t)s_output_generation);
+
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, s_cal_result);
+    TEST_ASSERT_FALSE(s_cal_active);
+    TEST_ASSERT_EQUAL_UINT8(BEMF_CAL_POINTS, s_cal_profile.planned_points);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cal_profile.measured_points);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cal_profile.quality);
+}
+
 static void test_calibration_rail_snapshot_no_division_race(void)
 {
     g_cal = BEMF_CAL_BASE;
@@ -1690,6 +1782,49 @@ static void test_bemf_target_clamp_bounds_flat_curve(void)
     TEST_ASSERT_TRUE(s_last_target <= 145.0f);
 }
 
+/* A zero direction trim must stop the PID: the 0.08 target floor used to add
+ * drive to a direction the user had explicitly disabled. */
+static void test_zero_direction_trim_disables_pid(void)
+{
+    motor_set_bemf_enabled(true);
+    motor_tick(); /* consume the init/enable resets */
+    s_bemf_adc_ready = true;
+    s_cal_valid = false;
+    g_cv[3] = 0;
+    g_cv[66] = 0;
+    g_cv[95] = 0;
+    motor_set_rail_voltage_mv(1000);
+    mock_adc_raw[PIN_BEMF1 - 1] = 0;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_target_speed = 63;
+    s_applied_speed = 63;
+    s_target_forward = true;
+    s_applied_forward = true;
+    s_was_stopped = false;
+    s_bemf_filtered = 0.0f;
+    s_bemf_filter_primed = true;
+
+    motor_tick();
+    TEST_ASSERT_FALSE(s_last_pid_ok);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s_last_target);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_1]);
+    TEST_ASSERT_FALSE(s_feedback_fault);
+
+    /* The reverse direction has its own zero trim (CV95). */
+    s_target_speed = 63;
+    s_applied_speed = 0;
+    s_target_forward = false;
+    s_applied_forward = false;
+    s_was_stopped = false;
+    s_ramp_acc = 0;
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(63, s_applied_speed);
+    TEST_ASSERT_FALSE(s_last_pid_ok);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_1]);
+}
+
 static void test_calibration_export_all_sixteen_points(void)
 {
     settings_bemf_cal_t cal = {0};
@@ -1738,6 +1873,17 @@ static void test_heartbeat_full_width(void)
     mock_timer_now_us = ((int64_t)1 << 32) + 1234;
     motor_tick();
     TEST_ASSERT_EQUAL_INT64(mock_timer_now_us, motor_last_tick_us());
+}
+
+/* The heartbeat must be renewed before the control mutex is taken: an NVS
+ * stall holding the mutex may not look like a dead motor task. */
+static void test_heartbeat_updates_before_control_mutex(void)
+{
+    mock_timer_now_us = 900000;
+    mock_sem_take_fail = 1; /* control tick cannot acquire the mutex */
+    motor_tick();
+    TEST_ASSERT_EQUAL_INT64(900000, motor_last_tick_us());
+    mock_sem_take_fail = 0;
 }
 
 static uint32_t g_task_waits;
@@ -2290,6 +2436,85 @@ static void test_feedback_partial_underread_latches(void)
     TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
 }
 
+/* A rail sense stuck high inflates target_bemf = frac*rail. The measured BEMF
+ * can then stay above the 0.35 plausibility margin while the PID pins the duty
+ * at LEDC_MAX, so only a saturated-drive watchdog over a long window catches
+ * it. */
+static void test_feedback_stuck_high_rail_saturation_latches(void)
+{
+    motor_set_bemf_enabled(true);
+    motor_tick(); /* consume the init/enable resets */
+    g_cv[3] = 0;
+    g_cv[5] = 255;
+    s_bemf_adc_ready = true;
+    mock_adc_raw[PIN_BEMF1 - 1] = 1189; /* ~900 mV real BEMF against 3 V rail */
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_target_speed = 126;
+    s_applied_speed = 126;
+    s_target_forward = true;
+    s_applied_forward = true;
+    s_was_stopped = false;
+    s_bemf_filtered = 0.0f;
+    s_bemf_filter_primed = false;
+
+    mock_timer_now_us = 0;
+    for (unsigned i = 0; i < 260U && !s_feedback_fault; ++i) {
+        mock_timer_now_us += 10000;
+        motor_set_rail_voltage_mv(3000); /* Stuck-high rail publication. */
+        motor_tick();
+        if (mock_timer_now_us < 1900000) {
+            TEST_ASSERT_FALSE(s_feedback_fault);
+        }
+        TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] >= BEMF_SENSE_SAT_DUTY ||
+                         s_feedback_fault);
+    }
+    TEST_ASSERT_TRUE(s_feedback_fault);
+    TEST_ASSERT_EQUAL_UINT8(0, s_target_speed);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+}
+
+/* A heavily loaded but healthy start can hold the duty saturated with a
+ * positive target error for a while. The long bounded window must allow it as
+ * long as the rotor is still accelerating (the error closes in time). */
+static void test_feedback_saturated_heavy_load_start_does_not_false_trip(void)
+{
+    motor_set_bemf_enabled(true);
+    motor_tick(); /* consume the init/enable resets */
+    g_cv[3] = 0;
+    g_cv[5] = 255;
+    s_bemf_adc_ready = true;
+    mock_adc_raw[PIN_BEMF1 - 1] = 793; /* ~600 mV: 85 % of the 708 mV target */
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+    s_target_speed = 126;
+    s_applied_speed = 126;
+    s_target_forward = true;
+    s_applied_forward = true;
+    s_was_stopped = false;
+    s_bemf_filtered = 0.0f;
+    s_bemf_filter_primed = false;
+
+    mock_timer_now_us = 0;
+    for (unsigned i = 0; i < 150U; ++i) {
+        mock_timer_now_us += 10000;
+        motor_set_rail_voltage_mv(1000);
+        motor_tick();
+        TEST_ASSERT_FALSE(s_feedback_fault);
+        TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] >= BEMF_SENSE_SAT_DUTY);
+    }
+    TEST_ASSERT_TRUE(s_sat_clock_active);
+
+    /* The load releases and the rotor reaches the target: no latch. */
+    mock_adc_raw[PIN_BEMF1 - 1] = 1057; /* ~800 mV, above the 708 mV target */
+    for (unsigned i = 0; i < 100U; ++i) {
+        mock_timer_now_us += 10000;
+        motor_set_rail_voltage_mv(1000);
+        motor_tick();
+        TEST_ASSERT_FALSE(s_feedback_fault);
+    }
+    TEST_ASSERT_FALSE(s_sat_clock_active);
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] > 0U);
+}
+
 static void test_cal_zero_measurements_abort_at_first_step(void)
 {
     g_delay_hook = refresh_calibration_rail;
@@ -2561,6 +2786,21 @@ static void test_custom_calibration_rejects_bad_speeds(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_bemf_cal_start_ex(&cfg));
 }
 
+/* CUSTOM with no explicit speed list must be rejected, not silently replaced
+ * by the built-in plan. */
+static void test_custom_calibration_rejects_missing_speeds(void)
+{
+    motor_bemf_cal_config_t cfg = {0};
+    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
+    cfg.points = 10;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_bemf_cal_start_ex(&cfg));
+
+    cfg.speed_count = 1;
+    cfg.speed[0] = 12;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_bemf_cal_start_ex(&cfg));
+    TEST_ASSERT_FALSE(s_cal_active);
+}
+
 static void test_adaptive_calibration_applies_recommended_pid(void)
 {
     g_delay_hook = refresh_calibration_rail;
@@ -2624,6 +2864,25 @@ static void test_normal_stop_keeps_feedback_history_for_cv4_ramp(void)
     TEST_ASSERT_EQUAL_UINT32(generation, s_output_generation);
     TEST_ASSERT_FALSE(s_feedback_reset_requested);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 250.0f, s_bemf_filtered);
+}
+
+/* Once the ramp actually reaches standstill, the pre-stop filter value must
+ * not blend into the next start. */
+static void test_bemf_filter_resets_at_applied_zero(void)
+{
+    motor_set_bemf_enabled(false);
+    motor_tick(); /* consume the enable reset */
+    s_target_speed = 0;
+    s_applied_speed = 40;
+    s_applied_forward = true;
+    s_was_stopped = false;
+    s_bemf_filtered = 300.0f;
+    s_bemf_filter_primed = true;
+
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT8(0, s_applied_speed);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s_bemf_filtered);
+    TEST_ASSERT_FALSE(s_bemf_filter_primed);
 }
 
 static void test_zero_bemf_calibration_preserves_working_curve(void)
@@ -3246,6 +3505,7 @@ int main(void)
     RUN_TEST(test_cal_late_sample_cannot_restore_expired_lease_while_coasted);
     RUN_TEST(test_repeated_dcc_command_does_not_cancel_sampling);
     RUN_TEST(test_normal_stop_keeps_feedback_history_for_cv4_ramp);
+    RUN_TEST(test_bemf_filter_resets_at_applied_zero);
     RUN_TEST(test_zero_bemf_calibration_preserves_working_curve);
     RUN_TEST(test_feedback_loss_holds_reduced_actual_duty);
     RUN_TEST(test_feedback_alternating_rejections_never_jump_to_base);
@@ -3264,6 +3524,8 @@ int main(void)
     RUN_TEST(test_feedback_stuck_zero_medium_speed_latches_without_saturation);
     RUN_TEST(test_feedback_near_zero_low_speed_integral_is_capped);
     RUN_TEST(test_feedback_partial_underread_latches);
+    RUN_TEST(test_feedback_stuck_high_rail_saturation_latches);
+    RUN_TEST(test_feedback_saturated_heavy_load_start_does_not_false_trip);
     RUN_TEST(test_cal_zero_measurements_abort_at_first_step);
     RUN_TEST(test_cal_stale_rail_aborts_first_step_without_full_run);
     RUN_TEST(test_cal_rest_check_rejects_coasting_motor);
@@ -3275,8 +3537,10 @@ int main(void)
     RUN_TEST(test_cal_low_bemf_before_settle_min_is_not_stall);
     RUN_TEST(test_custom_calibration_speeds);
     RUN_TEST(test_custom_calibration_rejects_bad_speeds);
+    RUN_TEST(test_custom_calibration_rejects_missing_speeds);
     RUN_TEST(test_adaptive_calibration_applies_recommended_pid);
     RUN_TEST(test_speed_duty_zero);
+    RUN_TEST(test_speed_duty_low_end_is_monotonic);
     RUN_TEST(test_speed_duty_linear_curve);
     RUN_TEST(test_speed_duty_non_monotonic_no_wrap);
     RUN_TEST(test_speed_duty_28_point_table);
@@ -3293,6 +3557,7 @@ int main(void)
     RUN_TEST(test_motor_tick_ramp_uses_cv3);
     RUN_TEST(test_motor_tick_decel_uses_cv4);
     RUN_TEST(test_motor_tick_kickstart);
+    RUN_TEST(test_motor_tick_kickstart_clears_on_reduction_stop_and_reverse);
     RUN_TEST(test_motor_tick_reverse_drives_other_channel);
     RUN_TEST(test_motor_tick_bemf_disabled_open_loop);
     RUN_TEST(test_motor_bemf_enable_resets_state);
@@ -3341,14 +3606,17 @@ int main(void)
     RUN_TEST(test_regular_stop_cancels_calibration);
     RUN_TEST(test_calibration_raw_average_has_no_iir_bias);
     RUN_TEST(test_failed_calibration_preserves_stored_curve);
+    RUN_TEST(test_legacy_calibration_failure_reports_actual_profile);
     RUN_TEST(test_calibration_rail_snapshot_no_division_race);
     RUN_TEST(test_pid_can_reduce_below_half_base_preserves_kick);
     RUN_TEST(test_bemf_ceiling_bounds_fallback_and_accepts_measured_high);
     RUN_TEST(test_bemf_target_clamp_bounds_flat_curve);
+    RUN_TEST(test_zero_direction_trim_disables_pid);
     RUN_TEST(test_calibration_export_all_sixteen_points);
     RUN_TEST(test_corrupt_curve_rejected_before_pid);
     RUN_TEST(test_feedback_reset_is_owner_applied);
     RUN_TEST(test_heartbeat_full_width);
+    RUN_TEST(test_heartbeat_updates_before_control_mutex);
     RUN_TEST(test_overrun_does_not_replay_control_ticks);
     RUN_TEST(test_adc_mutex_missing_fails_closed);
     RUN_TEST(test_cal_worker_can_finish_before_create_returns);

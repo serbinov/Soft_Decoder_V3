@@ -170,6 +170,36 @@ static void test_ch_duty_strobe_double_flash(void)
     TEST_ASSERT_EQUAL_UINT8(0, ch_duty(ch, 0, 500));
 }
 
+static void test_ch_duty_strobe_scales_short_period(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->enabled = true;
+    ch->mode = AUXIO_EFFECT_STROBE;
+    ch->pwm_on = 255;
+    ch->pwm_off = 0;
+    ch->period_ms = 100; /* shorter than the 130 ms reference pattern */
+
+    /* Windows scale to 23..0 ms and 76..100 ms, so both flashes are reachable
+     * instead of the second one being clamped away. */
+    TEST_ASSERT_EQUAL_UINT8(255, ch_duty(ch, 0, 0));
+    TEST_ASSERT_EQUAL_UINT8(255, ch_duty(ch, 0, 22));
+    TEST_ASSERT_EQUAL_UINT8(0, ch_duty(ch, 0, 30));
+    TEST_ASSERT_EQUAL_UINT8(0, ch_duty(ch, 0, 75));
+    TEST_ASSERT_EQUAL_UINT8(255, ch_duty(ch, 0, 76));
+    TEST_ASSERT_EQUAL_UINT8(255, ch_duty(ch, 0, 99));
+}
+
+static void test_ch_duty_steady_uses_pwm_on(void)
+{
+    auxio_ch_t *ch = &s_ch[0];
+    ch->enabled = true;
+    ch->mode = AUXIO_EFFECT_STEADY;
+    ch->pwm_on = 50;
+    ch->pwm_off = 200; /* invalid via the API, but ch_duty must still use on */
+    ch->period_ms = 800;
+    TEST_ASSERT_EQUAL_UINT8(50, ch_duty(ch, 0, 0));
+}
+
 static void test_ch_duty_short_period_falls_back_to_max(void)
 {
     auxio_ch_t *ch = &s_ch[0];
@@ -319,6 +349,66 @@ static void test_auxio_config_validation_and_state(void)
     TEST_ASSERT_FALSE(s_ch[0].enabled);
 }
 
+static void test_auxio_off_above_on_rejected(void)
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      auxio_set_effect(0, true, 50, 200, AUXIO_EFFECT_STEADY, 800));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      auxio_config(0, 50, 200, AUXIO_EFFECT_STEADY, 800));
+    /* The rejected request must not have changed the previous configuration. */
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(0, 100, 0, AUXIO_EFFECT_STEADY, 800));
+    TEST_ASSERT_EQUAL_UINT8(100, s_ch[0].pwm_on);
+    TEST_ASSERT_EQUAL_UINT8(0, s_ch[0].pwm_off);
+}
+
+static void test_strobe_period_below_task_resolution_rejected(void)
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      auxio_config(0, 255, 0, AUXIO_EFFECT_STROBE,
+                                   AUXIO_STROBE_MIN_PERIOD_MS - 1U));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      auxio_config(0, 255, 0, AUXIO_EFFECT_STROBE,
+                                   AUXIO_STROBE_MIN_PERIOD_MS));
+}
+
+static void test_auxio_config_preserves_continuous_state(void)
+{
+    /* A lit incandescent output must keep warming/glowing across a level-only
+     * reconfigure instead of being reset to dark. */
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(0, 255, 0, AUXIO_EFFECT_INCANDESCENT, 800));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(0, true));
+    s_ch[0].cur = 200;
+    mock_ledc_duty[LEDC_CHANNEL_2] = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(0, 128, 0, AUXIO_EFFECT_INCANDESCENT, 800));
+    TEST_ASSERT_TRUE(s_ch[0].enabled);
+    TEST_ASSERT_TRUE(s_ch[0].cur >= 200); /* warm-up continued, not restarted */
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_2] > 0);
+
+    /* The firebox keeps its flicker sample and schedule when only the level is
+     * reconfigured. */
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(1, 200, 0, AUXIO_EFFECT_FIREBOX, 800));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(1, true));
+    s_ch[1].cur = 150;
+    s_ch[1].fx_scheduled = true;
+    s_ch[1].fx_next_ms = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount()) + 100000U;
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(1, 200, 0, AUXIO_EFFECT_FIREBOX, 800));
+    TEST_ASSERT_TRUE(s_ch[1].enabled);
+    TEST_ASSERT_EQUAL_UINT8(150, s_ch[1].cur);
+    TEST_ASSERT_TRUE(s_ch[1].fx_scheduled);
+}
+
+static void test_auxio_config_clamps_firebox_to_on_level(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(0, 255, 0, AUXIO_EFFECT_FIREBOX, 800));
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_set_enabled(0, true));
+    s_ch[0].cur = 240;
+    s_ch[0].fx_scheduled = true;
+    s_ch[0].fx_next_ms = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount()) + 100000U;
+    TEST_ASSERT_EQUAL(ESP_OK, auxio_config(0, 100, 0, AUXIO_EFFECT_FIREBOX, 800));
+    TEST_ASSERT_EQUAL_UINT8(100, s_ch[0].cur);
+    TEST_ASSERT_TRUE(ch_duty(&s_ch[0], 0, 0) <= 100);
+}
+
 /* ---- remaining branches ---- */
 
 static void test_ch_step_steady_resets_cur(void)
@@ -429,6 +519,8 @@ int main(void)
     RUN_TEST(test_ch_duty_ditch_alternates);
     RUN_TEST(test_ch_duty_beacon_decay);
     RUN_TEST(test_ch_duty_strobe_double_flash);
+    RUN_TEST(test_ch_duty_strobe_scales_short_period);
+    RUN_TEST(test_ch_duty_steady_uses_pwm_on);
     RUN_TEST(test_ch_duty_short_period_falls_back_to_max);
     RUN_TEST(test_ch_step_incandescent_warm_and_cool);
     RUN_TEST(test_ch_step_firebox_flicker_range);
@@ -438,6 +530,10 @@ int main(void)
     RUN_TEST(test_auxio_set_enabled_validation);
     RUN_TEST(test_auxio_set_effect_validation);
     RUN_TEST(test_auxio_config_validation_and_state);
+    RUN_TEST(test_auxio_off_above_on_rejected);
+    RUN_TEST(test_strobe_period_below_task_resolution_rejected);
+    RUN_TEST(test_auxio_config_preserves_continuous_state);
+    RUN_TEST(test_auxio_config_clamps_firebox_to_on_level);
     RUN_TEST(test_ch_step_steady_resets_cur);
     RUN_TEST(test_ch_duty_unknown_mode_default);
     RUN_TEST(test_apply_now_and_api_timeouts);

@@ -5,7 +5,7 @@
 #   PACK <bytes> -> PACK-READY
 #   PACK-DATA <n> + n bytes -> PACK-DATA-OK <total>   (32 KB frames)
 #   last frame -> PACK-OK <wav_count>
-#   DONE -> DONE-OK (the device restarts; the ack may be lost)
+#   DONE -> DONE-OK (mandatory acknowledgement; missing ack is an error)
 #
 # The firmware parses the pack index and writes every payload as an individual
 # WAV under /userdata/audio. The pack is built from SOUND/ by
@@ -40,7 +40,7 @@ function Find-EspPort {
 }
 if (-not $Port) { $Port = Find-EspPort }
 if (-not $Port) {
-    Write-Host "[ERROR] ESP32-S3 USB-Serial/JTAG port not found. Use -Port COMx." -ForegroundColor Red
+    Write-Host "[ERROR] ESP32-S3 USB-Serial/JTAG port not found. Specify -Port COMx." -ForegroundColor Red
     exit 1
 }
 
@@ -95,11 +95,20 @@ Write-Host "[INFO] Entering provisioning (PROV)..."
 $started = $false
 for ($i = 0; $i -lt 30 -and -not $started; $i++) {
     try { $sp.DiscardInBuffer(); $sp.Write("PROV`n") } catch { }
-    if (ReadUntil @("PROV-CONFIRM?") 1200) {
+    $r = ReadUntil @("PROV-CONFIRM?", "PROV-ERR", "FW-ERR", "PROV-ABORT") 1200
+    if ($r -eq "PROV-CONFIRM?") {
         try { $sp.Write("PROV-CONFIRM`n") } catch { }
-        $r = ReadUntil @("PROV-OK", "PROV-ERR", "PROV-ABORT") 6000
+        $r = ReadUntil @("PROV-OK", "PROV-ERR", "FW-ERR", "PROV-ABORT") 6000
         if ($r -eq "PROV-OK") { $started = $true }
-        else { Write-Host ("[WARN] attempt {0}: {1} (got: {2})" -f ($i + 1), $r, (Format-Rx)) -ForegroundColor Yellow }
+        elseif ($r) {
+            Write-Host ("[ERROR] Firmware rejected provisioning ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
+            $sp.Close(); exit 1
+        } else {
+            Write-Host ("[WARN] attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) -ForegroundColor Yellow
+        }
+    } elseif ($r) {
+        Write-Host ("[ERROR] Firmware rejected provisioning ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
+        $sp.Close(); exit 1
     } else {
         Write-Host ("[INFO] attempt {0}: no answer yet (got: {1})" -f ($i + 1), (Format-Rx))
     }
@@ -122,10 +131,10 @@ try { $sp.Write($cmd + "`n") } catch {
     Write-Host "[ERROR] PACK command failed: $_" -ForegroundColor Red
     $sp.Close(); exit 1
 }
-$ready = ReadUntil @("PACK-READY", "PACK-ERR") 10000
+$ready = ReadUntil @("PACK-READY", "PACK-ERR", "FW-ERR") 10000
 if ($ready -ne "PACK-READY") {
-    if ($ready -eq "PACK-ERR") {
-        Write-Host ("[ERROR] Device rejected PACK: {0}" -f (Format-Rx)) -ForegroundColor Red
+    if ($ready) {
+        Write-Host ("[ERROR] Device rejected PACK ({0}): {1}" -f $ready, (Format-Rx)) -ForegroundColor Red
     } else {
         Write-Host "[ERROR] No PACK-READY (firmware without PACK support?)." -ForegroundColor Red
     }
@@ -146,9 +155,9 @@ try {
         $frames++
         if ($sent -lt $len) {
             # Intermediate frames are acked after the parser consumes them.
-            $ack = ReadUntil @("PACK-DATA-OK", "PACK-ERR") 30000
+            $ack = ReadUntil @("PACK-DATA-OK", "PACK-ERR", "FW-ERR") 30000
             if ($ack -ne "PACK-DATA-OK") {
-                throw ("frame {0} rejected: {1}" -f $frames, (Format-Rx))
+                throw ("frame {0} rejected ({1}): {2}" -f $frames, $ack, (Format-Rx))
             }
         }
         if (($frames % 16) -eq 0) {
@@ -162,20 +171,25 @@ try {
     $fs.Dispose()
 }
 
-$result = ReadUntil @("PACK-OK", "PACK-ERR") 300000
+$result = ReadUntil @("PACK-OK", "PACK-ERR", "FW-ERR") 300000
 $sw.Stop()
 if ($result -ne "PACK-OK") {
-    Write-Host ("[ERROR] Pack unpack failed: {0}" -f (Format-Rx)) -ForegroundColor Red
+    if ($result) { Write-Host ("[ERROR] Pack unpack failed ({0}): {1}" -f $result, (Format-Rx)) -ForegroundColor Red }
+    else { Write-Host "[ERROR] Pack unpack acknowledgement timed out." -ForegroundColor Red }
     $sp.Close(); exit 1
 }
 Write-Host ("[OK] Pack received in {0:N1} s: {1}" -f $sw.Elapsed.TotalSeconds, (Format-Rx)) -ForegroundColor Green
 
-# 4. Finish; the app saves metadata and restarts.
+# 4. Finish; the app saves metadata and restarts. DONE-OK is mandatory: without
+#    it the host cannot claim that the installed pack was committed.
 try { $sp.Write("DONE`n") } catch { }
-if (ReadUntil @("DONE-OK") 8000) {
+$r = ReadUntil @("DONE-OK", "PROV-ERR", "FW-ERR") 8000
+if ($r -eq "DONE-OK") {
     Write-Host "[OK] Sound pack installed, device restarting." -ForegroundColor Green
-} else {
-    Write-Host "[INFO] Sound pack installed; device restarts (DONE-OK may be lost on reboot)." -ForegroundColor Cyan
+    $sp.Close()
+    exit 0
 }
+if ($r) { Write-Host ("[ERROR] Firmware rejected DONE ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red }
+else { Write-Host "[ERROR] no DONE-OK acknowledgement; sound pack installation is not confirmed." -ForegroundColor Red }
 $sp.Close()
-exit 0
+exit 1

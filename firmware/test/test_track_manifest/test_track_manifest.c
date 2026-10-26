@@ -538,7 +538,7 @@ static void test_rev_s24_s25_manifest_explicit_empty_roundtrip(void)
     TEST_ASSERT_EQUAL_UINT32(0, count);
 }
 
-static void test_rev_s26_partial_restore_marker_and_worker_retry(void)
+static void test_rev_s26_partial_restore_marker_retries_before_web_init(void)
 {
     settings_track_t t;
     seed_track(&t, 1, "audio/slot1.wav", "Restore", true);
@@ -554,9 +554,18 @@ static void test_rev_s26_partial_restore_marker_and_worker_retry(void)
         TEST_ASSERT_EQUAL(ESP_OK, settings_recovery_pending(&pending));
         TEST_ASSERT_TRUE(pending);
         TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, settings_manifest_sync());
+
+        /* G-STORAGE-6: the worker must not restore after web_init(); the
+         * marker is left for the next boot, where recovery runs before the
+         * web caches are loaded. */
         g_fail_key = NULL;
         mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
         TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+        TEST_ASSERT_EQUAL(ESP_OK, settings_recovery_pending(&pending));
+        TEST_ASSERT_TRUE(pending);
+
+        /* Next boot: track_recover calls this synchronously. */
+        TEST_ASSERT_EQUAL(ESP_OK, settings_manifest_load());
         TEST_ASSERT_EQUAL(ESP_OK, settings_recovery_pending(&pending));
         TEST_ASSERT_FALSE(pending);
         func_binding_t back[FUNC_BIND_MAX];
@@ -626,6 +635,74 @@ static void test_recovery_excludes_competing_writes_without_recursive_lock(void)
     g_current_task = (TaskHandle_t)1;
 }
 
+/* G-STORAGE-7: a corrupt/legacy NVS base (type mismatch or wrong size) must
+ * not abort the manifest restore. The bad key is erased and rewritten by the
+ * successful restore. */
+static void test_manifest_restores_over_corrupt_nvs_blobs(void)
+{
+    FILE *f = fopen(MANIFEST_PATH, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("AURA-TRACKS 3\n", f);
+    fputs("C;1;0\n", f);
+    fputs("T;1;0;1;audio/slot1.wav;One\n", f);
+    fputs("F;0;3;4;5;1;2\n", f);
+    fclose(f);
+
+    mock_nvs_reset();
+    uint8_t junk[3] = { 1, 2, 3 };
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("tracks", junk, sizeof(junk)));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(1, "func_map", 9));
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_manifest_load());
+
+    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    size_t count = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_load(tracks, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    TEST_ASSERT_EQUAL_STRING("audio/slot1.wav", tracks[0].file);
+
+    settings_func_map_t map[SETTINGS_FUNC_MAP_COUNT];
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_map_load(map, &count));
+    TEST_ASSERT_EQUAL_UINT32(SETTINGS_FUNC_MAP_COUNT, count);
+    TEST_ASSERT_EQUAL_UINT8(3, map[0].slot_a);
+    TEST_ASSERT_EQUAL_UINT8(4, map[0].slot_b);
+}
+
+/* A real open error is retryable, not "manifest absent". */
+static void test_manifest_open_error_is_not_not_found(void)
+{
+    FILE *f = fopen(MANIFEST_PATH, "w");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("AURA-TRACKS 3\n", f);
+    fclose(f);
+    TEST_ASSERT_EQUAL(0, remove(MANIFEST_PATH));
+    TEST_ASSERT_EQUAL(0, MKDIR(MANIFEST_PATH)); /* path exists but is a directory */
+    esp_err_t err = settings_manifest_load();
+    TEST_ASSERT_NOT_EQUAL(ESP_ERR_NOT_FOUND, err);
+    (void)RMDIR(MANIFEST_PATH);
+}
+
+/* Factory reset removes the manifest in the same transaction as the NVS
+ * erase, so boot recovery cannot bring the old metadata back. */
+static void test_factory_reset_removes_manifest(void)
+{
+    settings_track_t t;
+    seed_track(&t, 1, "audio/slot1.wav", "Reset", true);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_save(&t, 1));
+    TEST_ASSERT_EQUAL(0, access(MANIFEST_PATH, 0));
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_factory_reset());
+
+    FILE *f = fopen(MANIFEST_PATH, "r");
+    TEST_ASSERT_NULL(f);
+    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    size_t count = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_tracks_load(tracks, &count));
+    settings_flush_status_t status;
+    settings_flush_status(&status);
+    TEST_ASSERT_FALSE(status.manifest_pending);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -645,10 +722,13 @@ int main(void)
     RUN_TEST(test_manifest_roundtrip_bindings);
     RUN_TEST(test_rev_s23_rename_failure_preserves_live_and_retry);
     RUN_TEST(test_rev_s24_s25_manifest_explicit_empty_roundtrip);
-    RUN_TEST(test_rev_s26_partial_restore_marker_and_worker_retry);
+    RUN_TEST(test_rev_s26_partial_restore_marker_retries_before_web_init);
     RUN_TEST(test_rev_s27_storage_gate_retains_manifest_dirty);
     RUN_TEST(test_manifest_rejects_truncated_declared_records);
     RUN_TEST(test_manifest_missing_tracks_is_not_intentional_empty);
+    RUN_TEST(test_manifest_restores_over_corrupt_nvs_blobs);
+    RUN_TEST(test_manifest_open_error_is_not_not_found);
+    RUN_TEST(test_factory_reset_removes_manifest);
     RUN_TEST(test_recovery_excludes_competing_writes_without_recursive_lock);
     return UNITY_END();
 }

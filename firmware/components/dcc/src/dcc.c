@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "pinmap.h"
@@ -25,9 +26,27 @@ static const char *TAG = "dcc";
 #define DCC_MAX_ZERO_HALF_PERIOD_US 10000
 #define DCC_MAX_EDGE_GAP_US         DCC_MAX_ZERO_HALF_PERIOD_US
 #define DCC_SERVICE_TIMEOUT_US      20000
+/* dcc_reload_config() is serialised: the DCC task and the web handler can both
+ * re-read and publish the CV image. The wait is bounded because the DCC task
+ * must never stall on the other writer (and the reads themselves stay in RAM,
+ * never flash/NVS). */
+#define DCC_CONFIG_LOCK_TIMEOUT_MS  20
 
 #define DCC_PACKET_MAX 8
 #define DCC_QUEUE_LEN  256
+
+/* Task budget contract (G-RTOS-8): the receiver drains the half-period queue on
+ * CPU1 at the highest application priority; the ACK worker only serves pulses. */
+#define DCC_TASK_STACK       8192U
+#define DCC_TASK_PRIO        10U
+#define DCC_TASK_CORE        1
+#define DCC_ACK_TASK_STACK   2048U
+#define DCC_ACK_TASK_PRIO    5U
+_Static_assert(DCC_TASK_STACK >= 8192U, "DCC receiver stack regression");
+_Static_assert(DCC_TASK_PRIO == 10U, "DCC receiver priority drift");
+_Static_assert(DCC_TASK_PRIO > DCC_ACK_TASK_PRIO,
+               "DCC receiver must outrank the ACK worker");
+_Static_assert(DCC_ACK_TASK_STACK >= 2048U, "DCC ACK stack regression");
 
 /* Service-mode ACK pulse (NMRA S-9.2.3): ~6 ms. Emitted by a dedicated task so
  * the DCC parser never blocks on it (a blocking delay could overflow the
@@ -63,10 +82,17 @@ static volatile int64_t s_last_packet_us;
 static int64_t s_last_signal_packet_us;
 /* Half-period samples dropped by the ISR because the parser task did not keep
  * up. Any drop invalidates the half-period pairing, so the task re-acquires
- * framing on the next packet preamble instead of decoding shifted garbage. */
+ * framing on the next packet preamble instead of decoding shifted garbage.
+ * Normal inter-packet idle gaps and sub-minimum glitch edges are counted
+ * separately: they also require re-framing but are not queue overruns. */
 static DRAM_ATTR volatile uint32_t s_isr_overruns;
 static DRAM_ATTR volatile uint32_t s_isr_overruns_total;
+static DRAM_ATTR volatile uint32_t s_isr_idle_gaps;
+static DRAM_ATTR volatile uint32_t s_isr_glitches;
 static DRAM_ATTR portMUX_TYPE s_edge_mux = portMUX_INITIALIZER_UNLOCKED;
+/* Serialises dcc_reload_config() so concurrent DCC/web CV writes cannot
+ * interleave their reads and publish a stale mix. Created in dcc_init(). */
+static SemaphoreHandle_t s_config_mux;
 static int64_t s_init_us;
 static QueueHandle_t s_start_queue;
 static bool s_initialized;
@@ -157,10 +183,12 @@ static bool read_cv(uint16_t cv, uint8_t *out_value)
     return s_cv_read_cb(cv, out_value);
 }
 
-static bool confirmed(dcc_confirmation_t *pending, const uint8_t *packet, uint8_t len)
+/* Idempotence guard: the first packet of a run is new (the caller applies it
+ * immediately), while an immediate retransmission of the same bytes is a
+ * repeat and must not write/ACK again. */
+static bool repeated(dcc_confirmation_t *pending, const uint8_t *packet, uint8_t len)
 {
     if (pending->len == len && memcmp(pending->bytes, packet, len) == 0) {
-        pending->len = 0;
         return true;
     }
     memcpy(pending->bytes, packet, len);
@@ -245,11 +273,26 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         s_service_pending.len = 0;
     }
 
+    bool service_shape = (len == 4U) &&
+                         ((packet[0] & 0xFCU) == 0x74U ||
+                          (packet[0] & 0xFCU) == 0x78U ||
+                          (packet[0] & 0xFCU) == 0x7CU);
+    /* Short addresses 124..127 start with 0x7C..0x7F, which aliases the
+     * service-mode Write Byte instruction. Only the freshly armed candidate is
+     * ambiguous: if the packet is also a valid 128-step speed packet for our
+     * configured short address, it is main-track traffic, not a service write.
+     * Clear the candidate and let the normal path decode it as speed. */
+    bool speed_over_service = !s_service_mode && s_service_candidate &&
+                              service_shape && !decoder_long &&
+                              decoder_addr >= 124U && decoder_addr <= 127U &&
+                              packet[0] == (uint8_t)decoder_addr &&
+                              packet[1] == 0x3FU;
+    if (speed_over_service) {
+        s_service_candidate = false;
+        s_service_pending.len = 0;
+    }
     bool service_mode = (s_service_mode || s_service_candidate) &&
-                        s_last_preamble_count >= 20U && len == 4U &&
-                        ((packet[0] & 0xFCU) == 0x74U ||
-                         (packet[0] & 0xFCU) == 0x78U ||
-                         (packet[0] & 0xFCU) == 0x7CU);
+                        s_last_preamble_count >= 20U && service_shape;
 
     uint16_t addr = 0;
     bool long_addr = false;
@@ -270,7 +313,7 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         s_service_deadline_us = now + DCC_SERVICE_TIMEOUT_US;
         mark_packet();
         s_ops_pending.len = 0;
-        if (!confirmed(&s_service_pending, packet, len)) {
+        if (repeated(&s_service_pending, packet, len)) {
             return;
         }
         uint8_t instr = packet[0];
@@ -322,6 +365,11 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     if (packet[0] >= 0x80U && (packet[0] < 0xC0U || packet[0] > 0xE7U)) {
         return;
     }
+    /* A long address whose decoded value is zero (0xC0 0x00) is not a valid
+     * locomotive address and must not alias the broadcast address. */
+    if (long_addr && addr == 0x0000U) {
+        return;
+    }
 
     bool is_broadcast = (addr == 0x0000U);
     bool via_consist = !long_addr && consist != 0U && addr == consist;
@@ -340,9 +388,9 @@ static void dispatch(const uint8_t *packet, uint8_t len)
                      ((instr & 0xFCU) == 0xECU ||
                       ((instr & 0xFCU) == 0xE8U &&
                        (packet[idx + 2U] & 0xF0U) == 0xF0U));
-    bool ops_confirmed = false;
+    bool ops_apply = false;
     if (ops_write) {
-        ops_confirmed = confirmed(&s_ops_pending, packet, len);
+        ops_apply = !repeated(&s_ops_pending, packet, len);
     } else {
         s_ops_pending.len = 0;
     }
@@ -427,6 +475,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         return;
     }
 
+    /* Broadcast accepts only reset/e-stop (above) and the speed stop/e-stop
+     * vectors (above); it never carries function or CV-access semantics. */
+    if (is_broadcast) {
+        return;
+    }
+
     /* Function group 1: F0-F4. */
     if ((instr & 0xE0U) == 0x80U && payload_len == 1U) {
         /* F0's directional consist mask uses the last accepted direction. */
@@ -473,9 +527,9 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         uint16_t cv = service_cv_address(instr, packet[idx + 1]);
         uint8_t data = packet[idx + 2];
 
-        if (cc == 0x03U && ops_confirmed) {
+        if (cc == 0x03U && ops_apply) {
             (void)write_cv(cv, data, false);
-        } else if (cc == 0x02U && ops_confirmed) {
+        } else if (cc == 0x02U && ops_apply) {
             uint8_t bit = data & 0x07U;
             uint8_t value = (uint8_t)((data >> 3) & 0x01U);
             bool write = (data & 0x10U) != 0U;
@@ -571,6 +625,30 @@ static void feed_half_period(uint16_t dt_us)
     s_pending_half = DCC_HALF_NONE;
 }
 
+/* Drain-side handling for one sampled half-period. Idle gaps and glitch
+ * resyncs force a re-frame, but only samples actually dropped by a failed
+ * queue send are accumulated into the overrun status. */
+static void process_queued_half(dcc_half_t hp)
+{
+    portENTER_CRITICAL(&s_edge_mux);
+    uint32_t overruns = s_isr_overruns;
+    uint32_t idle_gaps = s_isr_idle_gaps;
+    uint32_t glitches = s_isr_glitches;
+    s_isr_overruns = 0U;
+    s_isr_idle_gaps = 0U;
+    s_isr_glitches = 0U;
+    s_isr_overruns_total += overruns;
+    portEXIT_CRITICAL(&s_edge_mux);
+    if (overruns != 0U || idle_gaps != 0U || glitches != 0U) {
+        /* Samples were dropped while a callback ran, or the signal had an
+         * idle/glitch discontinuity: pairing and framing are no longer
+         * trustworthy. Re-acquire on the next preamble instead of decoding
+         * a shifted tail. */
+        reset_parser();
+    }
+    feed_half_period(hp.dt_us);
+}
+
 static void IRAM_ATTR dcc_isr(void *arg)
 {
     (void)arg;
@@ -585,14 +663,20 @@ static void IRAM_ATTR dcc_isr(void *arg)
     }
     int64_t dt = now - prev;
     if (dt > DCC_MAX_EDGE_GAP_US) {
+        /* Normal idle between packets (or a long zero stretch): re-reference
+         * here and ask the parser to drop its partial packet. Nothing was
+         * lost to a full queue, so this is not an overrun. */
         s_last_edge_us = now;
-        s_isr_overruns++;
+        s_isr_idle_gaps++;
         portEXIT_CRITICAL_ISR(&s_edge_mux);
         return;
     }
     if (dt < DCC_MIN_HALF_PERIOD_US) {
-        /* Glitch shorter than a half-period: ignore the edge and keep the
-         * reference time so the next real edge yields a valid half-period. */
+        /* Sub-minimum edge: a glitch or an idle gap shorter than a half
+         * period. Do not fold the gap into the next half; re-reference at
+         * this edge and let the parser discard the half it had pending. */
+        s_last_edge_us = now;
+        s_isr_glitches++;
         portEXIT_CRITICAL_ISR(&s_edge_mux);
         return;
     }
@@ -649,19 +733,7 @@ static void dcc_task(void *arg)
     while (s_dcc_iter_cap == 0U || iters < s_dcc_iter_cap) {
         dcc_half_t hp;
         if (xQueueReceive(s_queue, &hp, portMAX_DELAY) == pdTRUE) {
-            portENTER_CRITICAL(&s_edge_mux);
-            uint32_t overruns = s_isr_overruns;
-            s_isr_overruns = 0U;
-            s_isr_overruns_total += overruns;
-            portEXIT_CRITICAL(&s_edge_mux);
-            if (overruns != 0U) {
-                /* Samples were dropped while a callback (function packet /
-                 * sound / NVS) was running: the pairing and framing state can
-                 * no longer be trusted. Drop it and re-acquire on the next
-                 * preamble instead of mis-decoding the packet tail. */
-                reset_parser();
-            }
-            feed_half_period(hp.dt_us);
+            process_queued_half(hp);
         }
         iters++;
     }
@@ -681,11 +753,17 @@ static esp_err_t ack_pin_config(void)
 esp_err_t dcc_init(void)
 {
     if (s_initialized) return ESP_ERR_INVALID_STATE;
+    esp_err_t err;
     s_init_us = esp_timer_get_time();
     s_queue = xQueueCreateWithCaps(DCC_QUEUE_LEN, sizeof(dcc_half_t),
                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (s_queue == NULL) {
         return ESP_ERR_NO_MEM;
+    }
+    s_config_mux = xSemaphoreCreateMutex();
+    if (s_config_mux == NULL) {
+        err = ESP_ERR_NO_MEM;
+        goto fail;
     }
 
     gpio_config_t cfg = {
@@ -695,7 +773,7 @@ esp_err_t dcc_init(void)
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_ANYEDGE,
     };
-    esp_err_t err = gpio_config(&cfg);
+    err = gpio_config(&cfg);
     if (err != ESP_OK) goto fail;
 
     /* ACK output is configured once here instead of on every pulse. */
@@ -715,7 +793,9 @@ esp_err_t dcc_init(void)
         goto fail;
     }
 
-    BaseType_t ok = xTaskCreatePinnedToCore(dcc_task, "dcc", 8192, s_start_queue, 10, NULL, 1);
+    BaseType_t ok = xTaskCreatePinnedToCore(dcc_task, "dcc", DCC_TASK_STACK,
+                                            s_start_queue, DCC_TASK_PRIO, NULL,
+                                            DCC_TASK_CORE);
     if (ok != pdPASS) {
         err = ESP_ERR_NO_MEM;
         goto fail;
@@ -732,7 +812,8 @@ esp_err_t dcc_init(void)
     /* Non-blocking service-mode ACK worker. If it cannot start, fall back to
      * the inline pulse in dcc_service_ack(). The queue is intentionally NOT
      * freed here: dcc_task is already running and may hold a reference to it. */
-    if (xTaskCreate(dcc_ack_task, "dcc_ack", 2048, NULL, 5, NULL) == pdPASS) {
+    if (xTaskCreate(dcc_ack_task, "dcc_ack", DCC_ACK_TASK_STACK, NULL,
+                    DCC_ACK_TASK_PRIO, NULL) == pdPASS) {
         s_ack_worker = true;
     } else {
         ESP_LOGW(TAG, "ACK task create failed: service-mode ACK is inline");
@@ -746,7 +827,9 @@ fail:
     if (s_start_queue != NULL) vQueueDelete(s_start_queue);
     if (s_ack_queue != NULL) vQueueDelete(s_ack_queue);
     if (s_queue != NULL) vQueueDeleteWithCaps(s_queue);
+    if (s_config_mux != NULL) vSemaphoreDelete(s_config_mux);
     s_start_queue = s_ack_queue = s_queue = NULL;
+    s_config_mux = NULL;
     s_ack_worker = false;
     return err;
 }
@@ -776,6 +859,16 @@ void dcc_set_consist(uint8_t address, bool reverse_dir)
 
 void dcc_reload_config(void)
 {
+    bool locked = false;
+    if (s_config_mux != NULL) {
+        if (xSemaphoreTake(s_config_mux,
+                           pdMS_TO_TICKS(DCC_CONFIG_LOCK_TIMEOUT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "config reload skipped: another writer is active");
+            return;
+        }
+        locked = true;
+    }
+
     uint8_t cv1 = 3, cv29 = 0x02, cv17 = 0, cv18 = 0, cv19 = 0, cv21 = 0, cv22 = 0;
     (void)read_cv(1, &cv1);
     (void)read_cv(29, &cv29);
@@ -802,6 +895,9 @@ void dcc_reload_config(void)
     s_cv21 = cv21;
     s_cv22 = cv22;
     portEXIT_CRITICAL(&s_cfg_mux);
+    if (locked) {
+        xSemaphoreGive(s_config_mux);
+    }
     ESP_LOGI(TAG, "Decoder address: %u (%s)", (unsigned)addr,
              long_addr ? "long" : "short");
 }
@@ -847,6 +943,10 @@ int64_t dcc_last_packet_us(void)
     return v;
 }
 
+/* Cumulative samples dropped by a failed xQueueSendFromISR. Normal idle gaps
+ * between packets and sub-minimum glitch edges are tracked separately (they
+ * re-frame the parser) and deliberately do not increment this value, so
+ * /api/dcc/status "overruns" means only "the task fell behind the receiver". */
 uint32_t dcc_get_isr_overruns(void)
 {
     portENTER_CRITICAL(&s_edge_mux);

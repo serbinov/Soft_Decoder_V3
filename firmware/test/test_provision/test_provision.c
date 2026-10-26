@@ -110,33 +110,90 @@ static int g_maintenance_depth, g_maintenance_begin_calls, g_maintenance_end_cal
 static bool g_fs_closed;
 static int g_fs_release_calls, g_boot_calls, g_validate_calls;
 static uint32_t g_baud;
+static bool g_web_exclusive;
+static bool g_web_ready = true;
+static int g_storage_maint_depth;
+static uint64_t g_free_bytes = 8U * 1024U * 1024U;
+static esp_err_t g_free_err = ESP_OK;
+static esp_err_t g_motor_speed_err = ESP_OK;
+static esp_err_t g_motor_inhibit_err = ESP_OK;
+static bool g_motor_inhibited;
+static int g_motor_speed_calls;
+static int g_motor_inhibit_calls;
+static uint8_t g_motor_last_speed;
+static bool g_motor_last_fwd;
 
 esp_err_t web_maintenance_begin(bool exclusive_fs)
 {
-    TEST_ASSERT_TRUE(exclusive_fs);
     ++g_maintenance_begin_calls;
     if (g_web_busy || g_maintenance_err != ESP_OK) {
         return g_maintenance_err != ESP_OK ? g_maintenance_err : ESP_ERR_INVALID_STATE;
     }
+    g_web_exclusive = exclusive_fs;
     ++g_maintenance_depth;
-    g_fs_closed = true;
+    if (exclusive_fs) {
+        TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+        g_fs_closed = true;
+    }
     return ESP_OK;
 }
 
 void web_maintenance_end(void)
 {
     TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    if (g_web_exclusive && g_storage_maint_depth > 0) {
+        storage_maintenance_end();
+    }
     --g_maintenance_depth;
     ++g_maintenance_end_calls;
+    g_web_exclusive = false;
     g_fs_closed = false;
+}
+
+esp_err_t storage_maintenance_begin(void)
+{
+    ++g_storage_maint_depth;
+    g_fs_closed = true;
+    return ESP_OK;
 }
 
 void storage_maintenance_end(void)
 {
-    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
-    TEST_ASSERT_TRUE(g_fs_closed);
-    g_fs_closed = false;
-    ++g_fs_release_calls;
+    if (g_storage_maint_depth > 0) {
+        --g_storage_maint_depth;
+        g_fs_closed = false;
+        ++g_fs_release_calls;
+    }
+}
+
+esp_err_t storage_get_free_bytes(uint64_t *out_free_bytes)
+{
+    if (g_free_err != ESP_OK) {
+        return g_free_err;
+    }
+    TEST_ASSERT_NOT_NULL(out_free_bytes);
+    *out_free_bytes = g_free_bytes;
+    return ESP_OK;
+}
+
+bool storage_is_mounted(void)
+{
+    return true;
+}
+
+esp_err_t storage_mount(void)
+{
+    return ESP_OK;
+}
+
+bool web_actuation_ready(void)
+{
+    return g_web_ready;
+}
+
+bool web_maintenance_active(void)
+{
+    return g_maintenance_depth > 0;
 }
 
 const char *storage_get_root(void) { return "prov_tmp"; }
@@ -155,7 +212,6 @@ esp_err_t esp_ota_set_boot_partition(const esp_partition_t *partition)
 {
     TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
     TEST_ASSERT_FALSE(g_fs_closed);
-    TEST_ASSERT_TRUE(g_tracks_save_calls > 0);
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
     ++g_boot_calls;
     return sdk_set_boot_partition(partition);
@@ -238,9 +294,30 @@ esp_err_t motor_bemf_cal_reload(void)
 
 esp_err_t motor_set_speed(uint8_t speed128, bool forward)
 {
-    (void)speed128;
-    (void)forward;
+    ++g_motor_speed_calls;
+    g_motor_last_speed = speed128;
+    g_motor_last_fwd = forward;
+    return g_motor_speed_err;
+}
+
+esp_err_t motor_set_inhibited(bool inhibited)
+{
+    ++g_motor_inhibit_calls;
+    if (g_motor_inhibit_err != ESP_OK) {
+        return g_motor_inhibit_err;
+    }
+    g_motor_inhibited = inhibited;
     return ESP_OK;
+}
+
+void motor_get_applied_speed(uint8_t *speed, bool *forward)
+{
+    if (speed != NULL) {
+        *speed = g_motor_inhibited ? 0U : 60U;
+    }
+    if (forward != NULL) {
+        *forward = true;
+    }
 }
 
 static int g_motor_es_calls;
@@ -280,7 +357,6 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
     (void)tracks;
     (void)count;
     g_tracks_save_calls++;
-    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
     TEST_ASSERT_FALSE(g_fs_closed);
     TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
     return g_tracks_save_err;
@@ -288,7 +364,7 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
 
 esp_err_t storage_format(void)
 {
-    TEST_ASSERT_EQUAL_INT(1, g_maintenance_depth);
+    TEST_ASSERT_EQUAL_INT(1, g_storage_maint_depth);
     TEST_ASSERT_TRUE(g_fs_closed);
     g_storage_format_calls++;
     return g_storage_format_err;
@@ -460,20 +536,38 @@ void setUp(void)
     g_web_busy = 0;
     g_audio_stop_calls = 0;
     g_motor_es_calls = 0;
+    g_web_ready = true;
+    g_storage_maint_depth = 0;
+    g_free_bytes = 8U * 1024U * 1024U;
+    g_free_err = ESP_OK;
+    g_motor_speed_err = ESP_OK;
+    g_motor_inhibit_err = ESP_OK;
+    g_motor_inhibited = false;
+    g_motor_speed_calls = g_motor_inhibit_calls = 0;
+    g_motor_last_speed = 0;
+    g_motor_last_fwd = false;
+    install_session_reset();
     s_usbjtag_ok = false;
     s_provisioning = false;
+    s_listener_wdt = false;
     s_listen_iter_cap = 0;
+    mock_task_wdt_add_err = 0;
+    mock_task_wdt_reset_calls = 0;
+    (void)RMDIR(PROV_AUDIO_DIR ".prov_stage");
     (void)MKDIR(PROV_AUDIO_DIR);
 }
 
 void tearDown(void)
 {
     TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    TEST_ASSERT_EQUAL_INT(0, g_storage_maint_depth);
     TEST_ASSERT_FALSE(g_fs_closed);
     TEST_ASSERT_EQUAL_UINT32(115200, g_baud);
     remove(PROV_AUDIO_DIR "/slot1.wav");
     remove(PROV_AUDIO_DIR "/slot99.wav");
     remove(PROV_AUDIO_DIR "/test.wav");
+    (void)RMDIR(PROV_AUDIO_DIR ".prov_stage");
+    install_session_reset();
 }
 
 /* ---- BEMF commands ---- */
@@ -550,14 +644,46 @@ static void test_bemf_cvset_and_test(void)
     tx_reset();
     handle_bemf_cmd("BEMF-TEST 60");
     TEST_ASSERT_TRUE(tx_has("BEMF-TEST-OK 60 fwd"));
+    TEST_ASSERT_EQUAL_UINT8(60, g_motor_last_speed);
+    TEST_ASSERT_TRUE(g_motor_last_fwd);
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
 
     tx_reset();
     handle_bemf_cmd("BEMF-TEST 60 rev");
     TEST_ASSERT_TRUE(tx_has("BEMF-TEST-OK 60 rev"));
+    TEST_ASSERT_FALSE(g_motor_last_fwd);
+    TEST_ASSERT_TRUE(g_motor_inhibited);
 
     tx_reset();
     handle_bemf_cmd("BEMF-TEST 200");
     TEST_ASSERT_TRUE(tx_has("BEMF-ERR speed"));
+    tx_reset();
+    handle_bemf_cmd("BEMF-TEST 61");
+    TEST_ASSERT_TRUE(tx_has("BEMF-ERR speed"));
+
+    /* A drive failure is propagated and still leaves the bridge inhibited. */
+    g_motor_speed_err = ESP_FAIL;
+    tx_reset();
+    handle_bemf_cmd("BEMF-TEST 40");
+    TEST_ASSERT_TRUE(tx_has("BEMF-ERR motor"));
+    TEST_ASSERT_FALSE(tx_has("BEMF-TEST-OK"));
+    TEST_ASSERT_TRUE(g_motor_inhibited);
+    TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
+    g_motor_speed_err = ESP_OK;
+
+    /* Admission/source is closed while another operation owns actuation. */
+    g_web_ready = false;
+    tx_reset();
+    handle_bemf_cmd("BEMF-TEST 40");
+    TEST_ASSERT_TRUE(tx_has("BEMF-ERR busy"));
+    g_web_ready = true;
+
+    /* Duration is clamped to the bounded maximum. */
+    tx_reset();
+    handle_bemf_cmd("BEMF-TEST 10 999999");
+    TEST_ASSERT_TRUE(tx_has("BEMF-TEST-OK 10 fwd 5000"));
+    TEST_ASSERT_TRUE(g_motor_inhibited);
 }
 
 static void test_bemf_set_command(void)
@@ -684,10 +810,11 @@ static void test_provision_run_confirm_crlf(void)
 static void test_provision_run_storage_fail(void)
 {
     g_storage_format_err = ESP_FAIL;
-    feed("PROV-CONFIRM\n");
+    feed("PROV-CONFIRM\nPUT 1 4 x\nABCD\nDONE\n");
     TEST_ASSERT_FALSE(provision_run());
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_TRUE(tx_has("PROV-ERR storage"));
+    TEST_ASSERT_EQUAL_INT(1, g_storage_format_calls);
 }
 
 static void test_provision_run_web_busy(void)
@@ -723,6 +850,10 @@ static void test_provision_run_put_write_fail(void)
     TEST_ASSERT_TRUE(tx_has("PUT-OK"));
     TEST_ASSERT_FALSE(tx_has("FILE-OK"));
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    FILE *f = fopen(PROV_AUDIO_DIR "/slot1.wav", "rb");
+    TEST_ASSERT_NULL(f);
+    f = fopen(PROV_AUDIO_DIR ".prov_stage/slot1.wav", "rb");
+    TEST_ASSERT_NULL(f);
 }
 
 static void test_ensure_uart_driver_idempotent(void)
@@ -787,6 +918,37 @@ static void test_provision_listener_start(void)
     provision_listener_start(); /* task-create failure branch */
     TEST_ASSERT_EQUAL_INT(before + 2, mock_task_create_calls);
     mock_task_create_ok = 1;
+}
+
+/* G-RTOS-5: the provisioning worker owns the maintenance lease; subscribe it
+ * to the task watchdog so a hung transfer panics/resets instead of leaving the
+ * lease held forever. */
+static void test_provision_listener_subscribes_to_twdt(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(8192U, PROV_LISTENER_STACK);
+    TEST_ASSERT_EQUAL_UINT32(4U, PROV_LISTENER_PRIO);
+
+    s_listener_wdt = false;
+    mock_task_wdt_add_err = 0;
+    mock_task_wdt_reset_calls = 0;
+    s_listen_iter_cap = 2;
+    listener_task(NULL);
+    s_listen_iter_cap = 0;
+    TEST_ASSERT_TRUE(s_listener_wdt);
+    TEST_ASSERT_GREATER_THAN(0, mock_task_wdt_reset_calls);
+}
+
+static void test_provision_listener_wdt_failure_does_not_feed(void)
+{
+    s_listener_wdt = false;
+    mock_task_wdt_add_err = ESP_FAIL;
+    mock_task_wdt_reset_calls = 0;
+    s_listen_iter_cap = 1;
+    listener_task(NULL);
+    s_listen_iter_cap = 0;
+    TEST_ASSERT_FALSE(s_listener_wdt);
+    TEST_ASSERT_EQUAL_INT(0, mock_task_wdt_reset_calls);
+    mock_task_wdt_add_err = 0;
 }
 
 static void test_provision_listener_task_paths(void)
@@ -1012,14 +1174,15 @@ static void test_provision_run_fw_abort(void)
 static void test_provision_run_put_open_fail(void)
 {
     feed("PROV-CONFIRM\nPUT\nPUT 1 4 x\n");
-    /* A directory where the WAV should go makes fopen("...slot1.wav","wb")
-     * fail (provision_run recreates the parent dir, so removing it is not
-     * enough). */
-    (void)MKDIR(PROV_AUDIO_DIR "/slot1.wav");
+    /* A directory where the staged WAV should go makes fopen("...slot1.wav",
+     * "wb") fail after the format/preflight succeeded. */
+    (void)MKDIR(PROV_AUDIO_DIR ".prov_stage");
+    (void)MKDIR(PROV_AUDIO_DIR ".prov_stage/slot1.wav");
     provision_run();
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
     TEST_ASSERT_FALSE(tx_has("FILE-OK"));
-    (void)RMDIR(PROV_AUDIO_DIR "/slot1.wav");
+    (void)RMDIR(PROV_AUDIO_DIR ".prov_stage/slot1.wav");
+    (void)RMDIR(PROV_AUDIO_DIR ".prov_stage");
 }
 
 static void test_provision_run_put_no_mem(void)
@@ -1037,7 +1200,10 @@ static void test_provision_run_put_timeout(void)
     feed("PROV-CONFIRM\nPUT 1 4 x\n"); /* claims 4 bytes, none follow */
     provision_run();
     TEST_ASSERT_TRUE(tx_has("PROV-OK"));
+    TEST_ASSERT_TRUE(tx_has("PROV-ERR timeout"));
     TEST_ASSERT_FALSE(tx_has("FILE-OK"));
+    FILE *f = fopen(PROV_AUDIO_DIR ".prov_stage/slot1.wav", "rb");
+    TEST_ASSERT_NULL(f);
 }
 
 static void test_provision_run_put_chunk_ack(void)
@@ -1091,6 +1257,29 @@ static size_t build_test_pack(uint8_t *pack)
     return 40;
 }
 
+/* One-entry pack carrying an embedded sound scheme (bits = 0). */
+static size_t build_scheme_pack(uint8_t *pack)
+{
+    const char *name = AUDIO_PACK_SCHEME_NAME;
+    const uint8_t nlen = (uint8_t)strlen(name);
+    const uint32_t data_off = AUDIO_PACK_HDR_LEN + AUDIO_PACK_ENTRY_HDR_LEN + nlen;
+    const uint32_t data_len = 2; /* "{}" */
+    memcpy(pack, "AURASP01", 8);
+    put16(pack + 8, 1);
+    put16(pack + 10, 1);
+    put32(pack + 12, data_off);
+    pack[16] = nlen;
+    pack[17] = 0;
+    pack[18] = 0;
+    pack[19] = AUDIO_PACK_BITS_SCHEME;
+    put32(pack + 20, 0);
+    put32(pack + 24, data_off);
+    put32(pack + 28, data_len);
+    memcpy(pack + 32, name, nlen);
+    memcpy(pack + data_off, "{}", data_len);
+    return data_off + data_len;
+}
+
 static void test_provision_run_pack_success(void)
 {
     uint8_t pack[64];
@@ -1140,6 +1329,84 @@ static void test_provision_pack_errors(void)
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
 }
 
+static void test_provision_pack_scheme_is_rejected(void)
+{
+    uint8_t pack[128];
+    size_t plen = build_scheme_pack(pack);
+    char head[64];
+    snprintf(head, sizeof(head), "PROV-CONFIRM\nPACK %u\nPACK-DATA %u\n",
+             (unsigned)plen, (unsigned)plen);
+    feed(head);
+    mock_uart_feed(pack, plen);
+    tx_reset();
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PACK-READY"));
+    TEST_ASSERT_TRUE(tx_has("PACK-ERR scheme"));
+    TEST_ASSERT_FALSE(tx_has("PACK-OK"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+}
+
+static void test_provision_pack_failure_leaves_no_library(void)
+{
+    uint8_t pack[64];
+    uint8_t stream[128];
+    size_t plen = build_test_pack(pack);
+    size_t n = 0;
+    const char *head = "PROV-CONFIRM\nPACK 40\nPACK-DATA 40\n";
+    memcpy(stream + n, head, strlen(head)); n += strlen(head);
+    memcpy(stream + n, pack, plen); n += plen;
+    mock_uart_feed(stream, n);
+    g_prov_fwrite_fail = 1;
+    tx_reset();
+    TEST_ASSERT_FALSE(provision_run());
+    g_prov_fwrite_fail = 0;
+    TEST_ASSERT_TRUE(tx_has("PACK-ERR write"));
+    TEST_ASSERT_FALSE(tx_has("PACK-OK"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(1, g_storage_format_calls);
+    FILE *f = fopen(PROV_AUDIO_DIR "/test.wav", "rb");
+    TEST_ASSERT_NULL(f);
+    f = fopen(PROV_AUDIO_DIR ".prov_stage/test.wav", "rb");
+    TEST_ASSERT_NULL(f);
+}
+
+static void test_provision_space_preflight_rejects_before_format(void)
+{
+    g_free_bytes = 1024; /* less than the reserve, let alone the payload */
+    feed("PROV-CONFIRM\nPUT 1 4 x\nABCD\nDONE\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PROV-ERR space"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+    TEST_ASSERT_FALSE(tx_has("PUT-OK"));
+    TEST_ASSERT_FALSE(tx_has("FILE-OK"));
+
+    uint8_t pack[64];
+    uint8_t stream[128];
+    size_t plen = build_test_pack(pack);
+    size_t n = 0;
+    mock_uart_reset();
+    const char *head = "PROV-CONFIRM\nPACK 40\nPACK-DATA 40\n";
+    memcpy(stream + n, head, strlen(head)); n += strlen(head);
+    memcpy(stream + n, pack, plen); n += plen;
+    mock_uart_feed(stream, n);
+    tx_reset();
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("PACK-ERR space"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+}
+
+static void test_provision_install_marker_recovers_on_boot(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, install_marker_set(1));
+    TEST_ASSERT_TRUE(install_marker_get());
+    TEST_ASSERT_FALSE(provision_try()); /* no PROV flag: recovery only */
+    TEST_ASSERT_FALSE(install_marker_get());
+    TEST_ASSERT_EQUAL_INT(1, g_storage_format_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_tracks_save_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_storage_maint_depth);
+}
+
 static void test_provision_quiescence_failure_never_formats(void)
 {
     g_maintenance_err = ESP_ERR_TIMEOUT;
@@ -1183,7 +1450,7 @@ static void test_provision_wav_failure_after_fw_never_selects_boot(void)
     TEST_ASSERT_TRUE(tx_has("PROV-ERR wav"));
     TEST_ASSERT_EQUAL_INT(1, g_fs_release_calls);
     TEST_ASSERT_EQUAL_INT(1, g_validate_calls);
-    TEST_ASSERT_EQUAL_INT(0, g_tracks_save_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_tracks_save_calls); /* rollback clears metadata */
     TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
     TEST_ASSERT_EQUAL_INT(1, g_maintenance_end_calls);
     TEST_ASSERT_NULL(s_pending_boot);
@@ -1203,7 +1470,7 @@ static void test_provision_put_durability_failures_release_without_boot(void)
         TEST_ASSERT_EQUAL_INT(0, g_maintenance_depth);
         TEST_ASSERT_EQUAL_UINT32(115200, g_baud);
         TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
-        TEST_ASSERT_EQUAL_INT(0, g_tracks_save_calls);
+        TEST_ASSERT_EQUAL_INT(failure + 1, g_tracks_save_calls); /* rollback clears metadata */
         TEST_ASSERT_FALSE(tx_has("DONE-OK"));
         TEST_ASSERT_NULL(s_pending_boot);
     }
@@ -1213,7 +1480,7 @@ static void test_provision_put_durability_failures_release_without_boot(void)
 static void test_provision_metadata_failure_after_fw_never_selects_boot(void)
 {
     g_tracks_save_err = ESP_FAIL;
-    feed("PROV-CONFIRM\nFW 4\nABCD\nDONE\n");
+    feed("PROV-CONFIRM\nFW 4\nABCD\nPUT 1 4 x\nABCD\nDONE\n");
     TEST_ASSERT_FALSE(provision_run());
     TEST_ASSERT_TRUE(tx_has("PROV-ERR metadata"));
     TEST_ASSERT_EQUAL_INT(0, g_boot_calls);
@@ -1287,6 +1554,8 @@ int main(void)
     RUN_TEST(test_provision_run_fw_path);
     RUN_TEST(test_provision_try_paths);
     RUN_TEST(test_provision_listener_start);
+    RUN_TEST(test_provision_listener_subscribes_to_twdt);
+    RUN_TEST(test_provision_listener_wdt_failure_does_not_feed);
     RUN_TEST(test_provision_listener_task_paths);
     RUN_TEST(test_provision_listener_selftest);
     RUN_TEST(test_provision_listener_hil_cmd);
@@ -1305,6 +1574,10 @@ int main(void)
     RUN_TEST(test_provision_run_put_chunk_ack);
     RUN_TEST(test_provision_run_pack_success);
     RUN_TEST(test_provision_pack_errors);
+    RUN_TEST(test_provision_pack_scheme_is_rejected);
+    RUN_TEST(test_provision_pack_failure_leaves_no_library);
+    RUN_TEST(test_provision_space_preflight_rejects_before_format);
+    RUN_TEST(test_provision_install_marker_recovers_on_boot);
     RUN_TEST(test_provision_quiescence_failure_never_formats);
     RUN_TEST(test_provision_failed_put_paths_release_maintenance);
     RUN_TEST(test_provision_wav_failure_after_fw_never_selects_boot);

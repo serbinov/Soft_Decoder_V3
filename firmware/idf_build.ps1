@@ -23,6 +23,11 @@ param(
 $ErrorActionPreference = "Stop"
 $fw = $PSScriptRoot
 
+# Single-quote a value for the child PowerShell command line.
+function Quote-PS([string]$Value) {
+    return "'" + ($Value -replace "'", "''") + "'"
+}
+
 # --- locate ESP-IDF --------------------------------------------------------
 $candidates = @()
 if ($IdfPath) { $candidates += $IdfPath }
@@ -53,50 +58,77 @@ if (-not $env:IDF_TOOLS_PATH) {
 
 # --- COM port auto-detect (ESP32-S3 USB-Serial-JTAG: VID_303A PID_1001) -----
 function Get-EspPort {
-    $p = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+    Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
         Where-Object { $_.PNPDeviceID -like "USB\VID_303A*PID_1001*" -and $_.Name -match "\((COM\d+)\)" } |
         ForEach-Object { if ($_.Name -match "\((COM\d+)\)") { $Matches[1] } } |
         Select-Object -First 1
-    if (-not $p) { $p = "COM3" }
-    return $p
 }
 
-if (($Flash -or $Monitor) -and -not $Port) {
+if (($Flash -or $Erase -or $Monitor) -and -not $Port) {
     $Port = Get-EspPort
+    if (-not $Port) {
+        Write-Host "ERROR: ESP32-S3 (VID_303A/PID_1001) not found. Specify -Port COMx." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "Detected ESP32-S3 on $Port" -ForegroundColor Cyan
 }
 
 # --- build the idf.py command sequence -------------------------------------
+$toolsDir = Join-Path $fw "tools"
+$releaseTool = Join-Path $toolsDir "release_artifacts.py"
+$appBin = Join-Path $fw "build\soft_decoder_v3.bin"
 $steps = @()
 if (-not (Test-Path (Join-Path $fw "build\CMakeCache.txt"))) {
     $steps += "idf.py set-target esp32s3"
 }
 if ($Clean) { $steps += "idf.py fullclean" }
 $steps += "idf.py build"
-if ($Erase) { $steps += "idf.py -p $Port erase-flash" }
-if ($Flash) { $steps += "idf.py -p $Port flash" }
-if ($Monitor) { $steps += "idf.py -p $Port monitor" }
+if ($Flash -or $Erase) {
+    # Refuse to flash an oversized app: inspect also enforces the ota_0 slot.
+    $steps += "python " + (Quote-PS $releaseTool) + " inspect --input " + (Quote-PS $appBin) + " | Out-Null"
+}
+if ($Erase) { $steps += "idf.py -p " + (Quote-PS $Port) + " erase-flash" }
+if ($Flash) { $steps += "idf.py -p " + (Quote-PS $Port) + " flash" }
+if ($Monitor) { $steps += "idf.py -p " + (Quote-PS $Port) + " monitor" }
 if ($Release) {
     if ($Flash -or $Erase -or $Monitor) {
         throw "Release packaging is build-only; do not combine it with device actions."
     }
     $releaseDir = Join-Path (Split-Path $fw -Parent) "release"
-    $steps += "python '$fw\tools\release_artifacts.py' publish --build '$fw\build' --release '$releaseDir' --version '$fw\version.txt' --partitions '$fw\partitions.csv'"
-    $steps += "powershell -NoProfile -ExecutionPolicy Bypass -File '$fw\tools\gen_flash_readme.ps1' -Out '$releaseDir\flash_download_tool\README.txt'"
+    $steps += "python " + (Quote-PS $releaseTool) + " publish --build " + (Quote-PS (Join-Path $fw "build")) +
+              " --release " + (Quote-PS $releaseDir) + " --version " + (Quote-PS (Join-Path $fw "version.txt")) +
+              " --partitions " + (Quote-PS (Join-Path $fw "partitions.csv"))
+    $steps += "powershell -NoProfile -ExecutionPolicy Bypass -File " + (Quote-PS (Join-Path $toolsDir "gen_flash_readme.ps1")) +
+              " -Out " + (Quote-PS (Join-Path $releaseDir "flash_download_tool\README.txt"))
 }
+
+# Reproducible builds: pin the embedded timestamp to the last commit (or the
+# version file mtime when git is unavailable) instead of the current time.
+$epoch = 0L
+try {
+    $commitTime = & git -C $fw log -1 --format=%ct 2>$null
+    if ($LASTEXITCODE -eq 0 -and $commitTime) { $epoch = [int64]$commitTime }
+} catch { }
+if ($epoch -le 0) {
+    $stamp = (Get-Item -LiteralPath (Join-Path $fw "version.txt")).LastWriteTimeUtc
+    $epoch = [int64]([DateTimeOffset]$stamp).ToUnixTimeSeconds()
+}
+$env:SOURCE_DATE_EPOCH = [string]$epoch
 
 Write-Host "ESP-IDF : $idf"
 Write-Host "Tools   : $env:IDF_TOOLS_PATH"
 if ($Port) { Write-Host "Port    : $Port" }
+Write-Host "Epoch   : $epoch (SOURCE_DATE_EPOCH)"
 Write-Host ""
 
 # Activate the toolchain and run in a child PowerShell so a failure inside
 # ESP-IDF's export.ps1 cannot terminate this wrapper prematurely.
 $inner = @(
-    "`$env:IDF_PATH = '$idf'",
-    "`$env:IDF_TOOLS_PATH = '$env:IDF_TOOLS_PATH'",
-    ". '$idf\export.ps1'",
-    "Set-Location '$fw'",
+    "`$env:IDF_PATH = " + (Quote-PS $idf),
+    "`$env:IDF_TOOLS_PATH = " + (Quote-PS $env:IDF_TOOLS_PATH),
+    "`$env:SOURCE_DATE_EPOCH = " + (Quote-PS $env:SOURCE_DATE_EPOCH),
+    ". " + (Quote-PS (Join-Path $idf "export.ps1")),
+    "Set-Location " + (Quote-PS $fw),
     (($steps | ForEach-Object { $_ + '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }' }) -join "`n")
 ) -join "`n"
 

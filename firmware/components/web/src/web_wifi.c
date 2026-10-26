@@ -37,6 +37,24 @@ static volatile bool s_dns_run;
 static volatile uint8_t s_ap_sta_count;
 static int64_t s_ap_started_us;
 static int64_t s_last_client_us; /* last connect/disconnect; auto-off base */
+/* 64-bit timestamps are not atomic on the 32-bit target: guard the event-task
+ * writes and auto-off reads with one spinlock. */
+static portMUX_TYPE s_wifi_time_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void wifi_note_client_now(void)
+{
+    portENTER_CRITICAL(&s_wifi_time_mux);
+    s_last_client_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_wifi_time_mux);
+}
+
+static int64_t wifi_last_client_us(void)
+{
+    portENTER_CRITICAL(&s_wifi_time_mux);
+    int64_t value = s_last_client_us;
+    portEXIT_CRITICAL(&s_wifi_time_mux);
+    return value;
+}
 
 /* Parse a dotted-quad IPv4 address. 0.0.0.0 is rejected (not usable as an AP
  * address). Returns false when the text cannot be parsed. */
@@ -82,7 +100,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
                 if (s_ap_sta_count < 255U) {
                     s_ap_sta_count++;
                 }
-                s_last_client_us = esp_timer_get_time();
+                wifi_note_client_now();
                 ESP_LOGI(TAG, "STA %02x:%02x:%02x:%02x:%02x:%02x connected (aid=%d), clients=%u",
                          e->mac[0], e->mac[1], e->mac[2], e->mac[3], e->mac[4], e->mac[5],
                          (int)e->aid, (unsigned)s_ap_sta_count);
@@ -93,7 +111,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
                 if (s_ap_sta_count > 0U) {
                     s_ap_sta_count--;
                 }
-                s_last_client_us = esp_timer_get_time();
+                wifi_note_client_now();
                 ESP_LOGW(TAG, "STA disconnected (aid=%d, reason=%d), clients=%u",
                          (int)e->aid, (int)e->reason, (unsigned)s_ap_sta_count);
                 break;
@@ -228,7 +246,7 @@ static void wifi_auto_off_task(void *arg)
         /* Time since the last client was seen (or since AP start when no one
          * ever connected), not since boot, so a client that was connected for
          * a long time does not cause an immediate off right after leaving. */
-        if (esp_timer_get_time() - s_last_client_us <
+        if (esp_timer_get_time() - wifi_last_client_us() <
             (int64_t)minutes * 60LL * 1000000LL) {
             continue;
         }
@@ -390,8 +408,10 @@ esp_err_t wifi_start(const settings_config_t *cfg)
     }
 
     s_ap_sta_count = 0;
+    portENTER_CRITICAL(&s_wifi_time_mux);
     s_ap_started_us = esp_timer_get_time();
     s_last_client_us = s_ap_started_us;
+    portEXIT_CRITICAL(&s_wifi_time_mux);
     s_wifi_started = true;
 
     snprintf(s_ap_ip, sizeof(s_ap_ip), IPSTR, IP2STR(&ap_addr));

@@ -2,8 +2,93 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+/* Pre-include every header sound.c uses so the white-box `#define static`
+ * below only affects the component translation unit, not header inline code. */
+#include "audio.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "motor.h"
+#include "settings.h"
+#include "storage.h"
+#include "sound.h"
 #include "../../components/sound/src/sound_graph.c"
 #include "../../components/sound/src/sound_graph_runner.c"
+#define static
+#include "../../components/sound/src/sound.c"
+#undef static
+#include "../../test_libs/teststubs/stubs.c"
+
+/* Minimal audio/settings/motor/storage stand-ins for the sound.c white-box
+ * tests. The semantic runner tests use their own sg_io mock below. */
+static audio_completion_t s_audio_completion;
+static audio_voice_state_t s_audio_voice_state;
+static unsigned s_audio_play_calls;
+static unsigned s_audio_release_calls;
+
+esp_err_t audio_voice_play_generation(uint8_t voice, const char *path, bool loop,
+                                      uint8_t volume, audio_voice_handle_t *out)
+{
+    (void)path; (void)loop; (void)volume;
+    ++s_audio_play_calls;
+    s_audio_completion = AUDIO_COMPLETION_NONE;
+    s_audio_voice_state = AUDIO_VOICE_PENDING;
+    if (out != NULL) { *out = (audio_voice_handle_t){voice, s_audio_play_calls}; }
+    return ESP_OK;
+}
+esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out)
+{
+    if (out == NULL) { return ESP_ERR_INVALID_ARG; }
+    *out = (audio_voice_handle_t){0, ++s_audio_play_calls};
+    return ESP_OK;
+}
+esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
+                                 bool loop, uint8_t volume)
+{
+    (void)path; (void)loop; (void)volume;
+    s_audio_completion = AUDIO_COMPLETION_NONE;
+    s_audio_voice_state = AUDIO_VOICE_PENDING;
+    if (handle != NULL) { handle->generation = ++s_audio_play_calls; }
+    return ESP_OK;
+}
+void audio_voice_release_owned(audio_voice_handle_t handle)
+{
+    (void)handle;
+    ++s_audio_release_calls;
+}
+esp_err_t audio_voice_set_rate_owned(audio_voice_handle_t handle, uint16_t permille)
+{
+    (void)handle; (void)permille;
+    return ESP_OK;
+}
+audio_voice_state_t audio_voice_get_state(audio_voice_handle_t handle)
+{
+    (void)handle;
+    return s_audio_voice_state;
+}
+audio_completion_t audio_voice_completion(audio_voice_handle_t handle)
+{
+    (void)handle;
+    return s_audio_completion;
+}
+esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume)
+{
+    (void)voice; (void)volume;
+    return ESP_OK;
+}
+esp_err_t settings_load(settings_config_t *cfg)
+{
+    if (cfg != NULL) { memset(cfg, 0, sizeof(*cfg)); }
+    return ESP_OK;
+}
+void motor_get_applied_speed(uint8_t *speed, bool *forward)
+{
+    if (speed != NULL) { *speed = 0; }
+    if (forward != NULL) { *forward = true; }
+}
+const char *storage_get_root(void) { return "."; }
 
 static sg_graph_t *g;
 static sg_runner_t *r;
@@ -34,12 +119,17 @@ static void init_runner(void)
 }
 void setUp(void)
 {
+    sound_graph_deactivate();
+    memset(s_fn_state, 0, sizeof(s_fn_state));
+    s_audio_completion = AUDIO_COMPLETION_NONE;
+    s_audio_voice_state = AUDIO_VOICE_FINISHED;
+    s_audio_play_calls = s_audio_release_calls = 0;
     g = calloc(1,sizeof(*g)); r = calloc(1,sizeof(*r));
     TEST_ASSERT_NOT_NULL(g); TEST_ASSERT_NOT_NULL(r);
     TEST_ASSERT_EQUAL(ESP_OK,sg_parse(minimal,strlen(minimal),g,&diagnostic));
     plays = releases = 0; fail_play = false; no_voice_once = false; memset(audio_state,0,sizeof(audio_state));
 }
-void tearDown(void) { free(r); free(g); }
+void tearDown(void) { sound_graph_deactivate(); free(r); free(g); }
 static unsigned state(const char *id, const char *file, bool loop)
 {
     unsigned i = g->state_count++; sg_state_t *s = &g->states[i];
@@ -348,6 +438,101 @@ static void test_engine_without_fkey_runs_continuously(void)
     sg_runner_tick(r,0,0,true,20);
     TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
 }
+static void test_prime_levels_restores_held_engine_state(void)
+{
+    state("run","run.wav",true); edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
+    init_runner();
+    TEST_ASSERT_FALSE(r->engine_on);
+    TEST_ASSERT_FALSE(r->armed);
+    sg_runner_prime_levels(r,UINT32_C(1) << 1);
+    TEST_ASSERT_TRUE(r->engine_on);
+    TEST_ASSERT_TRUE(r->armed);
+    TEST_ASSERT_TRUE((r->fn_levels & (UINT32_C(1) << 1)) != 0);
+    sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(1,plays); TEST_ASSERT_EQUAL_UINT8(1,r->channels[0].state);
+}
+
+static void test_sound_graph_prime_after_commit_starts_engine(void)
+{
+    state("run","run.wav",true); edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
+    sound_graph_prepared_t *prepared = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_prepare(g,"test",1,&prepared));
+    sound_graph_commit(prepared);
+    TEST_ASSERT_NOT_NULL(s_graph_runner);
+    TEST_ASSERT_FALSE(s_graph_runner->engine_on);
+    sound_graph_prime_functions(UINT32_C(1) << 1);
+    TEST_ASSERT_TRUE(s_graph_runner->engine_on);
+    TEST_ASSERT_TRUE(s_graph_runner->armed);
+}
+
+static void test_status_masks_handle_channel_32(void)
+{
+    reset_model();
+    g->effect_count = SG_MAX_EFFECTS;
+    for (unsigned i = 0; i < SG_MAX_EFFECTS; ++i) {
+        snprintf(g->effects[i].id,sizeof(g->effects[i].id),"fx%u",i);
+        snprintf(g->effects[i].entry,sizeof(g->effects[i].entry),"off");
+        g->effects[i].fn = (uint8_t)(i % 29U);
+    }
+    sound_graph_prepared_t *prepared = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK,sound_graph_prepare(g,"test",1,&prepared));
+    sound_graph_commit(prepared);
+    TEST_ASSERT_NOT_NULL(s_graph_runner);
+    s_graph_runner->channels[31].failed = true;
+    s_graph_runner->channels[31].retry_play = true;
+    s_graph_runner->channels[32].failed = true;
+    s_graph_runner->channels[32].retry_play = true;
+    s_graph_runner->channels[32].state = 7;
+
+    sound_graph_status_t status;
+    sound_graph_status_get(&status);
+    TEST_ASSERT_TRUE((status.failed_channels & (UINT32_C(1) << 31)) != 0);
+    TEST_ASSERT_TRUE((status.retry_channels & (UINT32_C(1) << 31)) != 0);
+    TEST_ASSERT_TRUE(status.failed_channel32);
+    TEST_ASSERT_TRUE(status.retry_channel32);
+    TEST_ASSERT_EQUAL_UINT8(7,status.states[32]);
+}
+
+static void test_audio_idle_retries_without_permanent_failure(void)
+{
+    state("run","run.wav",true); edge("off","run",1,SG_ENGINE_ON,0,SG_IMMEDIATE);
+    init_runner(); sg_runner_power(r,true);
+    sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(1,plays);
+    audio_state[18] = SG_AUDIO_IDLE;
+    sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_FALSE(r->channels[0].failed);
+    TEST_ASSERT_TRUE(r->channels[0].retry_play);
+    TEST_ASSERT_FALSE(r->channels[0].playing);
+    TEST_ASSERT_EQUAL(1,releases);
+    sg_runner_tick(r,0,0,true,20);
+    TEST_ASSERT_EQUAL(2,plays);
+    TEST_ASSERT_FALSE(r->channels[0].failed);
+    TEST_ASSERT_TRUE(r->channels[0].playing);
+}
+
+static void test_graph_audio_poll_maps_stopped_to_idle(void)
+{
+    sg_handle_t handle = {0,1};
+    s_audio_voice_state = AUDIO_VOICE_FINISHED;
+    s_audio_completion = AUDIO_COMPLETION_STOPPED;
+    TEST_ASSERT_EQUAL(SG_AUDIO_IDLE,graph_audio_poll(NULL,handle));
+    s_audio_completion = AUDIO_COMPLETION_STALE;
+    TEST_ASSERT_EQUAL(SG_AUDIO_IDLE,graph_audio_poll(NULL,handle));
+    s_audio_completion = AUDIO_COMPLETION_ERROR;
+    TEST_ASSERT_EQUAL(SG_AUDIO_FAILED,graph_audio_poll(NULL,handle));
+    s_audio_completion = AUDIO_COMPLETION_EOF;
+    TEST_ASSERT_EQUAL(SG_AUDIO_DONE,graph_audio_poll(NULL,handle));
+    s_audio_completion = AUDIO_COMPLETION_NONE;
+    s_audio_voice_state = AUDIO_VOICE_PLAYING;
+    TEST_ASSERT_EQUAL(SG_AUDIO_PLAYING,graph_audio_poll(NULL,handle));
+    s_audio_voice_state = AUDIO_VOICE_PENDING;
+    TEST_ASSERT_EQUAL(SG_AUDIO_PENDING,graph_audio_poll(NULL,handle));
+    /* A voice finished without an error (e.g. inhibit) is idle, not failed. */
+    s_audio_voice_state = AUDIO_VOICE_FINISHED;
+    TEST_ASSERT_EQUAL(SG_AUDIO_IDLE,graph_audio_poll(NULL,handle));
+}
+
 static void test_all_function_keys_drive_effect_channels(void)
 {
     unsigned play_state[29], off_state[29];
@@ -869,7 +1054,10 @@ int main(void)
     RUN_TEST(test_utf8_and_unicode_escapes); RUN_TEST(test_parser_size_depth_and_string_bounds);
     RUN_TEST(test_exact_body_limit_and_token_limit);
     RUN_TEST(test_ids_filenames_and_direct_model_bounds); RUN_TEST(test_validator_references_ranges_priorities);
-    RUN_TEST(test_runner_no_autostart_and_toggle_edges); RUN_TEST(test_engine_without_fkey_runs_continuously); RUN_TEST(test_all_function_keys_drive_effect_channels);
+    RUN_TEST(test_runner_no_autostart_and_toggle_edges); RUN_TEST(test_engine_without_fkey_runs_continuously); RUN_TEST(test_prime_levels_restores_held_engine_state);
+    RUN_TEST(test_sound_graph_prime_after_commit_starts_engine); RUN_TEST(test_status_masks_handle_channel_32);
+    RUN_TEST(test_audio_idle_retries_without_permanent_failure); RUN_TEST(test_graph_audio_poll_maps_stopped_to_idle);
+    RUN_TEST(test_all_function_keys_drive_effect_channels);
     RUN_TEST(test_state_enter_fires_once_after_entry); RUN_TEST(test_observers_arm_from_boot);
     RUN_TEST(test_short_edges_priority_and_one_transition);
     RUN_TEST(test_engine_endless_loop_changes_band_immediately); RUN_TEST(test_pending_boundary_rechecks_condition_and_loop_replays); RUN_TEST(test_finite_loop_repeats_then_sample_done); RUN_TEST(test_loop_timeout_covers_whole_loop_not_one_sample); RUN_TEST(test_no_free_voice_is_retried_not_failed); RUN_TEST(test_parse_state_loops_field); RUN_TEST(test_sample_done_silent_next_tick_and_audible_once);

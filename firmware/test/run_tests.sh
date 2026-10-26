@@ -18,7 +18,7 @@ for arg in "$@"; do
             echo "        test_track test_audio test_pinmap test_track_manifest"
             echo "        test_storage test_track_recover test_provision test_selftest"
             echo "        test_web test_sound_graph test_sound_graph_store"
-            echo "        test_audio_pack test_main"
+            echo "        test_audio_pack test_main test_concurrency test_motor_concurrency"
             exit 0
             ;;
         *) ONLY+=("$arg") ;;
@@ -28,7 +28,7 @@ done
 SUITES=(test_dcc test_settings test_motor test_auxio test_web_util test_track
         test_audio test_pinmap test_track_manifest test_storage test_track_recover
         test_provision test_selftest test_web test_sound_graph test_sound_graph_store
-        test_audio_pack test_main)
+        test_audio_pack test_main test_concurrency test_motor_concurrency)
 if [ ${#ONLY[@]} -gt 0 ]; then
     for s in "${ONLY[@]}"; do
         if [[ ! " ${SUITES[*]} " =~ " ${s} " ]]; then
@@ -85,7 +85,14 @@ for suite in "${SUITES[@]}"; do
     exe="$TMP/$suite"
     rm -f "$exe"
     echo "=== $suite ==="
-    if ! "$CC" "${INC[@]}" "${srcs[@]}" "$UNITY_SRC/unity.c" "${EXTRA[@]}" -o "$exe"; then
+    SUITE_EXTRA=()
+    if [ "$suite" = "test_concurrency" ] || [ "$suite" = "test_motor_concurrency" ]; then
+        SUITE_EXTRA=(-DMOCK_FREERTOS_REAL_SYNC -pthread)
+    fi
+    if [ "$suite" = "test_motor_concurrency" ]; then
+        SUITE_EXTRA+=("-I$ROOT/test/test_motor")
+    fi
+    if ! "$CC" "${INC[@]}" "${srcs[@]}" "$UNITY_SRC/unity.c" "${EXTRA[@]}" "${SUITE_EXTRA[@]}" -o "$exe"; then
         echo "BUILD FAILED: $suite" >&2
         failed=$((failed + 1))
         continue

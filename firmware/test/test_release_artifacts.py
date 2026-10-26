@@ -1,6 +1,9 @@
+import argparse
+import contextlib
 import hashlib
 import importlib.util
 import io
+import json
 import struct
 import unittest
 from pathlib import Path
@@ -10,7 +13,7 @@ release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
 
-def app(version="0.10"):
+def app(version="0.11"):
     payload = bytearray(256)
     struct.pack_into("<I", payload, 0, 0xABCD5432)
     payload[16:16 + len(version)] = version.encode()
@@ -61,7 +64,7 @@ def package(names=(b"slot1.wav",)):
 class ReleaseTests(unittest.TestCase):
     def test_app_role_version_and_checksum(self):
         info = release.image_info(app())
-        self.assertEqual((info["role"], info["version"]), ("application", "0.10"))
+        self.assertEqual((info["role"], info["version"]), ("application", "0.11"))
 
     def test_corrupt_segment_and_hash_rejected(self):
         for offset in (64, -1):
@@ -101,6 +104,17 @@ class ReleaseTests(unittest.TestCase):
         release.wav_info(wav())
         with self.assertRaises(ValueError):
             release.wav_info(wav()[:-1])
+
+    def test_verify_published_release_and_version(self):
+        root = Path(__file__).resolve().parents[2]
+        version = (root / "firmware" / "version.txt").read_text(encoding="utf-8-sig").strip()
+        manifest = json.loads((root / "release" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], version)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            release.verify(argparse.Namespace(release=root / "release", legacy=False))
+        self.assertIn(f"current version {version}", output.getvalue())
 
 
 if __name__ == "__main__":

@@ -92,18 +92,32 @@ static esp_err_t graph_audio_play(void *ctx, bool engine, const sg_state_t *stat
     if (err != ESP_OK) { audio_voice_release_owned(h); return err; }
     *out = (sg_handle_t){h.voice,h.generation}; return ESP_OK;
 }
+static sg_audio_state_t completion_state(audio_completion_t done)
+{
+    switch (done) {
+        case AUDIO_COMPLETION_EOF: return SG_AUDIO_DONE;
+        case AUDIO_COMPLETION_ERROR: return SG_AUDIO_FAILED;
+        case AUDIO_COMPLETION_STOPPED: /* clean stop/abort, retry later */
+        case AUDIO_COMPLETION_STALE:
+            return SG_AUDIO_IDLE;
+        case AUDIO_COMPLETION_NONE:
+        default:
+            return SG_AUDIO_PENDING;
+    }
+}
 static sg_audio_state_t graph_audio_poll(void *ctx, sg_handle_t h)
 {
     (void)ctx; audio_voice_handle_t handle = {h.voice,h.generation};
     audio_completion_t done = audio_voice_completion(handle);
-    if (done == AUDIO_COMPLETION_EOF) { return SG_AUDIO_DONE; }
-    if (done != AUDIO_COMPLETION_NONE) { return SG_AUDIO_FAILED; }
+    if (done != AUDIO_COMPLETION_NONE) { return completion_state(done); }
     audio_voice_state_t state = audio_voice_get_state(handle);
     if (state == AUDIO_VOICE_PENDING) { return SG_AUDIO_PENDING; }
     if (state == AUDIO_VOICE_PLAYING) { return SG_AUDIO_PLAYING; }
-    /* EOF may have been published between the two generation-scoped queries. */
+    /* Completion may have been published between the two generation-scoped
+     * queries. A finished voice without an error (e.g. an inhibit-induced
+     * stop) is idle, not a permanently failed channel. */
     done = audio_voice_completion(handle);
-    return done == AUDIO_COMPLETION_EOF ? SG_AUDIO_DONE : SG_AUDIO_FAILED;
+    return done == AUDIO_COMPLETION_NONE ? SG_AUDIO_IDLE : completion_state(done);
 }
 
 /* Serialize the engine's shared state: the 20 ms task, the DCC/web function
@@ -290,7 +304,10 @@ void sound_graph_commit(sound_graph_prepared_t *prepared)
     if (!s_graph_runner) { for (unsigned i = 0; i < SOUND_FN_COUNT; ++i) { if (s_fn_state[i]) { levels |= UINT32_C(1) << i; } } }
     runtime_reset_locked();
     sg_graph_t *old = s_graph; sg_runner_t *old_runner = s_graph_runner;
-    s_graph = prepared->graph; s_graph_runner = prepared->runner; s_graph_fault = false; s_graph_runner->fn_levels = levels;
+    s_graph = prepared->graph; s_graph_runner = prepared->runner; s_graph_fault = false;
+    /* Restore the held keys and derive engine_on/armed from the new graph so a
+     * held engine-F starts without waiting for another toggle. */
+    sg_runner_prime_levels(s_graph_runner, levels);
     snprintf(s_graph_id,sizeof(s_graph_id),"%s",prepared->id); s_graph_revision = prepared->revision;
     sound_unlock(); free(old_runner); free(old); free(prepared);
 }
@@ -298,7 +315,7 @@ void sound_graph_prime_functions(uint32_t levels)
 {
     sound_lock();
     for (unsigned i = 0; i < SOUND_FN_COUNT; ++i) { s_fn_state[i] = (levels & (UINT32_C(1) << i)) != 0; }
-    if (s_graph_runner) { s_graph_runner->fn_levels = levels & UINT32_C(0x1fffffff); s_graph_runner->fn_press = 0; s_graph_runner->fn_release = 0; }
+    if (s_graph_runner) { sg_runner_prime_levels(s_graph_runner, levels); }
     sound_unlock();
 }
 void sound_graph_deactivate(void)
@@ -317,9 +334,15 @@ void sound_graph_status_get(sound_graph_status_t *out)
         out->engine = s_graph_runner->engine_on; out->armed = s_graph_runner->armed;
         snprintf(out->id,sizeof(out->id),"%s",s_graph_id); out->revision = s_graph_revision;
         for (unsigned i = 0; i <= s_graph->effect_count; ++i) {
-            out->states[i] = s_graph_runner->channels[i].state;
-            if (s_graph_runner->channels[i].failed) { out->failed_channels |= UINT32_C(1) << i; }
-            if (s_graph_runner->channels[i].retry_play) { out->retry_channels |= UINT32_C(1) << i; }
+            const sg_channel_t *channel = &s_graph_runner->channels[i];
+            out->states[i] = channel->state;
+            if (i < 32U) {
+                if (channel->failed) { out->failed_channels |= UINT32_C(1) << i; }
+                if (channel->retry_play) { out->retry_channels |= UINT32_C(1) << i; }
+            } else {
+                out->failed_channel32 = channel->failed;
+                out->retry_channel32 = channel->retry_play;
+            }
         }
     }
     sound_unlock();

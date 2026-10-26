@@ -1,20 +1,21 @@
 # =============================================================
 #  ADDITIPUS AURA-X standalone flasher (no dependencies)
-#  Pure PowerShell: enters download mode, erases the internal flash,
-#  flashes firmware (bootloader + partitions + ota_data + app) and uploads
-#  sounds. No Python / esptool required.
+#  Pure PowerShell: enters download mode, flashes firmware (bootloader +
+#  partitions + ota_data + app) and uploads sounds. The internal flash is
+#  preserved unless -Erase is given. No Python / esptool required.
 #
 #  Usage:
 #    .\flash_standalone.ps1
 #    .\flash_standalone.ps1 -FwDir "..\release\flash_download_tool" -SoundDir "..\..\SOUND"
 #    .\flash_standalone.ps1 -NoSounds
-#    .\flash_standalone.ps1 -NoErase     (skip the full internal-flash erase)
+#    .\flash_standalone.ps1 -Erase       (opt-in full internal-flash erase)
 # =============================================================
 param(
     [string]$FwDir = (Join-Path $PSScriptRoot "..\release\flash_download_tool"),
     [string]$SoundDir = (Join-Path $PSScriptRoot "..\..\SOUND"),
     [switch]$NoSounds,
-    [switch]$NoErase,
+    [switch]$Erase,
+    [switch]$NoErase,   # accepted for compatibility; erase is off unless -Erase
     [string]$Port = ""
 )
 
@@ -30,7 +31,7 @@ function Write-Err($m)   { Write-Host "[ERROR] $m" -ForegroundColor Red }
 function Find-EspPort {
     foreach ($p in [System.IO.Ports.SerialPort]::GetPortNames()) {
         $dev = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
-               Where-Object { $_.Name -match $p -and $_.DeviceID -match "VID_303A" }
+               Where-Object { $_.Name -match $p -and $_.DeviceID -match "VID_303A.*PID_1001" }
         if ($dev) { return $p }
     }
     return $null
@@ -152,9 +153,16 @@ function Calc-Checksum([byte[]]$data, [int]$state) {
 function Sync-Chip($sp) {
     $data = [byte[]](0x07,0x07,0x12,0x20) + [byte[]](1..32 | ForEach-Object { 0x55 })
     Write-SlipCmd $sp 0x08 $data 0
-    for ($i = 0; $i -lt 8; $i++) {
-        $p = Read-SlipPacket $sp 2000
-        if ($null -eq $p -or $p.Count -lt 8) { throw "sync failed (response $i)" }
+    # One SYNC command has exactly one response. The caller retries the whole
+    # command when the chip is not ready yet; never consume stale packets here.
+    $p = Read-SlipPacket $sp 2000
+    if ($null -eq $p -or $p.Count -lt 8) { throw "sync failed: no response" }
+    if ($p[0] -ne 0x01) { throw "sync failed: bad response direction" }
+    if ($p[1] -ne 0x08) { throw ("sync failed: unexpected opcode 0x{0:X2}" -f $p[1]) }
+    if ($p.Count -ge 10) {
+        $s0 = $p[$p.Count - 2]
+        $s1 = $p[$p.Count - 1]
+        if ($s0 -ne 0) { throw ("sync failed: status {0} {1}" -f $s0, $s1) }
     }
 }
 
@@ -274,9 +282,9 @@ function Format-Rx {
 }
 
 function Upload-Sounds($sp, [string]$dir) {
-    if (-not (Test-Path $dir)) { Write-Warn "sound folder not found: $dir"; return }
+    if (-not (Test-Path $dir)) { throw "sound folder not found: $dir" }
     $files = @(Get-ChildItem -LiteralPath $dir -Filter *.wav | Sort-Object Name)
-    if ($files.Count -eq 0) { Write-Warn "no WAV files in $dir"; return }
+    if ($files.Count -eq 0) { throw "no WAV files in $dir" }
     $total = ($files | Measure-Object Length -Sum).Sum
     Write-Info ("{0} sound files, {1:N0} B total -> slots 1..{0}" -f $files.Count, $total)
 
@@ -299,7 +307,7 @@ function Upload-Sounds($sp, [string]$dir) {
         Write-Err "firmware did not enter provisioning - the app is not answering on the port."
         Write-Warn "  check that the app is running (boot log above) and the port is not busy,"
         Write-Warn "  then run 'Flash + sounds' again."
-        return
+        throw "sound upload failed: firmware did not enter provisioning"
     }
     Write-Ok "provisioning started"
 
@@ -313,7 +321,8 @@ function Upload-Sounds($sp, [string]$dir) {
         Write-Info ("slot {0}: {1} ({2:N0} B)" -f $slot, $f.Name, $len)
         $sp.Write(("PUT {0} {1} {2}`n" -f $slot, $len, $f.Name))
         if (-not (Read-Text-Until $sp "PUT-OK" 60000)) {
-            Write-Err ("no PUT-OK slot {0} (got: {1})" -f $slot, (Format-Rx)); return
+            Write-Err ("no PUT-OK slot {0} (got: {1})" -f $slot, (Format-Rx))
+            throw ("sound upload failed: no PUT-OK for slot {0}" -f $slot)
         }
 
         $fs = [System.IO.File]::OpenRead($f.FullName)
@@ -331,12 +340,13 @@ function Upload-Sounds($sp, [string]$dir) {
                 }
                 if ($remaining -gt 0 -and -not (Read-Text-Until $sp "CHUNK" 30000)) {
                     Write-Err ("data ack timeout slot {0} at {1}/{2} B (got: {3})" -f $slot, $sent, $len, (Format-Rx))
-                    $fs.Dispose(); return
+                    throw ("sound upload failed: data ack timeout for slot {0}" -f $slot)
                 }
             }
         } finally { $fs.Dispose() }
         if (-not (Read-Text-Until $sp "FILE-OK" 60000)) {
-            Write-Err ("no FILE-OK slot {0} (got: {1})" -f $slot, (Format-Rx)); return
+            Write-Err ("no FILE-OK slot {0} (got: {1})" -f $slot, (Format-Rx))
+            throw ("sound upload failed: no FILE-OK for slot {0}" -f $slot)
         }
         Write-Ok ("slot {0}: {1} uploaded" -f $slot, $f.Name)
         $slot++
@@ -350,11 +360,49 @@ function Upload-Sounds($sp, [string]$dir) {
     else { Write-Info "sounds uploaded; device is restarting (DONE-OK not seen)" }
 }
 
+# Refuse to flash images that the release manifest did not verify. When the
+# script is pointed at a plain folder without a manifest, at least enforce the
+# ota_0 slot limit so a too-large app cannot overwrite the partition table.
+function Test-ReleaseImages([string]$dir) {
+    $app = Join-Path $dir "firmware.bin"
+    $slotSize = [int64]0x1E0000
+    if (Test-Path -LiteralPath $app) {
+        $appLen = (Get-Item -LiteralPath $app).Length
+        if ($appLen -gt $slotSize) {
+            throw ("firmware.bin is {0:N0} bytes; the ota_0 slot is only {1:N0} bytes" -f $appLen, $slotSize)
+        }
+    }
+    $release = Split-Path $dir -Parent
+    $manifestPath = Join-Path $release "manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        Write-Warn "release manifest not found; only the application size was checked"
+        return
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.schema -ne 1 -or $manifest.chip -ne "esp32s3" -or $manifest.flash_size -ne 0x400000) {
+        throw "invalid release manifest"
+    }
+    $version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "version.txt") -Raw).Trim()
+    if ($manifest.version -cne $version) { throw "release manifest version is stale; rebuild before flashing" }
+    foreach ($name in @("bootloader.bin", "partitions.bin", "ota_data_initial.bin", "firmware.bin")) {
+        $entry = @($manifest.files | Where-Object { $_.path -ceq ("flash_download_tool/" + $name) })
+        if ($entry.Count -ne 1) { throw ("release manifest is missing " + $name) }
+        $path = Join-Path $dir $name
+        if (-not (Test-Path -LiteralPath $path)) { throw ("missing release file: " + $path) }
+        if ((Get-Item -LiteralPath $path).Length -ne [int64]$entry[0].size) {
+            throw ("release size mismatch: " + $name)
+        }
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($hash -ine $entry[0].sha256) { throw ("release hash mismatch: " + $name) }
+    }
+    Write-Ok "release images verified"
+}
+
 # =============================================================
 # main
 # =============================================================
 if (-not $Port) { $Port = Find-EspPort }
-if (-not $Port) { Write-Err "ESP32-S3 (VID_303A) not found. Check USB."; exit 1 }
+if (-not $Port) { Write-Err "ESP32-S3 (VID_303A) not found. Specify -Port COMx or check USB."; exit 1 }
 Write-Info ("Port: {0}" -f $Port)
 
 if (-not (Test-Path $FwDir)) { Write-Err "firmware folder not found: $FwDir"; exit 1 }
@@ -364,6 +412,10 @@ $ota        = Join-Path $FwDir "ota_data_initial.bin"
 $firmware   = Join-Path $FwDir "firmware.bin"
 foreach ($f in @($bootloader, $partitions, $ota, $firmware)) {
     if (-not (Test-Path $f)) { Write-Err "missing file: $f"; exit 1 }
+}
+try { Test-ReleaseImages $FwDir } catch {
+    Write-Err $_.Exception.Message
+    exit 1
 }
 
 $sp = Open-Serial $Port 115200
@@ -406,9 +458,9 @@ try {
     Attach-Spi $sp
     Write-Ok "SPI flash attached"
 
-    if (-not $NoErase) {
-        # Best-effort: if the ROM rejects the erase we still proceed to flash.
-        try { Erase-Chip $sp } catch { Write-Warn "chip erase skipped: $($_.Exception.Message)" }
+    if ($Erase) {
+        # Explicitly requested: a failed erase must stop the flash, not be hidden.
+        Erase-Chip $sp
     }
 
     # bootloader/partitions offsets are fixed by ESP-IDF; the ota_data and app
@@ -460,6 +512,10 @@ try {
     }
 
     Write-Ok "DONE"
+}
+catch {
+    Write-Err $_.Exception.Message
+    exit 1
 }
 finally {
     if ($sp.IsOpen) { $sp.Close() }

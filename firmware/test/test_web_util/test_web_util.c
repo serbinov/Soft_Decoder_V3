@@ -712,11 +712,23 @@ static void test_same_origin_accepts_missing_and_matching(void)
     /* Authority only: paths/queries/fragments and default ports are ignored. */
     TEST_ASSERT_TRUE(web_util_same_origin("http://host:80/some/path?q=1#frag", NULL, "host"));
     TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://host:80/some/path", "HOST"));
-    TEST_ASSERT_TRUE(web_util_same_origin("https://host:443/a", NULL, "host"));
-    TEST_ASSERT_TRUE(web_util_same_origin("https://host", NULL, "host"));
-    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "HTTPS://Example.COM/path", "example.com"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://host", NULL, "host:80"));
     TEST_ASSERT_TRUE(web_util_same_origin("http://[::1]:80", NULL, "[::1]"));
     TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://[::1]/x", "[::1]:80"));
+}
+
+static void test_same_origin_rejects_tls_and_wrong_device_port(void)
+{
+    /* The device only ever serves HTTP/80. A matching client Host header must
+     * not make an https:// Origin look same-origin. */
+    TEST_ASSERT_FALSE(web_util_same_origin("https://host", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("https://host:443/a", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin(NULL, "HTTPS://Example.COM/path", "example.com"));
+    /* An explicit non-device port on both sides is still not the device
+     * origin, even though client and Host agree with each other. */
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host:8080", NULL, "host:8080"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host:8080", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, "host:8080"));
 }
 
 static void test_same_origin_rejects_mismatch_and_malformed(void)
@@ -782,6 +794,7 @@ int main(void)
     RUN_TEST(test_func_eval_conditions);
     RUN_TEST(test_same_origin_accepts_missing_and_matching);
     RUN_TEST(test_same_origin_rejects_mismatch_and_malformed);
+    RUN_TEST(test_same_origin_rejects_tls_and_wrong_device_port);
     RUN_TEST(test_fuzz_random_inputs);
     return UNITY_END();
 }

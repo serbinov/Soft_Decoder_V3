@@ -29,14 +29,64 @@
 #include "web.h"
 
 static const char *TAG = "soft_decoder";
+
+/* RTOS task budget contract. Safety and motor must run every 10 ms and the DCC
+ * receiver has the highest application priority; keep the values in one place
+ * so a drift is caught at compile time instead of only in a stale document. */
+#define SAFETY_TASK_STACK       3072U
+#define SAFETY_TASK_PRIO        6U
+#define SAFETY_PERIOD_MS        10U
+#define PERSISTENCE_TASK_STACK  4096U
+#define PERSISTENCE_TASK_PRIO   3U
+#define PERSISTENCE_PERIOD_MS   100U
+_Static_assert(SAFETY_PERIOD_MS == 10U, "safety period must stay 10 ms");
+_Static_assert(SAFETY_TASK_STACK >= 3072U, "safety stack regression");
+_Static_assert(SAFETY_TASK_PRIO > PERSISTENCE_TASK_PRIO,
+               "safety must outrank the persistence worker");
+_Static_assert(PERSISTENCE_PERIOD_MS == 100U, "persistence period drift");
+
+/* Brownout reset reason (ESP_RST_BROWNOUT from esp_system.h). */
 static QueueHandle_t s_safety_ready;
 static bool s_motor_stall_latched;
 static portMUX_TYPE s_safety_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_function_cleanup_requested;
+/* Brownout recovery latch: a brownout reset must not resume the last duty.
+ * Motion stays inhibited until a clean stop (DCC speed 0) or a power cycle. */
+static bool s_brownout_latched;
+static bool s_brownout_block_logged;
 
 static void update_decoder_address(void)
 {
     dcc_reload_config();
+}
+
+/* G-RTOS-4: a brownout reset may leave the throttle at the last non-zero
+ * speed. Latch motion off at boot and only release it after an explicit stop
+ * (or a clean power cycle). Returning true means the command was consumed by
+ * the recovery policy and must not reach the motor. */
+static bool brownout_blocks_motion(uint8_t speed128)
+{
+    if (!s_brownout_latched) {
+        return false;
+    }
+    if (speed128 != 0U) {
+        if (!s_brownout_block_logged) {
+            s_brownout_block_logged = true;
+            ESP_LOGW(TAG, "BROWNOUT latch: speed %u ignored until a stop command",
+                     (unsigned)speed128);
+            web_log_event("Power", "brownout: speed %u ignored until stop",
+                          (unsigned)speed128);
+        }
+        return true;
+    }
+    s_brownout_latched = false;
+    s_brownout_block_logged = false;
+    if (!s_motor_stall_latched) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, false);
+    }
+    ESP_LOGW(TAG, "BROWNOUT latch cleared by a clean stop");
+    web_log_event("Power", "brownout recovery: clean stop received");
+    return false;
 }
 
 static void on_dcc_speed(uint8_t speed128, bool forward)
@@ -53,6 +103,12 @@ static void on_dcc_speed(uint8_t speed128, bool forward)
         return;
     }
     if (web_control_rails_begin(NULL)) {
+        /* A brownout recovery latch applies only while the rails own control;
+         * a DCC speed must not clear it in web mode. */
+        if (brownout_blocks_motion(speed128)) {
+            web_control_rails_end();
+            return;
+        }
         /* Log every decoded speed change so the actual command received from
          * the throttle can be compared with what the motor does (only on a
          * change or an accept/reject transition, so a refreshing command
@@ -174,18 +230,33 @@ static void on_dcc_emergency_stop(void)
 
 static void on_dcc_hard_reset(void)
 {
-    if (!web_control_rails_begin(NULL)) {
+    if (!web_actuation_ready()) {
         return;
     }
-    if (settings_cv_hard_reset() == ESP_OK) {
-        update_decoder_address();
+    /* The safety half of an NMRA hard reset is source-independent: a broadcast
+     * reset must stop a web-driven locomotive too. Only the CV writes below
+     * change decoder configuration and stay gated to the rails source. */
+    motor_emergency_stop();
+    clear_functions();
+    audio_stop_all();
+    web_emergency_reset();
+    web_log_event("DCC", "аппаратный сброс (broadcast)");
+    ESP_LOGI(TAG, "Hard reset (broadcast)");
+
+    if (web_control_rails_begin(NULL)) {
+        if (settings_cv_hard_reset() == ESP_OK) {
+            update_decoder_address();
+        }
+        track_note_dcc_motor_command();
+        web_control_rails_end();
     }
-    web_control_rails_end();
 }
 
 static bool dcc_packet_timed_out(int64_t now)
 {
-    if (!web_control_is_rails() || track_is_dc_mode()) {
+    /* Lock-free source check: a REST handler holding the control mutex across
+     * NVS work must not look like "web mode" and clear the DCC-timeout inhibit. */
+    if (!web_control_source_is_rails() || track_is_dc_mode()) {
         return false;
     }
     uint8_t cv11 = 0;
@@ -198,8 +269,13 @@ static bool dcc_packet_timed_out(int64_t now)
 static void persistence_task(void *arg)
 {
     (void)arg;
+    bool wdt = esp_task_wdt_add(NULL) == ESP_OK;
+    if (!wdt) {
+        ESP_LOGD(TAG, "Persistence worker not subscribed to TWDT");
+    }
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(PERSISTENCE_PERIOD_MS));
+        if (wdt) (void)esp_task_wdt_reset();
         portENTER_CRITICAL(&s_safety_mux);
         bool cleanup = s_function_cleanup_requested;
         s_function_cleanup_requested = false;
@@ -373,7 +449,7 @@ static void safety_task(void *arg)
     int64_t deadline = esp_timer_get_time() + 2000000LL;
     if (ready == ESP_OK) {
         while (motor_last_tick_us() == 0 && esp_timer_get_time() < deadline) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(SAFETY_PERIOD_MS));
             (void)esp_task_wdt_reset();
         }
         int64_t tick = motor_last_tick_us();
@@ -394,7 +470,7 @@ static void safety_task(void *arg)
     }
 
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(SAFETY_PERIOD_MS));
         (void)esp_task_wdt_reset();
         safety_step(&timeout_active);
     }
@@ -404,7 +480,8 @@ static esp_err_t safety_start(void)
 {
     s_safety_ready = xQueueCreate(1, sizeof(esp_err_t));
     if (s_safety_ready == NULL ||
-        xTaskCreate(safety_task, "safety", 3072, NULL, 6, NULL) != pdPASS) {
+        xTaskCreate(safety_task, "safety", SAFETY_TASK_STACK, NULL,
+                    SAFETY_TASK_PRIO, NULL) != pdPASS) {
         (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
         return ESP_ERR_NO_MEM;
     }
@@ -449,7 +526,15 @@ static void recover_tracks_from_storage(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Soft Decoder V3 boot (reset=%u)", (unsigned)esp_reset_reason());
+    int reset_reason = esp_reset_reason();
+    s_brownout_latched = reset_reason == ESP_RST_BROWNOUT;
+    ESP_LOGI(TAG, "Soft Decoder V3 boot (reset=%d%s)", reset_reason,
+             s_brownout_latched ? " BROWNOUT" : "");
+    if (s_brownout_latched) {
+        /* A brownout may have interrupted a moving locomotive. Do not resume
+         * the last duty: inhibit motion until a clean stop or power cycle. */
+        ESP_LOGE(TAG, "BROWNOUT reset: motion latched off until a clean stop/power cycle");
+    }
 
     ESP_ERROR_CHECK(pinmap_validate());
     /* Coast the H-bridge immediately: until motor_init() the IN1/IN2 pins would
@@ -478,6 +563,9 @@ void app_main(void)
     ensure_audio_dir();
 
     ESP_ERROR_CHECK(motor_init());
+    if (s_brownout_latched) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+    }
     {
         esp_err_t err = audio_init();
         if (err != ESP_OK) {
@@ -514,6 +602,10 @@ void app_main(void)
         }
     }
 
+    if (s_brownout_latched) {
+        web_log_event("Power", "brownout: motion latched until stop/power cycle");
+    }
+
     {
         esp_err_t err = track_init();
         if (err != ESP_OK) {
@@ -523,7 +615,8 @@ void app_main(void)
         }
     }
 
-    if (xTaskCreate(persistence_task, "settings", 4096, NULL, 3, NULL) != pdPASS) {
+    if (xTaskCreate(persistence_task, "settings", PERSISTENCE_TASK_STACK, NULL,
+                    PERSISTENCE_TASK_PRIO, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Persistence worker create failed");
         (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
         return;

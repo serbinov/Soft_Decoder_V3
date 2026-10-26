@@ -37,14 +37,27 @@ foreach ($file in $files) {
 Write-Host "================================================"
 Write-Host " Build OTA + sounds v$version"
 Write-Host "================================================"
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "idf_build.ps1")
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "idf_build.ps1") -Release
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[FAIL] Build failed." -ForegroundColor Red
+    Write-Host "[FAIL] Build/publish failed." -ForegroundColor Red
     exit 1
 }
 if (-not (Test-Path $src)) {
     Write-Host "[ERROR] firmware.bin not found: $src" -ForegroundColor Red
     exit 1
+}
+
+# Cross-check the application inside the combined OTA against the published
+# release binary, so an OTA cannot silently package an unpublished build.
+$published = Join-Path $PSScriptRoot "..\release\flash_download_tool\firmware.bin"
+$srcHash = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash
+if (Test-Path -LiteralPath $published -PathType Leaf) {
+    $publishedHash = (Get-FileHash -LiteralPath $published -Algorithm SHA256).Hash
+    if ($srcHash -ne $publishedHash) {
+        throw "Build output differs from the published release firmware; publish it before creating the combined OTA."
+    }
+} else {
+    Write-Host "[WARN] Published release firmware not found; combined OTA is not cross-checked." -ForegroundColor Yellow
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
@@ -96,6 +109,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Combined OTA integrity/format verification failed." }
     $info = $infoText | ConvertFrom-Json
     if ($info.role -ne "AURAOTA2" -or $info.version -cne $version) { throw "Stale application in OTA package." }
+    if ($info.application_sha256 -ne $srcHash.ToLowerInvariant()) { throw "OTA application hash mismatch." }
     Move-Item -LiteralPath $temporary -Destination $dst -Force
 } finally {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }

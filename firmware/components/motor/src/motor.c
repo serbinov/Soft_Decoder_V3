@@ -59,6 +59,16 @@ static const char *TAG = "motor";
  * window keeps legitimate starts from tripping. */
 #define BEMF_SENSE_LOW_RATIO 0.35f
 #define BEMF_SENSE_PLAUSIBILITY_US 500000
+/* A stuck-high rail sense inflates target_bemf = frac*rail, so a measurement
+ * that looks plausible against the (too high) target can still leave the PID
+ * pinned at full duty. A saturated drive with the target error still positive
+ * for this long is not a normal heavy-load start: the rotor accelerates and
+ * closes the error, while the existing 0.35 ratio / 500 ms allowance is kept.
+ * Requiring near-full duty and a long bounded window catches the inflated
+ * target without tripping a healthy, heavily loaded start. */
+#define BEMF_SENSE_SAT_DUTY (LEDC_MAX * 97U / 100U)
+#define BEMF_SENSE_SAT_RATIO 0.90f
+#define BEMF_SENSE_SATURATION_US 2000000
 /* Calibration refuses to start while the motor is still coasting: residual
  * back-EMF biases the first (low-speed) points upward, and the resulting curve
  * then commands too high a target at low throttle. */
@@ -146,6 +156,9 @@ static bool s_bemf_filter_primed;
 static bool s_bemf_reject_high;
 static bool s_plausibility_clock_active;
 static int64_t s_plausibility_since_us;
+/* Stuck-high rail / saturated-drive watchdog clock. */
+static bool s_sat_clock_active;
+static int64_t s_sat_since_us;
 static int64_t s_last_pid_us;
 static bool s_target_clamp_warned;
 static esp_err_t s_bemf_sample_error;
@@ -337,10 +350,13 @@ static uint32_t speed_duty(uint8_t speed)
     }
     if (speed <= 63U) {
         uint32_t duty = vs + (vm - vs) * (speed - 1U) / 62U;
-        /* With the factory Vstart=0 the formula yields 0 at step 1. Clamp that
-         * one step up to a conservative creep duty; speed 0 already returned
-         * above and every other step keeps its curve value. */
-        if (speed == 1U && duty < MOTOR_CREEP_MIN_DUTY) {
+        /* With the factory Vstart=0 the formula yields 0 at step 1 and 8 at
+         * step 2, so clamping only step 1 made the low end decrease. Apply the
+         * creep floor to the first three notches: with the default curve they
+         * become 16,16,16 and step 4 continues at 24, keeping the curve
+         * non-decreasing. Speed 0 already returned above and every other step
+         * keeps its curve value. */
+        if (speed <= 3U && duty < MOTOR_CREEP_MIN_DUTY) {
             duty = MOTOR_CREEP_MIN_DUTY;
         }
         return duty;
@@ -466,6 +482,8 @@ static void control_reset(void)
     s_bemf_reject_high = false;
     s_plausibility_clock_active = false;
     s_plausibility_since_us = 0;
+    s_sat_clock_active = false;
+    s_sat_since_us = 0;
     s_last_pid_us = 0;
     s_target_clamp_warned = false;
     s_last_pid_ok = false;
@@ -765,6 +783,12 @@ static bool bemf_cal_build_job(bemf_cal_job_t *job, const motor_bemf_cal_config_
     job->cfg = *input;
     bemf_cal_apply_mode_defaults(&job->cfg);
 
+    /* CUSTOM is an explicit speed list; an empty list is a caller error, not
+     * an invitation to silently substitute the built-in plan. */
+    if (job->cfg.mode == MOTOR_BEMF_MODE_CUSTOM && job->cfg.speed_count == 0U) {
+        return false;
+    }
+
     if (job->cfg.mode == MOTOR_BEMF_MODE_CUSTOM && job->cfg.speed_count != 0U) {
         if (job->cfg.speed_count < BEMF_CAL_MIN_PLAN ||
             job->cfg.speed_count > BEMF_CAL_MAX_PLAN) return false;
@@ -859,6 +883,13 @@ static void bemf_cal_reload(void)
 
 static void motor_tick(void)
 {
+    /* Publish aliveness before taking the control mutex. An NVS/flash stall
+     * can block the mutex for longer than the safety task's 200 ms stall
+     * deadline; the task itself is still running, so it must renew the
+     * heartbeat first and keep the safety watchdog from latching. */
+    portENTER_CRITICAL(&s_output_mux);
+    s_last_tick_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_output_mux);
     motor_bemf_cal_watchdog();
     if (s_control_mutex == NULL || xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
         return;
@@ -888,6 +919,8 @@ static void motor_tick(void)
         s_bemf_reject_high = false;
         s_plausibility_clock_active = false;
         s_plausibility_since_us = 0;
+        s_sat_clock_active = false;
+        s_sat_since_us = 0;
         s_last_pid_us = 0;
         s_target_clamp_warned = false;
     }
@@ -920,6 +953,7 @@ static void motor_tick(void)
     }
 
     uint8_t applied = s_applied_speed;
+    uint8_t applied_prev = applied;
     bool reversing = (s_applied_forward != target_forward) && (applied > 0U);
 
     if (reversing) {
@@ -974,6 +1008,18 @@ static void motor_tick(void)
         s_applied_forward = target_forward;
     }
 
+    /* A kickstart burst may not survive a throttle reduction, a stop or a
+     * direction change: cancel it before the duty for this tick is chosen.
+     * Compare against the applied step at tick entry: an instantaneous ramp
+     * can make target == applied in one tick, which must still count as a
+     * reduction. */
+    if (s_kick_left > 0U &&
+        (target == 0U || target < applied || target < applied_prev ||
+         s_applied_forward != target_forward)) {
+        s_kick_left = 0;
+        s_kick_duty = 0;
+    }
+
     uint32_t duty_base = speed_duty(applied);
     uint8_t trim = 128;
     if (motor_cv_read(s_applied_forward ? 66U : 95U, &trim) == ESP_OK && trim != 128U) {
@@ -984,6 +1030,9 @@ static void motor_tick(void)
             duty_base = LEDC_MAX;
         }
     }
+    /* A zero trim disables drive in that direction; the PID target floor must
+     * not reintroduce motion, so the loop is disabled for this tick. */
+    bool trim_zero = applied > 0U && duty_base == 0U;
     uint32_t duty_final = duty_base;
 
     /* Kickstart (CV65): boost the duty for a short burst when starting. */
@@ -991,9 +1040,11 @@ static void motor_tick(void)
     if (calibration) {
         s_was_stopped = false;
         s_kick_left = 0;
+        s_kick_duty = 0;
     } else if (applied == 0U) {
         s_was_stopped = true;
         s_kick_left = 0;
+        s_kick_duty = 0;
     } else if (s_was_stopped) {
         s_was_stopped = false;
         uint8_t cv65 = 0;
@@ -1033,7 +1084,7 @@ static void motor_tick(void)
      * never coasted (the 1 ms sample window would otherwise cost 10 % of the
      * torque on every 10 ms tick). */
     bool sampled = false;
-    if (enabled && !calibration && s_bemf_adc_ready && applied > 0U) {
+    if (enabled && !calibration && s_bemf_adc_ready && applied > 0U && !trim_zero) {
         sampled = bemf_sample_window();
     }
     if (sampled) {
@@ -1053,7 +1104,7 @@ static void motor_tick(void)
     uint32_t bemf_mag = s_bemf1_mv > s_bemf2_mv ? s_bemf1_mv - s_bemf2_mv : s_bemf2_mv - s_bemf1_mv;
     bool sense_mag_low = rail > 300U && bemf_mag <= rail / BEMF_SENSE_ZERO_DIV;
     bool pid_ok = enabled && !calibration && s_bemf_adc_ready &&
-                  s_bemf_valid && rail > 300U && applied > 0U;
+                  s_bemf_valid && rail > 300U && applied > 0U && !trim_zero;
     s_last_pid_ok = pid_ok;
     float pid_target = 0.0f;
     int64_t now = esp_timer_get_time();
@@ -1140,10 +1191,18 @@ static void motor_tick(void)
             s_pid_integral = BEMF_SENSE_INTEGRAL_MAX;
         }
         duty_final = (uint32_t)clamped;
-    } else if (applied == 0U) {
+    } else if (applied == 0U || trim_zero) {
+        /* A zero trim means this direction is disabled: no target floor and no
+         * stale integral may produce drive when the trim returns. */
         s_pid_integral = 0.0f;
         s_pid_prev_error = 0.0f;
         s_last_pid_us = now;
+        if (trim_zero) {
+            s_last_error = 0.0f;
+            s_last_integral = 0.0f;
+            s_last_corr = 0.0f;
+            s_last_target = 0.0f;
+        }
     } else {
         s_last_pid_us = now;
     }
@@ -1182,7 +1241,24 @@ static void motor_tick(void)
         s_plausibility_clock_active = false;
     }
 
-    if (enabled && !calibration && applied > 0U && !pid_ok) {
+    /* Rail/sense saturation plausibility: a stuck-high rail sense scales the
+     * target up with the (wrong) rail reading, so the differential can stay
+     * above the 0.35 rejection margin while the PID pins the duty. A saturated
+     * drive whose target error remains positive for the long bounded window is
+     * a failed rail/BEMF sense (or a stalled rotor), not a normal start. */
+    bool saturation_low = pid_ok && pid_target > 0.0f &&
+                          duty_final >= BEMF_SENSE_SAT_DUTY &&
+                          s_bemf_filtered < pid_target * BEMF_SENSE_SAT_RATIO;
+    if (saturation_low) {
+        if (!s_sat_clock_active) {
+            s_sat_clock_active = true;
+            s_sat_since_us = now;
+        }
+    } else {
+        s_sat_clock_active = false;
+    }
+
+    if (enabled && !calibration && applied > 0U && !pid_ok && !trim_zero) {
         if (!s_feedback_clock_active) {
             s_feedback_clock_active = true;
             s_feedback_since_us = now;
@@ -1207,12 +1283,16 @@ static void motor_tick(void)
         }
     }
 
+    bool feedback_lost = enabled && !calibration && applied > 0U && !pid_ok &&
+                         !trim_zero && s_feedback_clock_active &&
+                         now - s_feedback_since_us >= FEEDBACK_FRESH_US;
+    bool zero_fault = sense_zero && now - s_zero_since_us >= FEEDBACK_FRESH_US;
+    bool plausibility_fault = plausibility_low && s_plausibility_clock_active &&
+                              now - s_plausibility_since_us >= BEMF_SENSE_PLAUSIBILITY_US;
+    bool saturation_fault = saturation_low && s_sat_clock_active &&
+                            now - s_sat_since_us >= BEMF_SENSE_SATURATION_US;
     bool fault_latched = false;
-    if ((enabled && !calibration && applied > 0U && !pid_ok &&
-         s_feedback_clock_active && now - s_feedback_since_us >= FEEDBACK_FRESH_US) ||
-        (sense_zero && now - s_zero_since_us >= FEEDBACK_FRESH_US) ||
-        (plausibility_low && s_plausibility_clock_active &&
-         now - s_plausibility_since_us >= BEMF_SENSE_PLAUSIBILITY_US)) {
+    if (feedback_lost || zero_fault || plausibility_fault || saturation_fault) {
         portENTER_CRITICAL(&s_output_mux);
         /* A concurrent STOP/disable supersedes this tick's fault decision. */
         if (s_bemf_enabled && s_target_speed > 0U && !s_feedback_reset_requested) {
@@ -1227,9 +1307,10 @@ static void motor_tick(void)
         }
         portEXIT_CRITICAL(&s_output_mux);
         if (fault_latched) {
-            ESP_LOGW(TAG, "BEMF feedback fault: duty=%lu target_mv=%lu filtered_mv=%lu rail_mv=%lu",
+            ESP_LOGW(TAG, "BEMF feedback fault: duty=%lu target_mv=%lu filtered_mv=%lu rail_mv=%lu%s",
                      (unsigned long)duty_final, (unsigned long)pid_target,
-                     (unsigned long)s_bemf_filtered, (unsigned long)rail);
+                     (unsigned long)s_bemf_filtered, (unsigned long)rail,
+                     saturation_fault ? " (rail/sense saturation)" : "");
         }
         duty_final = 0;
     }
@@ -1259,12 +1340,16 @@ static void motor_tick(void)
         s_feedback_since_us = 0;
         s_plausibility_clock_active = false;
         s_plausibility_since_us = 0;
+        s_sat_clock_active = false;
+        s_sat_since_us = 0;
+        /* A restart must not blend the pre-stop value into the new run. */
+        s_bemf_filtered = 0.0f;
+        s_bemf_filter_primed = false;
     }
     portENTER_CRITICAL(&s_output_mux);
     if (generation == s_output_generation && !s_inhibited && !s_feedback_fault && !s_stop_requested && !s_cal_cancelled) {
         applied_publish(s_applied_speed, s_applied_forward);
     }
-    s_last_tick_us = esp_timer_get_time();
     portEXIT_CRITICAL(&s_output_mux);
     s_tick_cv_active = false;
     xSemaphoreGive(s_control_mutex);
@@ -1797,7 +1882,8 @@ static void bemf_cal_profile_fill(motor_bemf_profile_t *p, const settings_bemf_c
     if (cal->count == 0U) return;
     if (p->planned_points == 0U) p->planned_points = cal->count;
     if (p->measured_points == 0U) p->measured_points = cal->count;
-    if (p->quality == 0U) p->quality = 100U;
+    /* Quality is only meaningful for a live run; stored curves and failed
+     * runs must publish their real (often zero) value, not a fabricated 100. */
     if (p->settle_ms_avg == 0U) {
         p->settle_ms_avg = s_cal_job.cfg.settle_ms != 0U ? s_cal_job.cfg.settle_ms
                                                         : (uint16_t)BEMF_CAL_SETTLE_MS;
@@ -1962,7 +2048,7 @@ static void bemf_cal_task(void *arg)
 {
     uint32_t generation = (uint32_t)(uintptr_t)arg;
     settings_bemf_cal_t cal = {0};
-    cal.count = BEMF_CAL_POINTS;
+    uint32_t quality_sum = 0;
     bool complete = true;
     bool current = false;
     if (!bemf_cal_rest_check(generation)) {
@@ -2096,11 +2182,20 @@ static void bemf_cal_task(void *arg)
             }
         } while (complete);
         if (complete && n == BEMF_CAL_SAMPLES) {
+            uint32_t minimum = samples[0];
+            uint32_t maximum = samples[0];
             for (uint32_t j = 0; j < n; ++j) {
                 sum += samples[j];
+                if (samples[j] < minimum) minimum = samples[j];
+                if (samples[j] > maximum) maximum = samples[j];
             }
+            uint32_t avg = sum / n;
+            int32_t quality = 100 - (int32_t)((maximum - minimum) * 100U / (avg + 1U));
+            if (quality < 0) quality = 0;
+            quality_sum += (uint32_t)quality;
             cal.speed[i] = spd;
-            cal.frac[i] = (uint16_t)(sum / n);
+            cal.frac[i] = (uint16_t)avg;
+            cal.count = (uint8_t)(i + 1U);
             portENTER_CRITICAL(&s_output_mux);
             if (generation == s_output_generation && !s_cal_cancelled) {
                 s_cal_step = (uint8_t)(i + 1U);
@@ -2117,7 +2212,7 @@ static void bemf_cal_task(void *arg)
     profile.mode = MOTOR_BEMF_MODE_FAST;
     profile.planned_points = BEMF_CAL_POINTS;
     profile.measured_points = cal.count;
-    profile.quality = 100U;
+    profile.quality = cal.count > 0U ? (uint8_t)(quality_sum / cal.count) : 0U;
     bemf_cal_finish(generation, &cal, complete, &profile, false);
 }
 

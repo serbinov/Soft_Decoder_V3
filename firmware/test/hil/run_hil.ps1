@@ -12,6 +12,7 @@
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -Port COM5
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -SkipBemf
+#   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -AllowSkip
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -Actuate
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -Actuate -MotorSpeed 30
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil.ps1 -Sweep
@@ -20,13 +21,17 @@
 # -Sweep presses every F0..F28 and switches every AUX channel on/off,
 # -MotorSpeed >0 also spins the motor. These drive real hardware (and can move
 # a loco); run them only when that is intended.
-# Exit code 0 = every reported check passed (FAIL fails, SKIP is allowed),
-# 1 = no response / a FAIL / a malformed report.
+# Mandatory BEMF-ADC (adc) and DCC checks that SKIP fail the run unless
+# -AllowSkip is passed (for a bench with no rail power/signal). Other SKIPs
+# (storage/audio/auxio) stay informational and are always reported.
+# Exit code 0 = every reported check passed, 1 = no response / a FAIL /
+# a mandatory SKIP / a malformed report.
 param(
     [string]$Port = "",
     [int]$Baud = 115200,
     [int]$BootTimeoutMs = 20000,
     [switch]$SkipBemf,
+    [switch]$AllowSkip,
     # Actuating commands are OFF by default: they drive lights/sound/motor.
     [switch]$Actuate,
     [int]$AuxChannel = 2,
@@ -75,10 +80,13 @@ try { $sp.Open() } catch {
 $sp.DiscardInBuffer()
 $sp.DiscardOutBuffer()
 
+# 64-bit monotonic clock: [Environment]::TickCount is a signed 32-bit value and
+# wraps after ~24.8 days of uptime, which could expire a deadline immediately.
+$clock = [System.Diagnostics.Stopwatch]::StartNew()
 function Read-For([int]$Milliseconds) {
-    $deadline = [Environment]::TickCount + $Milliseconds
+    $deadline = $clock.ElapsedMilliseconds + $Milliseconds
     $sb = New-Object System.Text.StringBuilder
-    while ([Environment]::TickCount -lt $deadline) {
+    while ($clock.ElapsedMilliseconds -lt $deadline) {
         try { [void]$sb.Append($sp.ReadExisting()) } catch { }
         Start-Sleep -Milliseconds 15
     }
@@ -89,8 +97,8 @@ $failed = $false
 try {
     # --- SELFTEST (retry until the console listener is up) ---
     $resp = ""
-    $deadline = [Environment]::TickCount + $BootTimeoutMs
-    while ([Environment]::TickCount -lt $deadline -and $resp -notmatch "SELFTEST-BEGIN") {
+    $deadline = $clock.ElapsedMilliseconds + $BootTimeoutMs
+    while ($clock.ElapsedMilliseconds -lt $deadline -and $resp -notmatch "SELFTEST-BEGIN") {
         try { $sp.Write("SELFTEST`n") } catch { }
         $resp += Read-For 700
     }
@@ -100,8 +108,8 @@ try {
         exit 1
     }
 
-    $endDeadline = [Environment]::TickCount + 5000
-    while ($resp -notmatch "SELFTEST-END" -and [Environment]::TickCount -lt $endDeadline) {
+    $endDeadline = $clock.ElapsedMilliseconds + 5000
+    while ($resp -notmatch "SELFTEST-END" -and $clock.ElapsedMilliseconds -lt $endDeadline) {
         $resp += Read-For 300
     }
 
@@ -138,12 +146,38 @@ try {
         $failed = $true
     }
 
+    # A SKIP on a mandatory path (BEMF-ADC or DCC) means the HIL run did not
+    # verify it. That must not be reported as PASS unless explicitly allowed.
+    $mandatory = @("adc", "dcc")
+    $skipped = @($results | Where-Object { $_.State -eq "SKIP" })
+    if ($skipped.Count -gt 0) {
+        $skippedNames = @($skipped | ForEach-Object { $_.Name }) -join ", "
+        Write-Host "[INFO] skipped checks: $skippedNames" -ForegroundColor Yellow
+    }
+    $present = @($results | ForEach-Object { $_.Name })
+    $mandatoryMissing = @($mandatory | Where-Object { $_ -notin $present })
+    $mandatorySkipped = @($skipped | Where-Object { $_.Name -in $mandatory })
+    if ($mandatorySkipped.Count -gt 0) {
+        $names = @($mandatorySkipped | ForEach-Object { $_.Name }) -join ", "
+        if ($AllowSkip) {
+            Write-Host "[WARN] mandatory check(s) SKIPPED (-AllowSkip): $names" -ForegroundColor Yellow
+        } else {
+            Write-Host "[FAIL] mandatory check(s) SKIPPED: $names (pass -AllowSkip only for a bench without rail power/signal)" -ForegroundColor Red
+            $failed = $true
+        }
+    }
+    if ($mandatoryMissing.Count -gt 0) {
+        $names = $mandatoryMissing -join ", "
+        Write-Host "[FAIL] mandatory check(s) not reported by SELFTEST: $names" -ForegroundColor Red
+        $failed = $true
+    }
+
     # --- BEMF? liveness (motor/ADC/calibration store) ---
     if (-not $SkipBemf) {
         $bemf = ""
         try { $sp.Write("BEMF?`n") } catch { }
-        $d = [Environment]::TickCount + 4000
-        while ([Environment]::TickCount -lt $d -and $bemf -notmatch "BEMF-OK") {
+        $d = $clock.ElapsedMilliseconds + 4000
+        while ($clock.ElapsedMilliseconds -lt $d -and $bemf -notmatch "BEMF-OK") {
             $bemf += Read-For 250
         }
         $okLine = ($bemf -split "`r?`n" | Where-Object { $_ -match '^BEMF-OK ' } | Select-Object -First 1)
@@ -165,8 +199,8 @@ try {
         foreach ($a in $acts) {
             try { $sp.Write($a.Text + "`n") } catch { }
             $r = ""
-            $d = [Environment]::TickCount + 6000
-            while ([Environment]::TickCount -lt $d -and $r -notmatch [regex]::Escape($a.Ok) -and $r -notmatch "-ERR") {
+            $d = $clock.ElapsedMilliseconds + 6000
+            while ($clock.ElapsedMilliseconds -lt $d -and $r -notmatch [regex]::Escape($a.Ok) -and $r -notmatch "-ERR") {
                 $r += Read-For 200
             }
             if ($r -match [regex]::Escape($a.Ok)) {
@@ -181,8 +215,8 @@ try {
         Write-Host "Actuating motor at $MotorSpeed for 800 ms..." -ForegroundColor Yellow
         try { $sp.Write("HIL-MOTOR $MotorSpeed 800`n") } catch { }
         $r = ""
-        $d = [Environment]::TickCount + 6000
-        while ([Environment]::TickCount -lt $d -and $r -notmatch "HIL-MOTOR-OK" -and $r -notmatch "HIL-MOTOR-ERR") {
+        $d = $clock.ElapsedMilliseconds + 6000
+        while ($clock.ElapsedMilliseconds -lt $d -and $r -notmatch "HIL-MOTOR-OK" -and $r -notmatch "HIL-MOTOR-ERR") {
             $r += Read-For 200
         }
         if ($r -match "HIL-MOTOR-OK") {
@@ -201,8 +235,8 @@ try {
         foreach ($sw in $sweeps) {
             try { $sp.Write($sw.Text + "`n") } catch { }
             $r = ""
-            $d = [Environment]::TickCount + 60000
-            while ([Environment]::TickCount -lt $d -and $r -notmatch [regex]::Escape($sw.Ok) -and $r -notmatch "-ERR") {
+            $d = $clock.ElapsedMilliseconds + 60000
+            while ($clock.ElapsedMilliseconds -lt $d -and $r -notmatch [regex]::Escape($sw.Ok) -and $r -notmatch "-ERR") {
                 $r += Read-For 300
             }
             $hit = ($r -split "`r?`n" | Where-Object { $_ -match [regex]::Escape($sw.Ok) } | Select-Object -First 1)
@@ -217,6 +251,12 @@ try {
 } finally {
     $sp.Close()
 }
+
+Write-Host ""
+Write-Host "HIL coverage gap (NOT verified by this serial run):" -ForegroundColor Yellow
+Write-Host "  BEMF motor calibration (free motor, start/cancel, terminal zero drive) is" -ForegroundColor Yellow
+Write-Host "  only available through the web HIL: run test\hil\run_hil_web.ps1 -CalibrateBemf" -ForegroundColor Yellow
+Write-Host "  (add -BemfCancelAfterMs 500 to exercise the cancel path)." -ForegroundColor Yellow
 
 Write-Host ""
 if ($failed) {

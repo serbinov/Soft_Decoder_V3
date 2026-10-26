@@ -6,12 +6,13 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
 #define MKDIR(p) _mkdir(p)
 #define RMDIR(p) _rmdir(p)
 #else
 #include <sys/stat.h>
 #include <unistd.h>
-#define MKDIR(p) mkdir((p), 0777)
+#define MKDIR(p) mkdir(p, 0777)
 #define RMDIR(p) rmdir(p)
 #endif
 
@@ -22,6 +23,32 @@
 static int g_fwrite_fail;
 static int g_fread_fail;
 static int g_fread_mismatch;
+static int g_flush_fail;
+static int g_sync_fail;
+static int g_close_fail;
+
+static int mock_selftest_flush(FILE *f)
+{
+    return g_flush_fail ? EOF : fflush(f);
+}
+
+static int mock_selftest_close(FILE *f)
+{
+    int result = fclose(f);
+    return g_close_fail ? EOF : result;
+}
+
+static int mock_selftest_sync(FILE *f)
+{
+    if (g_sync_fail) {
+        return -1;
+    }
+#ifdef _WIN32
+    return _commit(_fileno(f));
+#else
+    return fsync(fileno(f));
+#endif
+}
 
 static size_t mock_selftest_fwrite(const void *p, size_t sz, size_t n, FILE *f)
 {
@@ -46,6 +73,9 @@ static size_t mock_selftest_fread(void *p, size_t sz, size_t n, FILE *f)
 
 #define SELFTEST_FWRITE(p, sz, n, f) mock_selftest_fwrite((p), (sz), (n), (f))
 #define SELFTEST_FREAD(p, sz, n, f) mock_selftest_fread((p), (sz), (n), (f))
+#define SELFTEST_FFLUSH(f) mock_selftest_flush(f)
+#define SELFTEST_FCLOSE(f) mock_selftest_close(f)
+#define SELFTEST_FSYNC(f) mock_selftest_sync(f)
 
 /* White-box: expose s_tmp_path and the check helpers. */
 #define static
@@ -63,14 +93,24 @@ static esp_err_t g_adc_err = ESP_OK;
 static uint8_t g_volume = 20;
 static esp_err_t g_aux_err = ESP_OK;
 static bool g_storage_mounted = true;
+static int g_storage_leases;
+static esp_err_t g_storage_lease_err = ESP_OK;
+static bool g_web_ready = true;
+static bool g_web_maintenance;
+static int64_t g_dcc_last_packet_us;
+static uint32_t g_dcc_overruns;
 
 /* Actuation collaborators. */
 static esp_err_t g_aux_set_err = ESP_OK;
+static int g_aux_set_fail_after = -1;
 static bool g_aux_enabled = false;
 static int g_aux_set_calls;
 static esp_err_t g_play_err = ESP_OK;
 static int g_play_calls;
 static int g_stop_calls;
+static esp_err_t g_stop_err = ESP_OK;
+static uint8_t g_play_voice;
+static uint8_t g_stop_voice;
 static esp_err_t g_tracks_load_err = ESP_OK;
 static size_t g_tracks_count;
 static settings_track_t g_tracks[SETTINGS_MAX_TRACKS];
@@ -124,6 +164,32 @@ bool storage_is_mounted(void)
     return g_storage_mounted;
 }
 
+esp_err_t storage_access_begin(void)
+{
+    if (g_storage_lease_err != ESP_OK) {
+        return g_storage_lease_err;
+    }
+    ++g_storage_leases;
+    return ESP_OK;
+}
+
+void storage_access_end(void)
+{
+    if (g_storage_leases > 0) {
+        --g_storage_leases;
+    }
+}
+
+bool web_actuation_ready(void)
+{
+    return g_web_ready;
+}
+
+bool web_maintenance_active(void)
+{
+    return g_web_maintenance;
+}
+
 esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1, uint16_t *b2, uint16_t *rail)
 {
     if (b1 != NULL) {
@@ -158,26 +224,29 @@ esp_err_t auxio_set_enabled(uint8_t channel, bool enabled)
     if (g_aux_set_err != ESP_OK) {
         return g_aux_set_err;
     }
+    ++g_aux_set_calls;
+    if (g_aux_set_fail_after >= 0 && g_aux_set_calls > g_aux_set_fail_after) {
+        return ESP_FAIL;
+    }
     g_aux_enabled = enabled;
-    g_aux_set_calls++;
     return ESP_OK;
 }
 
 esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t volume)
 {
-    (void)voice;
     (void)path;
     (void)loop;
     (void)volume;
+    g_play_voice = voice;
     g_play_calls++;
     return g_play_err;
 }
 
 esp_err_t audio_voice_stop(uint8_t voice)
 {
-    (void)voice;
+    g_stop_voice = voice;
     g_stop_calls++;
-    return ESP_OK;
+    return g_stop_err;
 }
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
@@ -208,6 +277,12 @@ esp_err_t motor_set_speed(uint8_t speed, bool forward)
 void motor_stop(void)
 {
     ++g_motor_ramp_stop_calls;
+    g_motor_stop_calls++;
+}
+
+void motor_emergency_stop(void)
+{
+    g_motor_inhibited = true;
     g_motor_stop_calls++;
 }
 
@@ -251,7 +326,12 @@ void web_apply_function(uint8_t fn, bool state)
 
 int64_t dcc_last_packet_us(void)
 {
-    return 0;
+    return g_dcc_last_packet_us;
+}
+
+uint32_t dcc_get_isr_overruns(void)
+{
+    return g_dcc_overruns;
 }
 
 /* ---- helpers ---- */
@@ -271,6 +351,15 @@ void setUp(void)
     g_fwrite_fail = 0;
     g_fread_fail = 0;
     g_fread_mismatch = 0;
+    g_flush_fail = 0;
+    g_sync_fail = 0;
+    g_close_fail = 0;
+    g_storage_lease_err = ESP_OK;
+    g_storage_leases = 0;
+    g_web_ready = true;
+    g_web_maintenance = false;
+    g_dcc_last_packet_us = 0;
+    g_dcc_overruns = 0;
     g_heap = 100000u;
     g_pinmap_err = ESP_OK;
     g_cv_mode = 0;
@@ -288,11 +377,15 @@ void setUp(void)
     mock_nvs_set_u32_err = 0;
     mock_nvs_u32_corrupt = 0;
     g_aux_set_err = ESP_OK;
+    g_aux_set_fail_after = -1;
     g_aux_enabled = false;
     g_aux_set_calls = 0;
     g_play_err = ESP_OK;
     g_play_calls = 0;
     g_stop_calls = 0;
+    g_stop_err = ESP_OK;
+    g_play_voice = 0;
+    g_stop_voice = 0;
     g_tracks_load_err = ESP_OK;
     g_tracks_count = 0;
     memset(g_tracks, 0, sizeof(g_tracks));
@@ -327,8 +420,10 @@ static void test_selftest_state_name(void)
 
 static void test_selftest_all_pass(void)
 {
+    g_dcc_last_packet_us = 1000;
+    mock_timer_now_us = 2000;
     selftest_report_t r;
-    TEST_ASSERT_EQUAL_UINT8(9, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(7, selftest_run(&r));
     TEST_ASSERT_EQUAL_UINT8(9, r.count);
     TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "heap"));
     TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "pinmap"));
@@ -336,8 +431,8 @@ static void test_selftest_all_pass(void)
     TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "nvs"));
     TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "storage"));
     TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "adc"));
-    TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "audio"));
-    TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "auxio"));
+    TEST_ASSERT_EQUAL(SELFTEST_SKIP, state_of(&r, "audio"));
+    TEST_ASSERT_EQUAL(SELFTEST_SKIP, state_of(&r, "auxio"));
     TEST_ASSERT_EQUAL(SELFTEST_PASS, state_of(&r, "dcc"));
 
     /* A NULL report is allowed and reports zero passed. */
@@ -348,7 +443,7 @@ static void test_selftest_storage_skip(void)
 {
     g_storage_mounted = false;
     selftest_report_t r;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_SKIP, state_of(&r, "storage"));
 }
 
@@ -358,27 +453,48 @@ static void test_selftest_storage_fail_paths(void)
 
     /* fopen fails (missing directory). */
     s_tmp_path = "st_missing/.selftest.tmp";
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
     s_tmp_path = SELFTEST_TMP_PATH;
 
     /* fwrite returns short. */
     g_fwrite_fail = 1;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
     g_fwrite_fail = 0;
 
+    /* fflush / fsync / fclose failures must not pass. */
+    g_flush_fail = 1;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
+    g_flush_fail = 0;
+    g_sync_fail = 1;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
+    g_sync_fail = 0;
+    g_close_fail = 1;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
+    g_close_fail = 0;
+
     /* fread fails. */
     g_fread_fail = 1;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
     g_fread_fail = 0;
 
     /* fread succeeds but the payload differs. */
     g_fread_mismatch = 1;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "storage"));
     g_fread_mismatch = 0;
+
+    /* A busy storage lease is inconclusive, not a false PASS. */
+    g_storage_lease_err = ESP_ERR_INVALID_STATE;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_SKIP, state_of(&r, "storage"));
+    g_storage_lease_err = ESP_OK;
+    TEST_ASSERT_EQUAL_INT(0, g_storage_leases);
 }
 
 static void test_selftest_heap_and_pinmap_fail(void)
@@ -386,7 +502,7 @@ static void test_selftest_heap_and_pinmap_fail(void)
     selftest_report_t r;
     g_heap = 1;
     g_pinmap_err = ESP_FAIL;
-    TEST_ASSERT_EQUAL_UINT8(7, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(4, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "heap"));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "pinmap"));
 }
@@ -395,7 +511,7 @@ static void test_selftest_settings_cv_fail_modes(void)
 {
     selftest_report_t r;
     for (g_cv_mode = 1; g_cv_mode <= 3; ++g_cv_mode) {
-        TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+        TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
         TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "settings_cv"));
     }
     g_cv_mode = 0;
@@ -406,23 +522,29 @@ static void test_selftest_nvs_failures(void)
     selftest_report_t r;
 
     mock_nvs_open_fail = 1;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
     mock_nvs_open_fail = 0;
 
     mock_nvs_set_u32_err = ESP_FAIL;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
     mock_nvs_set_u32_err = 0;
 
     mock_nvs_get_u32_err = ESP_FAIL;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
     mock_nvs_get_u32_err = 0;
 
+    /* A commit failure must not be masked by the RAM cache. */
+    mock_nvs_commit_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
+    mock_nvs_commit_err = 0;
+
     /* Read succeeds but returns the wrong value. */
     mock_nvs_u32_corrupt = 1;
-    TEST_ASSERT_EQUAL_UINT8(8, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
     mock_nvs_u32_corrupt = 0;
 }
@@ -433,7 +555,7 @@ static void test_selftest_adc_audio_auxio_fail(void)
     g_adc_b1 = 5000; /* out of 12-bit range */
     g_volume = 200;  /* above the valid range */
     g_aux_err = ESP_FAIL;
-    TEST_ASSERT_EQUAL_UINT8(6, selftest_run(&r));
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "adc"));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "audio"));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "auxio"));
@@ -454,6 +576,14 @@ static void test_selftest_act_aux(void)
     g_aux_set_err = ESP_FAIL; /* cannot turn on */
     TEST_ASSERT_EQUAL(ESP_FAIL, selftest_act_aux(0, 100));
     g_aux_set_err = ESP_OK;
+
+    /* A failed restore must be reported, not swallowed. */
+    g_aux_set_calls = 0;
+    g_aux_set_fail_after = 1;
+    TEST_ASSERT_EQUAL(ESP_FAIL, selftest_act_aux(2, 100));
+    g_aux_set_fail_after = -1;
+    g_aux_enabled = false;
+    g_aux_set_calls = 0;
 
     g_aux_enabled = false;
     TEST_ASSERT_EQUAL(ESP_OK, selftest_act_aux(2, 100));
@@ -496,12 +626,19 @@ static void test_selftest_act_sound(void)
     TEST_ASSERT_EQUAL(ESP_FAIL, selftest_act_sound(1, 100));
     g_play_err = ESP_OK;
 
-    /* Success: play and stop the test voice. */
+    /* Success: play and stop the dedicated test voice. */
     g_play_calls = 0;
     g_stop_calls = 0;
     TEST_ASSERT_EQUAL(ESP_OK, selftest_act_sound(1, 100));
     TEST_ASSERT_EQUAL_INT(1, g_play_calls);
     TEST_ASSERT_EQUAL_INT(1, g_stop_calls);
+    TEST_ASSERT_EQUAL_UINT8(AUDIO_MAX_VOICES - 2, g_play_voice);
+    TEST_ASSERT_EQUAL_UINT8(AUDIO_MAX_VOICES - 2, g_stop_voice);
+
+    /* A failed stop must be propagated. */
+    g_stop_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, selftest_act_sound(1, 100));
+    g_stop_err = ESP_OK;
 }
 
 static void test_selftest_act_motor(void)
@@ -529,6 +666,14 @@ static void test_selftest_act_function(void)
 {
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
                       selftest_act_function(SETTINGS_FUNC_MAP_COUNT, true));
+
+    g_web_ready = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, selftest_act_function(3, true));
+    g_web_ready = true;
+    g_web_maintenance = true;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, selftest_act_function(3, true));
+    g_web_maintenance = false;
+
     TEST_ASSERT_EQUAL(ESP_OK, selftest_act_function(3, true));
     TEST_ASSERT_EQUAL_INT(1, g_apply_calls);
     TEST_ASSERT_EQUAL_UINT8(3, g_apply_last_fn);
@@ -573,6 +718,15 @@ static void test_selftest_act_fn_sweep(void)
 {
     TEST_ASSERT_EQUAL_UINT8(0, selftest_act_fn_sweep(SELFTEST_ACT_MS_MIN - 1U));
     TEST_ASSERT_EQUAL_UINT8(0, selftest_act_fn_sweep(SELFTEST_SWEEP_MS_MAX + 1U));
+
+    /* No-op apply is not a successful sweep. */
+    g_web_ready = false;
+    TEST_ASSERT_EQUAL_UINT8(0, selftest_act_fn_sweep(50));
+    g_web_ready = true;
+    g_web_maintenance = true;
+    TEST_ASSERT_EQUAL_UINT8(0, selftest_act_fn_sweep(50));
+    g_web_maintenance = false;
+
     g_apply_calls = 0;
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_FUNC_MAP_COUNT, selftest_act_fn_sweep(50));
     TEST_ASSERT_EQUAL_INT(SETTINGS_FUNC_MAP_COUNT * 2, g_apply_calls); /* on + off */
@@ -591,6 +745,12 @@ static void test_selftest_act_aux_sweep(void)
 static void test_adc_failure_cannot_be_reported_as_pass(void)
 {
     g_adc_b1 = g_adc_b2 = g_adc_rail = 0;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_adc());
+    g_adc_rail = 4095;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_adc());
+    g_adc_b1 = 1;
+    g_adc_b2 = 2;
+    g_adc_rail = 3;
     TEST_ASSERT_EQUAL(SELFTEST_PASS, check_adc());
     g_adc_err = ESP_ERR_TIMEOUT;
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_adc());
@@ -598,6 +758,28 @@ static void test_adc_failure_cannot_be_reported_as_pass(void)
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_adc());
     g_adc_err = ESP_ERR_INVALID_STATE;
     TEST_ASSERT_EQUAL(SELFTEST_SKIP, check_adc());
+}
+
+static void test_dcc_check_uses_age_and_overruns(void)
+{
+    mock_timer_now_us = 10000000;
+    g_dcc_last_packet_us = 9000000;
+    TEST_ASSERT_EQUAL(SELFTEST_PASS, check_dcc());
+
+    g_dcc_last_packet_us = 0;
+    TEST_ASSERT_EQUAL(SELFTEST_SKIP, check_dcc());
+
+    g_dcc_last_packet_us = mock_timer_now_us - SELFTEST_DCC_STALE_US - 1;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_dcc());
+
+    g_dcc_last_packet_us = mock_timer_now_us - 1000;
+    g_dcc_overruns = 1;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_dcc());
+    g_dcc_overruns = 0;
+
+    /* Clock going backwards must not look fresh. */
+    g_dcc_last_packet_us = mock_timer_now_us + 1000;
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, check_dcc());
 }
 
 int main(void)
@@ -612,6 +794,7 @@ int main(void)
     RUN_TEST(test_selftest_nvs_failures);
     RUN_TEST(test_selftest_adc_audio_auxio_fail);
     RUN_TEST(test_adc_failure_cannot_be_reported_as_pass);
+    RUN_TEST(test_dcc_check_uses_age_and_overruns);
     RUN_TEST(test_selftest_act_aux);
     RUN_TEST(test_selftest_act_sound);
     RUN_TEST(test_selftest_act_motor);

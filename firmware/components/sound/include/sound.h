@@ -20,8 +20,13 @@ typedef struct {
     uint32_t revision;
     uint8_t speed;
     uint8_t states[SG_MAX_EFFECTS + 1];
+    /* Channel masks for channels 0..31 (engine + effects 1..31). Effect channel
+     * 32 cannot be represented in 32 bits, so it has explicit flags instead of
+     * the undefined `1u << 32` shift. */
     uint32_t failed_channels;
     uint32_t retry_channels;
+    bool failed_channel32;
+    bool retry_channel32;
 } sound_graph_status_t;
 
 bool sound_graph_active(void);

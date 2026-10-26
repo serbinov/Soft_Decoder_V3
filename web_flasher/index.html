@@ -247,16 +247,63 @@ function showTab(name){
 $("tabbtn_flash").addEventListener("click", ()=>showTab("flash"));
 $("tabbtn_stats").addEventListener("click", ()=>showTab("stats"));
 
+/* ---------- session nonce / action start ---------- */
+/* Mirrors the server's destructive-action list in start_flasher.ps1. */
+const DESTRUCTIVE_ACTIONS = new Set(["flash", "flash_sounds", "flash_scheme", "ota"]);
+let sessionNonce = "";
+async function refreshSession(){
+  const r = await fetch("/api/session", {cache:"no-store"});
+  let j = null;
+  try{ j = await r.json(); }catch(e){}
+  if(!r.ok || !j || !j.nonce) throw new Error("не удалось получить сессионный ключ");
+  sessionNonce = j.nonce;
+  return sessionNonce;
+}
+function errorText(r, j){
+  if(j && j.error) return j.error;
+  return "HTTP " + r.status + (r.statusText ? (" " + r.statusText) : "");
+}
+async function postRun(action){
+  if(!sessionNonce) await refreshSession();
+  const params = new URLSearchParams({action});
+  if(DESTRUCTIVE_ACTIONS.has(action)) params.set("confirm", "yes");
+  const r = await fetch("/api/run?" + params.toString(), {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Aura-Nonce": sessionNonce
+    },
+    body: JSON.stringify({action})
+  });
+  let j = null;
+  try{ j = await r.json(); }catch(e){}
+  return {r, j};
+}
+async function startAction(action){
+  let {r, j} = await postRun(action);
+  if(r.status === 403){
+    /* A restarted panel has a new nonce; fetch it once and retry. */
+    await refreshSession();
+    ({r, j} = await postRun(action));
+  }
+  if(!r.ok || !j || j.error) throw new Error(errorText(r, j));
+  if(!j.id) throw new Error("сервер не вернул идентификатор операции");
+  return j.id;
+}
+
 /* ---------- run ---------- */
 let running=false;
 async function run(action, label){
   if(running) return;
+  if(DESTRUCTIVE_ACTIONS.has(action)){
+    if(!window.confirm(label + ": подтвердить выполнение? Действие изменяет устройство или файлы релиза.")) return;
+  }
   running=true; setButtons(false);
   logClear(); $("status").textContent="Выполняется: "+label+" …"; setAlert("","");
   try{
-    const r = await fetch("/api/run?action="+encodeURIComponent(action),{cache:"no-store"});
-    const j = await r.json();
-    if(!r.ok || j.error || !j.id) throw new Error(j.error || "скрипт не запущен");
+    const id = await startAction(action);
+    appendLog("[INFO] запущено: " + label + " (" + id + ")\n");
     let pos=0, done=false, code=null;
     while(!done){
       await sleep(400);
@@ -270,6 +317,10 @@ async function run(action, label){
   }catch(e){
     appendLog("\n[ERROR] панель: "+e.message+"\n");
     $("status").textContent="Ошибка панели";
+    setAlert(label+": "+e.message, "warn");
+    /* Drop a stale nonce and refresh in the background for the next attempt. */
+    sessionNonce="";
+    refreshSession().catch(()=>{});
   }finally{
     running=false; setButtons(true); refreshStatus(); refreshStats();
   }
@@ -283,7 +334,10 @@ $("btn_pack").addEventListener("click", ()=>run("pack", ACT_LABEL.pack));
 $("btn_flash").addEventListener("click", ()=>run("flash", ACT_LABEL.flash));
 $("btn_flash_snd").addEventListener("click", ()=>run("flash_sounds", ACT_LABEL.flash_sounds));
 $("btn_flash_scheme").addEventListener("click", ()=>run("flash_scheme", ACT_LABEL.flash_scheme));
-window.addEventListener("load", ()=>{ refreshStatus(); refreshStats(); ping(); setInterval(ping, 3000); });
+window.addEventListener("load", ()=>{
+  refreshSession().catch(e=>setAlert("Не удалось получить сессионный ключ: "+e.message, "warn"));
+  refreshStatus(); refreshStats(); ping(); setInterval(ping, 3000);
+});
 function ping(){ try{ fetch("/api/ping",{cache:"no-store"}).catch(()=>{}); }catch(e){} }
 </script>
 </body>

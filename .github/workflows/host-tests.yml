@@ -4,10 +4,14 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   host:
     name: Host tests (C + JS/Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: firmware
@@ -16,6 +20,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: C host tests
         run: |
           chmod +x test/run_tests.sh
@@ -34,6 +41,7 @@ jobs:
   sanitizers:
     name: Host tests (ASan + UBSan)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: firmware
@@ -43,3 +51,176 @@ jobs:
         run: |
           chmod +x test/run_tests.sh
           test/run_tests.sh --sanitize
+
+  coverage:
+    name: Coverage gate (first-party lines)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+      - name: Measure coverage and enforce the gate
+        shell: pwsh
+        env:
+          DCC_TEST_CC: C:\msys64\mingw64\bin\gcc.exe
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          $output = & ./test/coverage.ps1 2>&1 | Out-String
+          Write-Host $output
+          if ($output -match "Coverage failed:") {
+            throw "Coverage run failed"
+          }
+          $match = [regex]::Match($output, "TOTAL \(first-party\):\s*([0-9]+[.,][0-9]+)%")
+          if (-not $match.Success) { throw "Coverage total was not reported" }
+          $pct = [double]::Parse($match.Groups[1].Value.Replace(",", "."),
+                                [Globalization.CultureInfo]::InvariantCulture)
+          Write-Host ("First-party line coverage: {0:N2}%" -f $pct)
+          if ($pct -lt 88.0) { throw "Coverage $pct% is below the 88.0% gate" }
+
+  static-analysis:
+    name: Static analysis (cppcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+      - name: Run cppcheck
+        run: |
+          cppcheck --version
+          cppcheck \
+            --enable=warning,performance,portability \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --std=c11 --quiet \
+            -I components/dcc/include \
+            -I components/pinmap/include \
+            -I components/settings/include \
+            -I components/motor/include \
+            -I components/auxio/include \
+            -I components/audio/include \
+            -I components/sound/include \
+            -I components/track/include \
+            -I components/web/include \
+            -I components/storage/include \
+            -I components/provision/include \
+            -I components/selftest/include \
+            -I main \
+            components/audio components/auxio components/dcc components/motor \
+            components/pinmap components/provision components/selftest components/settings \
+            components/sound components/storage components/track components/web main \
+            2>&1 | tee cppcheck.txt
+          if grep -Eq "error:" cppcheck.txt; then
+            echo "::warning::cppcheck reported findings; see the cppcheck artifact"
+          fi
+      - name: Upload cppcheck report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cppcheck-report
+          path: firmware/cppcheck.txt
+          if-no-files-found: warn
+
+  target-build:
+    name: ESP-IDF 6.0 target build (esp32s3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ESP-IDF 6.0
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32s3
+          path: firmware
+      - name: Validate partition table and image size
+        working-directory: firmware
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "tools")
+          import release_artifacts as ra
+
+          build = Path("build")
+          version = Path("version.txt").read_text(encoding="utf-8-sig").strip()
+          bootloader = ra.image_info((build / "bootloader" / "bootloader.bin").read_bytes())
+          partitions = ra.partition_info((build / "partition_table" / "partition-table.bin").read_bytes())
+          application = ra.image_info((build / "soft_decoder_v3.bin").read_bytes())
+          slot = next(entry for entry in partitions["entries"] if entry["name"] == "ota_0")
+
+          assert bootloader["role"] == "bootloader", bootloader
+          assert bootloader["size"] <= 0x8000, bootloader
+          assert application["role"] == "application", application
+          assert application["version"] == version, (application["version"], version)
+          assert application["size"] <= slot["size"], (application["size"], slot["size"])
+          print(f"partition table OK: ota_0={slot['size']} bytes")
+          print(f"image OK: {application['size']} bytes, version {application['version']}")
+          PY
+      - name: Verify published release artifacts
+        working-directory: firmware
+        run: python tools/release_artifacts.py verify --release ../release
+      - name: Assert manifest version matches version.txt
+        working-directory: firmware
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          version = Path("version.txt").read_text(encoding="utf-8-sig").strip()
+          manifest = json.loads(Path("../release/manifest.json").read_text(encoding="utf-8"))
+          assert manifest["version"] == version, (manifest["version"], version)
+          print(f"release manifest version OK: {version}")
+          PY
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: |
+            firmware/build/soft_decoder_v3.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+            firmware/build/flasher_args.json
+          if-no-files-found: error
+
+  windows:
+    name: Windows host tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+      - name: Run test\run_tests.ps1
+        shell: pwsh
+        env:
+          DCC_TEST_CC: C:\msys64\mingw64\bin\gcc.exe
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          ./test/run_tests.ps1

@@ -16,6 +16,7 @@ Run:
 
 import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -33,14 +34,66 @@ VERSION = "PREVIEW"
 CV_COUNT = 512
 FN_COUNT = 29
 TRACK_COUNT = 20
-SG_MAX_EFFECTS = 32
 AUX_NAMES = ["F0F", "F0R", "AUX1", "AUX2", "AUX3", "AUX4", "AUX5", "AUX6", "AUX7"]
 
-GRAPH_LIMITS = {
-    "states": 57, "soundStates": 31, "transitions": 128, "effects": 24,
-    "effectTables": 16, "blocks": 64, "sinks": 9, "assets": 31,
-    "jsonBytes": 131072,
+# Graph limits mirror firmware/components/sound/include/sound_graph.h so the
+# preview cannot accept a graph the device would reject (or hide a new limit).
+SG_HEADER = os.path.join(FW, "components", "sound", "include", "sound_graph.h")
+SG_DEFAULTS = {
+    "SG_MAX_STATES": 192, "SG_MAX_SOUND_STATES": 144, "SG_MAX_SILENT_STATES": 96,
+    "SG_MAX_TRANSITIONS": 250, "SG_MAX_EFFECTS": 32, "SG_MAX_ASSETS": 128,
+    "SG_MAX_VARIABLES": 16, "SG_MAX_JSON": 128 * 1024,
 }
+
+
+def _sg_defines():
+    values = {}
+    try:
+        with open(SG_HEADER, "r", encoding="utf-8") as fh:
+            for line in fh:
+                match = re.match(r"\s*#define\s+(SG_[A-Z0-9_]+)\s+(.+?)\s*(?:/\*.*)?$", line)
+                if not match:
+                    continue
+                name, expr = match.group(1), match.group(2).strip()
+                product = re.match(r"^\(?\s*(\d+)U?\s*\*\s*(\d+)U?\s*\)?$", expr)
+                if product:
+                    values[name] = int(product.group(1)) * int(product.group(2))
+                elif expr.isdigit():
+                    values[name] = int(expr)
+    except OSError:
+        pass
+    return values
+
+
+_SG_DEFINES = _sg_defines()
+
+
+def _sg(name):
+    return _SG_DEFINES.get(name, SG_DEFAULTS[name])
+
+
+SG_MAX_STATES = _sg("SG_MAX_STATES")
+SG_MAX_SOUND_STATES = _sg("SG_MAX_SOUND_STATES")
+SG_MAX_SILENT_STATES = _sg("SG_MAX_SILENT_STATES")
+SG_MAX_TRANSITIONS = _sg("SG_MAX_TRANSITIONS")
+SG_MAX_EFFECTS = _sg("SG_MAX_EFFECTS")
+SG_MAX_ASSETS = _sg("SG_MAX_ASSETS")
+SG_MAX_VARIABLES = _sg("SG_MAX_VARIABLES")
+SG_MAX_JSON = _sg("SG_MAX_JSON")
+
+GRAPH_LIMITS = {
+    "states": SG_MAX_STATES, "soundStates": SG_MAX_SOUND_STATES,
+    "transitions": SG_MAX_TRANSITIONS, "effects": SG_MAX_EFFECTS,
+    "assets": SG_MAX_ASSETS, "variables": SG_MAX_VARIABLES,
+    "jsonBytes": SG_MAX_JSON,
+}
+CONDITION_TYPES = [
+    "fn_press", "fn_release", "fn_on", "fn_off", "engine_on", "engine_off",
+    "speed", "accel", "decel", "sample_done", "dir_fwd", "dir_rev",
+    "random", "timeout", "var_cmp", "state_enter",
+]
+VARIABLE_KINDS = ["speed", "forward", "moving", "engine"]
+COMPARE_OPS = ["eq", "ne", "lt", "le", "gt", "ge"]
 TRACK_LABELS = [
     "Тепловоз", "Отправление", "Свисток", "Тифон", "Компрессор", "Вентилятор",
     "Сцепка", "Тормоз", "Гудок", "Стрелка", "Колёса", "Песок", "Генератор",
@@ -159,6 +212,241 @@ def _seed_library_from_sound_dir():
 _seed_library_from_sound_dir()
 
 
+_GRAPH_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,31}$")
+_GRAPH_TIMINGS = ("immediate", "after_sample")
+_GRAPH_FN_CONDITIONS = ("fn_press", "fn_release", "fn_on", "fn_off")
+_GRAPH_RANGE_CONDITIONS = ("speed", "accel", "decel")
+_GRAPH_VAR_KINDS = ("user", "speed", "forward", "moving", "engine")
+
+
+def _graph_int(value, low, high, what):
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise ValueError("invalid %s" % what)
+    return value
+
+
+def _graph_id(value):
+    return isinstance(value, str) and bool(_GRAPH_ID_RE.match(value))
+
+
+def _graph_wav_name(value):
+    if not isinstance(value, str) or not value.endswith(".wav"):
+        return False
+    raw = value.encode("utf-8")
+    if not 5 <= len(raw) < 64:
+        return False
+    stem = value[:-4]
+    for i, ch in enumerate(stem):
+        if ord(ch) >= 0x80:
+            continue
+        if not (ch.isascii() and (ch.isalnum() or ch in "_-.")):
+            return False
+        if ch == "." and (i == 0 or stem[i - 1] == "."):
+            return False
+    return True
+
+
+def _validate_graph(doc, available_files=None):
+    """Mirror the core firmware parser/validator invariants for a compiled
+    schema-v1 sound graph. Raises ValueError with a short reason on failure."""
+    if not isinstance(doc, dict):
+        raise ValueError("project must be an object")
+    if doc.get("format") != "sound-graph":
+        raise ValueError("format must be sound-graph")
+    if doc.get("schemaVersion") != 1:
+        raise ValueError("unsupported schemaVersion")
+    if not _graph_id(doc.get("id")):
+        raise ValueError("invalid graph id")
+    if not isinstance(doc.get("name"), str):
+        raise ValueError("invalid graph name")
+    engine = doc.get("engine")
+    if not isinstance(engine, dict) or not _graph_id(engine.get("entry")):
+        raise ValueError("invalid engine entry")
+    fn = engine.get("fn")
+    if isinstance(fn, bool) or not isinstance(fn, int) or not (0 <= fn <= 28 or fn == 255):
+        raise ValueError("invalid engine fn")
+    if "hold" in engine and not isinstance(engine["hold"], bool):
+        raise ValueError("invalid engine hold")
+    if "hysteresis" in doc:
+        _graph_int(doc["hysteresis"], 0, 32, "hysteresis")
+
+    variables = doc.get("variables", [])
+    if not isinstance(variables, list) or len(variables) > SG_MAX_VARIABLES:
+        raise ValueError("variable capacity")
+    var_names = []
+    var_kinds = []
+    for var in variables:
+        if not isinstance(var, dict):
+            raise ValueError("invalid variable")
+        name = var.get("name")
+        if not isinstance(name, str) or not name or len(name.encode("utf-8")) >= 24:
+            raise ValueError("invalid variable name")
+        if name in var_names:
+            raise ValueError("duplicate variable name")
+        kind = var.get("kind", "user")
+        if kind not in _GRAPH_VAR_KINDS:
+            raise ValueError("invalid variable kind")
+        init = var.get("init", 0)
+        if isinstance(init, bool) or not isinstance(init, int) or not -(1 << 31) <= init < (1 << 31):
+            raise ValueError("invalid variable init")
+        if kind != "user" and init != 0:
+            raise ValueError("builtin variable cannot have an initial value")
+        var_names.append(name)
+        var_kinds.append(kind)
+
+    states = doc.get("states")
+    if not isinstance(states, list) or not states or len(states) > SG_MAX_STATES:
+        raise ValueError("state capacity")
+    state_ids = []
+    audible = silent = 0
+    for state in states:
+        if not isinstance(state, dict) or not _graph_id(state.get("id")):
+            raise ValueError("invalid state")
+        sid = state["id"]
+        if sid in state_ids:
+            raise ValueError("duplicate state ID")
+        if not isinstance(state.get("name"), str):
+            raise ValueError("invalid state name")
+        file = state.get("file", "")
+        if not isinstance(file, str) or (file and not _graph_wav_name(file)):
+            raise ValueError("invalid WAV basename")
+        if not isinstance(state.get("loop"), bool):
+            raise ValueError("invalid state loop")
+        _graph_int(state.get("volume"), 0, 100, "state volume")
+        _graph_int(state.get("rate"), 500, 3000, "state rate")
+        if "loops" in state:
+            _graph_int(state["loops"], 0, 255, "state loops")
+        if "setVar" in state:
+            _graph_int(state["setVar"], 0, max(0, len(variables) - 1), "state setVar")
+            if state["setVar"] >= len(variables) or var_kinds[state["setVar"]] != "user":
+                raise ValueError("state setVar must be a user variable")
+        if "setValue" in state:
+            _graph_int(state["setValue"], -(1 << 15), (1 << 15) - 1, "state setValue")
+        if file:
+            audible += 1
+        else:
+            silent += 1
+        state_ids.append(sid)
+    if audible > SG_MAX_SOUND_STATES or silent > SG_MAX_SILENT_STATES:
+        raise ValueError("audible/silent state capacity")
+
+    assets = doc.get("assets")
+    if not isinstance(assets, list) or len(assets) > SG_MAX_ASSETS:
+        raise ValueError("asset capacity")
+    asset_files = []
+    for asset in assets:
+        if not isinstance(asset, dict) or not _graph_wav_name(asset.get("file")):
+            raise ValueError("invalid asset metadata")
+        file = asset["file"]
+        if file in asset_files:
+            raise ValueError("duplicate asset")
+        crc = asset.get("crc32")
+        if not isinstance(crc, str) or not re.match(r"^[0-9A-Fa-f]{8}$", crc):
+            raise ValueError("invalid CRC32")
+        for key, low in (("size", 1), ("sampleRate", 1), ("channels", 1), ("bits", 1)):
+            _graph_int(asset.get(key), low, (1 << 32) - 1, "asset %s" % key)
+        asset_files.append(file)
+
+    asset_set = set(asset_files)
+    for state in states:
+        file = state.get("file", "")
+        if file and file not in asset_set:
+            raise ValueError("referenced WAV requires an asset manifest")
+        if file and available_files is not None and file not in available_files:
+            raise ValueError("referenced WAV is missing from the pack")
+
+    entry = engine["entry"]
+    if entry not in state_ids or states[state_ids.index(entry)].get("file"):
+        raise ValueError("engine entry must be silent")
+
+    effects = doc.get("effects")
+    if not isinstance(effects, list) or len(effects) > SG_MAX_EFFECTS:
+        raise ValueError("effect capacity")
+    effect_ids = []
+    effect_entries = []
+    for effect in effects:
+        if not isinstance(effect, dict) or not _graph_id(effect.get("id")):
+            raise ValueError("invalid effect")
+        if effect["id"] in effect_ids:
+            raise ValueError("duplicate effect ID")
+        _graph_int(effect.get("fn"), 0, 28, "effect fn")
+        target = effect.get("entry")
+        if target not in state_ids or states[state_ids.index(target)].get("file"):
+            raise ValueError("effect entry must be silent")
+        effect_ids.append(effect["id"])
+        effect_entries.append(target)
+
+    transitions = doc.get("transitions")
+    if not isinstance(transitions, list) or len(transitions) > SG_MAX_TRANSITIONS:
+        raise ValueError("transition capacity")
+    transition_ids = []
+    for transition in transitions:
+        if not isinstance(transition, dict) or not _graph_id(transition.get("id")):
+            raise ValueError("invalid transition")
+        if transition["id"] in transition_ids:
+            raise ValueError("duplicate transition ID")
+        if transition.get("source") not in state_ids or transition.get("target") not in state_ids:
+            raise ValueError("dangling transition")
+        _graph_int(transition.get("priority"), 0, 255, "transition priority")
+        if transition.get("timing") not in _GRAPH_TIMINGS:
+            raise ValueError("invalid transition timing")
+        cond = transition.get("condition")
+        if not isinstance(cond, dict) or cond.get("type") not in CONDITION_TYPES:
+            raise ValueError("unknown condition")
+        typ = cond["type"]
+        if typ in _GRAPH_FN_CONDITIONS:
+            _graph_int(cond.get("fn"), 0, 28, "condition fn")
+        elif "fn" in cond:
+            raise ValueError("condition fn mismatch")
+        if typ in _GRAPH_RANGE_CONDITIONS:
+            if "min" not in cond and "max" not in cond:
+                raise ValueError("missing condition range")
+            if "min" in cond:
+                _graph_int(cond["min"], 0, 255, "condition min")
+            if "max" in cond:
+                _graph_int(cond["max"], 0, 255, "condition max")
+            if cond.get("min", 0) > cond.get("max", 255):
+                raise ValueError("inverted condition range")
+        elif typ == "random":
+            _graph_int(cond.get("min"), 0, 100, "random chance")
+            if "max" in cond:
+                raise ValueError("invalid random chance")
+        elif typ == "timeout":
+            _graph_int(cond.get("min"), 0, 255, "timeout")
+            if "max" in cond:
+                raise ValueError("invalid timeout")
+        elif "min" in cond or "max" in cond:
+            raise ValueError("unexpected condition range")
+        if typ == "var_cmp":
+            _graph_int(cond.get("var"), 0, max(0, len(variables) - 1), "var_cmp variable")
+            if cond["var"] >= len(variables):
+                raise ValueError("invalid var_cmp variable")
+            if "var2" in cond:
+                _graph_int(cond["var2"], 0, max(0, len(variables) - 1), "var_cmp second variable")
+                if cond["var2"] >= len(variables):
+                    raise ValueError("invalid var_cmp second variable")
+            if "op" in cond:
+                _graph_int(cond["op"], 0, 5, "var_cmp operator")
+            if "value" in cond:
+                _graph_int(cond["value"], -(1 << 15), (1 << 15) - 1, "var_cmp value")
+        elif "var" in cond or "var2" in cond:
+            raise ValueError("unexpected variable fields")
+        transition_ids.append(transition["id"])
+
+    reached = {entry}
+    reached.update(effect_entries)
+    for _ in range(len(states)):
+        changed = False
+        for transition in transitions:
+            if transition["source"] in reached and transition["target"] not in reached:
+                reached.add(transition["target"])
+                changed = True
+        if not changed:
+            break
+    if len(reached) != len(state_ids):
+        raise ValueError("unreachable state")
+
+
 def _parse_pack(body):
     """Validate an AURA Sound Pack (.asp) and return its index entries.
     Raises ValueError with a short reason on any structural problem."""
@@ -232,24 +520,17 @@ def _load_pack(body):
     entries = _parse_pack(body)
     lib = {}
     encodings = set()
+    scheme_doc = None
     scheme_id = ""
     for e in entries:
         payload = body[e["off"]:e["off"] + e["len"]]
         if e["bits"] == 0 and e["name"] == "__aura_scheme__":
             try:
                 doc = json.loads(payload.decode("utf-8"))
-                if isinstance(doc, dict) and doc.get("format") == "sound-graph":
-                    GRAPH["project"] = doc
-                    GRAPH["revision"] = GRAPH.get("revision", 0) + 1
-                    GRAPH["active"] = True
-                    GRAPH["fault"] = False
-                    PROJECTS[doc.get("id", "locomotive_default")] = {
-                        "project": doc, "revision": GRAPH["revision"]}
-                    _runner_reset()
-                    _save_persisted()
-                    scheme_id = doc.get("id", "locomotive_default")
-            except Exception as exc:
+            except (ValueError, UnicodeDecodeError) as exc:
                 raise ValueError("некорректная схема в пакете: %s" % exc)
+            if isinstance(doc, dict) and doc.get("format") == "sound-graph":
+                scheme_doc = doc
             continue
         if e["bits"] == 4:
             blocks = e["len"] // IMA_BLOCK
@@ -267,9 +548,27 @@ def _load_pack(body):
         lib[e["name"]] = {"vol": e["vol"], "wav": _pcm16_wav(samples, e["rate"]),
                           "size": stored_hdr + e["len"], "raw": payload,
                           "rate": e["rate"], "channels": e["channels"], "bits": e["bits"]}
+    if scheme_doc is not None:
+        available = set()
+        for name in lib:
+            available.add(name)
+            available.add(name + ".wav")
+        try:
+            _validate_graph(scheme_doc, available_files=available)
+        except ValueError as exc:
+            raise ValueError("некорректная схема в пакете: %s" % exc)
     LIBRARY.clear()
     LIBRARY.update(lib)
     PREVIEW["name"] = ""
+    if scheme_doc is not None:
+        GRAPH["project"] = scheme_doc
+        GRAPH["revision"] = GRAPH.get("revision", 0) + 1
+        GRAPH["active"] = True
+        GRAPH["fault"] = False
+        scheme_id = scheme_doc.get("id", "locomotive_default")
+        PROJECTS[scheme_id] = {"project": scheme_doc, "revision": GRAPH["revision"]}
+        _runner_reset()
+        _save_persisted()
     return len(lib), len(body), "/".join(sorted(encodings)), scheme_id
 
 
@@ -1284,7 +1583,9 @@ def handle_api(method, path, query, body):
                        points=[{"speed": i * 12, "frac": 20 + i * 7} for i in range(1, 11)])
 
     if path == "/api/sound/graph/capabilities":
-        return 200, ok(format="sound-graph", schemaVersion=1, limits=GRAPH_LIMITS)
+        return 200, ok(format="sound-graph", schemaVersion=1, limits=dict(GRAPH_LIMITS),
+                       conditions=list(CONDITION_TYPES), variableKinds=list(VARIABLE_KINDS),
+                       compareOps=list(COMPARE_OPS))
 
     if path == "/api/sound/graph/projects":
         return 200, ok(projects=[{"id": pid, "name": ent["project"].get("name", pid),

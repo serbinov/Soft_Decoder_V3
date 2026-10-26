@@ -37,6 +37,18 @@ function Get-FirmwareRelease {
                 throw "Application identity/size mismatch."
             }
         }
+        # Sound packs published in the manifest are deliverables too: their
+        # names, sizes and hashes must match before the panel calls the release ready.
+        foreach ($entry in @($manifest.files | Where-Object { $_.role -eq "sound_pack" })) {
+            if (-not $entry.path) { throw "Invalid sound pack manifest entry." }
+            $path = Join-Path $release ($entry.path -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw ("Missing release pack: " + $entry.path) }
+            $length = (Get-Item -LiteralPath $path).Length
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+            if ($length -ne [int64]$entry.size -or $hash -ine $entry.sha256) {
+                throw ("Release pack changed or is incomplete: " + $entry.path)
+            }
+        }
         $result.ready = $true
     } catch {
         $result.errors += $_.Exception.Message

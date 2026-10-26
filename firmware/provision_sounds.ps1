@@ -1,9 +1,21 @@
 param(
-    [string]$Port = "COM3",
+    [string]$Port = "",
     [string]$SoundDir = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+function Find-EspPort {
+    Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+        Where-Object { $_.PNPDeviceID -like "USB\VID_303A*PID_1001*" -and $_.Name -match "\((COM\d+)\)" } |
+        ForEach-Object { if ($_.Name -match "\((COM\d+)\)") { $Matches[1] } } |
+        Select-Object -First 1
+}
+if (-not $Port) { $Port = Find-EspPort }
+if (-not $Port) {
+    Write-Host "[ERROR] ESP32-S3 (VID_303A/PID_1001) not found. Specify -Port COMx." -ForegroundColor Red
+    exit 1
+}
 
 # The sounds normally live in <repo>\SOUND (Soft_Decoder_V3\SOUND); keep the
 # older sibling-of-repo location as a fallback.
@@ -50,16 +62,21 @@ try { $sp.Open() } catch {
 $sp.DiscardInBuffer()
 $sp.DiscardOutBuffer()
 
-function ReadUntil([string]$marker, [int]$timeoutMs) {
+function ReadUntil([string[]]$markers, [int]$timeoutMs) {
     $deadline = [Environment]::TickCount + $timeoutMs
     $buf = ""
     while ([Environment]::TickCount -lt $deadline) {
         try { $buf += $sp.ReadExisting() } catch { }
-        if ($buf.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) { $script:lastText = $buf; return $true }
+        foreach ($marker in $markers) {
+            if ($buf.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) {
+                $script:lastText = $buf
+                return $marker
+            }
+        }
         Start-Sleep -Milliseconds 30
     }
     $script:lastText = $buf
-    return $false
+    return $null
 }
 function Format-Rx {
     $t = ($script:lastText -replace "[\r\n]+", " ").Trim()
@@ -78,11 +95,21 @@ Write-Host "[INFO] Asking the app to enter provisioning (PROV)..."
 $started = $false
 for ($i = 0; $i -lt 30 -and -not $started; $i++) {
     try { $sp.DiscardInBuffer(); $sp.Write("PROV`n") } catch { }
-    if (ReadUntil "PROV-CONFIRM?" 1200) {
+    $r = ReadUntil @("PROV-CONFIRM?", "PROV-ERR", "FW-ERR", "PROV-ABORT") 1200
+    if ($r -eq "PROV-CONFIRM?") {
         Write-Host "[INFO]   app requires confirmation -> sending PROV-CONFIRM"
         try { $sp.Write("PROV-CONFIRM`n") } catch { }
-        if (ReadUntil "PROV-OK" 4000) { $started = $true }
-        else { Write-Host ("[WARN]   attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) -ForegroundColor Yellow }
+        $r = ReadUntil @("PROV-OK", "PROV-ERR", "FW-ERR", "PROV-ABORT") 4000
+        if ($r -eq "PROV-OK") { $started = $true }
+        elseif ($r) {
+            Write-Host ("[ERROR] Firmware rejected provisioning ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
+            $sp.Close(); exit 1
+        } else {
+            Write-Host ("[WARN]   attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) -ForegroundColor Yellow
+        }
+    } elseif ($r) {
+        Write-Host ("[ERROR] Firmware rejected provisioning ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
+        $sp.Close(); exit 1
     } else {
         Write-Host ("[INFO]   attempt {0}: no answer yet (got: {1})" -f ($i + 1), (Format-Rx))
     }
@@ -107,8 +134,10 @@ foreach ($file in $files) {
     try { $sp.Write($cmd + "`n") } catch {
         Write-Host "[ERROR] write PUT failed: $_" -ForegroundColor Red; $sp.Close(); exit 1
     }
-    if (-not (ReadUntil "PUT-OK" 60000)) {
-        Write-Host "[ERROR] no PUT-OK for slot $slot (firmware busy?)" -ForegroundColor Red
+    $r = ReadUntil @("PUT-OK", "PROV-ERR", "FW-ERR") 60000
+    if ($r -ne "PUT-OK") {
+        if ($r) { Write-Host ("[ERROR] Firmware rejected slot {0} ({1}): {2}" -f $slot, $r, (Format-Rx)) -ForegroundColor Red }
+        else { Write-Host "[ERROR] no PUT-OK for slot $slot (firmware busy?)" -ForegroundColor Red }
         $sp.Close(); exit 1
     }
 
@@ -122,8 +151,10 @@ foreach ($file in $files) {
             $sp.Write($chunk, 0, $n)
             $remaining -= $n
             if ($remaining -gt 0) {
-                if (-not (ReadUntil "CHUNK" 30000)) {
-                    Write-Host "[ERROR] data ack timeout slot $slot" -ForegroundColor Red
+                $r = ReadUntil @("CHUNK", "PROV-ERR", "FW-ERR") 30000
+                if ($r -ne "CHUNK") {
+                    if ($r) { Write-Host ("[ERROR] Firmware rejected slot {0} ({1}): {2}" -f $slot, $r, (Format-Rx)) -ForegroundColor Red }
+                    else { Write-Host "[ERROR] data ack timeout slot $slot" -ForegroundColor Red }
                     $ok = $false; break
                 }
             }
@@ -133,21 +164,26 @@ foreach ($file in $files) {
     }
     if (-not $ok) { $sp.Close(); exit 1 }
 
-    if (-not (ReadUntil "FILE-OK" 60000)) {
-        Write-Host "[ERROR] file ack timeout slot $slot" -ForegroundColor Red
+    $r = ReadUntil @("FILE-OK", "PROV-ERR", "FW-ERR") 60000
+    if ($r -ne "FILE-OK") {
+        if ($r) { Write-Host ("[ERROR] Firmware rejected slot {0} ({1}): {2}" -f $slot, $r, (Format-Rx)) -ForegroundColor Red }
+        else { Write-Host "[ERROR] file ack timeout slot $slot" -ForegroundColor Red }
         $sp.Close(); exit 1
     }
     Write-Host ("[OK] slot {0}: {1} ({2} B)" -f $slot, $file.Name, $len) -ForegroundColor Green
     $slot++
 }
 
-# 4. Done.
+# 4. Done. The firmware must acknowledge the finalize step; a missing ack is a
+#    failure even if every slot was already FILE-OK'd.
 try { $sp.Write("DONE`n") } catch { }
-# On DONE the firmware acks and immediately restarts; the ack can be lost to the
-# USB re-enumeration. That is not an error - every slot was already FILE-OK'd.
-if (ReadUntil "DONE-OK" 8000) {
+$r = ReadUntil @("DONE-OK", "PROV-ERR", "FW-ERR") 8000
+if ($r -eq "DONE-OK") {
     Write-Host "[OK] Sounds uploaded, device restarting." -ForegroundColor Green
-} else {
-    Write-Host "[INFO] Sounds uploaded; device restarts (DONE-OK not seen - ack may be lost on reboot)." -ForegroundColor Cyan
+    $sp.Close()
+    exit 0
 }
+if ($r) { Write-Host ("[ERROR] Firmware rejected DONE ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red }
+else { Write-Host "[ERROR] no DONE-OK acknowledgement; sound upload is not confirmed." -ForegroundColor Red }
 $sp.Close()
+exit 1

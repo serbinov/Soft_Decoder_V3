@@ -5,6 +5,7 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
@@ -23,6 +24,12 @@ static const char *TAG = "selftest";
 #define SELFTEST_NVS_NS   "selftest"
 #define SELFTEST_NVS_MAGIC 0x5E1F7E57u
 
+/* A dedicated mixer voice keeps the HIL sound test from stopping user audio. */
+#define SELFTEST_AUDIO_VOICE (AUDIO_MAX_VOICES - 2)
+
+/* A packet addressed to this decoder older than this is a failed DCC path. */
+#define SELFTEST_DCC_STALE_US (2LL * 1000LL * 1000LL)
+
 /* Overridable so the host tests can point the scratch file at a temp dir. */
 #ifndef SELFTEST_TMP_PATH
 #define SELFTEST_TMP_PATH "/userdata/.selftest.tmp"
@@ -38,6 +45,21 @@ static const char *TAG = "selftest";
 #endif
 #ifndef SELFTEST_FREAD
 #define SELFTEST_FREAD(p, sz, n, f) fread((p), (sz), (n), (f))
+#endif
+#ifndef SELFTEST_FFLUSH
+#define SELFTEST_FFLUSH(f) fflush(f)
+#endif
+#ifndef SELFTEST_FCLOSE
+#define SELFTEST_FCLOSE(f) fclose(f)
+#endif
+#ifndef SELFTEST_FSYNC
+#ifdef _WIN32
+#include <io.h>
+#define SELFTEST_FSYNC(f) _commit(_fileno(f))
+#else
+#include <unistd.h>
+#define SELFTEST_FSYNC(f) fsync(fileno(f))
+#endif
 #endif
 
 /* Not const so the host test can redirect it at a missing directory. */
@@ -98,12 +120,36 @@ static selftest_state_t check_nvs(void)
     uint32_t back = 0;
     esp_err_t err = nvs_set_u32(h, "magic", SELFTEST_NVS_MAGIC);
     if (err == ESP_OK) {
-        err = nvs_get_u32(h, "magic", &back);
+        err = nvs_commit(h);
     }
-    (void)nvs_erase_key(h, "magic");
-    (void)nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) {
+        return SELFTEST_FAIL;
+    }
+
+    /* Read back through a fresh open so a RAM-only write cannot pass. */
+    if (nvs_open(SELFTEST_NVS_NS, NVS_READONLY, &h) != ESP_OK) {
+        return SELFTEST_FAIL;
+    }
+    err = nvs_get_u32(h, "magic", &back);
+    nvs_close(h);
+
+    /* Always remove the scratch key, and only report success when both the
+     * erase and its commit succeeded. */
+    esp_err_t clean = ESP_OK;
+    if (nvs_open(SELFTEST_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        clean = ESP_FAIL;
+    } else {
+        clean = nvs_erase_key(h, "magic");
+        if (clean == ESP_ERR_NVS_NOT_FOUND) {
+            clean = ESP_OK;
+        }
+        if (clean == ESP_OK) {
+            clean = nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    if (err != ESP_OK || clean != ESP_OK) {
         return SELFTEST_FAIL;
     }
     return (back == SELFTEST_NVS_MAGIC) ? SELFTEST_PASS : SELFTEST_FAIL;
@@ -114,25 +160,31 @@ static selftest_state_t check_storage(void)
     if (!storage_is_mounted()) {
         return SELFTEST_SKIP;
     }
+    /* Hold a lease for the whole lifetime of the open FILE. */
+    if (storage_access_begin() != ESP_OK) {
+        return SELFTEST_SKIP;
+    }
     const char payload[] = "selftest";
     bool ok = false;
     FILE *f = SELFTEST_FOPEN(s_tmp_path, "wb");
     if (f != NULL) {
         size_t w = SELFTEST_FWRITE(payload, 1, sizeof(payload), f);
-        (void)fflush(f);
-        (void)fclose(f);
-        if (w == sizeof(payload)) {
+        bool flushed = SELFTEST_FFLUSH(f) == 0;
+        bool synced = SELFTEST_FSYNC(f) == 0;
+        bool closed = SELFTEST_FCLOSE(f) == 0;
+        if (w == sizeof(payload) && flushed && synced && closed) {
             char back[16] = { 0 };
             f = SELFTEST_FOPEN(s_tmp_path, "rb");
             if (f != NULL) {
                 size_t r = SELFTEST_FREAD(back, 1, sizeof(payload), f);
-                (void)fclose(f);
-                ok = (r == sizeof(payload)) &&
+                bool read_closed = SELFTEST_FCLOSE(f) == 0;
+                ok = read_closed && (r == sizeof(payload)) &&
                      memcmp(back, payload, sizeof(payload)) == 0;
             }
         }
         (void)remove(s_tmp_path);
     }
+    storage_access_end();
     return ok ? SELFTEST_PASS : SELFTEST_FAIL;
 }
 
@@ -149,23 +201,54 @@ static selftest_state_t check_adc(void)
     if (b1 > 4095U || b2 > 4095U || rail > 4095U) {
         return SELFTEST_FAIL;
     }
+    /* All-zero is what a disconnected/floating front end reads, not a valid
+     * rail/BEMF measurement. */
+    if (b1 == 0U && b2 == 0U && rail == 0U) {
+        return SELFTEST_FAIL;
+    }
+    if (rail == 0U || rail >= 4095U) {
+        return SELFTEST_FAIL;
+    }
     return SELFTEST_PASS;
 }
 
 static selftest_state_t check_audio(void)
 {
-    return (audio_get_volume() <= 100U) ? SELFTEST_PASS : SELFTEST_FAIL;
+    /* The volume API only reports configuration; a dead codec/amplifier still
+     * looks identical. Report an out-of-range value as a failure and otherwise
+     * mark the check inconclusive instead of claiming a hardware PASS. */
+    return (audio_get_volume() <= 100U) ? SELFTEST_SKIP : SELFTEST_FAIL;
 }
 
 static selftest_state_t check_auxio(void)
 {
-    bool enabled = false;
-    return (auxio_get_enabled(0, &enabled) == ESP_OK) ? SELFTEST_PASS : SELFTEST_FAIL;
+    /* No feedback path exists for the AUX outputs: verify the read API covers
+     * every channel, then report SKIP (the actuating HIL command is the only
+     * way to exercise the pin). */
+    for (uint8_t ch = 0; ch < AUXIO_CH_COUNT; ++ch) {
+        bool enabled = false;
+        if (auxio_get_enabled(ch, &enabled) != ESP_OK) {
+            return SELFTEST_FAIL;
+        }
+    }
+    return SELFTEST_SKIP;
 }
 
 static selftest_state_t check_dcc(void)
 {
-    (void)dcc_last_packet_us();
+    if (dcc_get_isr_overruns() != 0U) {
+        return SELFTEST_FAIL;
+    }
+    int64_t last = dcc_last_packet_us();
+    if (last <= 0) {
+        /* No addressed packet has been seen yet: there is no evidence either
+         * way, so never report PASS. */
+        return SELFTEST_SKIP;
+    }
+    int64_t age = esp_timer_get_time() - last;
+    if (age < 0 || age > SELFTEST_DCC_STALE_US) {
+        return SELFTEST_FAIL;
+    }
     return SELFTEST_PASS;
 }
 
@@ -208,13 +291,14 @@ esp_err_t selftest_act_aux(uint8_t channel, uint16_t ms)
     if (auxio_get_enabled(channel, &prev) != ESP_OK) {
         return ESP_FAIL;
     }
-    if (auxio_set_enabled(channel, true) != ESP_OK) {
-        (void)auxio_set_enabled(channel, prev);
-        return ESP_FAIL;
+    esp_err_t err = auxio_set_enabled(channel, true);
+    if (err != ESP_OK) {
+        esp_err_t restore = auxio_set_enabled(channel, prev);
+        return restore != ESP_OK ? restore : err;
     }
     vTaskDelay(pdMS_TO_TICKS(ms));
-    (void)auxio_set_enabled(channel, prev);
-    return ESP_OK;
+    esp_err_t restore = auxio_set_enabled(channel, prev);
+    return restore;
 }
 
 esp_err_t selftest_act_sound(uint8_t slot, uint16_t ms)
@@ -240,13 +324,14 @@ esp_err_t selftest_act_sound(uint8_t slot, uint16_t ms)
     }
     char path[160];
     snprintf(path, sizeof(path), "%s/%s", storage_get_root(), file);
-    esp_err_t err = audio_voice_play(0, path, false, audio_get_volume());
+    esp_err_t err = audio_voice_play(SELFTEST_AUDIO_VOICE, path, false,
+                                     audio_get_volume());
     if (err != ESP_OK) {
         return err;
     }
     vTaskDelay(pdMS_TO_TICKS(ms));
-    (void)audio_voice_stop(0);
-    return ESP_OK;
+    esp_err_t stop = audio_voice_stop(SELFTEST_AUDIO_VOICE);
+    return stop;
 }
 
 esp_err_t selftest_act_motor(uint8_t speed, uint16_t ms)
@@ -267,10 +352,18 @@ esp_err_t selftest_act_motor(uint8_t speed, uint16_t ms)
         vTaskDelay(pdMS_TO_TICKS(ms));
     }
     /* The HIL deadline is independent of CV4 and task progress. */
-    (void)motor_set_inhibited(true);
+    esp_err_t stop = motor_set_inhibited(true);
+    if (err == ESP_OK) {
+        err = stop;
+    }
     uint8_t applied = 255;
     motor_get_applied_speed(&applied, NULL);
-    if (applied != 0U) {
+    if (stop != ESP_OK || applied != 0U) {
+        motor_emergency_stop();
+        applied = 255;
+        motor_get_applied_speed(&applied, NULL);
+    }
+    if (err == ESP_OK && applied != 0U) {
         err = ESP_FAIL;
     }
     web_maintenance_end();
@@ -282,6 +375,11 @@ esp_err_t selftest_act_function(uint8_t fn, bool on)
     if (fn >= SETTINGS_FUNC_MAP_COUNT) {
         return ESP_ERR_INVALID_ARG;
     }
+    /* web_apply_function() is a void, no-op when actuation is not ready. Do
+     * not report a successful HIL press in that state. */
+    if (!web_actuation_ready() || web_maintenance_active()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     /* Same entry point the DCC decoder and the web UI use. */
     web_apply_function(fn, on);
     return ESP_OK;
@@ -292,13 +390,21 @@ uint8_t selftest_act_fn_sweep(uint16_t ms)
     if (ms < SELFTEST_ACT_MS_MIN || ms > SELFTEST_SWEEP_MS_MAX) {
         return 0U;
     }
+    if (!web_actuation_ready() || web_maintenance_active()) {
+        return 0U;
+    }
+    uint8_t done = 0;
     for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
+        if (!web_actuation_ready() || web_maintenance_active()) {
+            break;
+        }
         web_apply_function(fn, true);
         vTaskDelay(pdMS_TO_TICKS(ms));
         web_apply_function(fn, false);
         vTaskDelay(pdMS_TO_TICKS(20));
+        ++done;
     }
-    return SETTINGS_FUNC_MAP_COUNT;
+    return done;
 }
 
 uint8_t selftest_act_aux_sweep(uint16_t ms)

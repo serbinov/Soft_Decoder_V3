@@ -126,6 +126,8 @@ void setUp(void)
     mock_queue_send_calls = 0;
     mock_queue_send_fail = 0;
     mock_queue_send_fail_after = -1;
+    mock_sem_take_fail = 0;
+    mock_mutex_create_fail = 0;
     mock_gpio_isr_install_err = 0;
     mock_gpio_isr_add_err = 0;
     mock_task_startup_hook = startup_hook;
@@ -144,6 +146,13 @@ void setUp(void)
     s_last_packet_us = s_last_signal_packet_us = s_last_edge_us = 0;
     s_last_input_edge_us = s_init_us = 0;
     s_isr_overruns = 0;
+    s_isr_overruns_total = 0;
+    s_isr_idle_gaps = 0;
+    s_isr_glitches = 0;
+    if (s_config_mux != NULL) {
+        vSemaphoreDelete(s_config_mux);
+        s_config_mux = NULL;
+    }
 
     s_decoder_addr = 3;
     s_decoder_long_addr = false;
@@ -192,12 +201,6 @@ static void feed_packet(const uint8_t *bytes, size_t len, unsigned preamble_ones
     consume_bit(1); /* end bit -> dispatch */
 }
 
-static void feed_confirmed_packet(const uint8_t *bytes, size_t len, unsigned preamble)
-{
-    feed_packet(bytes, len, preamble);
-    feed_packet(bytes, len, preamble);
-}
-
 /* Feed a full DCC packet through the half-period pipeline: two equal
  * half-periods per bit (58 us = "1", 100 us = "0"). */
 static void feed_half_periods(const uint8_t *bytes, size_t len, unsigned preamble_ones)
@@ -223,7 +226,40 @@ static void feed_half_periods(const uint8_t *bytes, size_t len, unsigned preambl
     feed_half_period(58);
 }
 
+/* Feed one edge through the real ISR, then drain everything it queued through
+ * the same parser-side handling dcc_task uses. */
+static void feed_isr_edge(int64_t t_us)
+{
+    mock_timer_now_us = t_us;
+    dcc_isr(NULL);
+    dcc_half_t hp;
+    while (xQueueReceive(s_queue, &hp, 0) == pdTRUE) {
+        process_queued_half(hp);
+    }
+}
+
+/* Emit one DCC bit as two equal half-periods and return the final edge time. */
+static int64_t feed_isr_bit(int64_t t_us, bool one)
+{
+    uint16_t half = one ? 58U : 100U;
+    t_us += half;
+    feed_isr_edge(t_us);
+    t_us += half;
+    feed_isr_edge(t_us);
+    return t_us;
+}
+
 /* ---- tests ---- */
+
+/* G-RTOS-8: the DCC receiver/ACK worker budget is part of the safety contract. */
+static void test_dcc_task_budget_contract(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(8192U, DCC_TASK_STACK);
+    TEST_ASSERT_EQUAL_UINT32(10U, DCC_TASK_PRIO);
+    TEST_ASSERT_EQUAL_UINT32(1U, DCC_TASK_CORE);
+    TEST_ASSERT_EQUAL_UINT32(2048U, DCC_ACK_TASK_STACK);
+    TEST_ASSERT_EQUAL_UINT32(5U, DCC_ACK_TASK_PRIO);
+}
 
 static void test_half_period_classification(void)
 {
@@ -255,8 +291,44 @@ static void test_dcc_glitch_resets_parser(void)
     feed_half_period(20); /* glitch -> reset */
 
     const uint8_t packet[] = {0x03, 0xEC, 0x00, 0x2A, 0xC5};
-    feed_confirmed_packet(packet, sizeof(packet), 12);
+    feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+}
+
+/* A 30 us gap between packets is below the half-period floor. The ISR must
+ * re-reference at that edge and discard the pending half instead of folding
+ * the gap into the next half (which would turn the first preamble "1" into a
+ * false "0"). A 10-bit preamble packet after the gap must still decode. */
+static void test_dcc_isr_gap_resync_10bit_preamble(void)
+{
+    s_queue = xQueueCreate(DCC_QUEUE_LEN, sizeof(dcc_half_t));
+    TEST_ASSERT_NOT_NULL(s_queue);
+    reset_parser();
+    s_last_edge_us = 0;
+    s_isr_glitches = 0;
+
+    feed_isr_edge(1000); /* previous packet's last edge */
+    feed_isr_edge(1030); /* 30 us idle gap -> sub-minimum edge */
+    TEST_ASSERT_EQUAL_INT64(1030, s_last_edge_us);
+    TEST_ASSERT_EQUAL_UINT32(1, s_isr_glitches);
+
+    int64_t t = 1030;
+    for (int i = 0; i < 10; ++i) {
+        t = feed_isr_bit(t, true); /* minimum 10-bit preamble */
+    }
+    const uint8_t packet[] = {0x03, 0x7F, 0x7C};
+    for (size_t b = 0; b < sizeof(packet); ++b) {
+        t = feed_isr_bit(t, false); /* start bit */
+        for (int bit = 7; bit >= 0; --bit) {
+            t = feed_isr_bit(t, ((packet[b] >> bit) & 0x01U) != 0);
+        }
+    }
+    (void)feed_isr_bit(t, true); /* end bit -> dispatch */
+
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(126, g_speed);
+    TEST_ASSERT_EQUAL_UINT32(0, dcc_get_isr_overruns());
 }
 
 /* Ops-mode write byte: addr 3, CV1 = 42. MSB-first must decode correctly
@@ -264,7 +336,7 @@ static void test_dcc_glitch_resets_parser(void)
 static void test_dcc_bit_order_ops_write(void)
 {
     const uint8_t packet[] = {0x03, 0xEC, 0x00, 0x2A, 0xC5};
-    feed_confirmed_packet(packet, sizeof(packet), 12);
+    feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(1, g_cv_index);
@@ -295,7 +367,7 @@ static void test_dcc_long_address(void)
 
     const uint8_t packet[] = {0xC0, 0x0A, 0xEC, 0x00, 0x2A,
                               0xC0 ^ 0x0A ^ 0xEC ^ 0x00 ^ 0x2A};
-    feed_confirmed_packet(packet, sizeof(packet), 12);
+    feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(1, g_cv_index);
@@ -359,7 +431,7 @@ static void test_dcc_service_write_direct(void)
 {
     const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
     s_service_mode = true;
-    feed_confirmed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
@@ -374,7 +446,7 @@ static void test_dcc_service_verify_match(void)
     g_read_ok = true;
     g_read_returns = 100;
     s_service_mode = true;
-    feed_confirmed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
@@ -386,7 +458,7 @@ static void test_dcc_service_verify_no_match(void)
     g_read_ok = true;
     g_read_returns = 50;
     s_service_mode = true;
-    feed_confirmed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
@@ -400,7 +472,7 @@ static void test_dcc_service_bit_write(void)
     g_read_ok = true;
     g_read_returns = 0x00;
     s_service_mode = true;
-    feed_confirmed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
@@ -420,26 +492,51 @@ static void test_dcc_service_mode_entered_by_reset(void)
     TEST_ASSERT_FALSE(s_service_mode);
 
     const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
-    feed_confirmed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(100, g_cv_value);
 }
 
 /* Short address 124 must not be mistaken for a service write: a 128-step
- * packet for that address is also 4 bytes and starts with 0x7C. */
-static void test_dcc_short_addr_124_not_service(void)
+ * packet for that address is also 4 bytes and starts with 0x7C. The reset
+ * arms the service candidate, and the repeated speed packet must clear it. */
+static void test_dcc_short_addr_124_not_service_after_reset(void)
 {
     s_decoder_addr = 124;
     s_decoder_long_addr = false;
     s_service_mode = false;
+    s_service_candidate = false;
+    const uint8_t reset[] = {0x00, 0x00, 0x00};
+    feed_packet(reset, sizeof(reset), 22);
+    TEST_ASSERT_TRUE(s_service_candidate);
+
     /* addr 124, 128-step, forward bit 0, speed code 65. */
     const uint8_t packet[] = {124, 0x3F, 0x41, 124 ^ 0x3F ^ 0x41};
+    feed_packet(packet, sizeof(packet), 22);
+    TEST_ASSERT_FALSE(s_service_candidate);
+    TEST_ASSERT_FALSE(s_service_mode);
+    feed_packet(packet, sizeof(packet), 22);
+
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(2, g_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(64, g_speed);
+}
+
+/* Address 127 (0x7F) has the same service-instruction alias. */
+static void test_dcc_short_addr_127_not_service_after_reset(void)
+{
+    s_decoder_addr = 127;
+    s_decoder_long_addr = false;
+    s_service_mode = false;
+    const uint8_t reset[] = {0x00, 0x00, 0x00};
+    feed_packet(reset, sizeof(reset), 22);
+    const uint8_t packet[] = {127, 0x3F, 0x85, 127 ^ 0x3F ^ 0x85};
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT8(64, g_speed);
+    TEST_ASSERT_EQUAL_UINT8(4, g_speed);
 }
 
 static void test_dcc_idle_packet(void)
@@ -495,6 +592,39 @@ static void test_dcc_broadcast_unknown_instruction(void)
     feed_packet(p, sizeof(p), 12);
     TEST_ASSERT_EQUAL_INT(0, g_reset_calls);
     TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_fn_calls);
+}
+
+/* Broadcast carries no function semantics: group one must be ignored. */
+static void test_dcc_broadcast_function_ignored(void)
+{
+    const uint8_t p[] = {0x00, 0x9F, 0x9F};
+    feed_packet(p, sizeof(p), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_fn_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+}
+
+/* Broadcast must not run ops-mode CV writes (CV8 = 8 would reset all CVs). */
+static void test_dcc_broadcast_cv_write_ignored(void)
+{
+    const uint8_t p[] = {0x00, 0xEC, 0x07, 0x08, 0x00 ^ 0xEC ^ 0x07 ^ 0x08};
+    feed_packet(p, sizeof(p), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_hard_reset_calls);
+}
+
+/* 0xC0 0x00 decodes to long address zero; it must not alias broadcast and
+ * therefore must not execute even a reset instruction. */
+static void test_dcc_long_address_zero_rejected(void)
+{
+    s_decoder_addr = 0;
+    s_decoder_long_addr = true;
+    const uint8_t reset[] = {0xC0, 0x00, 0x00, 0xC0};
+    feed_packet(reset, sizeof(reset), 12);
+    const uint8_t fn[] = {0xC0, 0x00, 0x9F, 0xC0 ^ 0x00 ^ 0x9F};
+    feed_packet(fn, sizeof(fn), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_reset_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_emergency_calls);
     TEST_ASSERT_EQUAL_INT(0, g_fn_calls);
 }
 
@@ -682,6 +812,25 @@ static void test_dcc_reload_config_consist_reverse(void)
     TEST_ASSERT_FALSE(g_forward); /* direction inverted by the consist */
 }
 
+/* Concurrent reloads are serialised: if the mutex cannot be taken within the
+ * bounded timeout, the caller must not publish a half-read (stale) config. */
+static void test_dcc_reload_config_serialized(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, dcc_init());
+    TEST_ASSERT_NOT_NULL(s_config_mux);
+    g_cv_table_ok = true;
+    g_cv_table[1] = 9;
+    g_cv_table[29] = 0x02;
+
+    mock_sem_take_fail = 1;
+    dcc_reload_config();
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_EQUAL_UINT16(3, s_decoder_addr); /* unchanged */
+
+    dcc_reload_config();
+    TEST_ASSERT_EQUAL_UINT16(9, s_decoder_addr);
+}
+
 /* ---- consist set directly ---- */
 
 static void test_dcc_consist_match_and_reverse(void)
@@ -730,7 +879,7 @@ static void test_dcc_ops_bit_write(void)
     /* instr 0xE8 = 1110_10_00: cc=2 bit-manip, CV high bits 0, CV5.
      * data 0xF9: D=1 (write), value=1, bit=1. */
     const uint8_t packet[] = {0x03, 0xE8, 0x04, 0xF9, 0x03 ^ 0xE8 ^ 0x04 ^ 0xF9};
-    feed_confirmed_packet(packet, sizeof(packet), 12);
+    feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(5, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0x02, g_cv_value);
@@ -752,7 +901,7 @@ static void test_dcc_ops_bit_verify_no_write(void)
 static void test_dcc_ops_write_high_cv(void)
 {
     const uint8_t packet[] = {0x03, 0xED, 0x2B, 0x55, 0x03 ^ 0xED ^ 0x2B ^ 0x55};
-    feed_confirmed_packet(packet, sizeof(packet), 12);
+    feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(300, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0x55, g_cv_value);
@@ -825,7 +974,7 @@ static void test_dcc_service_bit_verify(void)
     /* 0x78 0x03 -> CV4; data 0x0A = value=1 bit=2, D=0 -> verify. */
     const uint8_t packet[] = {0x78, 0x03, 0xEA, 0x78 ^ 0x03 ^ 0xEA};
     s_service_mode = true;
-    feed_confirmed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
 
@@ -867,7 +1016,7 @@ static void test_dcc_oversized_packet_resets(void)
         }
     }
     const uint8_t packet[] = {0x03, 0xEC, 0x00, 0x2A, 0xC5};
-    feed_confirmed_packet(packet, sizeof(packet), 12);
+    feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
 }
 
@@ -980,7 +1129,7 @@ static void test_dcc_service_bit_manip_clear(void)
     /* Service bit manipulation: write 0 to bit 0 of CV4 -> clear the bit. */
     const uint8_t pkt[] = { 0x78, 0x03, 0xF0, 0x78 ^ 0x03 ^ 0xF0 };
     s_service_mode = true;
-    feed_confirmed_packet(pkt, sizeof(pkt), 20);
+    feed_packet(pkt, sizeof(pkt), 20);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(0xFE, g_cv_value);
@@ -992,7 +1141,7 @@ static void test_dcc_ops_bit_manip_clear(void)
     g_read_ok = true;
     g_read_returns = 0xFF;
     const uint8_t pkt[] = { 0x03, 0xE8, 0x03, 0xF0, 0x03 ^ 0xE8 ^ 0x03 ^ 0xF0 };
-    feed_confirmed_packet(pkt, sizeof(pkt), 12);
+    feed_packet(pkt, sizeof(pkt), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT8(0xFE, g_cv_value);
 }
@@ -1039,17 +1188,26 @@ static void test_dcc_isr_paths(void)
     dcc_isr(NULL);
     TEST_ASSERT_EQUAL_INT64(1000, s_last_edge_us);
 
-    /* dt > MAX -> re-acquire. */
+    /* dt > MAX (normal inter-packet idle) -> re-acquire, but this is not a
+     * queue overrun. */
+    s_isr_overruns = 0;
+    s_isr_idle_gaps = 0;
     s_last_edge_us = 1000;
     mock_timer_now_us = 1000 + DCC_MAX_EDGE_GAP_US + 1;
     dcc_isr(NULL);
     TEST_ASSERT_EQUAL_INT64(mock_timer_now_us, s_last_edge_us);
+    TEST_ASSERT_EQUAL_UINT32(1, s_isr_idle_gaps);
+    TEST_ASSERT_EQUAL_UINT32(0, s_isr_overruns);
 
-    /* dt < MIN -> ignore the edge, keep the reference time. */
+    /* dt < MIN -> re-reference at this edge (do not merge the gap into the
+     * next half) and count it as a glitch resync, not an overrun. */
+    s_isr_glitches = 0;
     s_last_edge_us = 5000;
     mock_timer_now_us = 5000 + (DCC_MIN_HALF_PERIOD_US - 1);
     dcc_isr(NULL);
-    TEST_ASSERT_EQUAL_INT64(5000, s_last_edge_us);
+    TEST_ASSERT_EQUAL_INT64(mock_timer_now_us, s_last_edge_us);
+    TEST_ASSERT_EQUAL_UINT32(1, s_isr_glitches);
+    TEST_ASSERT_EQUAL_UINT32(0, s_isr_overruns);
 
     /* Valid edge -> enqueued. */
     s_last_edge_us = 100;
@@ -1079,6 +1237,67 @@ static void test_dcc_task_processes_queue(void)
     s_isr_overruns = 1; /* forces the reset-on-overrun path */
     dcc_task(NULL);
     s_dcc_iter_cap = 0;
+}
+
+/* An idle gap between packets re-frames the parser but must not appear as a
+ * receive-queue overrun in dcc_get_isr_overruns() (/api/dcc/status). */
+static void test_dcc_idle_gap_not_counted_as_overrun(void)
+{
+    s_queue = xQueueCreate(DCC_QUEUE_LEN, sizeof(dcc_half_t));
+    TEST_ASSERT_NOT_NULL(s_queue);
+    s_last_edge_us = 100;
+    mock_timer_now_us = 100 + DCC_MAX_EDGE_GAP_US + 1;
+    dcc_isr(NULL);
+    TEST_ASSERT_EQUAL_UINT32(0, s_isr_overruns);
+    TEST_ASSERT_EQUAL_UINT32(1, s_isr_idle_gaps);
+
+    dcc_half_t hp = { .dt_us = 58 };
+    TEST_ASSERT_TRUE(xQueueSend(s_queue, &hp, 0) == pdTRUE);
+    s_dcc_iter_cap = 1;
+    dcc_task(NULL);
+    s_dcc_iter_cap = 0;
+    TEST_ASSERT_EQUAL_UINT32(0, dcc_get_isr_overruns());
+    TEST_ASSERT_EQUAL_UINT32(0, s_isr_idle_gaps);
+}
+
+/* G-TEST-3: the host queue mock must expose the requested depth. DCC uses 256
+ * slots, so filling exactly to 256 must succeed and the first overrun must
+ * appear only on sample 257. Draining resets the boundary for reuse. */
+static void test_queue_mock_honors_dcc_queue_len_boundary(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(256, (uint32_t)DCC_QUEUE_LEN);
+    s_queue = xQueueCreate(DCC_QUEUE_LEN, sizeof(dcc_half_t));
+    TEST_ASSERT_NOT_NULL(s_queue);
+    s_last_edge_us = 0;
+    s_isr_overruns = 0;
+    s_isr_overruns_total = 0;
+    mock_timer_now_us = 1000;
+    dcc_isr(NULL); /* reference edge only, nothing queued */
+
+    for (uint32_t i = 0; i < (uint32_t)DCC_QUEUE_LEN; ++i) {
+        mock_timer_now_us += 58;
+        dcc_isr(NULL);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, s_isr_overruns);
+
+    mock_timer_now_us += 58;
+    dcc_isr(NULL); /* slot 257: the real boundary */
+    TEST_ASSERT_EQUAL_UINT32(1, s_isr_overruns);
+
+    uint32_t drained = 0;
+    dcc_half_t hp;
+    while (xQueueReceive(s_queue, &hp, 0) == pdTRUE) {
+        ++drained;
+    }
+    TEST_ASSERT_EQUAL_UINT32(DCC_QUEUE_LEN, drained);
+
+    mock_timer_now_us += 58;
+    dcc_isr(NULL); /* queue was reset by draining */
+    TEST_ASSERT_EQUAL_UINT32(1, s_isr_overruns);
+    TEST_ASSERT_EQUAL(pdTRUE, xQueueReceive(s_queue, &hp, 0));
+
+    vQueueDelete(s_queue);
+    s_queue = NULL;
 }
 
 static void test_dcc_task_isr_install_failure(void)
@@ -1202,24 +1421,18 @@ static void test_function_group2_f5_f8(void)
     TEST_ASSERT_EQUAL_INT(4, g_fn_calls);
 }
 
-static void test_ops_confirmation_invalidation(void)
+/* A checksum-valid ops write is applied on the first packet. An immediate
+ * retransmission is still idempotent (no second write); any other packet ends
+ * the run, so the next occurrence applies again. */
+static void test_ops_write_first_packet_and_idempotent_repeat(void)
 {
     const uint8_t write[] = {0x03,0xEC,0x00,0x2A,0xC5};
-    const uint8_t other[] = {0x04,0x60,0x64};
     const uint8_t own[] = {0x03,0x60,0x63};
-    const uint8_t broadcast[] = {0x00,0x60,0x60};
-    feed_packet(write, sizeof(write), 12);
-    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
-    feed_packet(other, sizeof(other), 12);
     feed_packet(write, sizeof(write), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(own, sizeof(own), 12);
-    feed_packet(write, sizeof(write), 12);
-    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
-    feed_packet(broadcast, sizeof(broadcast), 12);
-    feed_packet(write, sizeof(write), 12);
-    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(write, sizeof(write), 12);
     TEST_ASSERT_EQUAL_INT(2, g_cv_write_calls);
 }
@@ -1232,39 +1445,36 @@ static void test_service_entry_deadline_and_other_address_exit(void)
     feed_packet(reset, sizeof(reset), 22);
     feed_packet(write, sizeof(write), 22);
     TEST_ASSERT_TRUE(s_service_mode);
-    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(other, sizeof(other), 12);
     TEST_ASSERT_FALSE(s_service_mode);
-    feed_confirmed_packet(write, sizeof(write), 22);
-    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
-    feed_packet(reset, sizeof(reset), 22);
-    mock_timer_now_us += 20000;
-    feed_confirmed_packet(write, sizeof(write), 22);
-    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
-    feed_packet(reset, sizeof(reset), 22);
-    feed_packet(write, sizeof(write), 22);
-    const uint8_t reset_again[] = {0,0,0};
-    feed_packet(reset_again, sizeof(reset_again), 22);
-    feed_packet(write, sizeof(write), 22);
-    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     feed_packet(write, sizeof(write), 22);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    feed_packet(reset, sizeof(reset), 22);
+    mock_timer_now_us += 20000;
+    feed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    feed_packet(reset, sizeof(reset), 22);
+    feed_packet(write, sizeof(write), 22);
+    TEST_ASSERT_EQUAL_INT(2, g_cv_write_calls);
 }
 
-static void test_service_failure_and_verify_confirmation(void)
+/* The first checksum-valid verify (and write) must ACK; an immediate retrans-
+ * mission is ignored, preserving idempotence. */
+static void test_service_failure_and_verify_first_packet(void)
 {
     const uint8_t reset[] = {0,0,0};
     const uint8_t write[] = {0x7C,0x02,0x64,0x1A};
     const uint8_t verify[] = {0x74,0x02,0x64,0x12};
     feed_packet(reset, sizeof(reset), 22);
     g_write_result = ESP_FAIL;
-    feed_confirmed_packet(write, sizeof(write), 22);
+    feed_packet(write, sizeof(write), 22);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
     g_read_ok = true;
     g_read_returns = 100;
     feed_packet(verify, sizeof(verify), 22);
-    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
     feed_packet(verify, sizeof(verify), 22);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
 }
@@ -1272,12 +1482,12 @@ static void test_service_failure_and_verify_confirmation(void)
 static void test_unsupported_xpom_and_service_lengths(void)
 {
     const uint8_t xpom[] = {0x03,0xEC,0x01,0x02,0x04,0x2A,0xC2};
-    feed_confirmed_packet(xpom, sizeof(xpom), 12);
+    feed_packet(xpom, sizeof(xpom), 12);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     const uint8_t reset[] = {0,0,0};
     feed_packet(reset, sizeof(reset), 22);
     const uint8_t extra[] = {0x7C,0x01,0x02,0x03,0x7C};
-    feed_confirmed_packet(extra, sizeof(extra), 22);
+    feed_packet(extra, sizeof(extra), 22);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
 }
 
@@ -1302,7 +1512,7 @@ static void test_consist_speed_functions_and_cv_routing(void)
     TEST_ASSERT_TRUE(g_fn_state[9]);
     TEST_ASSERT_FALSE(g_fn_state[10]);
     const uint8_t write[] = {0x02,0xEC,0x00,0x2A,0xC4};
-    feed_confirmed_packet(write, sizeof(write), 12);
+    feed_packet(write, sizeof(write), 12);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     const uint8_t short_cv[] = {0x02,0xF2,0x10,0xE0};
     feed_packet(short_cv, sizeof(short_cv), 12);
@@ -1406,14 +1616,15 @@ static void test_init_start_queue_failure(void)
     TEST_ASSERT_NULL(s_start_queue);
 }
 
-static void test_control_reenable_invalidates_pending_write(void)
+static void test_control_gate_blocks_write_until_reenabled(void)
 {
     const uint8_t write[] = {0x03,0xEC,0x00,0x2A,0xC5};
-    feed_packet(write, sizeof(write), 12);
     dcc_set_control_enabled(false);
-    dcc_set_control_enabled(true); /* No intervening received packet. */
     feed_packet(write, sizeof(write), 12);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    dcc_set_control_enabled(true);
+    feed_packet(write, sizeof(write), 12);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(write, sizeof(write), 12);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
 }
@@ -1434,8 +1645,10 @@ static void test_consist_address_alias_keeps_baseline_functions(void)
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_dcc_task_budget_contract);
     RUN_TEST(test_half_period_classification);
     RUN_TEST(test_dcc_glitch_resets_parser);
+    RUN_TEST(test_dcc_isr_gap_resync_10bit_preamble);
     RUN_TEST(test_dcc_bit_order_ops_write);
     RUN_TEST(test_dcc_bad_checksum_rejected);
     RUN_TEST(test_dcc_packet_not_for_us_filtered);
@@ -1455,6 +1668,7 @@ int main(void)
     RUN_TEST(test_dcc_reload_config_14step);
     RUN_TEST(test_dcc_reload_config_long_address);
     RUN_TEST(test_dcc_reload_config_consist_reverse);
+    RUN_TEST(test_dcc_reload_config_serialized);
     RUN_TEST(test_dcc_consist_match_and_reverse);
     RUN_TEST(test_dcc_ops_short_form_cv23);
     RUN_TEST(test_dcc_ops_short_form_cv24);
@@ -1478,12 +1692,16 @@ int main(void)
     RUN_TEST(test_dcc_service_verify_no_match);
     RUN_TEST(test_dcc_service_bit_write);
     RUN_TEST(test_dcc_service_mode_entered_by_reset);
-    RUN_TEST(test_dcc_short_addr_124_not_service);
+    RUN_TEST(test_dcc_short_addr_124_not_service_after_reset);
+    RUN_TEST(test_dcc_short_addr_127_not_service_after_reset);
     RUN_TEST(test_dcc_idle_packet);
     RUN_TEST(test_dcc_broadcast_reset);
     RUN_TEST(test_dcc_broadcast_reset_len3_only);
     RUN_TEST(test_dcc_broadcast_unknown_instruction);
     RUN_TEST(test_dcc_broadcast_estop);
+    RUN_TEST(test_dcc_broadcast_function_ignored);
+    RUN_TEST(test_dcc_broadcast_cv_write_ignored);
+    RUN_TEST(test_dcc_long_address_zero_rejected);
     RUN_TEST(test_dcc_read_cv_null_callback);
     RUN_TEST(test_dcc_service_short_packet);
     RUN_TEST(test_dcc_service_bit_manip_clear);
@@ -1493,6 +1711,8 @@ int main(void)
     RUN_TEST(test_dcc_feed_half_period_kind_change);
     RUN_TEST(test_dcc_isr_paths);
     RUN_TEST(test_dcc_task_processes_queue);
+    RUN_TEST(test_dcc_idle_gap_not_counted_as_overrun);
+    RUN_TEST(test_queue_mock_honors_dcc_queue_len_boundary);
     RUN_TEST(test_dcc_task_isr_install_failure);
     RUN_TEST(test_dcc_init_failures);
     RUN_TEST(test_dcc_init_ack_queue_fail);
@@ -1502,9 +1722,9 @@ int main(void)
     RUN_TEST(test_address_partitions_and_signal_clock);
     RUN_TEST(test_stop_emergency_vectors_all_modes);
     RUN_TEST(test_function_group2_f5_f8);
-    RUN_TEST(test_ops_confirmation_invalidation);
+    RUN_TEST(test_ops_write_first_packet_and_idempotent_repeat);
     RUN_TEST(test_service_entry_deadline_and_other_address_exit);
-    RUN_TEST(test_service_failure_and_verify_confirmation);
+    RUN_TEST(test_service_failure_and_verify_first_packet);
     RUN_TEST(test_unsupported_xpom_and_service_lengths);
     RUN_TEST(test_consist_speed_functions_and_cv_routing);
     RUN_TEST(test_direction_inversion_and_control_gate);
@@ -1513,7 +1733,7 @@ int main(void)
     RUN_TEST(test_signal_static_uses_all_edges_and_boot_deadline);
     RUN_TEST(test_init_handler_failure_and_existing_service_rejected);
     RUN_TEST(test_init_start_queue_failure);
-    RUN_TEST(test_control_reenable_invalidates_pending_write);
+    RUN_TEST(test_control_gate_blocks_write_until_reenabled);
     RUN_TEST(test_consist_address_alias_keeps_baseline_functions);
     return UNITY_END();
 }

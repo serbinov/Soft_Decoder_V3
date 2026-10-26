@@ -21,7 +21,10 @@ if not "%PORT%"=="" (
     goto :port_ok
 )
 
-set "PORT=COM3"
+echo [ERROR] ESP32-S3 (VID_303A/PID_1001) not found.
+echo         Specify the COM port: flash_firmware_and_sounds.bat COM7 [erase]
+pause
+exit /b 1
 :port_ok
 
 echo ================================================================
@@ -53,9 +56,12 @@ powershell -ExecutionPolicy Bypass -File "%~dp0provision_sounds.ps1" -Port %PORT
 if errorlevel 1 (
     echo.
     echo [FAIL] Sound upload failed.
+    pause
+    exit /b 1
 ) else (
     echo.
     echo [OK] Sounds uploaded. The decoder restarts with the sounds ready.
 )
 pause
 endlocal
+exit /b 0

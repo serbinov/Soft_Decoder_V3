@@ -114,9 +114,9 @@ through `audio_voice_set_volume_live` and restored when effects end. A state's
 
 ## 5. Limits
 
-`states` 128 (`SG_MAX_STATES`, up to 96 sounding + 64 silent), `transitions` 250,
+`states` 192 (`SG_MAX_STATES`, at most 144 sounding + 96 silent), `transitions` 250,
 `effects` 32 channels (19 can sound simultaneously; one voice is reserved for
-the engine), `assets` 64, `variables` 16, JSON body ≤ 128 KiB.
+the engine), `assets` 128, `variables` 16, JSON body ≤ 128 KiB.
 
 ---
 

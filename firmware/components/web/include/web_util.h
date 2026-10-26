@@ -41,8 +41,12 @@ void sanitize_name(const char *in, char *out, size_t out_len);
 
 /* CSRF guard for mutating requests. Returns true when neither Origin nor
  * Referer is present (non-browser clients), or when the present header's
- * scheme://authority matches Host (case-insensitive, default ports
- * normalised). Origin: null and malformed values are rejected. */
+ * scheme://authority matches Host (case-insensitive).
+ *
+ * The device serves plain HTTP on port 80 and nothing else, so the effective
+ * device origin is http:<host>:80. An https:// Origin/Referer (even against a
+ * matching bare Host header) and any non-80 explicit port are rejected: the
+ * client Host header alone must not be allowed to imply TLS. */
 bool web_util_same_origin(const char *origin, const char *referer, const char *host);
 
 /* Output mask (SETTINGS_FUNC_OUT_*) a function must drive given its mapping,

@@ -12,6 +12,13 @@ from pathlib import Path
 
 FLASH_SIZE = 4 * 1024 * 1024
 SLOT_SIZE = 0x1E0000
+ASP_MAGIC = b"AURASP01"
+ASP_PW_MAGIC = b"AURAPW01"
+ASP_PW2_MAGIC = b"AURAPW02"
+ASP_MAX_SIZE = 15 * 1024 * 1024
+ASP_MAX_FILES = 400
+ASP_SCHEME_NAME = "__aura_scheme__"
+ASP_SCHEME_MAX = 131072
 FLASH_FILES = {
     "bootloader.bin": (0x0, "bootloader/bootloader.bin", "bootloader"),
     "partitions.bin": (0x8000, "partition_table/partition-table.bin", "partitions"),
@@ -151,6 +158,67 @@ def wav_info(data):
             "Invalid PCM frame alignment")
 
 
+def asp_info(data, legacy=False):
+    """Validate an AURA Sound Pack (.asp) that is shipped with a release."""
+    require(16 <= len(data) <= ASP_MAX_SIZE, "Invalid AURA sound pack size")
+    if data.startswith(ASP_PW_MAGIC):
+        # AURAPW01 (XOR + 32-bit tag) is import-only legacy crypto. A release
+        # must not publish it silently; an explicit --legacy opt-in is required.
+        require(legacy, "Legacy AURAPW01 sound pack rejected; pass --legacy to inspect it")
+        require(len(data) >= 24, "Corrupted legacy AURAPW01 sound pack")
+        return dict(role="sound_pack", format="AURAPW01", encrypted=True, legacy=True,
+                    size=len(data), sha256=sha256(data))
+    if data.startswith(ASP_PW2_MAGIC):
+        require(len(data) >= 44 + 32 + 16, "Corrupted AURAPW02 sound pack")
+        version, kdf, cipher_id, mac_id = data[8], data[9], data[10], data[11]
+        require((version, kdf, cipher_id, mac_id) == (2, 2, 1, 1),
+                "Unsupported AURAPW02 header")
+        log_n, r, p = data[12], data[13], data[14]
+        require(12 <= log_n <= 14 and r == 8 and 1 <= p <= 2,
+                "Invalid AURAPW02 KDF parameters")
+        require(128 * (1 << log_n) * r <= 32 * 1024 * 1024,
+                "AURAPW02 KDF exceeds the decoder memory limit")
+        return dict(role="sound_pack", format="AURAPW02", encrypted=True, legacy=False,
+                    size=len(data), sha256=sha256(data))
+    require(data[:8] == ASP_MAGIC, "Not an AURA sound pack")
+    version, count, data_off = struct.unpack_from("<HHI", data, 8)
+    require(version == 1, "Unsupported AURA sound pack version")
+    require(1 <= count <= ASP_MAX_FILES, "Invalid AURA sound pack entry count")
+    require(16 <= data_off <= len(data), "Invalid AURA sound pack data offset")
+    pos, running, names = 16, data_off, set()
+    for _ in range(count):
+        require(pos + 16 <= data_off, "Truncated AURA sound pack index")
+        name_len, volume, channels, bits, rate, offset, length = struct.unpack_from("<BBBBIII", data, pos)
+        pos += 16
+        require(1 <= name_len <= 63 and pos + name_len <= data_off,
+                "Invalid AURA sound pack entry name")
+        try:
+            name = data[pos:pos + name_len].decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("Invalid UTF-8 AURA sound pack name")
+        require("\0" not in name and "/" not in name and "\\" not in name and ".." not in name,
+                "Unsafe AURA sound pack name")
+        require(name not in names, "Duplicate AURA sound pack name")
+        names.add(name)
+        pos += name_len
+        require(volume <= 100, "Invalid AURA sound pack volume")
+        require(bits in (0, 4, 16), "Unsupported AURA sound pack encoding")
+        if bits == 0:
+            require(name == ASP_SCHEME_NAME and channels == 0 and rate == 0 and
+                    0 < length <= ASP_SCHEME_MAX,
+                    "Invalid AURA sound pack scheme entry")
+        else:
+            require(channels in (1, 2) and 1 <= rate <= 192000 and length > 0,
+                    "Invalid AURA sound pack audio entry")
+        require(offset == running and length <= len(data) - running,
+                "Invalid AURA sound pack payload offsets")
+        running += length
+    require(pos == data_off, "AURA sound pack index length mismatch")
+    require(running == len(data), "Trailing AURA sound pack bytes")
+    return dict(role="sound_pack", format="AURASP01", encrypted=False, legacy=False,
+                size=len(data), sha256=sha256(data), files=count)
+
+
 def container_info(data):
     require(len(data) <= 8 * 1024 * 1024 and len(data) >= 16, "Invalid AURAOTA2 size")
     length, count = struct.unpack_from("<II", data, 8)
@@ -184,8 +252,10 @@ def container_info(data):
                 application_sha256=app["sha256"], files=count)
 
 
-def inspect(path):
+def inspect(path, legacy=False):
     data = path.read_bytes()
+    if data.startswith((ASP_MAGIC, ASP_PW_MAGIC, ASP_PW2_MAGIC)):
+        return asp_info(data, legacy)
     if data.startswith(b"AURAOTA2"):
         return container_info(data)
     if data[:1] == b"\xe9":
@@ -195,7 +265,7 @@ def inspect(path):
     if path.name == "ota_data_initial.bin":
         require(data == b"\xff" * 0x2000, "Initial OTA data must be 8192 erased bytes")
         return dict(role="otadata", size=len(data), sha256=sha256(data))
-    raise ValueError("Unknown BIN format")
+    raise ValueError("Unknown BIN/ASP format")
 
 
 def atomic_write(path, data):
@@ -241,6 +311,13 @@ def publish(args):
         name = f"ADDITIPUS_AURA-X_v{version}{suffix}"
         payloads[release / name] = app
         manifest["files"].append(dict(path=name, offset=None, **image_info(app)))
+    # Sound packs are deliverables too: publish the hashes of every pack that is
+    # already present, so later verification notices tampering or truncation.
+    for path in sorted(release.glob("*.asp")):
+        data = path.read_bytes()
+        info = asp_info(data, legacy=getattr(args, "legacy", False))
+        payloads[path] = data
+        manifest["files"].append(dict(path=path.name, offset=None, **info))
     manifest_path = release / "manifest.json"
     # Invalidate the previous publication marker before updating any fixed-name file.
     if manifest_path.exists():
@@ -249,11 +326,54 @@ def publish(args):
         atomic_write(path, data)
         require(path.read_bytes() == data, f"Publication copy mismatch: {path}")
     atomic_write(manifest_path, (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+    checksums = {path.relative_to(release).as_posix() for path in payloads}
+    checksums.add("manifest.json")
+    write_checksums(release, checksums)
     verify(args)
+
+
+def write_checksums(release, relative_paths):
+    lines = []
+    for relative in sorted(relative_paths):
+        path = release / relative
+        lines.append(f"{sha256(path.read_bytes())}  {relative}")
+    atomic_write(release / "SHA256SUMS.txt", ("\n".join(lines) + "\n").encode("utf-8"))
+
+
+def verify_checksums(release, expected):
+    path = release / "SHA256SUMS.txt"
+    if not path.is_file():
+        return []
+    errors, covered = [], set()
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            require(len(parts) == 2, "Malformed SHA256SUMS.txt line")
+            digest, name = parts[0].lower(), parts[1].strip().lstrip("*")
+            require(re.fullmatch(r"[0-9a-f]{64}", digest), "Malformed SHA256SUMS.txt digest")
+            target = (release / name).resolve()
+            try:
+                target.relative_to(release)
+            except ValueError:
+                raise ValueError(f"Checksum path escapes the release directory: {name}")
+            require(target.is_file(), f"Checksum file is missing: {name}")
+            require(sha256(target.read_bytes()) == digest, f"Checksum mismatch: {name}")
+            covered.add(name)
+        require(covered, "SHA256SUMS.txt is empty")
+        missing = set(expected) - covered
+        require(not missing, "SHA256SUMS.txt does not cover: " + ", ".join(sorted(missing)))
+        print(f"OK SHA256SUMS.txt: {len(covered)} files")
+    except (ValueError, OSError, UnicodeError) as error:
+        errors.append(f"SHA256SUMS.txt: {error}")
+    return errors
 
 
 def verify(args):
     release = args.release.resolve()
+    legacy = getattr(args, "legacy", False)
     manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
     require(manifest["schema"] == 1, "Unsupported release manifest")
     require(manifest["chip"] == "esp32s3" and manifest["flash_size"] == FLASH_SIZE, "Wrong release target")
@@ -265,33 +385,76 @@ def verify(args):
         require(record is not None and record["offset"] == offset and record["role"] == role,
                 f"Manifest flash plan mismatch: {name}")
     app_hash = expected["flash_download_tool/firmware.bin"]["sha256"]
-    for path in sorted(release.rglob("*.bin")):
-        relative = path.relative_to(release).as_posix()
-        seen.add(relative)
+
+    def parse(path):
+        return inspect(path, legacy) if path.suffix.lower() in (".bin", ".asp") else None
+
+    def describe(info):
+        text = f"{info['role']}, {info['size']} bytes"
+        if "version" in info:
+            text += f", version {info['version']}"
+        if info.get("format"):
+            text += f", {info['format']}"
+        return text
+
+    # Every manifest entry is a deliverable: verify its bytes and, for BIN/ASP
+    # files, its internal structure as well.
+    for relative in sorted(expected):
+        record = expected[relative]
+        path = release / relative
         try:
-            info = inspect(path)
-            record = expected.get(relative)
-            if record is not None:
-                require(info["sha256"] == record["sha256"] and info["size"] == record["size"], "Manifest hash/size mismatch")
-                require(info["role"] == record["role"], "Manifest role mismatch")
+            require(path.is_file(), "missing release file")
+            data = path.read_bytes()
+            require(len(data) == record["size"], "manifest size mismatch")
+            require(sha256(data) == record["sha256"], "manifest hash mismatch")
+            info = parse(path)
+            if info is not None:
+                require(info["role"] == record["role"], "manifest role mismatch")
+                if info.get("legacy"):
+                    print(f"WARNING: {relative} uses legacy AURAPW01 encryption", file=sys.stderr)
                 if info["role"] in ("application", "AURAOTA2"):
-                    require(info["version"] == manifest["version"], "Manifest/application version mismatch")
-            elif info["role"] in ("application", "AURAOTA2"):
-                match = re.search(r"_v(.+?)(?:_OTA|_with_sounds)?\.bin$", path.name)
-                require(match is not None and match[1] == info["version"], "Historical filename/version mismatch")
-                if info["version"] == manifest["version"]:
-                    embedded = info.get("application_sha256", info["sha256"])
-                    require(embedded == app_hash, "Same-version optional BIN contains a stale application")
-            else:
-                raise ValueError("Unlisted binary cannot be selected for flashing")
-            status = "OK" if record is not None else ("OPTIONAL" if info.get("version") == manifest["version"] else "HISTORICAL")
-            print(f"{status} {relative}: {info['role']}, {info['size']} bytes"
-                  + (f", version {info['version']}" if 'version' in info else ""))
+                    require(info["version"] == manifest["version"], "manifest/application version mismatch")
+                if info["role"] == "AURAOTA2":
+                    require(info["application_sha256"] == app_hash,
+                            "combined OTA does not contain the published application")
+            seen.add(relative)
+            print(f"OK {relative}: " + (describe(info) if info else record["role"]))
         except (ValueError, UnicodeError, struct.error) as error:
             errors.append(f"{relative}: {error}")
-    errors.extend(f"Missing release binary: {name}" for name in expected.keys() - seen)
+
+    # Optional binaries/packs in the release directory are validated too so an
+    # unlisted but stale artifact cannot be selected for flashing.
+    candidates = sorted(release.rglob("*.bin")) + sorted(release.rglob("*.asp"))
+    for path in candidates:
+        relative = path.relative_to(release).as_posix()
+        if relative in expected:
+            continue
+        try:
+            info = inspect(path, legacy)
+            if info["role"] in ("application", "AURAOTA2"):
+                match = re.search(r"_v(.+?)(?:_OTA|_with_sounds)?\.bin$", path.name)
+                require(match is not None and match[1] == info["version"],
+                        "Historical filename/version mismatch")
+                if info["version"] == manifest["version"]:
+                    embedded = info.get("application_sha256", info["sha256"])
+                    require(embedded == app_hash,
+                            "Same-version optional BIN contains a stale application")
+                status = "OPTIONAL" if info["version"] == manifest["version"] else "HISTORICAL"
+            elif info["role"] == "sound_pack":
+                status = "OPTIONAL"
+                if info.get("legacy"):
+                    print(f"WARNING: {relative} uses legacy AURAPW01 encryption", file=sys.stderr)
+            else:
+                raise ValueError("Unlisted binary cannot be selected for flashing")
+            seen.add(relative)
+            print(f"{status} {relative}: {describe(info)}")
+        except (ValueError, UnicodeError, struct.error) as error:
+            errors.append(f"{relative}: {error}")
+
+    errors.extend(f"Missing release file: {name}" for name in expected.keys() - seen)
+    errors.extend(verify_checksums(release, expected))
     require(not errors, "\n".join(errors))
-    print(f"Verified all {len(seen)} release BIN files; current version {manifest['version']}.")
+    print(f"Verified all {len(seen)} release BIN/ASP files; current version {manifest['version']}.")
 
 
 def main():
@@ -302,11 +465,13 @@ def main():
     parser.add_argument("--build", type=Path)
     parser.add_argument("--version", type=Path)
     parser.add_argument("--partitions", type=Path)
+    parser.add_argument("--legacy", action="store_true",
+                        help="allow legacy AURAPW01 sound packs (import-only, insecure)")
     args = parser.parse_args()
     try:
         if args.command == "inspect":
             require(args.input is not None, "Inspect needs --input")
-            print(json.dumps(inspect(args.input), ensure_ascii=False))
+            print(json.dumps(inspect(args.input, args.legacy), ensure_ascii=False))
         elif args.command == "publish":
             require(args.build is not None and args.version is not None and args.partitions is not None,
                     "Publish needs --build, --version and --partitions")

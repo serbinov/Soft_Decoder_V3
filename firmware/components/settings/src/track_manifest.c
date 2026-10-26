@@ -69,6 +69,14 @@ bool settings_manifest_write_allowed(void)
     return allowed;
 }
 
+bool settings_manifest_restore_in_progress(void)
+{
+    portENTER_CRITICAL(&s_manifest_mux);
+    bool loading = s_manifest_loading;
+    portEXIT_CRITICAL(&s_manifest_mux);
+    return loading;
+}
+
 static esp_err_t manifest_begin(bool loading)
 {
     TaskHandle_t caller = xTaskGetCurrentTaskHandle();
@@ -223,6 +231,13 @@ static esp_err_t manifest_sync_owned(void)
 
 esp_err_t settings_manifest_sync(void)
 {
+    /* Saves already sync the manifest. A caller that follows a successful save
+     * with another sync must not rewrite the file a second time. */
+    settings_flush_status_t status;
+    settings_flush_status(&status);
+    if (!status.manifest_pending) {
+        return ESP_OK;
+    }
     esp_err_t err = manifest_begin(false);
     if (err == ESP_ERR_NOT_FOUND) return ESP_OK; /* same-task restore setter */
     if (err != ESP_OK) { settings_manifest_result(err); return err; }
@@ -241,22 +256,37 @@ esp_err_t settings_manifest_sync(void)
 
 /* Remove the on-storage metadata backup so a factory reset is not undone by
  * boot recovery (which would otherwise restore names/categories/function map
- * from the file that survives the NVS erase). A missing file or unmounted
- * storage is a no-op success. */
-esp_err_t settings_manifest_remove(void)
+ * from the file that survives the NVS erase). The caller must already hold the
+ * metadata lock (factory reset holds it across the NVS erase too, so no setter
+ * can recreate the file in between). A missing file or unmounted storage is a
+ * no-op success. */
+esp_err_t settings_manifest_remove_locked(void)
 {
     esp_err_t err = manifest_begin(false);
     if (err == ESP_ERR_NOT_FOUND) return ESP_OK;      /* same-task restore setter */
     if (err == ESP_ERR_INVALID_STATE) return ESP_OK;  /* storage unavailable: nothing to clear */
     if (err != ESP_OK) return err;
-    err = settings_metadata_lock();
-    if (err == ESP_OK) {
-        if (remove(MANIFEST_PATH) != 0 && errno != ENOENT) err = ESP_FAIL;
-        (void)remove(MANIFEST_PATH ".tmp");
-        settings_manifest_result(ESP_OK);
-        settings_metadata_unlock();
+    esp_err_t rm = ESP_OK;
+    if (remove(MANIFEST_PATH) != 0 && errno != ENOENT) {
+        rm = ESP_FAIL;
+    }
+    if (remove(MANIFEST_PATH ".tmp") != 0 && errno != ENOENT && rm == ESP_OK) {
+        rm = ESP_FAIL;
     }
     manifest_end();
+    return rm;
+}
+
+esp_err_t settings_manifest_remove(void)
+{
+    esp_err_t err = settings_metadata_lock();
+    if (err != ESP_OK) {
+        settings_manifest_result(err);
+        return err;
+    }
+    err = settings_manifest_remove_locked();
+    settings_manifest_result(err);
+    settings_metadata_unlock();
     return err;
 }
 
@@ -264,7 +294,14 @@ static esp_err_t manifest_load_owned(void)
 {
     FILE *f = fopen(MANIFEST_PATH, "r");
     if (f == NULL) {
-        return ESP_ERR_NOT_FOUND;
+        /* Only a genuinely absent manifest means "rebuild from WAVs". A
+         * transient storage/FS error must stay retryable instead of being
+         * mistaken for an absent backup. */
+        if (errno == ENOENT) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        ESP_LOGW(TAG, "manifest open failed (%s): retry", strerror(errno));
+        return ESP_FAIL;
     }
 
     /* Aggregates on the heap (see manifest_ws_t) to keep this frame small
@@ -382,6 +419,9 @@ static esp_err_t manifest_load_owned(void)
     if (err == ESP_OK && have_bind) err = settings_func_bind_save(ws->binds, bcount);
     if (err == ESP_OK) err = settings_recovery_set_pending(false);
     if (err != ESP_OK) { settings_manifest_dirty(); free(ws); return err; }
+    /* The manifest file is the source of this restore; the NVS saves above
+     * must not trigger a redundant rewrite of the same file. */
+    settings_manifest_result(ESP_OK);
 
     if (!have_tracks) {
         /* No track records, but the F;/B; metadata was still restored above.

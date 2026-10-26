@@ -16,9 +16,19 @@ static int no_files_mkdir(const char *path, int mode)
     (void)mode;
     return 0;
 }
+
+/* The host stub always reports a cold boot. Route the boot-reason check through
+ * this hook so the brownout latch policy can be exercised. */
+#ifndef ESP_RST_BROWNOUT
+#define ESP_RST_BROWNOUT 3
+#endif
+static int g_reset_reason;
+static int test_reset_reason(void) { return g_reset_reason; }
+#define esp_reset_reason test_reset_reason
 #define mkdir no_files_mkdir
 #include "../../main/app_main.c"
 #undef mkdir
+#undef esp_reset_reason
 #define esp_ota_mark_app_valid_cancel_rollback sdk_mark_app_valid_cancel_rollback
 #define vTaskDelay sdk_task_delay
 #include "../../test_libs/teststubs/stubs.c"
@@ -29,6 +39,9 @@ static esp_err_t g_web_err, g_track_err, g_ready_err, g_motor_err, g_cv_err;
 static esp_err_t g_hard_reset_err, g_safety_ack;
 static bool g_send_ack, g_rails, g_dc, g_enabled, g_admitted;
 static bool g_boot_mode, g_bound_worker;
+/* Simulates an HTTP handler holding the control mutex across NVS work. The
+ * lock-free source check must still report rails mode. */
+static bool g_control_lock_held;
 static int g_worker_delays;
 static jmp_buf g_worker_exit;
 static int g_lease_depth, g_lease_ends, g_motor_calls, g_notes, g_motion;
@@ -179,7 +192,10 @@ esp_err_t esp_ota_mark_app_valid_cancel_rollback(void)
     return ESP_OK;
 }
 bool track_is_dc_mode(void) { return g_dc; }
-bool web_control_is_rails(void) { return g_rails && (!g_boot_mode || g_admitted); }
+bool web_control_is_rails(void)
+{
+    return g_rails && (!g_boot_mode || g_admitted) && !g_control_lock_held;
+}
 bool web_control_source_is_rails(void) { return g_rails && (!g_boot_mode || g_admitted); }
 bool web_actuation_ready(void) { return !g_boot_mode || g_admitted; }
 bool web_control_rails_begin(uint32_t *generation)
@@ -312,6 +328,8 @@ void setUp(void)
     g_send_ack = g_rails = true;
     g_dc = g_enabled = g_admitted = false;
     g_boot_mode = g_bound_worker = false;
+    g_control_lock_held = false;
+    g_reset_reason = 0;
     g_worker_delays = 0;
     g_lease_depth = g_lease_ends = g_motor_calls = g_notes = g_motion = 0;
     g_functions = g_sound_stops = g_reload = g_deferred = g_flush = 0;
@@ -341,6 +359,7 @@ void setUp(void)
     g_speed_cb = NULL; g_function_cb = NULL; g_write_cb = NULL;
     g_read_cb = NULL; g_reset_cb = g_estop_cb = g_hard_cb = NULL;
     s_motor_stall_latched = s_function_cleanup_requested = false;
+    s_brownout_latched = s_brownout_block_logged = false;
     s_safety_ready = NULL;
     mock_task_create_ok = 1;
     mock_task_create_fail_after = -1;
@@ -552,6 +571,18 @@ static void test_cv11_ignored_in_dc_and_web_modes(void)
     TEST_ASSERT_FALSE(timeout);
     TEST_ASSERT_BITS_LOW(MOTOR_INHIBIT_DCC_TIMEOUT, g_mask);
 }
+static void test_dcc_timeout_uses_lock_free_source(void)
+{
+    /* A control-mutex timeout (web_control_is_rails false) must not look like
+     * web mode and clear the DCC-timeout inhibit. */
+    g_cv[11] = 1;
+    g_packet = mock_timer_now_us - 600000;
+    g_control_lock_held = true;
+    TEST_ASSERT_FALSE(web_control_is_rails());
+    TEST_ASSERT_TRUE(dcc_packet_timed_out(mock_timer_now_us));
+    g_control_lock_held = false;
+    TEST_ASSERT_TRUE(dcc_packet_timed_out(mock_timer_now_us));
+}
 static void test_callbacks_source_leases_and_accepted_motion_only(void)
 {
     on_dcc_speed(30, true);
@@ -658,12 +689,21 @@ static void test_cv_write_reset_reload_and_master_alias(void)
     TEST_ASSERT_EQUAL_INT(9, g_deferred);
     TEST_ASSERT_EQUAL_INT(0, g_flush);
 }
+static void assert_hard_reset_safety(void)
+{
+    TEST_ASSERT_EQUAL_INT(1, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(SETTINGS_FUNC_MAP_COUNT, g_functions);
+    TEST_ASSERT_EQUAL_INT(1, g_sound_stops);
+    TEST_ASSERT_EQUAL_INT(1, g_emergency_resets);
+}
+
 static void test_hard_reset_delegates_subset_and_error_reload(void)
 {
     memset(g_cv, 55, sizeof(g_cv));
     on_dcc_hard_reset();
     TEST_ASSERT_EQUAL_INT(1, g_hard_reset_calls);
     TEST_ASSERT_EQUAL_INT(1, g_reload);
+    assert_hard_reset_safety();
     for (uint16_t cv = 1; cv <= SETTINGS_CV_COUNT; ++cv) {
         uint8_t expected = cv == 29 ? 2 :
                            (cv == 19 || cv == 31 || cv == 32) ? 0 : 55;
@@ -681,6 +721,60 @@ static void test_hard_reset_denied_source_cannot_change_cvs(void)
     on_dcc_hard_reset();
     TEST_ASSERT_EQUAL_INT(0, g_hard_reset_calls);
     TEST_ASSERT_EQUAL_INT(0, g_reload);
+}
+
+/* G-DCC-7: a broadcast hard reset must stop a web-driven locomotive and clear
+ * its function/AUX outputs, even though the CV writes stay rails-only. */
+static void test_hard_reset_safety_runs_in_web_mode(void)
+{
+    g_rails = false;
+    on_dcc_hard_reset();
+    TEST_ASSERT_EQUAL_INT(0, g_hard_reset_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_reload);
+    TEST_ASSERT_EQUAL_INT(0, g_deferred);
+    TEST_ASSERT_EQUAL_INT(0, g_lease_ends);
+    assert_hard_reset_safety();
+}
+
+static void test_task_budget_contract(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(10U, SAFETY_PERIOD_MS);
+    TEST_ASSERT_EQUAL_UINT32(3072U, SAFETY_TASK_STACK);
+    TEST_ASSERT_EQUAL_UINT32(6U, SAFETY_TASK_PRIO);
+    TEST_ASSERT_EQUAL_UINT32(4096U, PERSISTENCE_TASK_STACK);
+    TEST_ASSERT_EQUAL_UINT32(3U, PERSISTENCE_TASK_PRIO);
+    TEST_ASSERT_EQUAL_UINT32(100U, PERSISTENCE_PERIOD_MS);
+}
+
+/* G-RTOS-4: a brownout reset must not resume the last duty. Nonzero DCC speed
+ * is refused until an explicit stop, and only then is motion re-admitted. */
+static void test_brownout_reset_latches_until_clean_stop(void)
+{
+    g_reset_reason = ESP_RST_BROWNOUT;
+    app_main();
+    TEST_ASSERT_TRUE(s_brownout_latched);
+    TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
+
+    int motor_calls = g_motor_calls;
+    on_dcc_speed(50, true);
+    TEST_ASSERT_EQUAL_INT(motor_calls, g_motor_calls);
+    TEST_ASSERT_TRUE(s_brownout_latched);
+    TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
+
+    /* A DCC stop must not clear the latch while the web owns control. */
+    g_rails = false;
+    on_dcc_speed(0, true);
+    TEST_ASSERT_TRUE(s_brownout_latched);
+    TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
+    g_rails = true;
+
+    on_dcc_speed(0, true);
+    TEST_ASSERT_FALSE(s_brownout_latched);
+    TEST_ASSERT_BITS_LOW(MOTOR_INHIBIT_SAFETY, g_mask);
+    TEST_ASSERT_EQUAL_INT(motor_calls + 1, g_motor_calls);
+
+    on_dcc_speed(50, true);
+    TEST_ASSERT_EQUAL_INT(motor_calls + 2, g_motor_calls);
 }
 
 static void run_one_persistence_iteration(void)
@@ -877,6 +971,7 @@ int main(void)
     RUN_TEST(test_actual_safety_task_checks_calibration_every_ten_ms);
     RUN_TEST(test_cv11_dcc_timeout_recovery_preserves_other_owners);
     RUN_TEST(test_cv11_ignored_in_dc_and_web_modes);
+    RUN_TEST(test_dcc_timeout_uses_lock_free_source);
     RUN_TEST(test_callbacks_source_leases_and_accepted_motion_only);
     RUN_TEST(test_dcc_speed_ignored_while_bemf_calibration_owns_bridge);
     RUN_TEST(test_dcc_forwards_every_function_key);
@@ -884,6 +979,9 @@ int main(void)
     RUN_TEST(test_cv_write_reset_reload_and_master_alias);
     RUN_TEST(test_hard_reset_delegates_subset_and_error_reload);
     RUN_TEST(test_hard_reset_denied_source_cannot_change_cvs);
+    RUN_TEST(test_hard_reset_safety_runs_in_web_mode);
+    RUN_TEST(test_task_budget_contract);
+    RUN_TEST(test_brownout_reset_latches_until_clean_stop);
     RUN_TEST(test_persistence_worker_owns_flush_and_deferred_cleanup);
     RUN_TEST(test_persistence_worker_skips_recovered_timeout_cleanup);
     return UNITY_END();

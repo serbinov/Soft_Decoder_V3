@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <time.h>
+#include <utime.h>
 #include "freertos/task.h"
 #define xTaskGetCurrentTaskHandle() ((TaskHandle_t)1)
 
@@ -38,11 +40,18 @@ static int g_save_calls;
 static int g_load_calls;
 static bool g_tracks_present;
 static bool g_recovery_pending;
+static int g_recovery_set_calls;
 static esp_err_t g_manifest_error;
 static esp_err_t g_save_error;
 static esp_err_t g_load_error;
 
 esp_err_t settings_recovery_pending(bool *out) { *out = g_recovery_pending; return ESP_OK; }
+esp_err_t settings_recovery_set_pending(bool pending)
+{
+    g_recovery_pending = pending;
+    g_recovery_set_calls++;
+    return ESP_OK;
+}
 
 esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
 {
@@ -120,6 +129,7 @@ void setUp(void)
     g_save_calls = 0;
     g_tracks_present = false;
     g_recovery_pending = false;
+    g_recovery_set_calls = 0;
     g_manifest_error = ESP_OK;
     g_save_error = ESP_OK;
     g_load_error = ESP_OK;
@@ -334,9 +344,78 @@ static void test_recover_errors_never_trigger_destructive_rebuild(void)
     TEST_ASSERT_TRUE(storage_is_quiescent());
 }
 
+/* G-STORAGE-3: a recovery marker without a manifest must not deadlock. The
+ * marker is cleared and the list rebuilt from the WAV files. */
+static void test_missing_manifest_clears_pending_marker_and_rebuilds(void)
+{
+    g_recovery_pending = true;
+    make_file(DIR_AUDIO "/slot1.wav");
+    track_recover_result_t r;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_TRUE(r.rebuilt);
+    TEST_ASSERT_EQUAL_UINT32(1, r.count);
+    TEST_ASSERT_FALSE(g_recovery_pending);
+    TEST_ASSERT_EQUAL_INT(1, g_recovery_set_calls);
+}
+
+/* G-STORAGE-10: one overlong name is skipped, the rest still rebuild. */
+static void test_overlong_wav_is_skipped(void)
+{
+    make_file(DIR_AUDIO "/slot1.wav");
+    char name[200];
+    int prefix = snprintf(name, sizeof(name), "%s/", DIR_AUDIO);
+    TEST_ASSERT_TRUE(prefix > 0);
+    memset(name + prefix, 'a', 140);
+    memcpy(name + prefix + 140, ".wav", 5);
+    make_file(name);
+
+    track_recover_result_t r;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+    TEST_ASSERT_TRUE(r.rebuilt);
+    TEST_ASSERT_EQUAL_UINT32(1, r.count);
+    TEST_ASSERT_EQUAL_UINT32(1, r.files_found);
+    remove(name);
+}
+
+static void make_old_file(const char *name)
+{
+    make_file(name);
+    struct utimbuf times;
+    times.actime = time(NULL) - 3600;
+    times.modtime = times.actime;
+    (void)utime(name, &times);
+}
+
+/* G-STORAGE-9: stale upload artifacts are removed at boot; a recent backup is
+ * kept because it may still be the only copy of the previous sound. */
+static void test_boot_sweep_removes_stale_artifacts_only(void)
+{
+    make_old_file(DIR_AUDIO "/u00000001_00000001.tmp");
+    make_old_file(DIR_AUDIO "/u00000001_00000002.bak");
+    make_old_file(DIR_AUDIO "/tracks.txt.tmp");
+    make_file(DIR_AUDIO "/u00000002_00000001.bak");
+
+    track_recover_result_t r;
+    track_recover_from_storage(DIR_AUDIO, DIR_ROOT, &r);
+
+    FILE *f = fopen(DIR_AUDIO "/u00000001_00000001.tmp", "rb");
+    TEST_ASSERT_NULL(f);
+    f = fopen(DIR_AUDIO "/u00000001_00000002.bak", "rb");
+    TEST_ASSERT_NULL(f);
+    f = fopen(DIR_AUDIO "/tracks.txt.tmp", "rb");
+    TEST_ASSERT_NULL(f);
+    f = fopen(DIR_AUDIO "/u00000002_00000001.bak", "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    fclose(f);
+    remove(DIR_AUDIO "/u00000002_00000001.bak");
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_missing_manifest_clears_pending_marker_and_rebuilds);
+    RUN_TEST(test_overlong_wav_is_skipped);
+    RUN_TEST(test_boot_sweep_removes_stale_artifacts_only);
     RUN_TEST(test_rev_s24_intentionally_empty_nvs_survives_orphan_wav);
     RUN_TEST(test_rev_s26_existing_tracks_do_not_hide_partial_restore);
     RUN_TEST(test_recover_errors_never_trigger_destructive_rebuild);

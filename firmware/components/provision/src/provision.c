@@ -1,5 +1,6 @@
 #include "provision.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_vfs_dev.h"
 #include "freertos/FreeRTOS.h"
@@ -33,27 +35,52 @@ static const esp_partition_t *s_pending_boot;
 
 #define NVS_NAMESPACE    "decoder"
 #define NVS_KEY_PROV     "prov"
+#define NVS_KEY_INSTALL  "prov_inst"
 #define PROV_BAUD        921600
 #define PROV_CHUNK       4096
 #define PROV_PACK_FRAME  32768
 #define PROV_PACK_CHUNK  32768
 #define PROV_PACK_MAX    (15U * 1024U * 1024U)
 #define PROV_WINDOW_MS   20000
+/* BEMF-TEST is a maintenance command, not a remote throttle: it must always
+ * return the bridge to the inhibited state. */
+#define PROV_BEMF_TEST_MAX_SPEED 60U
+#define PROV_BEMF_TEST_MAX_MS    5000U
+#define PROV_BEMF_TEST_DEF_MS    2000U
+/* Keep enough LittleFS headroom for metadata, directory entries and the
+ * temporary staging tree before a destructive format. */
+#define PROV_INSTALL_RESERVE     (256U * 1024U)
+#define PROV_INSTALL_FILE_OVER   (4U * 1024U)
 /* The provisioning entry point erases the external NOR, so the host must send
  * an explicit confirmation after "PROV" before anything is destroyed. */
 #define PROV_CONFIRM_TIMEOUT_MS 10000
 #ifndef PROV_AUDIO_DIR
 #define PROV_AUDIO_DIR   "/userdata/audio"
 #endif
+/* Sibling of the audio directory: a failed install can be removed without
+ * touching a previously published library. */
+#define PROV_STAGE_DIR   PROV_AUDIO_DIR ".prov_stage"
+#define PROV_STAGE_NAME_MAX 72
+#define PROV_STAGE_MAX_FILES (AUDIO_PACK_MAX_FILES + SETTINGS_MAX_TRACKS)
+
+/* Task budget contract (G-RTOS-8). The listener also owns the provisioning
+ * session; it is subscribed to the task watchdog so a hung transfer reaches a
+ * controlled panic/reset instead of holding the maintenance lock forever. */
+#define PROV_LISTENER_STACK  8192U
+#define PROV_LISTENER_PRIO   4U
+_Static_assert(PROV_LISTENER_STACK >= 8192U, "provision listener stack regression");
+_Static_assert(PROV_LISTENER_PRIO == 4U, "provision listener priority drift");
 
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
 #define PROV_MKDIR(p) _mkdir(p)
+#define PROV_RMDIR(p) _rmdir(p)
 #define PROV_FSYNC(f) _commit(_fileno(f))
 #else
 #include <unistd.h>
 #define PROV_MKDIR(p) mkdir((p), 0755)
+#define PROV_RMDIR(p) rmdir(p)
 #define PROV_FSYNC(f) fsync(fileno(f))
 #endif
 
@@ -65,6 +92,19 @@ static const esp_partition_t *s_pending_boot;
 /* True while the boot-time provisioning window is open; the background
  * listener ignores "PROV" in that state so it cannot re-trigger a reboot. */
 static volatile bool s_provisioning = false;
+
+/* True while listener_task is subscribed to the task watchdog. The provisioning
+ * protocol can block for minutes on host input, so every blocking read/frame
+ * loop must feed the watchdog explicitly; a hung worker then panics/resets,
+ * which releases the in-RAM maintenance lease. */
+static bool s_listener_wdt;
+
+static void prov_wdt_feed(void)
+{
+    if (s_listener_wdt) {
+        (void)esp_task_wdt_reset();
+    }
+}
 
 /* True once the USB-Serial-JTAG driver is installed. The board is usually
  * connected to the host through the native USB-Serial-JTAG port, so the
@@ -96,6 +136,257 @@ static void clear_prov_flag(void)
     nvs_close(h);
 }
 
+/* ---- interrupted-install marker -------------------------------------- */
+
+/* Set before the first destructive write and cleared only after the complete
+ * library and its metadata were published. NVS survives an external-NOR
+ * format, so a power loss mid-install is detected on the next boot. */
+static bool install_marker_get(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return false;
+    }
+    uint8_t v = 0;
+    (void)nvs_get_u8(h, NVS_KEY_INSTALL, &v);
+    nvs_close(h);
+    return v != 0;
+}
+
+static esp_err_t install_marker_set(uint8_t value)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_u8(h, NVS_KEY_INSTALL, value);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    return err;
+}
+
+/* ---- install staging transaction -------------------------------------- */
+
+static bool s_install_marker;
+static bool s_install_storage_held;
+static bool s_install_formatted;
+static bool s_install_published;
+static char (*s_stage_names)[PROV_STAGE_NAME_MAX];
+static size_t s_stage_count;
+static uint64_t s_install_free_budget = UINT64_MAX;
+static uint64_t s_install_bytes_used;
+static uint32_t s_install_files_used;
+
+static void install_file_path(char *out, size_t cap, const char *dir, const char *name)
+{
+    snprintf(out, cap, "%s/%s", dir, name);
+}
+
+static bool install_remove_file(const char *path)
+{
+    if (remove(path) == 0) {
+        return true;
+    }
+    return errno == ENOENT;
+}
+
+static void install_session_reset(void)
+{
+    free(s_stage_names);
+    s_stage_names = NULL;
+    s_stage_count = 0;
+    s_install_marker = false;
+    s_install_storage_held = false;
+    s_install_formatted = false;
+    s_install_published = false;
+    s_install_free_budget = UINT64_MAX;
+    s_install_bytes_used = 0;
+    s_install_files_used = 0;
+}
+
+static bool install_budget_ok(uint64_t bytes, uint32_t files)
+{
+    if (s_install_free_budget == UINT64_MAX) {
+        return true;
+    }
+    if (UINT64_MAX - bytes < (uint64_t)files * PROV_INSTALL_FILE_OVER) {
+        return false;
+    }
+    uint64_t need = bytes + (uint64_t)files * PROV_INSTALL_FILE_OVER;
+    if (s_install_bytes_used > s_install_free_budget) {
+        return false;
+    }
+    uint64_t used = s_install_bytes_used +
+                    (uint64_t)s_install_files_used * PROV_INSTALL_FILE_OVER;
+    if (used > s_install_free_budget || need > s_install_free_budget - used) {
+        return false;
+    }
+    return (s_install_free_budget - used - need) >= PROV_INSTALL_RESERVE;
+}
+
+static void install_account(uint64_t bytes, uint32_t files)
+{
+    s_install_bytes_used += bytes;
+    s_install_files_used += files;
+}
+
+static bool stage_add(const char *name)
+{
+    if (s_stage_names == NULL || name == NULL || name[0] == '\0' ||
+        s_stage_count >= PROV_STAGE_MAX_FILES) {
+        return false;
+    }
+    for (size_t i = 0; i < s_stage_count; ++i) {
+        if (strcmp(s_stage_names[i], name) == 0) {
+            return false;
+        }
+    }
+    snprintf(s_stage_names[s_stage_count], PROV_STAGE_NAME_MAX, "%s", name);
+    ++s_stage_count;
+    return true;
+}
+
+/* Called after the pack index (or the PUT header) is validated and before the
+ * first payload byte is written. It performs the destructive format only
+ * after the aggregate size fits the free space measured before maintenance. */
+static esp_err_t install_prepare(uint64_t payload_bytes, uint32_t files)
+{
+    if (!install_budget_ok(payload_bytes, files)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (s_install_formatted) {
+        return ESP_OK;
+    }
+    if (s_stage_names == NULL) {
+        s_stage_names = calloc(PROV_STAGE_MAX_FILES, PROV_STAGE_NAME_MAX);
+        if (s_stage_names == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    esp_err_t err = storage_format();
+    if (err != ESP_OK) {
+        return err;
+    }
+    prov_wdt_feed();
+    s_install_formatted = true;
+    s_stage_count = 0;
+    if (PROV_MKDIR(PROV_AUDIO_DIR) != 0 && errno != EEXIST) {
+        return ESP_FAIL;
+    }
+    (void)PROV_RMDIR(PROV_STAGE_DIR);
+    if (PROV_MKDIR(PROV_STAGE_DIR) != 0 && errno != EEXIST) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static bool install_publish(void)
+{
+    char src[192];
+    char dst[192];
+    size_t published = 0;
+    for (size_t i = 0; i < s_stage_count; ++i) {
+        prov_wdt_feed();
+        install_file_path(src, sizeof(src), PROV_STAGE_DIR, s_stage_names[i]);
+        install_file_path(dst, sizeof(dst), PROV_AUDIO_DIR, s_stage_names[i]);
+        (void)install_remove_file(dst);
+        if (rename(src, dst) != 0) {
+            break;
+        }
+        ++published;
+    }
+    if (published != s_stage_count) {
+        /* Restore the pre-publication state: the caller rolls back staging. */
+        for (size_t i = 0; i < published; ++i) {
+            install_file_path(dst, sizeof(dst), PROV_AUDIO_DIR, s_stage_names[i]);
+            (void)install_remove_file(dst);
+        }
+        return false;
+    }
+    (void)PROV_RMDIR(PROV_STAGE_DIR);
+    s_install_published = true;
+    return true;
+}
+
+/* Remove everything this session created. The marker is cleared only when the
+ * cleanup completed, so a failed unlink leaves recovery armed for boot. */
+static void install_abort(void)
+{
+    bool clean = true;
+    char path[192];
+
+    if (s_stage_names != NULL) {
+        for (size_t i = 0; i < s_stage_count; ++i) {
+            install_file_path(path, sizeof(path), PROV_STAGE_DIR, s_stage_names[i]);
+            if (!install_remove_file(path)) {
+                clean = false;
+            }
+            if (s_install_published) {
+                install_file_path(path, sizeof(path), PROV_AUDIO_DIR, s_stage_names[i]);
+                if (!install_remove_file(path)) {
+                    clean = false;
+                }
+            }
+        }
+    }
+    if (PROV_RMDIR(PROV_STAGE_DIR) != 0 && errno != ENOENT) {
+        clean = false;
+    }
+    /* Manifest sync takes a normal storage lease, so release the exclusive
+     * maintenance lease before clearing metadata (web maintenance still
+     * blocks control/audio mutations). */
+    if (s_install_storage_held) {
+        storage_maintenance_end();
+        s_install_storage_held = false;
+    }
+    /* The format already erased the previous library, so no stale NVS
+     * metadata may keep pointing at files that no longer exist. */
+    if (s_install_formatted &&
+        settings_tracks_save(NULL, 0) != ESP_OK) {
+        clean = false;
+    }
+    if (s_install_marker && clean) {
+        if (install_marker_set(0) == ESP_OK) {
+            s_install_marker = false;
+        } else {
+            clean = false;
+        }
+    }
+    /* If cleanup was incomplete the NVS marker stays armed for the boot retry;
+     * the RAM session state is still discarded so a host retry starts fresh. */
+    install_session_reset();
+}
+
+/* Boot-time rollback: an install interrupted by a reset never leaves a
+ * partially populated library behind. */
+static void install_recover_incomplete(void)
+{
+    if (!install_marker_get()) {
+        return;
+    }
+    ESP_LOGW(TAG, "incomplete sound install detected: resetting the library");
+    if (!storage_is_mounted()) {
+        (void)storage_mount();
+    }
+    bool ok = false;
+    if (storage_maintenance_begin() == ESP_OK) {
+        ok = storage_format() == ESP_OK;
+        storage_maintenance_end();
+    }
+    if (ok) {
+        ok = settings_tracks_save(NULL, 0) == ESP_OK;
+    }
+    if (ok && install_marker_set(0) == ESP_OK) {
+        ESP_LOGW(TAG, "incomplete install rolled back to an empty library");
+    } else {
+        ESP_LOGE(TAG, "incomplete install rollback failed; will retry next boot");
+    }
+}
+
 /* ---- UART helpers ----------------------------------------------------- */
 
 /* Read one byte from UART0 or USB-Serial-JTAG before `deadline_us`. Polls
@@ -103,6 +394,7 @@ static void clear_prov_flag(void)
 static bool read_byte_any(uint8_t *c, int64_t deadline_us)
 {
     while (esp_timer_get_time() < deadline_us) {
+        prov_wdt_feed();
         int r = uart_read_bytes(UART_NUM_0, c, 1, 0);
         if (r == 1) {
             return true;
@@ -141,6 +433,7 @@ static bool uart_read_exact(uint8_t *buf, size_t len, uint32_t timeout_ms)
     size_t got = 0;
     int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
     while (got < len) {
+        prov_wdt_feed();
         size_t want = len - got;
         int r = uart_read_bytes(UART_NUM_0, buf + got, (uint32_t)want, 0);
         if (r > 0) {
@@ -239,6 +532,7 @@ static bool pack_stream_read(uint8_t *buf, size_t len, uint32_t timeout_ms)
 {
     size_t got = 0;
     while (got < len) {
+        prov_wdt_feed();
         if (s_pack_frame_pos < s_pack_frame_len) {
             size_t n = s_pack_frame_len - s_pack_frame_pos;
             if (n > len - got) {
@@ -354,7 +648,7 @@ static void send_bemf_header(const motor_bemf_cal_info_t *info)
  *   BEMF=...   -> store coefficients (pairs "spd,frac", comma separated)
  *   BEMF-RAW   -> dump raw BEMF measurement diagnostics
  *   BEMF-ADC   -> dump direct ADC raw counts (bemf1 bemf2 rail)
- *   BEMF-TEST  -> drive the motor at a speed, e.g. "BEMF-TEST 60" or "BEMF-TEST 60 rev"
+ *   BEMF-TEST  -> bounded drive, e.g. "BEMF-TEST 60 [rev] [ms]" (max 60/5 s)
  *   BEMF-CAL   -> start the legacy 10-point calibration (motor unloaded)
  *   BEMF-CAL <mode> [points] [settle_ms] [interval_ms] [samples] [retries] [apply_pid]
  *              -> adaptive calibration: AUTO, FAST, BALANCED, THOROUGH, CUSTOM
@@ -362,6 +656,44 @@ static void send_bemf_header(const motor_bemf_cal_info_t *info)
  *   BEMF-PROFILE? -> dump the last adaptive profile/recommended PID
  *   BEMF-CLR   -> clear the stored calibration
  */
+/* Bounded bench test: reserve maintenance, drive, then force the bridge back
+ * into inhibit even when a step fails. Returns the first error. */
+static esp_err_t bemf_test_run(uint8_t speed, bool forward, uint16_t ms)
+{
+    if (!web_actuation_ready() || web_maintenance_active()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = web_maintenance_begin(false);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = motor_set_inhibited(false);
+    if (err == ESP_OK) {
+        err = motor_set_speed(speed, forward);
+    }
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(ms));
+    }
+    esp_err_t stop_err = motor_set_inhibited(true);
+    if (err == ESP_OK) {
+        err = stop_err;
+    }
+    uint8_t applied = 255;
+    motor_get_applied_speed(&applied, NULL);
+    if (stop_err != ESP_OK || applied != 0U) {
+        /* Inhibit failed or the bridge still reports an output: use the
+         * fail-safe stop so the motor cannot remain energized. */
+        motor_emergency_stop();
+        applied = 255;
+        motor_get_applied_speed(&applied, NULL);
+    }
+    if (err == ESP_OK && applied != 0U) {
+        err = ESP_FAIL;
+    }
+    web_maintenance_end();
+    return err;
+}
+
 static bool bemf_parse_mode(const char *s, motor_bemf_cal_mode_t *mode)
 {
     if (s == NULL || mode == NULL) return false;
@@ -548,19 +880,37 @@ static void handle_bemf_cmd(const char *line)
     }
     if (strncmp(line, "BEMF-TEST", 9) == 0) {
         int spd = -1;
+        int ms = 0;
         bool fwd = true;
         char tail[32] = { 0 };
-        (void)sscanf(line, "BEMF-TEST %d %31s", &spd, tail);
+        (void)sscanf(line, "BEMF-TEST %d %31s %d", &spd, tail, &ms);
         if (tail[0] == 'r' || tail[0] == 'R') {
             fwd = false;
+        } else if (tail[0] >= '0' && tail[0] <= '9') {
+            /* "BEMF-TEST <spd> <ms>" (no direction token). */
+            ms = atoi(tail);
         }
-        if (spd < 0 || spd > 126) {
+        if (spd < 0 || spd > (int)PROV_BEMF_TEST_MAX_SPEED) {
             send_line("BEMF-ERR speed");
             return;
         }
-        (void)motor_set_speed((uint8_t)spd, fwd);
-        char ok[40];
-        snprintf(ok, sizeof(ok), "BEMF-TEST-OK %u %s", (unsigned)spd, fwd ? "fwd" : "rev");
+        if (ms <= 0) {
+            ms = (int)PROV_BEMF_TEST_DEF_MS;
+        } else if (ms > (int)PROV_BEMF_TEST_MAX_MS) {
+            ms = (int)PROV_BEMF_TEST_MAX_MS;
+        }
+        esp_err_t err = bemf_test_run((uint8_t)spd, fwd, (uint16_t)ms);
+        if (err == ESP_ERR_INVALID_STATE) {
+            send_line("BEMF-ERR busy");
+            return;
+        }
+        if (err != ESP_OK) {
+            send_line("BEMF-ERR motor");
+            return;
+        }
+        char ok[48];
+        snprintf(ok, sizeof(ok), "BEMF-TEST-OK %u %s %d",
+                 (unsigned)spd, fwd ? "fwd" : "rev", ms);
         send_line(ok);
         return;
     }
@@ -653,6 +1003,7 @@ static esp_err_t provision_fw(const char *cmd)
 
     long remaining = size;
     while (remaining > 0L) {
+        prov_wdt_feed();
         size_t want = (size_t)(remaining > (long)PROV_CHUNK ? (long)PROV_CHUNK : remaining);
         if (!read_exact(buf, want, 60000)) {
             ESP_LOGE(TAG, "provision: FW data timeout");
@@ -706,6 +1057,8 @@ static esp_err_t provision_pack_parse(const char *cmd)
     audio_pack_entry_t *entries = NULL;
     uint8_t *buf = NULL;
     esp_err_t err = ESP_OK;
+    char current[192] = { 0 };
+    FILE *current_file = NULL;
 
     if (!read_exact(hdr, sizeof(hdr), 60000)) {
         send_line("PACK-ERR timeout");
@@ -726,6 +1079,8 @@ static esp_err_t provision_pack_parse(const char *cmd)
     }
 
     uint64_t pos = AUDIO_PACK_HDR_LEN;
+    uint64_t total_data = 0;
+    uint32_t wav_count = 0;
     for (uint32_t i = 0; i < ph.count; ++i) {
         uint8_t eh[AUDIO_PACK_ENTRY_HDR_LEN];
         uint8_t nlen = 0;
@@ -752,12 +1107,61 @@ static esp_err_t provision_pack_parse(const char *cmd)
             err = ESP_ERR_INVALID_ARG;
             goto done;
         }
+        if (entries[i].bits == AUDIO_PACK_BITS_SCHEME) {
+            /* A serial install cannot activate the bundled graph. Never claim
+             * PACK-OK after silently dropping it: the host must use the web
+             * upload path (or ship a sound-only pack). */
+            send_line("PACK-ERR scheme");
+            err = ESP_ERR_NOT_SUPPORTED;
+            goto done;
+        }
+        total_data += entries[i].data_len;
+        ++wav_count;
+    }
+    if (wav_count == 0U) {
+        send_line("PACK-ERR empty");
+        err = ESP_ERR_INVALID_ARG;
+        goto done;
     }
     if (pos > ph.data_off) {
         send_line("PACK-ERR index");
         err = ESP_ERR_INVALID_ARG;
         goto done;
     }
+    /* Validate the complete payload layout and names before erasing
+     * anything: offsets must be contiguous and end exactly at the pack end. */
+    uint64_t payload_pos = ph.data_off;
+    for (uint32_t i = 0; i < ph.count; ++i) {
+        if ((uint64_t)entries[i].data_off != payload_pos) {
+            send_line("PACK-ERR order");
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
+        }
+        payload_pos += entries[i].data_len;
+        for (uint32_t j = 0; j < i; ++j) {
+            if (strcasecmp(entries[i].name, entries[j].name) == 0) {
+                send_line("PACK-ERR duplicate");
+                err = ESP_ERR_INVALID_ARG;
+                goto done;
+            }
+        }
+    }
+    if (payload_pos != (uint64_t)size) {
+        send_line("PACK-ERR size");
+        err = ESP_ERR_INVALID_SIZE;
+        goto done;
+    }
+
+    /* Validate the whole index and the aggregate size before the destructive
+     * format, then stage every payload; nothing is published until DONE. */
+    err = install_prepare(total_data, wav_count);
+    if (err != ESP_OK) {
+        send_line(err == ESP_ERR_INVALID_SIZE ? "PACK-ERR space"
+                 : err == ESP_ERR_NO_MEM ? "PACK-ERR mem"
+                                          : "PACK-ERR storage");
+        goto done;
+    }
+
     while (pos < ph.data_off) {
         size_t want = (size_t)(ph.data_off - pos > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : ph.data_off - pos);
         if (!read_exact(buf, want, 60000)) {
@@ -768,7 +1172,6 @@ static esp_err_t provision_pack_parse(const char *cmd)
         pos += want;
     }
 
-    unsigned wav_count = 0;
     for (uint32_t i = 0; i < ph.count; ++i) {
         audio_pack_entry_t *e = &entries[i];
         if ((uint64_t)e->data_off < pos) {
@@ -786,32 +1189,22 @@ static esp_err_t provision_pack_parse(const char *cmd)
             pos += want;
         }
 
-        if (e->bits == AUDIO_PACK_BITS_SCHEME) {
-            /* The serial pack path installs sounds only; an embedded scheme is
-             * skipped (use the web pack upload if a scheme is required). */
-            uint32_t rem = e->data_len;
-            while (rem > 0U) {
-                size_t want = rem > PROV_PACK_CHUNK ? PROV_PACK_CHUNK : rem;
-                if (!read_exact(buf, want, 60000)) {
-                    send_line("PACK-ERR timeout");
-                    err = ESP_ERR_TIMEOUT;
-                    goto done;
-                }
-                pos += want;
-                rem -= (uint32_t)want;
-            }
-            continue;
+        char fname[PROV_STAGE_NAME_MAX];
+        snprintf(fname, sizeof(fname), "%s.wav", e->name);
+        if (!stage_add(fname)) {
+            send_line("PACK-ERR duplicate");
+            err = ESP_ERR_INVALID_ARG;
+            goto done;
         }
-
-        char path[128];
-        snprintf(path, sizeof(path), PROV_AUDIO_DIR "/%s.wav", e->name);
-        FILE *f = fopen(path, "wb");
+        snprintf(current, sizeof(current), "%s/%s", PROV_STAGE_DIR, fname);
+        FILE *f = fopen(current, "wb");
         if (f == NULL) {
-            ESP_LOGE(TAG, "provision: cannot create %s", path);
+            ESP_LOGE(TAG, "provision: cannot create %s", current);
             send_line("PACK-ERR create");
             err = ESP_FAIL;
             goto done;
         }
+        current_file = f;
 
         uint8_t wh[AUDIO_PACK_WAV_HDR_MAX];
         size_t whl = audio_pack_wav_header(wh, sizeof(wh), e->data_len,
@@ -835,20 +1228,24 @@ static esp_err_t provision_pack_parse(const char *cmd)
             pos += want;
             rem -= (uint32_t)want;
         }
-        /* No per-file fflush/fsync: 300 files would add minutes. fclose
-         * flushes and closes the file; a failed pack can be uploaded again. */
-        if (fclose(f) != 0) {
+        if (written && (fflush(f) != 0 || PROV_FSYNC(f) != 0)) {
+            send_line("PACK-ERR write");
+            err = ESP_FAIL;
+            written = false;
+        }
+        int close_err = fclose(f);
+        current_file = NULL;
+        if (close_err != 0) {
             written = false;
         }
         if (!written) {
-            (void)remove(path);
+            (void)remove(current);
             if (err == ESP_OK) {
                 send_line("PACK-ERR write");
                 err = ESP_FAIL;
             }
             goto done;
         }
-        ++wav_count;
     }
 
     /* Consume any trailing bytes so the next read_line starts on a command. */
@@ -862,12 +1259,17 @@ static esp_err_t provision_pack_parse(const char *cmd)
         pos += want;
     }
 
+    install_account(total_data, wav_count);
     char ok[48];
-    snprintf(ok, sizeof(ok), "PACK-OK %u", wav_count);
+    snprintf(ok, sizeof(ok), "PACK-OK %u", (unsigned)wav_count);
     send_line(ok);
-    ESP_LOGW(TAG, "Pack received (%ld bytes, %u WAV files)", size, wav_count);
+    ESP_LOGW(TAG, "Pack received (%ld bytes, %u WAV files)", size, (unsigned)wav_count);
 
 done:
+    if (current_file != NULL) {
+        (void)fclose(current_file);
+        (void)install_remove_file(current);
+    }
     free(buf);
     free(entries);
     return err;
@@ -938,27 +1340,37 @@ static bool provision_transfer(bool *maintenance_started)
         return false;
     }
 
+    /* Measure the free space before taking the exclusive maintenance lease;
+     * storage_get_free_bytes() deliberately refuses while maintenance owns the
+     * filesystem. The value is a conservative upper bound: the following format
+     * can only free more space. */
+    uint64_t freeb = 0;
+    if (storage_is_mounted()) {
+        s_install_free_budget = (storage_get_free_bytes(&freeb) == ESP_OK) ? freeb : 0;
+    } else {
+        s_install_free_budget = UINT64_MAX;
+    }
+
     esp_err_t err = web_maintenance_begin(true);
     if (err != ESP_OK) {
         send_line("PROV-ERR busy");
         return false;
     }
     *maintenance_started = true;
+    s_install_storage_held = true;
     s_pending_boot = NULL;
+
+    err = install_marker_set(1);
+    if (err != ESP_OK) {
+        send_line("PROV-ERR nvs");
+        return false;
+    }
+    s_install_marker = true;
     send_line("PROV-OK");
 
     /* Both sides switch to the fast baud for the bulk transfer. */
     uart_flush_input(UART_NUM_0);
     (void)uart_set_baudrate(UART_NUM_0, PROV_BAUD);
-
-    /* Admission is closed and all file holders acknowledged quiescence. */
-    err = storage_format();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "provision: external NOR unavailable, aborting");
-        send_line("PROV-ERR storage");
-        return false;
-    }
-    (void)PROV_MKDIR(PROV_AUDIO_DIR);
 
     settings_track_t tracks[SETTINGS_MAX_TRACKS];
     memset(tracks, 0, sizeof(tracks));
@@ -1005,8 +1417,23 @@ static bool provision_transfer(bool *maintenance_started)
             return false;
         }
 
-        char path[64];
-        snprintf(path, sizeof(path), PROV_AUDIO_DIR "/slot%d.wav", slot);
+        esp_err_t serr = install_prepare((uint64_t)size + AUDIO_PACK_WAV_HDR_LEN, 1);
+        if (serr != ESP_OK) {
+            ESP_LOGE(TAG, "provision: storage preflight failed (%s)", esp_err_to_name(serr));
+            send_line(serr == ESP_ERR_INVALID_SIZE ? "PROV-ERR space"
+                     : serr == ESP_ERR_NO_MEM ? "PROV-ERR mem"
+                                               : "PROV-ERR storage");
+            return false;
+        }
+
+        char name[PROV_STAGE_NAME_MAX];
+        snprintf(name, sizeof(name), "slot%d.wav", slot);
+        if (!stage_add(name)) {
+            send_line("PROV-ERR duplicate");
+            return false;
+        }
+        char path[192];
+        snprintf(path, sizeof(path), "%s/%s", PROV_STAGE_DIR, name);
         FILE *f = fopen(path, "wb");
         if (f == NULL) {
             ESP_LOGE(TAG, "provision: cannot create %s", path);
@@ -1016,23 +1443,29 @@ static bool provision_transfer(bool *maintenance_started)
         uint8_t *buf = (uint8_t *)malloc(PROV_CHUNK);
         if (buf == NULL) {
             fclose(f);
+            (void)install_remove_file(path);
             return false;
         }
 
         long remaining = size;
         send_line("PUT-OK");
         while (remaining > 0L) {
+            prov_wdt_feed();
             size_t want = (size_t)(remaining > (long)PROV_CHUNK ? (long)PROV_CHUNK : remaining);
             if (!read_exact(buf, want, 60000)) {
                 ESP_LOGE(TAG, "provision: data timeout for slot %d", slot);
                 free(buf);
                 fclose(f);
+                (void)install_remove_file(path);
+                send_line("PROV-ERR timeout");
                 return false;
             }
             if (PROV_FWRITE(buf, 1, want, f) != want) {
                 ESP_LOGE(TAG, "provision: write failed for slot %d", slot);
                 free(buf);
                 fclose(f);
+                (void)install_remove_file(path);
+                send_line("PROV-ERR write");
                 return false;
             }
             remaining -= (long)want;
@@ -1044,9 +1477,11 @@ static bool provision_transfer(bool *maintenance_started)
         bool written = fflush(f) == 0 && PROV_FSYNC(f) == 0;
         if (fclose(f) != 0) { written = false; }
         if (!written) {
+            (void)install_remove_file(path);
             send_line("PROV-ERR write");
             return false;
         }
+        install_account((uint64_t)size + AUDIO_PACK_WAV_HDR_LEN, 1);
 
         if (tcount < SETTINGS_MAX_TRACKS) {
             tracks[tcount].slot = (uint8_t)slot;
@@ -1060,21 +1495,42 @@ static bool provision_transfer(bool *maintenance_started)
         send_line("FILE-OK");
     }
 
-    /* Formatting is finished. Reopen filesystem leases for validation and
-     * metadata backup, while command/audio admission stays closed. */
+    /* The data stream is complete. Reopen filesystem leases for validation
+     * and publication, while command/audio admission stays closed. */
     storage_maintenance_end();
-    for (size_t i = 0; i < tcount; ++i) {
-        char path[160];
-        snprintf(path, sizeof(path), "%s/%s", storage_get_root(), tracks[i].file);
+    s_install_storage_held = false;
+
+    for (size_t i = 0; i < s_stage_count; ++i) {
+        char path[192];
+        snprintf(path, sizeof(path), "%s/%s", PROV_STAGE_DIR, s_stage_names[i]);
         if (audio_validate_wav(path) != ESP_OK) {
             send_line("PROV-ERR wav");
             return false;
         }
     }
-    err = settings_tracks_save(tracks, tcount);
-    if (err != ESP_OK) {
-        send_line("PROV-ERR metadata");
+
+    /* Publish only after every payload validated. An interruption here leaves
+     * the marker set, so the next boot/formats the partial library away. */
+    if (s_stage_count > 0U && !install_publish()) {
+        send_line("PROV-ERR publish");
         return false;
+    }
+
+    if (s_install_formatted) {
+        prov_wdt_feed();
+        err = settings_tracks_save(tracks, tcount);
+        prov_wdt_feed();
+        if (err != ESP_OK) {
+            send_line("PROV-ERR metadata");
+            return false;
+        }
+    }
+    if (s_install_marker) {
+        if (install_marker_set(0) != ESP_OK) {
+            send_line("PROV-ERR nvs");
+            return false;
+        }
+        s_install_marker = false;
     }
     if (s_pending_boot != NULL && esp_ota_set_boot_partition(s_pending_boot) != ESP_OK) {
         send_line("FW-ERR boot");
@@ -1082,6 +1538,7 @@ static bool provision_transfer(bool *maintenance_started)
     }
     send_line("DONE-OK");
     ESP_LOGW(TAG, "Provisioning complete (%u tracks), restarting", (unsigned)tcount);
+    install_session_reset();
 
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -1092,6 +1549,9 @@ static bool provision_run(void)
 {
     bool maintenance_started = false;
     bool result = provision_transfer(&maintenance_started);
+    if (!result) {
+        install_abort();
+    }
     if (maintenance_started) {
         web_maintenance_end();
         (void)uart_set_baudrate(UART_NUM_0, 115200);
@@ -1103,6 +1563,10 @@ static bool provision_run(void)
 
 bool provision_try(void)
 {
+    /* A previous install that never reached DONE-OK is rolled back before any
+     * new protocol session (or normal audio startup) can use the library. */
+    install_recover_incomplete();
+
     /* Only enter provisioning when the background listener requested it. */
     if (!get_prov_flag()) {
         return false;
@@ -1134,8 +1598,10 @@ static uint32_t s_listen_iter_cap;
  * test/hil/run_hil.ps1 parses these lines. The checks are non-destructive. */
 static void run_selftest_console(void)
 {
+    prov_wdt_feed();
     selftest_report_t rep;
     uint8_t passed = selftest_run(&rep);
+    prov_wdt_feed();
     send_line("SELFTEST-BEGIN");
     for (uint8_t i = 0; i < rep.count; ++i) {
         char out[48];
@@ -1207,10 +1673,15 @@ static void run_hil_act_console(const char *line)
 static void listener_task(void *arg)
 {
     (void)arg;
+    s_listener_wdt = esp_task_wdt_add(NULL) == ESP_OK;
+    if (!s_listener_wdt) {
+        ESP_LOGW(TAG, "Provisioning worker not subscribed to TWDT");
+    }
     char line[256];
     size_t len = 0;
     uint32_t iters = 0;
     while (s_listen_iter_cap == 0U || iters < s_listen_iter_cap) {
+        prov_wdt_feed();
         uint8_t c;
         int64_t deadline = esp_timer_get_time() + 1000000;
         if (read_byte_any(&c, deadline)) {
@@ -1246,7 +1717,8 @@ void provision_listener_start(void)
 {
     ensure_uart_driver();
     ensure_usbjtag_driver();
-    if (xTaskCreate(listener_task, "prov_listen", 8192, NULL, 4, NULL) != pdPASS) {
+    if (xTaskCreate(listener_task, "prov_listen", PROV_LISTENER_STACK, NULL,
+                    PROV_LISTENER_PRIO, NULL) != pdPASS) {
         ESP_LOGE(TAG, "listener task create failed");
     }
     ESP_LOGI(TAG, "Provisioning listener started (send PROV over UART/USB to provision)");

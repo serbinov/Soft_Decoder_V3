@@ -93,7 +93,16 @@ bool sg_id_valid(const char *id);
 bool sg_filename_valid(const char *file);
 
 /* Runtime I/O keeps the semantic runner dependency-free and host-testable. */
-typedef enum { SG_AUDIO_PENDING, SG_AUDIO_PLAYING, SG_AUDIO_DONE, SG_AUDIO_FAILED } sg_audio_state_t;
+/* IDLE means the voice stopped without a decode/IO error (stop/abort/stale):
+ * the runner releases it and retries the current state instead of latching a
+ * permanent channel failure. */
+typedef enum {
+    SG_AUDIO_PENDING,
+    SG_AUDIO_PLAYING,
+    SG_AUDIO_DONE,
+    SG_AUDIO_FAILED,
+    SG_AUDIO_IDLE
+} sg_audio_state_t;
 typedef struct { uint8_t voice; uint32_t generation; } sg_handle_t;
 typedef struct {
     esp_err_t (*play)(void *ctx, bool engine, const sg_state_t *state, sg_handle_t *handle);
@@ -124,6 +133,10 @@ typedef struct {
 void sg_runner_init(sg_runner_t *runner, const sg_graph_t *graph, const sg_io_t *io);
 void sg_runner_reset(sg_runner_t *runner);
 void sg_runner_function(sg_runner_t *runner, uint8_t fn, bool on);
+/* Restore a full function-key snapshot (e.g. after applying a graph while keys
+ * are held) and recompute engine_on/armed from it, without generating press
+ * events or requiring an extra engine-F toggle. */
+void sg_runner_prime_levels(sg_runner_t *runner, uint32_t levels);
 void sg_runner_power(sg_runner_t *runner, bool on);
 void sg_runner_tick(sg_runner_t *runner, uint8_t speed, int32_t accel, bool forward, uint32_t dt_ms);
 

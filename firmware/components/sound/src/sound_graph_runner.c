@@ -77,6 +77,25 @@ void sg_runner_function(sg_runner_t *r, uint8_t fn, bool on)
         else if (on) { r->engine_on = !r->engine_on; }
     }
 }
+/* Restore a level snapshot taken outside the runner (web/function routing).
+ * Unlike replaying sg_runner_function() this is idempotent and generates no
+ * press/release events; engine_on follows the held engine-F level and any held
+ * key arms the engine so the next tick starts it immediately. */
+void sg_runner_prime_levels(sg_runner_t *r, uint32_t levels)
+{
+    if (!r || !r->graph) { return; }
+    r->fn_levels = levels & ((UINT32_C(1) << 29) - 1U);
+    r->fn_press = 0;
+    r->fn_release = 0;
+    if (r->graph->engine_fn == SG_NONE) {
+        r->engine_on = true;
+    } else if (r->graph->engine_fn <= 28U) {
+        r->engine_on = (r->fn_levels & (UINT32_C(1) << r->graph->engine_fn)) != 0;
+    } else {
+        r->engine_on = false;
+    }
+    r->armed = r->engine_on || r->graph->observers || r->fn_levels != 0;
+}
 void sg_runner_power(sg_runner_t *r, bool on)
 {
     r->engine_on = on; r->armed = true;
@@ -165,6 +184,13 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
         if (ch->playing && r->io.poll) {
             sg_audio_state_t audio = r->io.poll(r->io.ctx,ch->handle);
             if (audio == SG_AUDIO_FAILED) { sgr_release(r,ch); ch->failed = true; ch->pending = SG_NONE; continue; }
+            if (audio == SG_AUDIO_IDLE) {
+                /* Stop/abort/stale is not a decode/IO failure: release the voice
+                 * and restart the same state on a later tick. */
+                sgr_release(r,ch);
+                ch->retry_play = true;
+                continue;
+            }
             if (audio == SG_AUDIO_DONE) {
                 sgr_release(r,ch);
                 const sg_state_t *st = &r->graph->states[ch->state];

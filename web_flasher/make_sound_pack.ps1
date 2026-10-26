@@ -105,6 +105,12 @@ if ($LASTEXITCODE -ne 0) { Write-Err "Упаковка не удалась (ко
 
 if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) { Write-Err "Файл не создан: $Output"; exit 1 }
 $size = (Get-Item -LiteralPath $Output).Length
+$maxBytes = [int64](15 * 1024 * 1024)
+if ($size -gt $maxBytes) {
+    Write-Err ("Контейнер превышает лимит 15 МиБ: {0:N0} Б (максимум {1:N0} Б)." -f $size, $maxBytes)
+    Remove-Item -LiteralPath $Output -Force -ErrorAction SilentlyContinue
+    exit 1
+}
 $rel = $Output
 if ($Output.StartsWith($repo, [StringComparison]::OrdinalIgnoreCase)) {
     $rel = $Output.Substring($repo.Length).TrimStart('\', '/')

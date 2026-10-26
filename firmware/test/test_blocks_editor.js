@@ -1690,3 +1690,207 @@ test('36. Wire payload uses legacy numeric flags and drops editor-only effect me
   assert.ok(raw.effects.some(effect => 'hasFn' in effect || 'label' in effect),
     'the simulator metadata still exists in the in-memory payload');
 });
+
+test('37. Hostile hyst/color/volume values are coerced and never injected into HTML', t => {
+  const { api, dom } = createEditorFixture(t);
+  const p = JSON.parse(JSON.stringify(api.project()));
+  p.mix.blocks.push({
+    id: 'speed_bad', type: 'speed', name: 'Speed', fn: -1, trigger: 'auto',
+    volume: '"><img src=x onerror=alert(1)>',
+    hyst: '"><img src=x onerror=alert(2)>',
+    bands: [{ from: 0, to: 100, file: '' }], files: {}, x: 200, y: 200,
+    level: 100, outDelay: 0, shortMs: 400
+  });
+  p.mix.texts.push({
+    id: 'txt_bad', text: 'note', x: 10, y: 10, size: 16,
+    color: '"><img src=x onerror=alert(3)>'
+  });
+  api.setProject(p);
+
+  const b = api.project().mix.blocks.find(x => x.id === 'speed_bad');
+  assert.equal(typeof b.hyst, 'number', 'hyst is coerced to a number');
+  assert.ok(b.hyst >= 0 && b.hyst <= 100, 'hyst is clamped to 0..100');
+  assert.equal(typeof b.volume, 'number', 'volume is coerced to a number');
+  assert.ok(b.volume >= 0 && b.volume <= 100, 'volume is clamped to 0..100');
+  const tx = api.project().mix.texts.find(x => x.id === 'txt_bad');
+  assert.ok(tx.color === undefined || /^#[0-9a-fA-F]{6}$/.test(tx.color), 'invalid colors are dropped');
+
+  const hostile = api.nodeSummary(Object.assign({}, b, { hyst: '"><img src=x onerror=alert(4)>' }));
+  assert.ok(!hostile.includes('<img'), 'nodeSummary never emits a hostile hyst value');
+  assert.ok(!hostile.includes('onerror'), 'nodeSummary never emits an event handler');
+
+  api.selectNode('speed_bad');
+  const inspector = dom.getEl('inspector').innerHTML;
+  assert.ok(!inspector.includes('<img'), 'the inspector escapes hostile project values');
+  assert.ok(!inspector.includes('onerror'), 'the inspector does not emit event handlers');
+  const vol = inspector.match(/id="i_vol"[^>]*value="([^"]*)"/);
+  assert.ok(vol, 'the speed block volume input is rendered');
+  assert.match(vol[1], /^\d+$/, 'the rendered volume is numeric');
+});
+
+test('38. Firmware string limits produce specific errors and reject imports', async t => {
+  const { api, context, dom } = createEditorFixture(t);
+  const textProject = JSON.parse(JSON.stringify(api.project()));
+  textProject.mix.texts.push({ id: 'txt_long', text: 'x'.repeat(1025), x: 1, y: 1, size: 16 });
+  assert.match(api.projectStringLimitError(textProject), /1024/, 'an overlong text label is named explicitly');
+
+  const nameProject = JSON.parse(JSON.stringify(api.project()));
+  nameProject.mix.blocks.find(b => b.id === 'f1').name = 'B'.repeat(64);
+  assert.match(api.projectStringLimitError(nameProject), /63/, 'an overlong block name is named explicitly');
+
+  const invalid = JSON.parse(JSON.stringify(api.project()));
+  invalid.mix.texts.push({ id: 'txt_long', text: 'x'.repeat(1025), x: 1, y: 1, size: 16 });
+  invalid.mix.blocks.find(b => b.id === 'f2').name = 'C'.repeat(64);
+  api.setProject(invalid);
+  const messages = api.validate().diagnostics.map(d => d.message).join('\n');
+  assert.match(messages, /1024/, 'validation reports the text limit');
+  assert.match(messages, /63/, 'validation reports the name limit');
+
+  const alerts = [];
+  context.alert = message => alerts.push(String(message));
+  const before = api.project().id;
+  const input = dom.getEl('f_import');
+  input.files = [{ text: async () => JSON.stringify(JSON.parse(JSON.stringify(nameProject))) }];
+  await input.onchange({ target: input });
+  assert.ok(alerts.some(message => /63/.test(message)), 'import shows the byte-limit error, not generic invalid JSON');
+  assert.equal(api.project().id, before, 'a rejected import leaves the working copy untouched');
+});
+
+test('39. Importing .blocks.json resets device metadata and reference mode', async t => {
+  const { api, dom } = createEditorFixture(t);
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().referenceMode, true);
+
+  const imported = JSON.parse(JSON.stringify(api.project()));
+  imported.id = 'imported_one';
+  imported.name = 'Imported';
+  const input = dom.getEl('f_import');
+  input.files = [{ text: async () => JSON.stringify(imported) }];
+  await input.onchange({ target: input });
+
+  const probe = api.stateProbe();
+  assert.equal(api.project().id, 'imported_one');
+  assert.equal(probe.savedId, '', 'import is not bound to the previous device project');
+  assert.equal(probe.revision, 0, 'import starts a new revision base');
+  assert.equal(probe.referenceMode, false, 'import is editable, not the reference');
+  assert.equal(probe.dirty, true, 'import must be saved explicitly');
+});
+
+test('39b. Importing a colliding project id saves as a new project', async t => {
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
+    if (url.startsWith('/api/sound/graph/projects')) return { ok: true, projects: [{ id: 'collision', name: 'Existing', revision: 3 }] };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  const imported = JSON.parse(JSON.stringify(api.project()));
+  imported.id = 'collision';
+  imported.name = 'Collision';
+  const input = dom.getEl('f_import');
+  input.files = [{ text: async () => JSON.stringify(imported) }];
+  await input.onchange({ target: input });
+
+  assert.notEqual(api.project().id, 'collision', 'a colliding id is replaced');
+  assert.match(api.project().id, /^[A-Za-z0-9_-]{1,31}$/);
+});
+
+test('40. Import prompts and archives a dirty draft before replacing it', async t => {
+  const { api, context, dom } = createEditorFixture(t);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  api.setProject(Object.assign({}, api.project(), { name: 'Dirty edit' }));
+  let asked = 0;
+  context.confirm = () => {
+    asked++;
+    context.localStorage.setItem('aura_blocks_project_v1', '{"draft":"previous"}');
+    return true;
+  };
+  const imported = JSON.parse(JSON.stringify(api.project()));
+  imported.id = 'after_backup';
+  const input = dom.getEl('f_import');
+  input.files = [{ text: async () => JSON.stringify(imported) }];
+  await input.onchange({ target: input });
+
+  assert.equal(asked, 1, 'a dirty import asks for confirmation');
+  assert.equal(context.localStorage.getItem('aura_blocks_project_backup_v1'), '{"draft":"previous"}',
+    'the previous draft is archived before it is replaced');
+  assert.equal(api.project().id, 'after_backup');
+
+  context.localStorage.removeItem('aura_blocks_project_backup_v1');
+  api.setProject(Object.assign({}, api.project(), { name: 'Dirty again' }));
+  let cancelled = 0;
+  context.confirm = () => { cancelled++; return false; };
+  const before = api.project().id;
+  const other = JSON.parse(JSON.stringify(api.project()));
+  other.id = 'must_not_import';
+  input.files = [{ text: async () => JSON.stringify(other) }];
+  await input.onchange({ target: input });
+  assert.equal(cancelled, 1, 'cancelling the prompt is respected');
+  assert.equal(api.project().id, before, 'cancelling leaves the working copy unchanged');
+  assert.equal(context.localStorage.getItem('aura_blocks_project_backup_v1'), null,
+    'a cancelled import does not overwrite the archived draft');
+});
+
+test('41. Status polling keeps the base revision while dirty and surfaces a conflict', async t => {
+  let state = { id: 'deviceB', revision: 9 };
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: true, id: state.id, revision: state.revision };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+
+  api.setProject(Object.assign({}, api.project(), { id: 'deviceB', name: 'B' }));
+  api.setMeta('deviceB', 9);
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().dirty, false);
+
+  api.setProject(Object.assign({}, api.project(), { name: 'Local edit' }));
+  state = { id: 'deviceB', revision: 12 };
+  await api.refreshStatus();
+
+  const probe = api.stateProbe();
+  assert.equal(api.meta().revision, 9, 'the expectedRevision is preserved while dirty');
+  assert.equal(probe.savedId, 'deviceB');
+  assert.equal(probe.dirty, true);
+  assert.equal(probe.conflictRevision, 12, 'the remote revision is recorded as a conflict');
+  assert.match(dom.getEl('status_txt').textContent, /другом|another|changed/i,
+    'the conflict is surfaced instead of silently overwriting');
+});
+
+test('42. Pack import completion waits for the new project to become active', async t => {
+  let state = { id: 'old_project', revision: 4 };
+  let deviceProject = null;
+  const { api, context, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: true, id: state.id, revision: state.revision };
+    if (url.startsWith('/api/sound/graph/project?')) {
+      return { ok: true, revision: state.revision, project: { id: state.id, name: state.id, editor: { project: deviceProject } } };
+    }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    return { ok: true };
+  } });
+
+  api.setProject(Object.assign({}, api.project(), { id: 'old_project', name: 'Old' }));
+  api.setMeta('old_project', 4);
+  api.resetAutoLoad();
+  await api.refreshStatus();
+  context.window.open = () => {};
+
+  dom.getEl('b_pack_import').onclick();
+  assert.equal(await api.checkPackImportCompletion(), false, 'the unchanged active project is not treated as success');
+
+  state = { id: 'pack_project', revision: 5 };
+  deviceProject = Object.assign({}, api.project(), { format: 'sound-blocks', id: 'pack_project', name: 'Pack' });
+  assert.equal(await api.checkPackImportCompletion(), true, 'the new active project completes the import');
+  assert.equal(api.project().id, 'pack_project');
+  assert.equal(api.stateProbe().savedId, 'pack_project');
+});

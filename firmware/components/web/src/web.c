@@ -24,6 +24,7 @@
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -88,6 +89,17 @@ static volatile int s_up_received;
 static volatile bool s_up_active;
 static volatile bool s_up_ota;
 static volatile uint8_t s_up_slot;
+/* Active async transfer request, used by the transfer supervisor to abort a
+ * hung upload. Protected by s_control_state_mux (pointer only). */
+static httpd_req_t *s_up_req;
+static TaskHandle_t s_transfer_supervisor;
+static TaskHandle_t s_up_worker;
+static volatile bool s_up_aborted;
+/* True while the worker holds a storage lease. Only one of the worker and the
+ * supervisor may release it (claim under s_control_state_mux). */
+static bool s_up_lease_held;
+/* Worker-only TWDT subscription flag; fed only on real byte progress. */
+static bool s_transfer_wdt_subscribed;
 
 /* Test hooks for the otherwise unbounded background loops: 0 runs forever
  * (production); the host tests set a small cap so the loop body can be
@@ -113,6 +125,10 @@ static uint16_t s_func_last_mask[SETTINGS_FUNC_MAP_COUNT];
  * between the DCC callback and the HTTP handler. */
 static SemaphoreHandle_t s_func_mutex;
 static SemaphoreHandle_t s_control_mutex;
+/* Single owner of the cached settings_config_t. Writers hold it across the
+ * read-modify-save sequence so two handlers cannot persist a mixed/stale
+ * snapshot; DCC hot-path readers take it non-blocking. */
+static SemaphoreHandle_t s_cfg_mutex;
 static portMUX_TYPE s_control_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_actuation_ready;
 static TaskHandle_t s_maintenance_owner;
@@ -122,6 +138,20 @@ static unsigned s_mutation_count;
 static TaskHandle_t s_mutation_owner;
 static int64_t s_transfer_deadline;
 static bool s_transfer_reboot;
+/* 64-bit deadline is shared with the supervisor task; keep read/write atomic. */
+static int64_t transfer_deadline_get(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    int64_t value = s_transfer_deadline;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    return value;
+}
+static void transfer_deadline_set(int64_t value)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    s_transfer_deadline = value;
+    portEXIT_CRITICAL(&s_control_state_mux);
+}
 static uint32_t s_file_sequence;
 static bool s_func_bind_present;
 static uint16_t s_outputs_applied;
@@ -140,6 +170,38 @@ static bool actuation_ready(void)
     bool ready = s_actuation_ready;
     portEXIT_CRITICAL(&s_control_state_mux);
     return ready;
+}
+
+static bool cfg_lock(TickType_t wait)
+{
+    return s_cfg_mutex == NULL || xSemaphoreTake(s_cfg_mutex, wait) == pdTRUE;
+}
+
+static void cfg_unlock(void)
+{
+    if (s_cfg_mutex != NULL) xSemaphoreGive(s_cfg_mutex);
+}
+
+/* Copy the cached config without ever holding the lock across I/O. */
+static bool cfg_read(settings_config_t *out)
+{
+    if (out == NULL || !cfg_lock(pdMS_TO_TICKS(100))) return false;
+    *out = s_cfg;
+    cfg_unlock();
+    return true;
+}
+
+/* Persist `next` and publish it as the new cache. The config lock is held
+ * across the save so concurrent read-modify-save handlers cannot overwrite
+ * each other with a stale snapshot. */
+static esp_err_t cfg_save(const settings_config_t *next, bool deferred)
+{
+    if (next == NULL) return ESP_ERR_INVALID_ARG;
+    if (!cfg_lock(pdMS_TO_TICKS(100))) return ESP_ERR_TIMEOUT;
+    esp_err_t err = deferred ? settings_save_deferred(next) : settings_save(next);
+    if (err == ESP_OK) s_cfg = *next;
+    cfg_unlock();
+    return err;
 }
 
 static esp_err_t control_mutex_init(void)
@@ -292,6 +354,8 @@ static esp_err_t send_root_html(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(req, "Content-Security-Policy", "frame-ancestors 'none'");
 
     char inm[96];
     if (httpd_req_get_hdr_value_str(req, "If-None-Match", inm, sizeof(inm)) == ESP_OK &&
@@ -343,7 +407,22 @@ static bool query_bool_valid(const char *query, const char *key)
 
 static bool transfer_expired(void)
 {
-    return s_transfer_deadline != 0 && esp_timer_get_time() >= s_transfer_deadline;
+    int64_t deadline = transfer_deadline_get();
+    return deadline != 0 && esp_timer_get_time() >= deadline;
+}
+
+/* OTA uploads range from a small app image to the full 8 MiB limit. A fixed
+ * 120 s window rejects a slow-but-healthy link halfway through, so derive a
+ * budget from the declared body length at a conservative 16 KiB/s, with a
+ * 300 s floor. */
+static int64_t ota_deadline_from_len(int content_len)
+{
+    const int64_t min_us = 300000000LL;
+    if (content_len <= 0) return esp_timer_get_time() + min_us;
+    int64_t seconds = ((int64_t)content_len + 16383LL) / 16384LL;
+    int64_t budget = seconds * 1000000LL;
+    if (budget < min_us) budget = min_us;
+    return esp_timer_get_time() + budget;
 }
 
 static esp_err_t close_rejected_body(httpd_req_t *req, esp_err_t response)
@@ -430,8 +509,11 @@ esp_err_t web_set_actuation_ready(bool ready)
     }
     esp_err_t sound_err = sound_set_inhibited(!ready);
     esp_err_t audio_err = audio_set_inhibited(!ready);
-    if (!ready && sound_err == ESP_ERR_INVALID_STATE) sound_err = ESP_OK;
-    if (!ready && audio_err == ESP_ERR_INVALID_STATE) audio_err = ESP_OK;
+    /* INVALID_STATE means the optional audio/sound subsystem was never
+     * initialised (absent hardware, or import failure). It must neither block
+     * DCC/motor readiness nor block OTA confirmation. */
+    if (sound_err == ESP_ERR_INVALID_STATE) sound_err = ESP_OK;
+    if (audio_err == ESP_ERR_INVALID_STATE) audio_err = ESP_OK;
     err = sound_err != ESP_OK ? sound_err : audio_err;
     if (err != ESP_OK) {
         ready = false;
@@ -481,8 +563,8 @@ static esp_err_t maintenance_reserve_checked(bool stopped)
     esp_err_t audio_err = audio_set_inhibited(true);
     xSemaphoreGive(s_control_mutex);
     if (err == ESP_OK) err = sound_err;
-    if (!actuation_ready() && err == ESP_ERR_INVALID_STATE) err = ESP_OK;
-    if (!actuation_ready() && audio_err == ESP_ERR_INVALID_STATE) audio_err = ESP_OK;
+    if (err == ESP_ERR_INVALID_STATE) err = ESP_OK;
+    if (audio_err == ESP_ERR_INVALID_STATE) audio_err = ESP_OK;
     if (err == ESP_OK) err = audio_err;
     if (err != ESP_OK) {
         /* The reserve failed before quiescence, so nothing was mutated. Abort
@@ -542,9 +624,19 @@ static esp_err_t set_inhibited_retry(esp_err_t (*set)(bool), bool inhibited)
     return err;
 }
 
-void web_maintenance_end(void)
+/* Shared maintenance release. Normal callers must own the maintenance; the
+ * transfer supervisor may force-release an owner that stopped responding.
+ * `expected_owner == NULL` with force still requires an active maintenance. */
+static void maintenance_end_impl(bool force, TaskHandle_t expected_owner)
 {
-    if (s_maintenance_owner != xTaskGetCurrentTaskHandle()) return;
+    portENTER_CRITICAL(&s_control_state_mux);
+    TaskHandle_t owner = s_maintenance_owner;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    if (force) {
+        if (owner == NULL || (expected_owner != NULL && owner != expected_owner)) return;
+    } else if (owner != xTaskGetCurrentTaskHandle()) {
+        return;
+    }
     if (s_maintenance_exclusive_fs) storage_maintenance_end();
     if (control_mutex_init() != ESP_OK) {
         portENTER_CRITICAL(&s_control_state_mux);
@@ -554,7 +646,21 @@ void web_maintenance_end(void)
         portEXIT_CRITICAL(&s_control_state_mux);
         return;
     }
-    (void)xSemaphoreTake(s_control_mutex, portMAX_DELAY);
+    /* The supervisor must never block behind a stuck worker holding the
+     * control mutex. If the bounded take fails, leave outputs inhibited and
+     * clear the maintenance owner (fail-safe). */
+    TickType_t wait = force ? pdMS_TO_TICKS(50) : portMAX_DELAY;
+    if (xSemaphoreTake(s_control_mutex, wait) != pdTRUE) {
+        if (force) {
+            portENTER_CRITICAL(&s_control_state_mux);
+            s_maintenance_owner = NULL;
+            s_maintenance_exclusive_fs = false;
+            s_actuation_ready = false;
+            portEXIT_CRITICAL(&s_control_state_mux);
+            ++s_control_generation;
+        }
+        return;
+    }
     bool ready = actuation_ready();
     esp_err_t sound_err;
     esp_err_t audio_err;
@@ -567,6 +673,8 @@ void web_maintenance_end(void)
         sound_err = sound_set_inhibited(true);
         audio_err = audio_set_inhibited(true);
     }
+    if (sound_err == ESP_ERR_INVALID_STATE) sound_err = ESP_OK;
+    if (audio_err == ESP_ERR_INVALID_STATE) audio_err = ESP_OK;
     if (ready && (sound_err != ESP_OK || audio_err != ESP_OK)) {
         ready = false;
         (void)sound_set_inhibited(true);
@@ -582,10 +690,26 @@ void web_maintenance_end(void)
     xSemaphoreGive(s_control_mutex);
 }
 
+void web_maintenance_end(void)
+{
+    maintenance_end_impl(false, NULL);
+}
+
 uint8_t web_get_voice_volume(uint8_t fn)
 {
+    uint8_t engine_vol;
+    uint8_t effects_vol;
+    /* Called from the DCC audio path: never block behind an HTTP NVS save. */
+    if (cfg_lock(0)) {
+        engine_vol = s_cfg.engine_volume;
+        effects_vol = s_cfg.effects_volume;
+        cfg_unlock();
+    } else {
+        engine_vol = s_cfg.engine_volume;
+        effects_vol = s_cfg.effects_volume;
+    }
     return web_util_voice_volume(fn, s_track_cat, s_track_cat_loaded,
-                                 s_cfg.engine_volume, s_cfg.effects_volume);
+                                 engine_vol, effects_vol);
 }
 
 void web_master_volume_changed(uint8_t vol0_100)
@@ -593,9 +717,12 @@ void web_master_volume_changed(uint8_t vol0_100)
     if (vol0_100 > 100U) {
         vol0_100 = 100U;
     }
-    s_cfg.master_volume = vol0_100;
+    if (cfg_lock(pdMS_TO_TICKS(100))) {
+        s_cfg.master_volume = vol0_100;
+        (void)settings_save_deferred(&s_cfg);
+        cfg_unlock();
+    }
     (void)audio_set_volume(vol0_100);
-    (void)settings_save_deferred(&s_cfg);
 }
 
 /* Effect-specific cycle period (ms): Mars ~1.75 Hz, beacon ~1.1 Hz, strobe
@@ -801,12 +928,13 @@ void web_emergency_reset(void)
 {
     bool locked = false;
     if (s_func_mutex != NULL) {
-        locked = xSemaphoreTake(s_func_mutex, portMAX_DELAY) == pdTRUE;
+        /* Never block a DCC/safety callback behind an HTTP handler that holds
+         * the function lock across storage/NVS. If the lock is busy, clear the
+         * latched outputs and state directly; the safety guarantee takes
+         * precedence over lock discipline here (the next function apply is
+         * gated by s_actuation_ready/motion anyway). */
+        locked = xSemaphoreTake(s_func_mutex, 0) == pdTRUE;
     }
-    /* Emergency clearing must never depend on the lock being available: the
-     * caller is already stopping the locomotive, so a lost mutex would leave
-     * AUX/lights latched. Only a NULL/deleted mutex (or a failed take) reaches
-     * this path; clear the state unlocked and report it. */
     if (!locked) {
         ESP_LOGW(TAG, "emergency reset without function lock");
     }
@@ -1069,6 +1197,8 @@ static esp_err_t sound_editor_get(httpd_req_t *req)
         httpd_resp_set_type(req, a->mime);
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
         httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+        httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+        httpd_resp_set_hdr(req, "Content-Security-Policy", "frame-ancestors 'none'");
         httpd_resp_set_hdr(req, "Cache-Control", a->immutable ? "public, max-age=31536000, immutable" : "no-cache");
         return httpd_resp_send(req, (const char *)a->data, a->length);
     }
@@ -1142,7 +1272,21 @@ static bool graph_revision(const char *query, const char *key, uint32_t *revisio
 
 static esp_err_t graph_capabilities_get(httpd_req_t *req)
 {
-    return send_json(req, "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,\"limits\":{\"states\":128,\"soundStates\":96,\"transitions\":250,\"effects\":32,\"assets\":64,\"variables\":16,\"jsonBytes\":131072},\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\",\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\",\"sample_done\",\"dir_fwd\",\"dir_rev\",\"random\",\"timeout\",\"var_cmp\"],\"variableKinds\":[\"speed\",\"forward\",\"moving\",\"engine\"],\"compareOps\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\"]}");
+    char json[1024];
+    snprintf(json, sizeof(json),
+             "{\"ok\":true,\"format\":\"sound-graph\",\"schemaVersion\":1,"
+             "\"limits\":{\"states\":%d,\"soundStates\":%d,\"transitions\":%d,"
+             "\"effects\":%d,\"assets\":%d,\"variables\":%d,\"jsonBytes\":%u},"
+             "\"conditions\":[\"fn_press\",\"fn_release\",\"fn_on\",\"fn_off\","
+             "\"engine_on\",\"engine_off\",\"speed\",\"accel\",\"decel\","
+             "\"sample_done\",\"dir_fwd\",\"dir_rev\",\"random\",\"timeout\","
+             "\"var_cmp\",\"state_enter\"],"
+             "\"variableKinds\":[\"speed\",\"forward\",\"moving\",\"engine\"],"
+             "\"compareOps\":[\"eq\",\"ne\",\"lt\",\"le\",\"gt\",\"ge\"]}",
+             SG_MAX_STATES, SG_MAX_SOUND_STATES, SG_MAX_TRANSITIONS,
+             SG_MAX_EFFECTS, SG_MAX_ASSETS, SG_MAX_VARIABLES,
+             (unsigned)SG_MAX_JSON);
+    return send_json(req, json);
 }
 
 static esp_err_t graph_projects_get(httpd_req_t *req)
@@ -1416,9 +1560,13 @@ static esp_err_t graph_project_delete_post(httpd_req_t *req)
 
 static esp_err_t control_source_get(httpd_req_t *req)
 {
+    settings_config_t cfg;
+    if (!cfg_read(&cfg)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     char json[64];
     snprintf(json, sizeof(json), "{\"ok\":true,\"source\":\"%s\"}",
-             s_cfg.control_source == 1 ? "web" : "rails");
+             cfg.control_source == 1 ? "web" : "rails");
     return send_json(req, json);
 }
 
@@ -1439,6 +1587,10 @@ static esp_err_t control_source_post(httpd_req_t *req)
         xSemaphoreGive(s_control_mutex);
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance\"}");
     }
+    if (!cfg_lock(pdMS_TO_TICKS(100))) {
+        xSemaphoreGive(s_control_mutex);
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     settings_config_t next = s_cfg;
     next.control_source = (strcasecmp(buf, "web") == 0 || strcmp(buf, "1") == 0) ? 1 : 0;
     motor_emergency_stop();
@@ -1451,21 +1603,24 @@ static esp_err_t control_source_post(httpd_req_t *req)
         if (err == ESP_OK) err = settings_cv_write(29, cv29 & (uint8_t)~0x04U);
         if (err == ESP_OK) err = settings_cv_commit();
         if (err != ESP_OK) {
+            cfg_unlock();
             xSemaphoreGive(s_control_mutex);
             return send_json(req, "{\"ok\":false,\"error\":\"mode save failed\"}");
         }
     }
     if (settings_save(&next) != ESP_OK) {
+        cfg_unlock();
         xSemaphoreGive(s_control_mutex);
         return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
     }
     s_cfg = next;
     ++s_control_generation;
-    web_log_event("Источник", "%s", s_cfg.control_source == 1 ? "Веб" : "Рельсы");
+    web_log_event("Источник", "%s", next.control_source == 1 ? "Веб" : "Рельсы");
+    cfg_unlock();
     xSemaphoreGive(s_control_mutex);
     char json[64];
     snprintf(json, sizeof(json), "{\"ok\":true,\"source\":\"%s\"}",
-             s_cfg.control_source == 1 ? "web" : "rails");
+             next.control_source == 1 ? "web" : "rails");
     return send_json(req, json);
 }
 
@@ -2079,6 +2234,31 @@ static bool web_name_is_wav(const char *n)
            (e[2] == 'a' || e[2] == 'A') && (e[3] == 'v' || e[3] == 'V');
 }
 
+/* Names the library/storage code owns privately. A user upload must never be
+ * able to collide with the metadata sidecars, a pack backup directory or an
+ * in-progress staging file. */
+static bool web_name_reserved(const char *name)
+{
+    if (name == NULL || name[0] == '\0') return false;
+    if (name[0] == '.' && name[1] == 'p' && name[2] == 'b') return true;
+    size_t l = strlen(name);
+    if (l >= 4U && strcasecmp(name + l - 4U, ".tmp") == 0) return true;
+    return strcasecmp(name, "tracks.txt") == 0 ||
+           strcasecmp(name, "volumes.txt") == 0;
+}
+
+/* Force the stored/displayed extension to lowercase so upload, OTA, library,
+ * play and delete all agree on the canonical file name. */
+static void web_name_lower_wav(char *name, size_t cap)
+{
+    size_t l = strlen(name);
+    if (l < 4U || l + 1U > cap) return;
+    name[l - 4U] = '.';
+    name[l - 3U] = 'w';
+    name[l - 2U] = 'a';
+    name[l - 1U] = 'v';
+}
+
 static int web_name_cmp(const void *a, const void *b)
 {
     return strcmp((const char *)a, (const char *)b);
@@ -2115,6 +2295,36 @@ static bool web_lib_base_name(const char *in, char *out, size_t out_len)
     }
     snprintf(out, out_len, "%s", safe);
     return true;
+}
+
+/* Resolve a library base name to the canonical on-disk path. New uploads are
+ * stored as `<base>.wav`, but libraries written by older firmware may still
+ * contain `<base>.WAV`; accept those case-insensitively so play/delete/raw
+ * references agree with the ingest normalization. */
+static bool web_lib_resolve_path(const char *base, char *path, size_t cap)
+{
+    snprintf(path, cap, WEB_AUDIO_DIR "/%s.wav", base);
+    FILE *f = fopen(path, "rb");
+    if (f != NULL) {
+        fclose(f);
+        return true;
+    }
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d == NULL) return false;
+    bool found = false;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (!web_name_is_wav(ent->d_name)) continue;
+        char cand[WEB_LIB_NAME_MAX];
+        if (!web_lib_base_name(ent->d_name, cand, sizeof(cand))) continue;
+        if (strcasecmp(cand, base) == 0) {
+            snprintf(path, cap, WEB_AUDIO_DIR "/%s", ent->d_name);
+            found = true;
+            break;
+        }
+    }
+    closedir(d);
+    return found;
 }
 
 /* Read volumes.txt into `out` (cap entries). Returns the entry count (0 if the
@@ -2310,9 +2520,12 @@ static esp_err_t sound_file_get(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     }
     char path[192];
-    snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
     if (storage_access_begin() != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage busy");
+    }
+    if (!web_lib_resolve_path(base, path, sizeof(path))) {
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     }
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
@@ -2377,6 +2590,10 @@ static esp_err_t sound_file_get(httpd_req_t *req)
 static esp_err_t audio_status_get(httpd_req_t *req)
 {
     preview_sync();
+    settings_config_t cfg;
+    if (!cfg_read(&cfg)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     char pe[WEB_LIB_NAME_MAX * 2];
     json_escape(s_preview_name, pe, sizeof(pe));
     char json[320];
@@ -2384,10 +2601,10 @@ static esp_err_t audio_status_get(httpd_req_t *req)
              "{\"ok\":true,\"playing\":%s,\"active_slot\":%u,\"master_volume\":%u,"
              "\"engine_volume\":%u,\"effects_volume\":%u,\"preview\":\"%s\"}",
              audio_is_playing() ? "true" : "false",
-             (unsigned)s_cfg.active_slot,
-             (unsigned)s_cfg.master_volume,
-             (unsigned)s_cfg.engine_volume,
-             (unsigned)s_cfg.effects_volume, pe);
+             (unsigned)cfg.active_slot,
+             (unsigned)cfg.master_volume,
+             (unsigned)cfg.engine_volume,
+             (unsigned)cfg.effects_volume, pe);
     return send_json(req, json);
 }
 
@@ -2443,7 +2660,9 @@ static esp_err_t audio_play_post(httpd_req_t *req)
         if (!web_lib_base_name(qname, base, sizeof(base)))
             return send_json(req, "{\"ok\":false,\"error\":\"bad name\"}");
         char abs_path[192];
-        snprintf(abs_path, sizeof(abs_path), WEB_AUDIO_DIR "/%s.wav", base);
+        if (!web_lib_resolve_path(base, abs_path, sizeof(abs_path))) {
+            snprintf(abs_path, sizeof(abs_path), WEB_AUDIO_DIR "/%s.wav", base);
+        }
         uint8_t vol = audio_library_volume_lookup(base);
         esp_err_t err = ESP_OK;
         if (audio_voice_get_state(s_preview_voice) == AUDIO_VOICE_FINISHED)
@@ -2471,8 +2690,11 @@ static esp_err_t audio_play_post(httpd_req_t *req)
     (void)settings_tracks_load(tracks, &count);
     for (size_t i = 0; i < count; ++i) {
         if (tracks[i].slot == slot && tracks[i].file[0] != '\0') {
-            s_cfg.active_slot = slot;
-            (void)settings_save_deferred(&s_cfg);
+            if (cfg_lock(pdMS_TO_TICKS(100))) {
+                s_cfg.active_slot = slot;
+                (void)settings_save_deferred(&s_cfg);
+                cfg_unlock();
+            }
             char abs_path[160];
             snprintf(abs_path, sizeof(abs_path), WEB_USERDATA_DIR "/%s", tracks[i].file);
             esp_err_t err = ESP_OK;
@@ -2510,20 +2732,36 @@ static esp_err_t audio_volume_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
-    uint8_t m = 20, e = 20, f = 20;
-    parse_u8(query, "master", &m);
-    parse_u8(query, "engine", &e);
-    parse_u8(query, "effects", &f);
-    if (m > 100) m = 100;
-    if (e > 100) e = 100;
-    if (f > 100) f = 100;
-    bool vol_changed = (m != s_cfg.master_volume || e != s_cfg.engine_volume ||
-                        f != s_cfg.effects_volume);
-    s_cfg.master_volume = m;
-    s_cfg.engine_volume = e;
-    s_cfg.effects_volume = f;
+    settings_config_t next;
+    if (!cfg_read(&next)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
+    /* Only fields present in the request change: a partial slider update must
+     * not reset the other two volumes to their defaults. */
+    uint8_t old_m = next.master_volume;
+    uint8_t old_e = next.engine_volume;
+    uint8_t old_f = next.effects_volume;
+    uint8_t v = 0;
+    if (query_has_key(query, "master") && parse_u8(query, "master", &v)) {
+        next.master_volume = v > 100U ? 100U : v;
+    }
+    if (query_has_key(query, "engine") && parse_u8(query, "engine", &v)) {
+        next.engine_volume = v > 100U ? 100U : v;
+    }
+    if (query_has_key(query, "effects") && parse_u8(query, "effects", &v)) {
+        next.effects_volume = v > 100U ? 100U : v;
+    }
+    bool vol_changed = (next.master_volume != old_m ||
+                        next.engine_volume != old_e ||
+                        next.effects_volume != old_f);
+    uint8_t m = next.master_volume;
+    uint8_t e = next.engine_volume;
+    uint8_t f = next.effects_volume;
     /* Deferred: a slider drag must not trigger one flash write per move. */
-    (void)settings_save_deferred(&s_cfg);
+    esp_err_t save_err = cfg_save(&next, true);
+    if (save_err != ESP_OK) {
+        return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+    }
     (void)audio_set_volume(m);
     sound_set_volumes(e, f);
     if (vol_changed) {
@@ -2632,11 +2870,16 @@ static esp_err_t audio_library_volume_post(httpd_req_t *req)
 #define WEB_UP_PROGRESS_STEP 262144
 #endif
 
+/* Defined with the transfer worker below; used by the streaming loops above. */
+static bool transfer_aborted(void);
+static void transfer_wdt_feed(size_t bytes);
+
 static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
 {
     uint8_t *buf = malloc(PIPE_BUF_SIZE);
     if (buf == NULL) return ESP_ERR_NO_MEM;
-    int64_t deadline = s_transfer_deadline != 0 ? s_transfer_deadline : esp_timer_get_time() + 120000000;
+    int64_t deadline = transfer_deadline_get();
+    if (deadline == 0) deadline = esp_timer_get_time() + 120000000;
     int remaining = (int)req->content_len;
     int total = 0;
     int idle = 0;
@@ -2645,6 +2888,7 @@ static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
     uint32_t iterations = 0;
     while (err == ESP_OK && remaining > 0) {
         if (s_pipe_iter_cap != 0U && iterations++ >= s_pipe_iter_cap) { err = ESP_ERR_TIMEOUT; break; }
+        if (transfer_aborted()) { err = ESP_ERR_TIMEOUT; break; }
         if (esp_timer_get_time() >= deadline) { err = ESP_ERR_TIMEOUT; break; }
         size_t want = remaining > PIPE_BUF_SIZE ? PIPE_BUF_SIZE : (size_t)remaining;
         int r = httpd_req_recv(req, (char *)buf, want);
@@ -2656,6 +2900,7 @@ static esp_err_t pipe_upload(httpd_req_t *req, FILE *f, int *out_total)
             total += r;
             remaining -= r;
             s_up_received = total;
+            transfer_wdt_feed((size_t)r);
             if (total - (int)next_prog >= WEB_UP_PROGRESS_STEP) {
                 next_prog = (uint32_t)total;
                 ESP_LOGI(TAG, "UP: progress %d/%d", total, (int)req->content_len);
@@ -2794,7 +3039,9 @@ static esp_err_t wav_files_prepare(wav_tx_t *tx)
         if (src != NULL && dst != NULL) {
             size_t n;
             while ((n = fread(buffer, 1, 8192, src)) > 0U) {
-                if (transfer_expired() || WEB_FWRITE(buffer, 1, n, dst) != n) { err = ESP_FAIL; break; }
+                if (transfer_aborted() || transfer_expired() ||
+                    WEB_FWRITE(buffer, 1, n, dst) != n) { err = ESP_FAIL; break; }
+                transfer_wdt_feed(n);
             }
             if (ferror(src)) err = ESP_FAIL;
         }
@@ -2900,7 +3147,23 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
         sanitize_name(decoded, name, sizeof(name));
     }
 
-    if (asset_only && (name[0] == '\0' || !web_name_is_wav(name)))
+    /* Reject storage-owned sidecars/backup names before they can be opened,
+     * and require the .wav suffix for both bound and asset uploads. The
+     * extension is normalized to lowercase so every later lookup (library,
+     * play, delete, graph preflight) uses the same canonical name. */
+    if (name[0] != '\0') {
+        if (web_name_reserved(name)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "reserved filename");
+        }
+        if (!web_name_is_wav(name)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                       asset_only ? "wav filename required for asset upload"
+                                                  : "wav filename required");
+        }
+        web_name_lower_wav(name, sizeof(name));
+    }
+
+    if (asset_only && name[0] == '\0')
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "wav filename required for asset upload");
 
     /* Load the track list first: it is also used to auto-assign a slot when the
@@ -2940,7 +3203,10 @@ static esp_err_t audio_upload_post(httpd_req_t *req)
     tx->file_count = 1;
     tx->previous_count = asset_only ? 0U : count;
     memcpy(tx->previous, tracks, sizeof(tx->previous));
-    tx->previous_cfg = s_cfg;
+    if (!cfg_read(&tx->previous_cfg)) {
+        free(tx);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "config busy");
+    }
     char *path = tx->files[0].staged;
     /* Relative path (no /userdata prefix): matches the V0 convention and the
      * web UI which strips the "audio/" prefix for display. */
@@ -3115,9 +3381,16 @@ static esp_err_t audio_track_delete_post(httpd_req_t *req)
 
     /* Unbind, do not unlink a path potentially owned by a sound project. */
 
-    if (s_cfg.active_slot == slot) {
-        s_cfg.active_slot = 0;
-        (void)settings_save(&s_cfg);
+    bool was_active = false;
+    if (cfg_lock(pdMS_TO_TICKS(100))) {
+        was_active = s_cfg.active_slot == slot;
+        if (was_active) {
+            s_cfg.active_slot = 0;
+            (void)settings_save(&s_cfg);
+        }
+        cfg_unlock();
+    }
+    if (was_active) {
         audio_voice_release_owned(s_preview_voice);
         memset(&s_preview_voice, 0, sizeof(s_preview_voice));
     }
@@ -3287,22 +3560,27 @@ static bool web_func_bind_remove(size_t idx)
     return web_func_bind_commit(tmp, n);
 }
 
-/* 64 bindings x ~124 bytes worst case = ~7.9 KB, plus frame overhead. */
-#define WEB_FUNC_BIND_JSON_MAX 8192
+/* Worst-case frame overhead per binding is < 200 bytes; size the response from
+ * the live count instead of a fixed buffer that silently truncates JSON. */
+#define WEB_FUNC_BIND_JSON_HDR 128U
+#define WEB_FUNC_BIND_JSON_ENTRY 224U
 
 /* GET /api/func-map?view=bind[|matrix] -> the canonical binding list. */
 static esp_err_t func_bind_get(httpd_req_t *req)
 {
-    char *json = malloc(WEB_FUNC_BIND_JSON_MAX);
+    size_t count = s_func_bind_count;
+    if (count > FUNC_BIND_MAX) count = FUNC_BIND_MAX;
+    size_t cap = WEB_FUNC_BIND_JSON_HDR + count * WEB_FUNC_BIND_JSON_ENTRY;
+    char *json = malloc(cap);
     if (json == NULL) {
         return send_json(req, "{\"ok\":false,\"error\":\"oom\"}");
     }
     size_t used = 0;
-    buf_appendf(json, WEB_FUNC_BIND_JSON_MAX, &used, "{\"ok\":true,\"count\":%u,\"binds\":[",
-                (unsigned)s_func_bind_count);
-    for (size_t i = 0; i < s_func_bind_count; ++i) {
+    buf_appendf(json, cap, &used, "{\"ok\":true,\"count\":%u,\"binds\":[",
+                (unsigned)count);
+    for (size_t i = 0; i < count; ++i) {
         const func_binding_t *b = &s_func_bind[i];
-        buf_appendf(json, WEB_FUNC_BIND_JSON_MAX, &used,
+        buf_appendf(json, cap, &used,
                     "%s{\"fn\":%u,\"type\":%u,\"id\":%u,\"dir\":%u,\"state\":%u,"
                     "\"mode\":%u,\"flags\":%u,\"short\":%u,\"short_ms\":%u,"
                     "\"min_ms\":%u,\"fade_ms\":%u}",
@@ -3311,7 +3589,17 @@ static esp_err_t func_bind_get(httpd_req_t *req)
                     (unsigned)b->mode, (unsigned)b->flags, (unsigned)b->short_table,
                     (unsigned)b->short_ms, (unsigned)b->min_ms, (unsigned)b->fade_ms);
     }
-    buf_appendf(json, WEB_FUNC_BIND_JSON_MAX, &used, "]}");
+    if (used >= cap) {
+        /* Should be unreachable with the per-entry budget, but never emit
+         * truncated, unparsable JSON. */
+        free(json);
+        return send_json(req, "{\"ok\":false,\"error\":\"response too large\"}");
+    }
+    buf_appendf(json, cap, &used, "]}");
+    if (used >= cap) {
+        free(json);
+        return send_json(req, "{\"ok\":false,\"error\":\"response too large\"}");
+    }
     esp_err_t err = send_json(req, json);
     free(json);
     return err;
@@ -3499,7 +3787,8 @@ static esp_err_t cv_write_post(httpd_req_t *req)
     /* Address / speed-step / consist CVs must take effect immediately (the
      * runtime config is cached inside the DCC decoder, not read per packet).
      * CV8 = 8 is a factory reset of all CVs, so reload those as well. */
-    if (idx == 1U || idx == 8U || idx == 17U || idx == 18U || idx == 19U || idx == 29U) {
+    if (idx == 1U || idx == 8U || idx == 17U || idx == 18U || idx == 19U ||
+        idx == 21U || idx == 22U || idx == 29U) {
         dcc_reload_config();
     }
     web_log_event("CV", "CV %u = %u", (unsigned)idx, (unsigned)value);
@@ -3511,17 +3800,21 @@ static esp_err_t cv_write_post(httpd_req_t *req)
 
 static esp_err_t wifi_get(httpd_req_t *req)
 {
+    settings_config_t cfg;
+    if (!cfg_read(&cfg)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     char ap_ssid[SETTINGS_SSID_MAX * 2];
-    json_escape(s_cfg.ap_ssid, ap_ssid, sizeof(ap_ssid));
+    json_escape(cfg.ap_ssid, ap_ssid, sizeof(ap_ssid));
 
     char json[384];
     snprintf(json, sizeof(json),
              "{\"ok\":true,\"mode\":%u,\"ap_ssid\":\"%s\",\"ap_password\":\"%s\","
              "\"auto_off_min\":%u,\"status\":\"%s\",\"ap_ip\":\"%s\"}",
-             (unsigned)s_cfg.wifi_mode, ap_ssid,
-             s_cfg.ap_password[0] ? "********" : "",
-             (unsigned)s_cfg.auto_off_min,
-             web_wifi_is_started() ? "ap_running" : "off", s_cfg.ap_ip);
+             (unsigned)cfg.wifi_mode, ap_ssid,
+             cfg.ap_password[0] ? "********" : "",
+             (unsigned)cfg.auto_off_min,
+             web_wifi_is_started() ? "ap_running" : "off", cfg.ap_ip);
     return send_json(req, json);
 }
 
@@ -3535,7 +3828,10 @@ static esp_err_t wifi_post(httpd_req_t *req)
 
     /* Parse into a local copy: on a validation error nothing may be applied,
      * otherwise a later deferred save would persist the partial change. */
-    settings_config_t next = s_cfg;
+    settings_config_t next;
+    if (!cfg_read(&next)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     next.wifi_mode = 1; /* access point only */
     char buf[SETTINGS_PASS_MAX] = { 0 };
     if (query_has_key(query, "ap_ssid") && !parse_query(query, "ap_ssid", buf, sizeof(buf)))
@@ -3581,12 +3877,11 @@ static esp_err_t wifi_post(httpd_req_t *req)
 
     if (web_maintenance_begin(false) != ESP_OK)
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
-    if (settings_save(&next) != ESP_OK) {
+    if (cfg_save(&next, false) != ESP_OK) {
         web_maintenance_end();
         return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
     }
-    s_cfg = next;
-    web_log_event("Wi-Fi", "настройки сохранены (IP %s), перезагрузка", s_cfg.ap_ip);
+    web_log_event("Wi-Fi", "настройки сохранены (IP %s), перезагрузка", next.ap_ip);
     send_json(req, "{\"ok\":true,\"reboot\":1}");
     motor_emergency_stop();
     audio_stop_all();
@@ -3598,16 +3893,22 @@ static esp_err_t wifi_post(httpd_req_t *req)
 
 static esp_err_t wifi_reset_post(httpd_req_t *req)
 {
+    settings_config_t next;
+    if (!cfg_read(&next)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     if (web_maintenance_begin(false) != ESP_OK)
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
-    settings_config_t def = { 0 };
-    def.wifi_mode = 1;
-    strncpy(def.ap_ip, AP_IP_DEFAULT, sizeof(def.ap_ip) - 1);
-    strncpy(def.ap_ssid, "ADDITIPUS AURA-X", sizeof(def.ap_ssid) - 1);
-    def.master_volume = 20;
-    def.engine_volume = 20;
-    def.effects_volume = 20;
-    if (settings_save(&def) != ESP_OK) {
+    /* Wi-Fi reset only touches Wi-Fi fields. Device name, volumes, control
+     * source and track selection must survive it. */
+    next.wifi_mode = 1;
+    next.ap_password[0] = '\0';
+    next.auto_off_min = 0;
+    strncpy(next.ap_ip, AP_IP_DEFAULT, sizeof(next.ap_ip) - 1);
+    next.ap_ip[sizeof(next.ap_ip) - 1] = '\0';
+    strncpy(next.ap_ssid, "ADDITIPUS AURA-X", sizeof(next.ap_ssid) - 1);
+    next.ap_ssid[sizeof(next.ap_ssid) - 1] = '\0';
+    if (cfg_save(&next, false) != ESP_OK) {
         web_maintenance_end();
         return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
     }
@@ -3656,8 +3957,12 @@ static esp_err_t factory_reset_post(httpd_req_t *req)
 
 static esp_err_t device_get(httpd_req_t *req)
 {
+    settings_config_t cfg;
+    if (!cfg_read(&cfg)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     char esc[SETTINGS_NAME_MAX * 2];
-    json_escape(s_cfg.device_name, esc, sizeof(esc));
+    json_escape(cfg.device_name, esc, sizeof(esc));
     /* 32-bit seconds: fits for >100 years. Do NOT use %lld here — newlib nano
      * (CONFIG_NEWLIB_NANO_FORMAT) has no 64-bit printf conversion. */
     uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
@@ -3673,13 +3978,20 @@ static esp_err_t device_post(httpd_req_t *req)
     char query[WEB_QUERY_MAX] = { 0 };
     httpd_req_get_url_query_str(req, query, sizeof(query));
     char buf[SETTINGS_NAME_MAX] = { 0 };
+    settings_config_t next;
+    if (!cfg_read(&next)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
     if (parse_query(query, "name", buf, sizeof(buf)) && buf[0]) {
-        strncpy(s_cfg.device_name, buf, sizeof(s_cfg.device_name) - 1);
-        (void)settings_save(&s_cfg);
-        web_log_event("Имя", "%s", s_cfg.device_name);
+        strncpy(next.device_name, buf, sizeof(next.device_name) - 1);
+        next.device_name[sizeof(next.device_name) - 1] = '\0';
+        if (cfg_save(&next, false) != ESP_OK) {
+            return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+        }
+        web_log_event("Имя", "%s", next.device_name);
     }
     char esc[SETTINGS_NAME_MAX * 2];
-    json_escape(s_cfg.device_name, esc, sizeof(esc));
+    json_escape(next.device_name, esc, sizeof(esc));
     char json[128];
     snprintf(json, sizeof(json), "{\"ok\":true,\"name\":\"%s\"}", esc);
     return send_json(req, json);
@@ -3723,7 +4035,9 @@ static int ota_stream_read(ota_stream_t *s, uint8_t *dst, size_t n)
 {
     size_t got = 0;
     while (got < n) {
-        if (s_transfer_deadline != 0 && esp_timer_get_time() >= s_transfer_deadline) return -1;
+        if (transfer_aborted()) return -1;
+        int64_t deadline = transfer_deadline_get();
+        if (deadline != 0 && esp_timer_get_time() >= deadline) return -1;
         if (s->pos < s->len) {
             size_t avail = s->len - s->pos;
             size_t take = (avail < n - got) ? avail : n - got;
@@ -3742,6 +4056,7 @@ static int ota_stream_read(ota_stream_t *s, uint8_t *dst, size_t n)
             s->pos = 0;
             s->remaining -= r;
             s->idle = 0;
+            transfer_wdt_feed((size_t)r);
             continue;
         }
         if ((r == 0 || r == HTTPD_SOCK_ERR_TIMEOUT) && ++s->idle < 4) {
@@ -3789,6 +4104,12 @@ static void ota_safe_name(const char *in, char *out, size_t out_len)
             out[w++] = 'a';
             out[w++] = 'v';
         }
+    } else {
+        /* Normalize .WAV/.Wav to the canonical lowercase extension. */
+        out[w - 4U] = '.';
+        out[w - 3U] = 'w';
+        out[w - 2U] = 'a';
+        out[w - 1U] = 'v';
     }
     out[w] = '\0';
 }
@@ -3817,9 +4138,32 @@ typedef struct {
     char (*old_names)[WEB_LIB_NAME_MAX];
     bool *old_moved;
     size_t old_count;
+    char (*new_names)[WEB_LIB_NAME_MAX];
+    size_t new_count;
     pack_file_t *files;
     size_t file_count;
+    char journal[160];
+    bool journal_written;
 } pack_tx_t;
+
+/* Durable pack-import journal. It is written (and fsynced) before the old
+ * library is moved, and rewritten as COMMITTED only after the NVS track list
+ * and on-storage manifest have both been confirmed. Boot recovery either
+ * rolls a PREPARED transaction back or cleans up a COMMITTED one. */
+#define PACK_JOURNAL_MAGIC "AURAPKJ1"
+#define PACK_JOURNAL_PREPARED 1U
+#define PACK_JOURNAL_COMMITTED 2U
+#define PACK_JOURNAL_MAX_NAMES 512U
+#define PACK_JOURNAL_PATH WEB_AUDIO_DIR "/.packjournal"
+#define PACK_JOURNAL_TMP  PACK_JOURNAL_PATH ".tmp"
+
+typedef struct {
+    char magic[8];
+    uint32_t phase;
+    uint32_t old_count;
+    uint32_t new_count;
+    char backup_dir[96];
+} pack_journal_hdr_t;
 
 static bool pack_name_in_index(const audio_pack_entry_t *idx, size_t count,
                                const char *name)
@@ -3895,8 +4239,16 @@ static void pack_tx_rollback(pack_tx_t *tx)
             }
         }
     }
+    bool clean = true;
     if (tx->backup_dir[0] && WEB_RMDIR(tx->backup_dir) != 0 && errno != ENOENT) {
         ESP_LOGW(TAG, "PACK: backup dir retained: %s", tx->backup_dir);
+        clean = false;
+    }
+    if (clean && tx->journal_written && tx->journal[0] != '\0') {
+        if (remove(tx->journal) != 0 && errno != ENOENT) clean = false;
+    }
+    if (!clean) {
+        ESP_LOGW(TAG, "PACK: recovery journal retained: %s", tx->journal);
     }
 }
 
@@ -3905,39 +4257,243 @@ static void pack_tx_free(pack_tx_t *tx)
     if (tx == NULL) return;
     free(tx->old_names);
     free(tx->old_moved);
+    free(tx->new_names);
     free(tx->files);
     free(tx);
 }
 
-static void pack_tx_commit_cleanup(pack_tx_t *tx)
+static bool pack_journal_name_ok(const char *name)
 {
-    if (tx == NULL) return;
-    char backup_path[224];
-    for (size_t i = 0; i < tx->old_count; ++i) {
-        if (!tx->old_moved[i]) continue;
-        snprintf(backup_path, sizeof(backup_path), "%s/%s",
-                 tx->backup_dir, tx->old_names[i]);
-        (void)remove(backup_path);
-        tx->old_moved[i] = false;
+    if (name == NULL || name[0] == '\0') return false;
+    if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL) return false;
+    return strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
+}
+
+static esp_err_t pack_journal_write(pack_tx_t *tx, uint32_t phase)
+{
+    if (tx == NULL || tx->journal[0] == '\0') return ESP_ERR_INVALID_ARG;
+    if (tx->old_count > PACK_JOURNAL_MAX_NAMES ||
+        tx->new_count > PACK_JOURNAL_MAX_NAMES) {
+        return ESP_ERR_INVALID_SIZE;
     }
-    if (tx->backup_dir[0] && WEB_RMDIR(tx->backup_dir) != 0 && errno != ENOENT) {
+    FILE *f = fopen(PACK_JOURNAL_TMP, "wb");
+    if (f == NULL) return ESP_FAIL;
+    pack_journal_hdr_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    memcpy(hdr.magic, PACK_JOURNAL_MAGIC, 8);
+    hdr.phase = phase;
+    hdr.old_count = (uint32_t)tx->old_count;
+    hdr.new_count = (uint32_t)tx->new_count;
+    snprintf(hdr.backup_dir, sizeof(hdr.backup_dir), "%s", tx->backup_dir);
+    bool ok = fwrite(&hdr, 1, sizeof(hdr), f) == sizeof(hdr);
+    if (ok && tx->old_count != 0U) {
+        ok = fwrite(tx->old_names, sizeof(tx->old_names[0]), tx->old_count, f) == tx->old_count;
+    }
+    if (ok && tx->new_count != 0U) {
+        ok = fwrite(tx->new_names, sizeof(tx->new_names[0]), tx->new_count, f) == tx->new_count;
+    }
+    if (fflush(f) != 0) ok = false;
+    if (fsync(fileno(f)) != 0) ok = false;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        (void)remove(PACK_JOURNAL_TMP);
+        return ESP_FAIL;
+    }
+    if (rename(PACK_JOURNAL_TMP, tx->journal) != 0) {
+        (void)remove(PACK_JOURNAL_TMP);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+/* Remove a committed transaction's backup files. Returns true only when the
+ * backup directory is gone (or never existed), so the journal can be deleted
+ * without losing recovery evidence. */
+static bool pack_backup_cleanup(const char *backup_dir, char (*names)[WEB_LIB_NAME_MAX],
+                                size_t count)
+{
+    if (backup_dir == NULL || backup_dir[0] == '\0') return true;
+    bool clean = true;
+    char path[224];
+    for (size_t i = 0; i < count; ++i) {
+        if (!pack_journal_name_ok(names[i])) continue;
+        snprintf(path, sizeof(path), "%s/%s", backup_dir, names[i]);
+        if (remove(path) != 0 && errno != ENOENT) clean = false;
+    }
+    if (WEB_RMDIR(backup_dir) != 0 && errno != ENOENT) clean = false;
+    return clean;
+}
+
+/* Roll a PREPARED transaction back: remove published new files, restore every
+ * old file from the backup directory, then reload the pre-pack metadata
+ * manifest (it was only rewritten after a confirmed commit). */
+static bool pack_backup_restore(const char *backup_dir,
+                                char (*old_names)[WEB_LIB_NAME_MAX], size_t old_count,
+                                char (*new_names)[WEB_LIB_NAME_MAX], size_t new_count)
+{
+    if (backup_dir == NULL || backup_dir[0] == '\0') return true;
+    char path[224], backup_path[224];
+    bool restored = true;
+    for (size_t i = 0; i < new_count; ++i) {
+        if (!pack_journal_name_ok(new_names[i])) continue;
+        snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s", new_names[i]);
+        if (remove(path) != 0 && errno != ENOENT) restored = false;
+    }
+    for (size_t i = 0; i < old_count; ++i) {
+        if (!pack_journal_name_ok(old_names[i])) continue;
+        snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s", old_names[i]);
+        snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, old_names[i]);
+        if (remove(path) != 0 && errno != ENOENT) {
+            restored = false;
+            continue;
+        }
+        if (rename(backup_path, path) != 0) restored = false;
+    }
+    if (WEB_RMDIR(backup_dir) != 0 && errno != ENOENT) restored = false;
+    if (restored) {
+        /* The manifest still describes the pre-pack library. */
+        (void)settings_manifest_load();
+    }
+    return restored;
+}
+
+/* Boot scan for backup directories left behind by a crash. This is a fallback
+ * for a corrupt/missing journal; a valid journal is handled by
+ * web_recover_pack_journal(). */
+static void pack_recover_orphan_backups(void)
+{
+    DIR *d = opendir(WEB_AUDIO_DIR);
+    if (d == NULL) return;
+    bool recovered = false;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strncmp(ent->d_name, ".pb", 3) != 0) continue;
+        char dir[224];
+        snprintf(dir, sizeof(dir), WEB_AUDIO_DIR "/%s", ent->d_name);
+        DIR *bd = opendir(dir);
+        if (bd == NULL) {
+            (void)WEB_RMDIR(dir);
+            continue;
+        }
+        struct dirent *be;
+        while ((be = readdir(bd)) != NULL) {
+            if (!pack_journal_name_ok(be->d_name)) continue;
+            char canonical[224], backup[224];
+            snprintf(canonical, sizeof(canonical), WEB_AUDIO_DIR "/%s", be->d_name);
+            snprintf(backup, sizeof(backup), "%s/%s", dir, be->d_name);
+            (void)remove(canonical);
+            if (rename(backup, canonical) != 0) {
+                ESP_LOGE(TAG, "PACK: orphan recovery cannot restore %s", be->d_name);
+            } else {
+                recovered = true;
+            }
+        }
+        closedir(bd);
+        (void)WEB_RMDIR(dir);
+        ESP_LOGW(TAG, "PACK: restored orphan backup %s", ent->d_name);
+    }
+    closedir(d);
+    /* Only reload the (old) manifest when we actually rolled something back;
+     * a normal boot must never let the sidecar override newer NVS metadata. */
+    if (recovered) (void)settings_manifest_load();
+}
+
+/* Boot recovery entry, called from web_init() before the settings caches are
+ * loaded. Safe to call when storage is absent; never blocks boot on a damaged
+ * journal. */
+static esp_err_t web_recover_pack_journal(void)
+{
+    if (!storage_is_mounted()) return ESP_ERR_INVALID_STATE;
+    FILE *f = fopen(PACK_JOURNAL_PATH, "rb");
+    if (f == NULL) {
+        if (errno == ENOENT) {
+            pack_recover_orphan_backups();
+            return ESP_OK;
+        }
+        return ESP_FAIL;
+    }
+    pack_journal_hdr_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    bool ok = fread(&hdr, 1, sizeof(hdr), f) == sizeof(hdr) &&
+              memcmp(hdr.magic, PACK_JOURNAL_MAGIC, 8) == 0 &&
+              (hdr.phase == PACK_JOURNAL_PREPARED || hdr.phase == PACK_JOURNAL_COMMITTED) &&
+              hdr.old_count <= PACK_JOURNAL_MAX_NAMES &&
+              hdr.new_count <= PACK_JOURNAL_MAX_NAMES;
+    char (*old_names)[WEB_LIB_NAME_MAX] = NULL;
+    char (*new_names)[WEB_LIB_NAME_MAX] = NULL;
+    if (ok && hdr.old_count != 0U) {
+        old_names = malloc((size_t)hdr.old_count * sizeof(*old_names));
+        ok = old_names != NULL &&
+             fread(old_names, sizeof(*old_names), hdr.old_count, f) == hdr.old_count;
+    }
+    if (ok && hdr.new_count != 0U) {
+        new_names = malloc((size_t)hdr.new_count * sizeof(*new_names));
+        ok = new_names != NULL &&
+             fread(new_names, sizeof(*new_names), hdr.new_count, f) == hdr.new_count;
+    }
+    fclose(f);
+    if (!ok) {
+        free(old_names);
+        free(new_names);
+        /* Corrupt journal: drop it and fall back to the orphan scan. */
+        (void)remove(PACK_JOURNAL_PATH);
+        pack_recover_orphan_backups();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool cleaned = true;
+    if (hdr.phase == PACK_JOURNAL_COMMITTED) {
+        cleaned = pack_backup_cleanup(hdr.backup_dir, old_names, hdr.old_count);
+    } else {
+        /* A PREPARED journal without a backup directory means the transaction
+         * never moved any old file (only staged files existed); there is
+         * nothing to roll back. */
+        DIR *bd = opendir(hdr.backup_dir);
+        if (bd != NULL) {
+            closedir(bd);
+            cleaned = pack_backup_restore(hdr.backup_dir, old_names, hdr.old_count,
+                                          new_names, hdr.new_count);
+        }
+    }
+    free(old_names);
+    free(new_names);
+    if (cleaned) {
+        (void)remove(PACK_JOURNAL_PATH);
+        return ESP_OK;
+    }
+    ESP_LOGW(TAG, "PACK: recovery incomplete, journal retained: %s", PACK_JOURNAL_PATH);
+    return ESP_FAIL;
+}
+
+static bool pack_tx_commit_cleanup(pack_tx_t *tx)
+{
+    if (tx == NULL) return true;
+    bool clean = pack_backup_cleanup(tx->backup_dir, tx->old_names, tx->old_count);
+    if (clean && tx->journal[0] != '\0') {
+        if (remove(tx->journal) != 0 && errno != ENOENT) clean = false;
+    }
+    if (!clean && tx->backup_dir[0]) {
         ESP_LOGW(TAG, "PACK: backup cleanup pending: %s", tx->backup_dir);
     }
+    return clean;
 }
 
 /* A pack replaces every file. Drop track/binding references to sounds that no
- * longer exist instead of leaving slots pointing at deleted paths. */
-static void pack_reconcile_metadata(void)
+ * longer exist instead of leaving slots pointing at deleted paths. Returns an
+ * error when NVS tracks, the function map/bindings or the on-storage manifest
+ * could not be confirmed; callers must then keep the backup/journal. */
+static esp_err_t pack_reconcile_metadata(void)
 {
+    esp_err_t result = ESP_OK;
     settings_track_t *tracks = calloc(SETTINGS_MAX_TRACKS, sizeof(*tracks));
-    if (tracks == NULL) return;
+    if (tracks == NULL) return ESP_ERR_NO_MEM;
     size_t count = 0;
     esp_err_t load_err = settings_tracks_load(tracks, &count);
     if (load_err == ESP_ERR_NOT_FOUND) {
         count = 0;
     } else if (load_err != ESP_OK) {
         free(tracks);
-        return;
+        return load_err;
     }
     if (count > SETTINGS_MAX_TRACKS) count = SETTINGS_MAX_TRACKS;
     bool slots[SETTINGS_MAX_TRACKS + 1] = { false };
@@ -3962,12 +4518,20 @@ static void pack_reconcile_metadata(void)
             tracks_changed = true;
         }
     }
-    if (tracks_changed) (void)settings_tracks_save(tracks, kept);
+    if (tracks_changed) {
+        result = settings_tracks_save(tracks, kept);
+    }
 
-    if (s_cfg.active_slot > SETTINGS_MAX_TRACKS ||
-        (s_cfg.active_slot != 0U && !slots[s_cfg.active_slot])) {
-        s_cfg.active_slot = 0;
-        (void)settings_save_deferred(&s_cfg);
+    if (cfg_lock(pdMS_TO_TICKS(100))) {
+        if (s_cfg.active_slot > SETTINGS_MAX_TRACKS ||
+            (s_cfg.active_slot != 0U && !slots[s_cfg.active_slot])) {
+            s_cfg.active_slot = 0;
+            esp_err_t save = settings_save_deferred(&s_cfg);
+            if (result == ESP_OK) result = save;
+        }
+        cfg_unlock();
+    } else if (result == ESP_OK) {
+        result = ESP_ERR_TIMEOUT;
     }
 
     bool func_locked = s_func_mutex != NULL &&
@@ -3988,7 +4552,8 @@ static void pack_reconcile_metadata(void)
         }
     }
     if (map_changed) {
-        (void)settings_func_map_save(s_func_map, SETTINGS_FUNC_MAP_COUNT);
+        esp_err_t save = settings_func_map_save(s_func_map, SETTINGS_FUNC_MAP_COUNT);
+        if (result == ESP_OK) result = save;
     }
 
     bool bind_changed = false;
@@ -4006,13 +4571,19 @@ static void pack_reconcile_metadata(void)
     }
     if (bind_changed) {
         s_func_bind_count = kept_bind;
-        (void)settings_func_bind_save(s_func_bind, s_func_bind_count);
+        esp_err_t save = settings_func_bind_save(s_func_bind, s_func_bind_count);
+        if (result == ESP_OK) result = save;
     }
     if (func_locked) xSemaphoreGive(s_func_mutex);
 
-    (void)settings_manifest_sync();
+    /* Manifest last: it is the sidecar copy used by boot recovery. */
+    {
+        esp_err_t manifest = settings_manifest_sync();
+        if (result == ESP_OK) result = manifest;
+    }
     free(tracks);
     func_tracks_cache_refresh();
+    return result;
 }
 
 /* POST /api/audio/pack — unpack an AURA Sound Pack straight from the request
@@ -4029,7 +4600,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid size");
     /* A pack can be far larger than a single WAV, so give the transfer more
      * than the generic 120 s window (the UI XHR timeout matches). */
-    s_transfer_deadline = esp_timer_get_time() + 600000000;
+    transfer_deadline_set(esp_timer_get_time() + 600000000);
 
     ota_stream_t *st = calloc(1, sizeof(*st));
     uint8_t *buf = malloc(8192);
@@ -4038,6 +4609,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     char *scheme_json = NULL;
     size_t scheme_len = 0;
     sg_graph_t *scheme_graph = NULL;
+    bool keep_recovery = false;
     if (st == NULL || buf == NULL) {
         free(st); free(buf);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
@@ -4110,10 +4682,15 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
     }
     ptx->file_count = ph.count;
     ptx->files = calloc(ph.count, sizeof(*ptx->files));
-    if (ptx->files == NULL) {
+    ptx->new_names = calloc(ph.count, sizeof(*ptx->new_names));
+    if (ptx->files == NULL || ptx->new_names == NULL) {
         errmsg = "no transaction memory";
         goto fail_tx;
     }
+    snprintf(ptx->journal, sizeof(ptx->journal), "%s", PACK_JOURNAL_PATH);
+    snprintf(ptx->backup_dir, sizeof(ptx->backup_dir), WEB_AUDIO_DIR "/.pb%08lx_%08lx",
+             (unsigned long)(uint32_t)esp_timer_get_time(),
+             (unsigned long)++s_file_sequence);
     ptx->old_count = 0;
     if (pack_collect_old(ptx) != ESP_OK) {
         errmsg = "cannot enumerate library";
@@ -4168,6 +4745,11 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         if (f == NULL) { errmsg = "staging failed"; goto fail_tx; }
         snprintf(ptx->files[i].canonical, sizeof(ptx->files[i].canonical),
                  WEB_AUDIO_DIR "/%s.wav", idx[i].name);
+        if (ptx->new_count < ph.count) {
+            snprintf(ptx->new_names[ptx->new_count], sizeof(ptx->new_names[0]),
+                     "%s.wav", idx[i].name);
+            ++ptx->new_count;
+        }
         (void)setvbuf(f, NULL, _IOFBF, 8192);
         uint8_t wh[AUDIO_PACK_WAV_HDR_MAX];
         size_t whl = audio_pack_wav_header(wh, sizeof(wh), idx[i].data_len,
@@ -4215,15 +4797,22 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         }
     }
 
+    /* Durable intent record before touching the old library. It records both
+     * the backup directory and the names that will be published, so boot can
+     * roll the transaction back after a power loss. */
+    if (pack_journal_write(ptx, PACK_JOURNAL_PREPARED) != ESP_OK) {
+        errmsg = "recovery journal failed";
+        goto fail_tx;
+    }
+    ptx->journal_written = true;
+    /* Always create the backup directory, even for an empty old library: its
+     * presence tells boot recovery that publication may have started. */
+    if (WEB_MKDIR(ptx->backup_dir) != 0) {
+        errmsg = "backup directory failed";
+        goto fail_tx;
+    }
     /* Move the old library aside. Nothing is deleted yet. */
     if (ptx->old_count != 0U) {
-        snprintf(ptx->backup_dir, sizeof(ptx->backup_dir), WEB_AUDIO_DIR "/.pb%08lx_%08lx",
-                 (unsigned long)(uint32_t)esp_timer_get_time(),
-                 (unsigned long)++s_file_sequence);
-        if (WEB_MKDIR(ptx->backup_dir) != 0) {
-            errmsg = "backup directory failed";
-            goto fail_tx;
-        }
         char old_path[192], backup_path[224];
         for (size_t i = 0; i < ptx->old_count; ++i) {
             snprintf(old_path, sizeof(old_path), WEB_AUDIO_DIR "/%s", ptx->old_names[i]);
@@ -4309,8 +4898,27 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
         }
     }
 
-    pack_reconcile_metadata();
-    pack_tx_commit_cleanup(ptx);
+    esp_err_t meta_err = pack_reconcile_metadata();
+    bool recovery_pending = false;
+    if (meta_err != ESP_OK) {
+        /* NVS tracks/manifest are not confirmed. Keep the new files, backup
+         * directory and PREPARED journal so boot can roll back consistently;
+         * never delete the only copy of the old library here. */
+        ESP_LOGE(TAG, "PACK: metadata not confirmed (%s); backup/journal retained",
+                 esp_err_to_name(meta_err));
+        keep_recovery = true;
+        errmsg = "metadata save failed; previous library will be restored on reboot";
+        errstatus = 500;
+        goto fail_tx;
+    }
+    if (pack_journal_write(ptx, PACK_JOURNAL_COMMITTED) != ESP_OK) {
+        /* Metadata is committed but the cleanup intent is not durable. Keep
+         * everything; boot will treat the PREPARED journal as a rollback. */
+        ESP_LOGW(TAG, "PACK: commit journal write failed; backup retained");
+        recovery_pending = true;
+    } else if (!pack_tx_commit_cleanup(ptx)) {
+        recovery_pending = true;
+    }
     pack_tx_free(ptx);
     ptx = NULL;
 
@@ -4318,15 +4926,19 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
              (unsigned long)wav_count, (unsigned long)total_data, (int)scheme_applied);
     web_log_event("Звук", "пакет: %lu звук(ов)%s", (unsigned long)wav_count,
                   scheme_applied ? " + звуковая схема" : "");
-    char json[192];
+    char json[256];
     if (scheme_applied && scheme_graph != NULL) {
         snprintf(json, sizeof(json),
-                 "{\"ok\":true,\"files\":%lu,\"bytes\":%lu,\"scheme\":\"%s\",\"revision\":%lu}",
+                 "{\"ok\":true,\"files\":%lu,\"bytes\":%lu,\"scheme\":\"%s\",\"revision\":%lu,"
+                 "\"recovery_cleanup_pending\":%s}",
                  (unsigned long)wav_count, (unsigned long)total_data,
-                 scheme_graph->id, (unsigned long)scheme_rev);
+                 scheme_graph->id, (unsigned long)scheme_rev,
+                 recovery_pending ? "true" : "false");
     } else {
-        snprintf(json, sizeof(json), "{\"ok\":true,\"files\":%lu,\"bytes\":%lu}",
-                 (unsigned long)wav_count, (unsigned long)total_data);
+        snprintf(json, sizeof(json),
+                 "{\"ok\":true,\"files\":%lu,\"bytes\":%lu,\"recovery_cleanup_pending\":%s}",
+                 (unsigned long)wav_count, (unsigned long)total_data,
+                 recovery_pending ? "true" : "false");
     }
     free(scheme_json);
     free(scheme_graph);
@@ -4338,7 +4950,7 @@ static esp_err_t audio_pack_upload_post(httpd_req_t *req)
 fail_tx:
     free(scheme_json);
     free(scheme_graph);
-    pack_tx_rollback(ptx);
+    if (!keep_recovery) pack_tx_rollback(ptx);
     pack_tx_free(ptx);
     free(idx);
     free(st);
@@ -4360,8 +4972,17 @@ fail:
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, errmsg);
 }
 
+static bool track_file_is(const char *file, const char *wav_name)
+{
+    const char *base = strrchr(file, '/');
+    base = base != NULL ? base + 1 : file;
+    return strcasecmp(base, wav_name) == 0;
+}
+
 /* DELETE / POST /api/audio/library/delete?name=<name> — remove one library WAV
- * when it is not referenced by a saved sound graph. */
+ * only when no saved graph, track slot or function binding uses it. Refusing
+ * is deliberate: unlinking before unbinding metadata would leave a dangling
+ * slot/scheme reference (and a later boot recovery could resurrect it). */
 static esp_err_t audio_library_delete_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = { 0 };
@@ -4382,13 +5003,72 @@ static esp_err_t audio_library_delete_post(httpd_req_t *req)
     if (referenced) {
         return graph_error(req, "409 Conflict", "file referenced by saved sound scheme");
     }
+
+    /* A library asset can also be bound as a legacy track slot, either by the
+     * track list or by a canonical/legacy function binding. Check both before
+     * unlinking so a delete cannot create a dangling sound reference. */
+    settings_track_t *tracks = calloc(SETTINGS_MAX_TRACKS, sizeof(*tracks));
+    if (tracks == NULL) {
+        return graph_error(req, "500 Internal Server Error", "no memory");
+    }
+    size_t track_count = 0;
+    esp_err_t tload = settings_tracks_load(tracks, &track_count);
+    if (tload != ESP_OK && tload != ESP_ERR_NOT_FOUND) {
+        free(tracks);
+        return graph_error(req, "500 Internal Server Error", "tracks load failed");
+    }
+    bool slot_used[SETTINGS_MAX_TRACKS + 1] = { false };
+    bool slot_ref = false;
+    if (tload == ESP_OK) {
+        if (track_count > SETTINGS_MAX_TRACKS) track_count = SETTINGS_MAX_TRACKS;
+        for (size_t i = 0; i < track_count; ++i) {
+            if (track_file_is(tracks[i].file, wav_name)) {
+                slot_ref = true;
+                if (tracks[i].slot >= 1U && tracks[i].slot <= SETTINGS_MAX_TRACKS) {
+                    slot_used[tracks[i].slot] = true;
+                }
+            }
+        }
+    }
+    free(tracks);
+    if (slot_ref) {
+        bool binding_ref = false;
+        bool func_locked = s_func_mutex != NULL &&
+            xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(100)) == pdTRUE;
+        if (func_locked) {
+            for (size_t i = 0; i < s_func_bind_count; ++i) {
+                const func_binding_t *b = &s_func_bind[i];
+                if (b->used && b->target_type == FUNC_TARGET_SLOT &&
+                    b->target_id >= 1U && b->target_id <= SETTINGS_MAX_TRACKS &&
+                    slot_used[b->target_id]) {
+                    binding_ref = true;
+                    break;
+                }
+            }
+            for (uint8_t f = 0; f < SETTINGS_FUNC_MAP_COUNT && !binding_ref; ++f) {
+                uint8_t a = s_func_map[f].slot_a;
+                uint8_t b = s_func_map[f].slot_b;
+                if ((a >= 1U && a <= SETTINGS_MAX_TRACKS && slot_used[a]) ||
+                    (b >= 1U && b <= SETTINGS_MAX_TRACKS && slot_used[b])) {
+                    binding_ref = true;
+                }
+            }
+            xSemaphoreGive(s_func_mutex);
+        }
+        if (binding_ref) {
+            return graph_error(req, "409 Conflict", "file bound to a function sound binding");
+        }
+        return graph_error(req, "409 Conflict", "file bound to a track slot");
+    }
     if (strcmp(s_preview_name, base) == 0) {
         audio_voice_release_owned(s_preview_voice);
         memset(&s_preview_voice, 0, sizeof(s_preview_voice));
         s_preview_name[0] = '\0';
     }
     char path[192];
-    snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
+    if (!web_lib_resolve_path(base, path, sizeof(path))) {
+        snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
+    }
     if (remove(path) != 0 && errno != ENOENT) {
         return send_json(req, "{\"ok\":false,\"error\":\"remove failed\"}");
     }
@@ -4411,9 +5091,12 @@ static esp_err_t sound_file_raw_get(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     }
     char path[192];
-    snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
     if (storage_access_begin() != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage busy");
+    }
+    if (!web_lib_resolve_path(base, path, sizeof(path))) {
+        storage_access_end();
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     }
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
@@ -4439,18 +5122,28 @@ static esp_err_t sound_file_raw_get(httpd_req_t *req)
     httpd_resp_set_hdr(req, "X-Audio-Rate", hdr_rate);
     httpd_resp_set_hdr(req, "X-Audio-Channels", hdr_ch);
     httpd_resp_set_hdr(req, "X-Audio-Bits", hdr_bits);
+    /* Do not pin the storage lease for the whole (possibly slow) download:
+     * read one chunk under a short lease, release it for the network send, and
+     * fail closed if maintenance took exclusive ownership meanwhile. */
+    storage_access_end();
     uint8_t buf[2048];
     uint32_t left = data_len;
     esp_err_t err = ESP_OK;
     while (err == ESP_OK && left > 0U) {
+        if (storage_access_begin() != ESP_OK) { err = ESP_FAIL; break; }
         size_t want = left > sizeof(buf) ? sizeof(buf) : (size_t)left;
         size_t got = fread(buf, 1, want, f);
+        storage_access_end();
         if (got == 0U) { err = ESP_FAIL; break; }
         left -= (uint32_t)got;
         err = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)got);
     }
-    fclose(f);
-    storage_access_end();
+    if (storage_access_begin() == ESP_OK) {
+        fclose(f);
+        storage_access_end();
+    } else {
+        fclose(f);
+    }
     if (err != ESP_OK) return ESP_FAIL;
     return httpd_resp_send_chunk(req, NULL, 0);
 }
@@ -4466,6 +5159,7 @@ static esp_err_t ota_update_post(httpd_req_t *req)
     if (req->content_len <= 0 || req->content_len > (8 * 1024 * 1024)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid size");
     }
+    transfer_deadline_set(ota_deadline_from_len((int)req->content_len));
 
     const esp_partition_t *update = esp_ota_get_next_update_partition(NULL);
     if (update == NULL) {
@@ -4567,6 +5261,7 @@ static esp_err_t ota_update_post(httpd_req_t *req)
         }
         written += (uint32_t)r;
         s_up_received = (int)written;
+        transfer_wdt_feed((size_t)r);
     }
     if (fail || written != fw_len) {
         ESP_LOGE(TAG, "OTA: abort, fw written=%lu/%lu", (unsigned long)written,
@@ -4606,7 +5301,10 @@ static esp_err_t ota_update_post(httpd_req_t *req)
         tx->file_count = n_files;
         memcpy(tx->previous, tracks, sizeof(tx->previous));
         tx->previous_count = tn;
-        tx->previous_cfg = s_cfg;
+        if (!cfg_read(&tx->previous_cfg)) {
+            s_up_active = false; free(st); free(buf); free(tx);
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "config busy");
+        }
     }
     if (combined && n_files > 0U && storage_is_mounted()) {
         for (uint32_t i = 0; i < n_files; ++i) {
@@ -4666,6 +5364,7 @@ static esp_err_t ota_update_post(httpd_req_t *req)
                 }
                 left -= (uint32_t)r;
                 s_up_received = req->content_len - st->remaining - (int)(st->len - st->pos);
+                if (write_ok) transfer_wdt_feed((size_t)r);
             }
             if (fp != NULL) {
                 if (write_ok && WEB_FFLUSH(fp) != 0) {
@@ -4895,35 +5594,142 @@ typedef struct {
     esp_err_t (*handler)(httpd_req_t *);
 } transfer_job_t;
 
+static bool transfer_aborted(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    bool aborted = s_up_aborted;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    return aborted;
+}
+
+/* Feed the TWDT only when a read/write actually moved bytes. Idle recv retries
+ * and deadline polling must not hide a stalled peer. */
+static void transfer_wdt_feed(size_t bytes)
+{
+    if (bytes == 0U || !s_transfer_wdt_subscribed) return;
+    (void)esp_task_wdt_reset();
+}
+
+/* Both the worker and the supervisor may race to release the lease after an
+ * abort. Claim it under the control spinlock so it is released exactly once. */
+static bool transfer_claim_lease(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    bool held = s_up_lease_held;
+    s_up_lease_held = false;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    return held;
+}
+
+/* Timeout action: mark the transfer aborted, close its socket, release any
+ * storage lease, and force-release maintenance. Returns true when it aborted a
+ * live transfer. Exposed (static) so the host test can simulate the supervisor
+ * while an upload worker is stalled. */
+static bool transfer_supervisor_check(void)
+{
+    portENTER_CRITICAL(&s_control_state_mux);
+    bool active = s_up_active;
+    bool already = s_up_aborted;
+    int64_t deadline = s_transfer_deadline;
+    httpd_req_t *req = s_up_req;
+    TaskHandle_t worker = s_up_worker;
+    if (!active || already || deadline == 0 || req == NULL) {
+        portEXIT_CRITICAL(&s_control_state_mux);
+        return false;
+    }
+    if (esp_timer_get_time() < deadline) {
+        portEXIT_CRITICAL(&s_control_state_mux);
+        return false;
+    }
+    s_up_aborted = true;
+    portEXIT_CRITICAL(&s_control_state_mux);
+
+    int fd = httpd_req_to_sockfd(req);
+    if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
+    if (transfer_claim_lease()) storage_access_end();
+    /* The worker may be stuck in a blocking syscall and never observe its own
+     * deadline; release the safety/storage gate from this task as a last
+     * resort. The worker's later web_maintenance_end() is a no-op because the
+     * owner is already cleared. */
+    maintenance_end_impl(true, worker);
+    ESP_LOGW(TAG, "transfer deadline exceeded; aborted socket/lease/maintenance");
+    return true;
+}
+
+static void transfer_supervisor_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        (void)transfer_supervisor_check();
+    }
+}
+
 static void transfer_worker(void *arg)
 {
     transfer_job_t *job = arg;
     portENTER_CRITICAL(&s_control_state_mux);
     s_maintenance_owner = xTaskGetCurrentTaskHandle();
+    s_up_worker = xTaskGetCurrentTaskHandle();
+    s_up_req = job->req;
+    s_up_aborted = false;
+    s_up_lease_held = false;
     portEXIT_CRITICAL(&s_control_state_mux);
-    s_transfer_deadline = esp_timer_get_time() + 120000000;
+    s_transfer_wdt_subscribed = esp_task_wdt_add(NULL) == ESP_OK;
+    if (!s_transfer_wdt_subscribed) {
+        ESP_LOGW(TAG, "transfer worker not subscribed to TWDT");
+    }
+    transfer_deadline_set(esp_timer_get_time() + 120000000);
     s_transfer_reboot = false;
     esp_err_t err = maintenance_quiesce(false);
     bool lease = false;
-    if (err == ESP_OK && (job->handler == audio_upload_post || storage_is_mounted())) {
+    if (err == ESP_OK && !transfer_aborted()) {
         err = storage_access_begin();
-        lease = err == ESP_OK;
+        if (err == ESP_OK) {
+            portENTER_CRITICAL(&s_control_state_mux);
+            s_up_lease_held = true;
+            portEXIT_CRITICAL(&s_control_state_mux);
+            lease = true;
+            /* The supervisor may have aborted between the lease acquisition and
+             * publishing s_up_lease_held. */
+            if (transfer_aborted()) {
+                if (transfer_claim_lease()) storage_access_end();
+                lease = false;
+                err = ESP_ERR_TIMEOUT;
+            }
+        }
     }
-    if (err == ESP_OK) {
+    bool handler_ran = false;
+    if (err == ESP_OK && !transfer_aborted()) {
         httpd_resp_set_hdr(job->req, "Connection", "close");
+        handler_ran = true;
         (void)job->handler(job->req);
-    } else {
-        (void)httpd_resp_send_err(job->req, HTTPD_500_INTERNAL_SERVER_ERROR, "transfer quiescence/admission failed");
+    } else if (err == ESP_OK) {
+        err = ESP_ERR_TIMEOUT;
     }
-    if (lease) storage_access_end();
+    if (!handler_ran) {
+        (void)httpd_resp_send_err(job->req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                  transfer_aborted() ? "transfer aborted by watchdog"
+                                                     : "transfer quiescence/admission failed");
+    }
+    if (transfer_claim_lease()) storage_access_end();
     s_up_active = false;
-    s_transfer_deadline = 0;
+    transfer_deadline_set(0);
     int fd = httpd_req_to_sockfd(job->req);
     if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
+    portENTER_CRITICAL(&s_control_state_mux);
+    s_up_req = NULL;
+    s_up_worker = NULL;
+    s_up_aborted = false;
+    portEXIT_CRITICAL(&s_control_state_mux);
     /* Complete wakes httpd to observe EOF and close the session. Do not queue
      * a later close by fd: the server could already have reused that number. */
     (void)httpd_req_async_handler_complete(job->req);
     free(job);
+    if (s_transfer_wdt_subscribed) {
+        (void)esp_task_wdt_delete(NULL);
+        s_transfer_wdt_subscribed = false;
+    }
     if (s_transfer_reboot) {
         /* Keep inhibit/admission closed across reboot. Filesystem and boot
          * selection cannot be one power-loss-atomic transaction. */
@@ -4937,6 +5743,16 @@ static void transfer_worker(void *arg)
 
 static esp_err_t transfer_start(httpd_req_t *req, esp_err_t (*handler)(httpd_req_t *))
 {
+    portENTER_CRITICAL(&s_control_state_mux);
+    /* An aborted worker may still be unwinding after the supervisor released
+     * maintenance; do not admit a second upload over it. Normal concurrency is
+     * already excluded by the maintenance gate. */
+    bool busy = s_up_aborted;
+    portEXIT_CRITICAL(&s_control_state_mux);
+    if (busy) {
+        return close_rejected_body(req,
+            send_json(req, "{\"ok\":false,\"error\":\"transfer busy\"}"));
+    }
     transfer_job_t *job = malloc(sizeof(*job));
     if (job == NULL) return close_rejected_body(req,
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no worker memory"));
@@ -4955,12 +5771,19 @@ static esp_err_t transfer_start(httpd_req_t *req, esp_err_t (*handler)(httpd_req
     s_up_received = 0;
     s_up_slot = 0;
     s_up_ota = handler == ota_update_post;
+    portENTER_CRITICAL(&s_control_state_mux);
+    s_up_req = job->req;
+    portEXIT_CRITICAL(&s_control_state_mux);
     if (xTaskCreate(transfer_worker, "web_transfer", 16384, job, 6, NULL) != pdPASS) {
         (void)httpd_resp_send_err(job->req, HTTPD_500_INTERNAL_SERVER_ERROR, "worker creation failed");
         int fd = httpd_req_to_sockfd(job->req);
         if (fd >= 0) (void)shutdown(fd, SHUT_RDWR);
         (void)httpd_req_async_handler_complete(job->req);
-        free(job); s_up_active = false; web_maintenance_end();
+        free(job); s_up_active = false;
+        portENTER_CRITICAL(&s_control_state_mux);
+        s_up_req = NULL;
+        portEXIT_CRITICAL(&s_control_state_mux);
+        web_maintenance_end();
     }
     return ESP_OK;
 }
@@ -5084,6 +5907,13 @@ static esp_err_t start_http_server(void)
         ESP_LOGE(TAG, "httpd_start failed");
         return ESP_FAIL;
     }
+    if (s_transfer_supervisor == NULL) {
+        if (xTaskCreate(transfer_supervisor_task, "web_tx_sup", 3072, NULL, 4,
+                        &s_transfer_supervisor) != pdPASS) {
+            ESP_LOGW(TAG, "transfer supervisor create failed");
+            s_transfer_supervisor = NULL;
+        }
+    }
 
     register_route("/", HTTP_GET, root_handler);
     register_route("/sound-editor", HTTP_GET, sound_editor_get);
@@ -5159,10 +5989,17 @@ esp_err_t web_init(void)
 {
     memset(s_fn, 0, sizeof(s_fn));
     s_func_mutex = xSemaphoreCreateMutex();
+    s_cfg_mutex = xSemaphoreCreateMutex();
     esp_err_t control_err = control_mutex_init();
     s_evlog_mutex = xSemaphoreCreateMutex();
-    if (s_func_mutex == NULL || control_err != ESP_OK || s_evlog_mutex == NULL)
+    if (s_func_mutex == NULL || s_cfg_mutex == NULL || control_err != ESP_OK ||
+        s_evlog_mutex == NULL)
         return ESP_ERR_NO_MEM;
+    /* Finish/roll back an interrupted sound-pack import before the settings
+     * caches are loaded for the session. */
+    if (web_recover_pack_journal() == ESP_FAIL) {
+        ESP_LOGW(TAG, "Sound pack recovery incomplete; previous library kept for next boot");
+    }
     esp_err_t load_err = settings_load(&s_cfg);
     if (load_err != ESP_OK) return load_err;
     (void)audio_set_volume(s_cfg.master_volume);

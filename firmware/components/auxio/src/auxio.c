@@ -95,18 +95,31 @@ static uint8_t ch_duty(const auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
         }
     }
 
-    /* Effects that do not depend on the period. */
+    /* Effects that do not depend on the period. The configured on level is
+     * authoritative; max/min only describe the two phases of an oscillator. */
     if (ch->mode == AUXIO_EFFECT_INCANDESCENT) {
-        return (uint8_t)(((uint32_t)maxv * s_gamma[ch->cur]) / 255U);
+        return (uint8_t)(((uint32_t)hi * s_gamma[ch->cur]) / 255U);
     }
     if (ch->mode == AUXIO_EFFECT_FIREBOX) {
         return ch->cur;
     }
     if (ch->mode == AUXIO_EFFECT_STEADY || ch->period_ms < 20U) {
-        return maxv;
+        return hi;
     }
 
     uint32_t period = ch->period_ms;
+    if (ch->mode == AUXIO_EFFECT_STROBE) {
+        /* Two flashes at 0..30 ms and 100..130 ms are the reference pattern.
+         * Scale those windows by the configured period so a short strobe keeps
+         * both flashes instead of silently clamping to the 130 ms pattern. */
+        uint32_t phase = now_ms % period;
+        uint32_t scale = period < AUXIO_STROBE_PATTERN_MS ? period : AUXIO_STROBE_PATTERN_MS;
+        uint32_t w1 = ((uint32_t)30U * scale) / AUXIO_STROBE_PATTERN_MS;
+        uint32_t w2_start = ((uint32_t)100U * scale) / AUXIO_STROBE_PATTERN_MS;
+        uint32_t w2_end = ((uint32_t)130U * scale) / AUXIO_STROBE_PATTERN_MS;
+        if (w2_end > period) { w2_end = period; }
+        return ((phase < w1) || (phase >= w2_start && phase < w2_end)) ? hi : lo;
+    }
     uint32_t phase = now_ms % period;
 
     switch (ch->mode) {
@@ -134,11 +147,8 @@ static uint8_t ch_duty(const auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
                                     ((uint64_t)period * period));
             return (uint8_t)(floor + (((uint32_t)(maxv - floor) * t) / 255U));
         }
-        case AUXIO_EFFECT_STROBE:
-            /* double strobe: two short flashes, then a pause */
-            return ((phase < 30U) || (phase >= 100U && phase < 130U)) ? maxv : minv;
         default:
-            return maxv;
+            return hi;
     }
 }
 
@@ -147,8 +157,6 @@ static uint8_t ch_duty(const auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
 static uint8_t ch_step(auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
 {
     uint8_t hi = ch->pwm_on;
-    uint8_t lo = ch->pwm_off;
-    uint8_t maxv = (hi > lo) ? hi : lo;
 
     if (ch->mode == AUXIO_EFFECT_INCANDESCENT) {
         uint8_t target = ch->enabled ? 255U : 0U;
@@ -166,11 +174,12 @@ static uint8_t ch_step(auxio_ch_t *ch, uint8_t idx, uint32_t now_ms)
             ch->cur = 0U;
             ch->fx_scheduled = false;
         } else if (!ch->fx_scheduled || (int32_t)(now_ms - ch->fx_next_ms) >= 0) {
-            uint32_t floor40 = ((uint32_t)maxv * 40U) / 100U;
-            uint32_t range = (uint32_t)maxv - floor40;
+            uint32_t floor40 = ((uint32_t)hi * 40U) / 100U;
+            uint32_t range = (uint32_t)hi - floor40;
             uint32_t r = (now_ms * 1103515245U) + 12345U + (uint32_t)idx * 2654435761U;
             r ^= r >> 15;
             ch->cur = (uint8_t)(floor40 + (range ? (r % range) : 0U));
+            if (ch->cur > hi) { ch->cur = hi; }
             ch->fx_next_ms = now_ms + 30U + (r % 71U);
             ch->fx_scheduled = true;
         }
@@ -300,8 +309,30 @@ static esp_err_t apply_now(uint8_t channel)
         return ESP_ERR_TIMEOUT;
     }
     uint32_t now = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
-    apply_duty(&s_ch[channel], ch_duty(&s_ch[channel], channel, now));
+    /* Advance stateful effects once so enabling/configuring a continuous
+     * output applies a valid duty immediately instead of a one-block zero. */
+    apply_duty(&s_ch[channel], ch_step(&s_ch[channel], channel, now));
     xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+static bool auxio_continuous(auxio_effect_t mode)
+{
+    return mode == AUXIO_EFFECT_INCANDESCENT || mode == AUXIO_EFFECT_FIREBOX;
+}
+
+static esp_err_t auxio_validate(uint8_t channel, uint8_t pwm_on, uint8_t pwm_off,
+                                auxio_effect_t mode, uint16_t period_ms,
+                                uint16_t min_period_ms)
+{
+    if (channel >= AUXIO_CH_COUNT || (uint32_t)mode >= AUXIO_EFFECT_COUNT ||
+        period_ms < min_period_ms || period_ms > AUXIO_PERIOD_MAX_MS ||
+        pwm_off > pwm_on) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (mode == AUXIO_EFFECT_STROBE && period_ms < AUXIO_STROBE_MIN_PERIOD_MS) {
+        return ESP_ERR_INVALID_ARG;
+    }
     return ESP_OK;
 }
 
@@ -322,9 +353,9 @@ esp_err_t auxio_set_effect(uint8_t channel, bool enabled,
                            uint8_t pwm_on, uint8_t pwm_off,
                            auxio_effect_t mode, uint16_t period_ms)
 {
-    if (channel >= AUXIO_CH_COUNT || period_ms < 100U ||
-        period_ms > AUXIO_PERIOD_MAX_MS || (uint32_t)mode >= AUXIO_EFFECT_COUNT) {
-        return ESP_ERR_INVALID_ARG;
+    esp_err_t err = auxio_validate(channel, pwm_on, pwm_off, mode, period_ms, 100U);
+    if (err != ESP_OK) {
+        return err;
     }
     if (s_lock == NULL || xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
@@ -357,20 +388,29 @@ esp_err_t auxio_get_enabled(uint8_t channel, bool *out_enabled)
 esp_err_t auxio_config(uint8_t channel, uint8_t pwm_on, uint8_t pwm_off,
                        auxio_effect_t mode, uint16_t period_ms)
 {
-    if (channel >= AUXIO_CH_COUNT || period_ms < 20U ||
-        period_ms > AUXIO_PERIOD_MAX_MS || (uint32_t)mode >= AUXIO_EFFECT_COUNT) {
-        return ESP_ERR_INVALID_ARG;
+    esp_err_t err = auxio_validate(channel, pwm_on, pwm_off, mode, period_ms, 20U);
+    if (err != ESP_OK) {
+        return err;
     }
     if (s_lock == NULL || xSemaphoreTake(s_lock, pdMS_TO_TICKS(100)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    s_ch[channel].pwm_on = pwm_on;
-    s_ch[channel].pwm_off = pwm_off;
-    s_ch[channel].mode = mode;
-    s_ch[channel].period_ms = period_ms;
-    s_ch[channel].cur = 0;
-    s_ch[channel].fx_next_ms = 0;
-    s_ch[channel].fx_scheduled = false;
+    auxio_ch_t *ch = &s_ch[channel];
+    /* Reconfiguring a continuous effect must not extinguish it: keep its
+     * current warm-up/flicker state (and enabled flag) when the mode is
+     * unchanged. The effect task resumes from there on the next tick. */
+    bool keep_state = auxio_continuous(mode) && ch->mode == mode;
+    ch->pwm_on = pwm_on;
+    ch->pwm_off = pwm_off;
+    ch->mode = mode;
+    ch->period_ms = period_ms;
+    if (!keep_state) {
+        ch->cur = 0;
+        ch->fx_next_ms = 0;
+        ch->fx_scheduled = false;
+    } else if (mode == AUXIO_EFFECT_FIREBOX && ch->cur > pwm_on) {
+        ch->cur = pwm_on;
+    }
     xSemaphoreGive(s_lock);
     return apply_now(channel);
 }

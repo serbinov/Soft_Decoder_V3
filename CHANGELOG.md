@@ -11,6 +11,64 @@
 
 ## Релизы
 
+### 2026-10-26 — batch B: concurrency, audio/RTOS, CI и release hardening
+
+- **Concurrency/тесты:** добавлены real-sync наборы `test_concurrency` и
+  `test_motor_concurrency`; проверки queue-depth, HIL и runner синхронизированы
+  с фактическими размерами очередей, таймингами и блокировками.
+- **Audio (A5–A9, A10, A12, A15–A20):** per-play состояние голоса очищается
+  (rate/volume/live override), запросы без живого микшера больше не ставятся в
+  очередь, ошибки/короткие I2S-записи получают bounded backoff, WAV `fmt`/`data`
+  и диапазон rate проверяются строже, а граф корректно учитывает активные,
+  неудачные и retry-каналы; preview/stop не залипает.
+- **RTOS/питание:** brownout-latch не даёт возобновить последний duty до чистого
+  STOP; persistence/transfer workers подписываются на WDT и кормят его только
+  по реальному прогрессу; task-budget (10 мс safety/motor, приоритеты, стеки)
+  зафиксирован статическими проверками; OTA deadline зависит от размера.
+- **Web/безопасность:** Hard Reset на рельсах останавливает и web-driven
+  локомотив; capabilities/preview ограничения согласованы с реальными лимитами;
+  flasher panel использует POST с nonce; завершено остаточное hardening
+  storage/web (manifest/recovery, JSON/response size, config busy).
+- **CI/release:** ESP-IDF 6.0 target build с проверкой partition/size и artifact
+  upload; release verify и assert `manifest.json` == `version.txt`; coverage
+  gate **88,0 %**, cppcheck, Windows `run_tests.ps1`, `timeout-minutes` у всех
+  jobs. Текущее покрытие first-party строк — **88,7 % (10744/12110)**; runtime
+  `sound.c` ~28,6 %, следующие цели — `provision.c` и `web.c`.
+
+### 2026-10-26 — batch A: DCC, мотор, хранилище, web, tools, tests
+
+- **DCC:** `dcc_reload_config()` сериализован bounded-lock, поэтому
+  одновременный reload из DCC-задачи и web-обработчика больше не публикует
+  смешанный снимок CV; повторные service/Ops-пакеты не применяются и не
+  подтверждаются повторно. Короткие адреса 124..127 больше не путаются с
+  service Write Byte, длинный адрес 0 отбрасывается, а idle-gaps/glitches
+  учитываются отдельно от переполнения очереди.
+- **Мотор/BEMF:** добавлен watchdog залипшего high-rail/насыщенного привода;
+  creep-пол первых трёх ступеней сохраняет монотонность кривой; kickstart
+  отменяется при снижении скорости, реверсе или остановке; heartbeat
+  публикуется до взятия control-mutex, чтобы flash/NVS-задержка не выглядела
+  как stall. Калибровка принимает валидированную частичную кривую (>=2 точек,
+  последняя дробь >=51/1024), если ceiling/пропуски не дали целевые 10 точек.
+- **Хранилище/восстановление:** manifest-restore не считает временную ошибку
+  FS отсутствующим файлом и не перезаписывает manifest повторно; recovery-
+  маркер очищается только после успешного сохранения; временные `.tmp`/`.bak`
+  артефакты удаляются по grace-периоду; CV63 корректно конвертируется между
+  0..100 % и 0..255 без потери значения.
+- **Web/API:** `/api/sound/graph/capabilities` отдаёт реальные `SG_MAX_*`
+  (192/144/250/32/128); добавлены недостающие ответы `config busy` и
+  проверки размера ответа; частичное обновление громкостей не сбрасывает
+  остальные поля; загрузки требуют `.wav`; OTA deadline зависит от размера;
+  DCC/function callbacks не блокируются на NVS/HTTP-мьютексах.
+- **Инструменты/тесты:** `release_artifacts.py` валидирует `.asp`
+  (AURASP01/AURAPW01/AURAPW02), публикует хэши sound-pack'ов и
+  `SHA256SUMS.txt`; добавлены host/JS-тесты для DCC, BEMF, восстановления,
+  web-контрактов и release-артефактов.
+- **CI/документация:** target-build ESP-IDF 6.0 с проверкой partition/size,
+  release verify и artifact upload; coverage gate, cppcheck, Windows
+  `run_tests.ps1`, `timeout-minutes` у всех jobs; BEMF/known-issues,
+  sound-graph limits, safety period и размеры релиза синхронизированы с кодом
+  и `release/manifest.json`.
+
 ### 2026-10-25 — адаптивная калибровка BEMF
 
 - Добавлены профили `FAST` (10 точек), `BALANCED` (12), `THOROUGH`/`AUTO`
@@ -19,10 +77,13 @@
   `boost_ms`, `adaptive`, `apply_pid`.
 - Каждая точка теперь ждёт сходимости BEMF (ограниченный settle), оценивает
   качество и повторяется при шуме; нераскрутившаяся точка получает boost и
-  пропускается. Калибровка требует не менее 10 вращающихся точек.
+  пропускается. Целевой план — не менее 10 вращающихся точек; это quality
+  target, а не жёсткий порог сохранения.
 - Второй проход адаптивно добавляет точки в интервалах с наибольшим
   наклоном/кривизной/низким качеством; при достижении acceptance ceiling
-  сохраняется частичная кривая.
+  сохраняется частичная кривая. Частичный результат принимается, если в нём
+  >=2 валидированных точек и последняя дробь >=51/1024
+  (`SETTINGS_BEMF_CAL_MIN_END_FRAC`); иначе калибровка завершается `CURVE`.
 - Профиль прогона отдаёт recommended Kp/Ki/Kd, plant gain, quality, stalled/
   ceiling/first-move; PID применяется в CV54/55/56 только с `apply_pid`.
 - Web UI: выбор режима калибровки; `POST /api/bemf/calibrate?start=1&mode=...`.
@@ -172,7 +233,7 @@
 - Усилены host-тесты: добавлены проверки ADPCM-воспроизведения, live volume,
   emergency endpoint, graph GET, Wi-Fi fallback; fuzz-тесты проверяют инварианты.
 - Проверка: 800 C-тестов и 75 JS/Python-тестов PASS, чистая сборка ESP-IDF
-  успешна, покрытие host-строк 92,9 % (8266/8893), ветвей — 76,2 % (6449/8468).
+  успешна, покрытие host-строк на тот момент 92,9 % (8266/8893).
 - Добавлены branch-тесты парсеров `ima_adpcm`, `sound_graph`, `settings` и
   error-path `web.c`; CI-workflow запускает host-тесты и ASan+UBSan.
 
@@ -403,6 +464,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-26 (v0.11) — fix(firmware): close global review findings
 - 2026-10-26 (v0.11) — fix(firmware): correct DCC speed, BEMF calibration and sound recovery
 - 2026-10-25 (v0.11) — feat(motor,web): adaptive BEMF calibration and WiFi link tuning
 - 2026-10-25 (v0.11) — feat(editor): persistent project library, clone/rename and simulator hot reload

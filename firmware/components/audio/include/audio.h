@@ -68,9 +68,10 @@ esp_err_t audio_voice_play(uint8_t voice, const char *path, bool loop, uint8_t v
 esp_err_t audio_voice_stop(uint8_t voice);
 void audio_stop_all(void);
 
-/* Live per-voice volume override (0..100) applied to an already-playing voice.
- * Cleared on the next play request, so it never leaks into a new playback.
- * Used by the sound engine to duck the engine voice under effects. */
+/* Live per-voice volume override (0..100) applied to the current playback,
+ * including a play request still pending in the same mixer block. Cleared on
+ * the next play request, so it never leaks into a new playback. Used by the
+ * sound engine to duck the engine voice under effects. */
 esp_err_t audio_voice_set_volume_live(uint8_t voice, uint8_t volume);
 
 void audio_set_volume(uint8_t vol);

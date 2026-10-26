@@ -101,6 +101,10 @@ esp_err_t settings_manifest_sync(void) { return ESP_OK; }
 esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
 esp_err_t settings_manifest_remove(void) { return ESP_OK; }
 bool settings_manifest_write_allowed(void) { return true; }
+bool settings_manifest_restore_in_progress(void) { return false; }
+
+static esp_err_t g_manifest_remove_error;
+esp_err_t settings_manifest_remove_locked(void) { return g_manifest_remove_error; }
 
 /* Guard against an out-of-band version bump: version.txt is the single source
  * of truth for the firmware version, and CV7 (decoder version) must match its
@@ -147,6 +151,7 @@ void setUp(void)
     g_blob_hook = NULL;
     g_before_take_hook = NULL;
     g_lock_depth = 0;
+    g_manifest_remove_error = ESP_OK;
     mock_timer_now_us = 0;
     memset(&s_cv, 0, sizeof(s_cv));
     cv_set_defaults();
@@ -154,6 +159,7 @@ void setUp(void)
     s_pending = false;
     s_cv_pending = false;
     s_manifest_pending = false;
+    s_recovery_marker = false;
     s_pending_us = 0;
     s_last_error = ESP_OK;
     s_retries = 0;
@@ -544,6 +550,34 @@ static void test_func_map_stale_blob_uses_defaults(void)
     TEST_ASSERT_EQUAL_UINT8(1, map[1].slot_a);
 }
 
+/* Type-mismatched / truncated metadata blobs are unusable, not I/O errors:
+ * loaders fall back to defaults and drop the bad key (G-STORAGE-7). */
+static void test_corrupt_metadata_blobs_are_discarded(void)
+{
+    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    size_t count = 99;
+    uint8_t junk[3] = { 1, 2, 3 };
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("tracks", junk, sizeof(junk)));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_tracks_load(tracks, &count));
+    TEST_ASSERT_EQUAL_UINT32(0, count);
+    size_t len = sizeof(tracks);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_blob(s_h, "tracks", tracks, &len));
+
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "func_map", 7));
+    settings_func_map_t map[SETTINGS_FUNC_MAP_COUNT];
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_func_map_load(map, &count));
+    TEST_ASSERT_EQUAL_UINT32(SETTINGS_FUNC_MAP_COUNT, count);
+    TEST_ASSERT_EQUAL_UINT16(SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R, map[0].aux_mask);
+    len = sizeof(map);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_blob(s_h, "func_map", map, &len));
+
+    uint8_t wrong_type = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("recover", &wrong_type, sizeof(wrong_type)));
+    bool pending = true;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_recovery_pending(&pending));
+    TEST_ASSERT_FALSE(pending);
+}
+
 /* ---- AUX configuration ---- */
 
 static void test_aux_cfg_defaults(void)
@@ -796,6 +830,31 @@ static void test_factory_reset_clears_all_stores(void)
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_TRACK_CAT_EFFECTS, got_cats[1]);
 }
 
+/* A manifest-removal failure aborts the reset transaction: the NVS metadata
+ * is kept and the pending result stays set for a retry (G-STORAGE-4). */
+static void test_factory_reset_keeps_metadata_when_manifest_removal_fails(void)
+{
+    settings_track_t track;
+    memset(&track, 0, sizeof(track));
+    track.slot = 2;
+    track.enabled = true;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_save(&track, 1));
+
+    g_manifest_remove_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_factory_reset());
+    g_manifest_remove_error = ESP_OK;
+
+    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    size_t count = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_load(tracks, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    TEST_ASSERT_EQUAL_UINT8(2, tracks[0].slot);
+    settings_flush_status_t status;
+    settings_flush_status(&status);
+    TEST_ASSERT_TRUE(status.manifest_pending);
+    TEST_ASSERT_EQUAL(ESP_FAIL, status.last_error);
+}
+
 /* ---- settings_init / deferred write / error branches ---- */
 
 static void test_nvs_read_u8_error(void)
@@ -964,7 +1023,9 @@ static void test_cv63_master_volume_alias(void)
 
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(63, 128));
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &v));
-    TEST_ASSERT_EQUAL_UINT8(127, v); /* 128 -> 50 % -> 127 */
+    TEST_ASSERT_EQUAL_UINT8(128, v); /* exact CV value, no re-quantization */
+    TEST_ASSERT_EQUAL_UINT8(50, s_cfg.master_volume);
+    TEST_ASSERT_EQUAL_UINT8(s_cfg.master_volume, s_master_volume);
 
     mock_nvs_reset();
     s_lock = (SemaphoreHandle_t)1;
@@ -985,6 +1046,37 @@ static void test_cv63_master_volume_alias(void)
     mock_sem_take_fail = 0;
 
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_cv_read(63, NULL));
+}
+
+/* A master-volume update from either path must keep both live copies equal and
+ * survive a settings_save/load round trip (G-STORAGE-8). */
+static void test_master_volume_roundtrip_keeps_live_copies_in_sync(void)
+{
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    cfg.master_volume = 55;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(55, s_master_volume);
+    TEST_ASSERT_EQUAL_UINT8(55, s_cfg.master_volume);
+
+    s_cfg_valid = false;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(55, cfg.master_volume);
+    TEST_ASSERT_EQUAL_UINT8(55, s_master_volume);
+    uint8_t cv63 = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &cv63));
+    TEST_ASSERT_EQUAL_UINT8(volume_pct_to_cv(55), cv63);
+
+    /* A CV-path update reaches the config copy too. */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(63, 200));
+    TEST_ASSERT_EQUAL_UINT8(cv_to_volume_pct(200), s_cfg.master_volume);
+    TEST_ASSERT_EQUAL_UINT8(s_cfg.master_volume, s_master_volume);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_cv_read(63, &cv63));
+    TEST_ASSERT_EQUAL_UINT8(200, cv63);
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save(&s_cfg));
+    s_cfg_valid = false;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(cv_to_volume_pct(200), cfg.master_volume);
 }
 
 static void test_cv7_migrated_from_old_blob(void)
@@ -1037,11 +1129,11 @@ static void test_func_bind_roundtrip(void)
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_save(NULL, 1));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_save(back, FUNC_BIND_MAX + 1U));
 
-    /* A blob that is not a whole number of bindings is rejected. */
+    /* A blob that is not a whole number of bindings is an unusable base. */
     uint8_t junk[3] = { 1, 2, 3 };
     TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("func_bind", junk, sizeof(junk)));
     size_t jn = 99;
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, settings_func_bind_load(back, &jn));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_func_bind_load(back, &jn));
     TEST_ASSERT_EQUAL_UINT32(0, jn);
 
     /* Lock timeout paths. */
@@ -1538,6 +1630,7 @@ int main(void)
     RUN_TEST(test_func_map_defaults);
     RUN_TEST(test_func_map_roundtrip);
     RUN_TEST(test_func_map_stale_blob_uses_defaults);
+    RUN_TEST(test_corrupt_metadata_blobs_are_discarded);
     RUN_TEST(test_store_api_invalid_args);
     RUN_TEST(test_store_api_io_errors);
     RUN_TEST(test_aux_cfg_defaults);
@@ -1550,6 +1643,7 @@ int main(void)
     RUN_TEST(test_bemf_use_null_arg);
     RUN_TEST(test_factory_reset);
     RUN_TEST(test_factory_reset_clears_all_stores);
+    RUN_TEST(test_factory_reset_keeps_metadata_when_manifest_removal_fails);
     RUN_TEST(test_nvs_read_u8_error);
     RUN_TEST(test_settings_load_error_paths);
     RUN_TEST(test_settings_init_branches);
@@ -1560,6 +1654,7 @@ int main(void)
     RUN_TEST(test_cv_commit_deferred_flush);
     RUN_TEST(test_bemf_cal_clear_missing_key_is_ok);
     RUN_TEST(test_cv63_master_volume_alias);
+    RUN_TEST(test_master_volume_roundtrip_keeps_live_copies_in_sync);
     RUN_TEST(test_cv7_migrated_from_old_blob);
     RUN_TEST(test_func_bind_roundtrip);
     RUN_TEST(test_func_bind_legacy_convert);

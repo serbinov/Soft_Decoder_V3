@@ -75,9 +75,43 @@ static void test_pinmap_check_rejects_reserved(void)
 
 static void test_pinmap_check_accepts_valid(void)
 {
-    int ok[] = { 1, 2, 3, 4 };
+    int ok[] = { 1, 4, 5, 6 };
     TEST_ASSERT_EQUAL(ESP_OK, pinmap_check(ok, 4));
     TEST_ASSERT_EQUAL(ESP_OK, pinmap_check(ok, 0));
+}
+
+/* ESP32-S3 strapping pins must not be assigned by the generic checker. */
+static void test_pinmap_check_rejects_strapping(void)
+{
+    int strap0[] = { 0 };
+    int strap3[] = { 3 };
+    int strap45[] = { 45 };
+    int strap46[] = { 46 };
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(strap0, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(strap3, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(strap45, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(strap46, 1));
+}
+
+/* The board map explicitly whitelists its two documented strap pins. */
+static void test_pinmap_check_board_allows_documented_straps(void)
+{
+    int board[] = { PIN_ACK_LOAD, PIN_AUX_F0R };
+    int other[] = { 0, PIN_ACK_LOAD };
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(board, 2));
+    TEST_ASSERT_EQUAL(ESP_OK, pinmap_check_board(board, 2));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check_board(other, 2));
+}
+
+/* Output validity comes from the SoC mask, not a legacy GPIO_PIN_COUNT bound. */
+static void test_pinmap_check_output_validity(void)
+{
+    int s3_outputs[] = { 34, 35, 36, 37, 48 };
+    int too_high[] = { 49 };
+    int not_bonded[] = { 22 };
+    TEST_ASSERT_EQUAL(ESP_OK, pinmap_check(s3_outputs, 5));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(too_high, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, pinmap_check(not_bonded, 1));
 }
 
 /* out-of-range, GPIO22 and duplicate assignments must all be rejected. */
@@ -101,6 +135,9 @@ int main(void)
     RUN_TEST(test_pinmap_no_duplicates);
     RUN_TEST(test_pinmap_check_rejects_reserved);
     RUN_TEST(test_pinmap_check_accepts_valid);
+    RUN_TEST(test_pinmap_check_rejects_strapping);
+    RUN_TEST(test_pinmap_check_board_allows_documented_straps);
+    RUN_TEST(test_pinmap_check_output_validity);
     RUN_TEST(test_pinmap_check_rejects_bad);
     return UNITY_END();
 }

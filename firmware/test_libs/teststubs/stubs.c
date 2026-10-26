@@ -30,6 +30,27 @@
 #include "esp_system.h"
 #include "esp_vfs_dev.h"
 
+/* Opt-in real synchronisation for the concurrency harness. The default build
+ * keeps the deterministic single-threaded mocks so every existing suite stays
+ * reproducible. test_concurrency is compiled with -DMOCK_FREERTOS_REAL_SYNC and
+ * then uses the native OS primitive instead of the (void*)1 no-op handle. */
+#ifdef MOCK_FREERTOS_REAL_SYNC
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#undef min
+#undef max
+#undef near
+#undef far
+#undef interface
+#else
+#include <pthread.h>
+#include <errno.h>
+#include <time.h>
+#endif
+#endif
 
 int64_t mock_timer_now_us = 0;
 int mock_gpio_set_level_count = 0;
@@ -97,8 +118,11 @@ int gpio_get_level(gpio_num_t gpio)
 }
 
 /* ---- FreeRTOS (minimal in-memory queue) ---- */
+/* The mock honours the depth passed to xQueueCreate(). Production code uses
+ * DCC_QUEUE_LEN == 256, so a fixed 16-slot mock silently hid overruns. */
 typedef struct {
-    void *items[16];
+    void **items;
+    size_t capacity;
     size_t head;
     size_t count;
     size_t item_size;
@@ -115,7 +139,6 @@ int mock_queue_send_calls = 0;
 
 QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size)
 {
-    (void)len;
     mock_queue_create_calls++;
     if (mock_queue_create_fail ||
         (mock_queue_create_fail_after >= 0 &&
@@ -126,7 +149,13 @@ QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size)
     if (q == NULL) {
         return NULL;
     }
-    q->item_size = item_size;
+    q->capacity = len > 0U ? (size_t)len : 1U;
+    q->item_size = item_size > 0U ? (size_t)item_size : 1U;
+    q->items = (void **)calloc(q->capacity, sizeof(*q->items));
+    if (q->items == NULL) {
+        free(q);
+        return NULL;
+    }
     return q;
 }
 
@@ -137,10 +166,10 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t ticks)
     mock_queue_send_calls++;
     if (mock_queue_send_fail || (mock_queue_send_fail_after >= 0 &&
                                  mock_queue_send_calls > mock_queue_send_fail_after) ||
-        mq == NULL || mq->count >= 16) {
+        mq == NULL || item == NULL || mq->count >= mq->capacity) {
         return pdFALSE;
     }
-    size_t idx = (mq->head + mq->count) % 16;
+    size_t idx = (mq->head + mq->count) % mq->capacity;
     mq->items[idx] = malloc(mq->item_size);
     if (mq->items[idx] == NULL) {
         return pdFALSE;
@@ -170,7 +199,8 @@ BaseType_t xQueueReceive(QueueHandle_t q, void *buf, TickType_t ticks)
     }
     memcpy(buf, mq->items[mq->head], mq->item_size);
     free(mq->items[mq->head]);
-    mq->head = (mq->head + 1) % 16;
+    mq->items[mq->head] = NULL;
+    mq->head = (mq->head + 1) % mq->capacity;
     mq->count--;
     return pdTRUE;
 }
@@ -183,9 +213,11 @@ void vQueueDelete(QueueHandle_t q)
     }
     while (mq->count > 0) {
         free(mq->items[mq->head]);
-        mq->head = (mq->head + 1) % 16;
+        mq->items[mq->head] = NULL;
+        mq->head = (mq->head + 1) % mq->capacity;
         mq->count--;
     }
+    free(mq->items);
     free(mq);
 }
 
@@ -326,32 +358,366 @@ uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t task)
 int mock_mutex_create_fail = 0;
 int mock_sem_take_fail = 0;
 
+#ifdef MOCK_FREERTOS_REAL_SYNC
+/* Real mutex/binary primitives. Tick == millisecond in this mock. */
+typedef struct {
+#if defined(_WIN32)
+    HANDLE handle;
+#else
+    pthread_mutex_t state;
+    pthread_cond_t cond;
+    int available;
+#endif
+    int is_binary;
+} mock_real_sem_t;
+
+#if defined(_WIN32)
+static DWORD mock_real_sem_timeout(TickType_t ticks)
+{
+    return ticks == portMAX_DELAY ? INFINITE : (DWORD)ticks;
+}
+#else
+static void mock_real_sem_deadline(TickType_t ticks, struct timespec *deadline)
+{
+    clock_gettime(CLOCK_REALTIME, deadline);
+    long add_ns = (long)(ticks % 1000U) * 1000000L;
+    deadline->tv_sec += (time_t)(ticks / 1000U);
+    deadline->tv_nsec += add_ns;
+    if (deadline->tv_nsec >= 1000000000L) {
+        deadline->tv_nsec -= 1000000000L;
+        deadline->tv_sec += 1;
+    }
+}
+#endif
+
+static mock_real_sem_t *mock_real_sem_new(int binary)
+{
+    mock_real_sem_t *sem = (mock_real_sem_t *)calloc(1, sizeof(*sem));
+    if (sem == NULL) {
+        return NULL;
+    }
+    sem->is_binary = binary;
+#if defined(_WIN32)
+    sem->handle = binary ? CreateEventA(NULL, FALSE, FALSE, NULL)
+                         : CreateMutexA(NULL, FALSE, NULL);
+    if (sem->handle == NULL) {
+        free(sem);
+        return NULL;
+    }
+#else
+    if (pthread_mutex_init(&sem->state, NULL) != 0) {
+        free(sem);
+        return NULL;
+    }
+    if (pthread_cond_init(&sem->cond, NULL) != 0) {
+        pthread_mutex_destroy(&sem->state);
+        free(sem);
+        return NULL;
+    }
+    sem->available = binary ? 0 : 1;
+#endif
+    return sem;
+}
+
+static void mock_real_sem_free(mock_real_sem_t *sem)
+{
+    if (sem == NULL) {
+        return;
+    }
+#if defined(_WIN32)
+    if (sem->handle != NULL) {
+        CloseHandle(sem->handle);
+    }
+#else
+    pthread_cond_destroy(&sem->cond);
+    pthread_mutex_destroy(&sem->state);
+#endif
+    free(sem);
+}
+
+static int mock_real_sem_take(mock_real_sem_t *sem, TickType_t ticks)
+{
+#if defined(_WIN32)
+    return WaitForSingleObject(sem->handle, mock_real_sem_timeout(ticks)) == WAIT_OBJECT_0;
+#else
+    int acquired = 0;
+    pthread_mutex_lock(&sem->state);
+    if (ticks == portMAX_DELAY) {
+        while (!sem->available) {
+            pthread_cond_wait(&sem->cond, &sem->state);
+        }
+        sem->available = 0;
+        acquired = 1;
+    } else {
+        struct timespec deadline;
+        mock_real_sem_deadline(ticks, &deadline);
+        while (!sem->available) {
+            int rc = pthread_cond_timedwait(&sem->cond, &sem->state, &deadline);
+            if (rc == ETIMEDOUT) {
+                break;
+            }
+        }
+        if (sem->available) {
+            sem->available = 0;
+            acquired = 1;
+        }
+    }
+    pthread_mutex_unlock(&sem->state);
+    return acquired;
+#endif
+}
+
+static int mock_real_sem_give(mock_real_sem_t *sem)
+{
+#if defined(_WIN32)
+    return sem->is_binary ? SetEvent(sem->handle) != 0 : ReleaseMutex(sem->handle) != 0;
+#else
+    pthread_mutex_lock(&sem->state);
+    sem->available = 1;
+    pthread_cond_signal(&sem->cond);
+    pthread_mutex_unlock(&sem->state);
+    return 1;
+#endif
+}
+
+/* --- native thread helpers for the real-concurrency test suites --------- */
+typedef void *mock_thread_t;
+typedef struct mock_thread_handle mock_thread_handle_t;
+typedef struct {
+    void (*fn)(void *);
+    void *arg;
+    mock_thread_handle_t *owner;
+} mock_thread_start_t;
+
+#if defined(_WIN32)
+struct mock_thread_handle {
+    HANDLE handle;
+};
+
+static DWORD WINAPI mock_thread_entry(LPVOID arg)
+{
+    mock_thread_start_t *start = (mock_thread_start_t *)arg;
+    start->fn(start->arg);
+    free(start);
+    return 0;
+}
+
+mock_thread_t mock_thread_start(void (*fn)(void *), void *arg)
+{
+    mock_thread_start_t *start = (mock_thread_start_t *)calloc(1, sizeof(*start));
+    mock_thread_handle_t *thread = (mock_thread_handle_t *)calloc(1, sizeof(*thread));
+    if (start == NULL || thread == NULL) {
+        free(start);
+        free(thread);
+        return NULL;
+    }
+    start->fn = fn;
+    start->arg = arg;
+    start->owner = thread;
+    thread->handle = CreateThread(NULL, 0, mock_thread_entry, start, 0, NULL);
+    if (thread->handle == NULL) {
+        free(start);
+        free(thread);
+        return NULL;
+    }
+    return (mock_thread_t)thread;
+}
+
+int mock_thread_join_timeout(mock_thread_t thread, unsigned timeout_ms)
+{
+    if (thread == NULL) {
+        return 1;
+    }
+    mock_thread_handle_t *handle = (mock_thread_handle_t *)thread;
+    DWORD timeout = timeout_ms == 0xFFFFFFFFu ? INFINITE : (DWORD)timeout_ms;
+    if (WaitForSingleObject(handle->handle, timeout) != WAIT_OBJECT_0) {
+        return 0; /* still running: leave the handle alive for process exit */
+    }
+    CloseHandle(handle->handle);
+    free(handle);
+    return 1;
+}
+
+void mock_thread_join(mock_thread_t thread)
+{
+    (void)mock_thread_join_timeout(thread, 0xFFFFFFFFu);
+}
+
+void mock_thread_sleep_ms(unsigned ms)
+{
+    Sleep(ms);
+}
+#else
+struct mock_thread_handle {
+    pthread_t thread;
+    pthread_mutex_t done_mutex;
+    pthread_cond_t done_cond;
+    int done;
+};
+
+static void *mock_thread_entry(void *arg)
+{
+    mock_thread_start_t *start = (mock_thread_start_t *)arg;
+    start->fn(start->arg);
+    pthread_mutex_lock(&start->owner->done_mutex);
+    start->owner->done = 1;
+    pthread_cond_signal(&start->owner->done_cond);
+    pthread_mutex_unlock(&start->owner->done_mutex);
+    free(start);
+    return NULL;
+}
+
+mock_thread_t mock_thread_start(void (*fn)(void *), void *arg)
+{
+    mock_thread_start_t *start = (mock_thread_start_t *)calloc(1, sizeof(*start));
+    mock_thread_handle_t *thread = (mock_thread_handle_t *)calloc(1, sizeof(*thread));
+    if (start == NULL || thread == NULL) {
+        free(start);
+        free(thread);
+        return NULL;
+    }
+    if (pthread_mutex_init(&thread->done_mutex, NULL) != 0) {
+        free(start);
+        free(thread);
+        return NULL;
+    }
+    if (pthread_cond_init(&thread->done_cond, NULL) != 0) {
+        pthread_mutex_destroy(&thread->done_mutex);
+        free(start);
+        free(thread);
+        return NULL;
+    }
+    start->fn = fn;
+    start->arg = arg;
+    start->owner = thread;
+    if (pthread_create(&thread->thread, NULL, mock_thread_entry, start) != 0) {
+        pthread_cond_destroy(&thread->done_cond);
+        pthread_mutex_destroy(&thread->done_mutex);
+        free(start);
+        free(thread);
+        return NULL;
+    }
+    return (mock_thread_t)thread;
+}
+
+int mock_thread_join_timeout(mock_thread_t thread, unsigned timeout_ms)
+{
+    if (thread == NULL) {
+        return 1;
+    }
+    mock_thread_handle_t *handle = (mock_thread_handle_t *)thread;
+    int done = 0;
+    pthread_mutex_lock(&handle->done_mutex);
+    if (timeout_ms == 0xFFFFFFFFu) {
+        while (!handle->done) {
+            pthread_cond_wait(&handle->done_cond, &handle->done_mutex);
+        }
+        done = 1;
+    } else {
+        struct timespec deadline;
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        long add_ns = (long)(timeout_ms % 1000U) * 1000000L;
+        deadline.tv_sec += (time_t)(timeout_ms / 1000U);
+        deadline.tv_nsec += add_ns;
+        if (deadline.tv_nsec >= 1000000000L) {
+            deadline.tv_nsec -= 1000000000L;
+            deadline.tv_sec += 1;
+        }
+        while (!handle->done) {
+            int rc = pthread_cond_timedwait(&handle->done_cond, &handle->done_mutex,
+                                            &deadline);
+            if (rc == ETIMEDOUT) {
+                break;
+            }
+        }
+        done = handle->done;
+    }
+    pthread_mutex_unlock(&handle->done_mutex);
+    if (!done) {
+        return 0; /* still running: leave the handle alive for process exit */
+    }
+    pthread_join(handle->thread, NULL);
+    pthread_cond_destroy(&handle->done_cond);
+    pthread_mutex_destroy(&handle->done_mutex);
+    free(handle);
+    return 1;
+}
+
+void mock_thread_join(mock_thread_t thread)
+{
+    (void)mock_thread_join_timeout(thread, 0xFFFFFFFFu);
+}
+
+void mock_thread_sleep_ms(unsigned ms)
+{
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000U);
+    ts.tv_nsec = (long)(ms % 1000U) * 1000000L;
+    nanosleep(&ts, NULL);
+}
+#endif
+#endif /* MOCK_FREERTOS_REAL_SYNC */
+
 SemaphoreHandle_t xSemaphoreCreateMutex(void)
 {
-    return mock_mutex_create_fail ? NULL : (SemaphoreHandle_t)1;
+    if (mock_mutex_create_fail) {
+        return NULL;
+    }
+#ifdef MOCK_FREERTOS_REAL_SYNC
+    return (SemaphoreHandle_t)mock_real_sem_new(0);
+#else
+    return (SemaphoreHandle_t)1;
+#endif
 }
 
 SemaphoreHandle_t xSemaphoreCreateBinary(void)
 {
+#ifdef MOCK_FREERTOS_REAL_SYNC
+    return (SemaphoreHandle_t)mock_real_sem_new(1);
+#else
     return (SemaphoreHandle_t)1;
+#endif
 }
 
 void vSemaphoreDelete(SemaphoreHandle_t s)
 {
+#ifdef MOCK_FREERTOS_REAL_SYNC
+    if (s != NULL && s != (SemaphoreHandle_t)1) {
+        mock_real_sem_free((mock_real_sem_t *)s);
+    }
+#else
     (void)s;
+#endif
 }
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t t)
 {
+#ifdef MOCK_FREERTOS_REAL_SYNC
+    if (mock_sem_take_fail || s == NULL) {
+        return pdFALSE;
+    }
+    if (s == (SemaphoreHandle_t)1) {
+        return pdTRUE;
+    }
+    return mock_real_sem_take((mock_real_sem_t *)s, t) ? pdTRUE : pdFALSE;
+#else
     (void)s;
     (void)t;
     return mock_sem_take_fail ? pdFALSE : pdTRUE;
+#endif
 }
 
 BaseType_t xSemaphoreGive(SemaphoreHandle_t s)
 {
+#ifdef MOCK_FREERTOS_REAL_SYNC
+    if (s == NULL || s == (SemaphoreHandle_t)1) {
+        return pdTRUE;
+    }
+    return mock_real_sem_give((mock_real_sem_t *)s) ? pdTRUE : pdFALSE;
+#else
     (void)s;
     return pdTRUE;
+#endif
 }
 
 /* ---- NVS (generic in-memory key/value store) ---- */

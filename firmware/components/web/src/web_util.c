@@ -474,9 +474,16 @@ bool web_util_same_origin(const char *origin, const char *referer, const char *h
         !web_util_parse_host_header(host, &host_authority)) {
         return false;
     }
-    unsigned source_port = source_authority.has_port ? source_authority.port : default_port;
-    unsigned host_port = host_authority.has_port ? host_authority.port : default_port;
-    return source_port == host_port &&
+    /* The device origin is fixed: plain HTTP on port 80. Using the source
+     * scheme's default for the Host side (the previous behaviour) accepted
+     * https://host against an HTTP Host: host, and a matching explicit
+     * non-device port. Compare both sides against the real device port. */
+    if (default_port != 80U) {
+        return false;
+    }
+    unsigned source_port = source_authority.has_port ? source_authority.port : 80U;
+    unsigned host_port = host_authority.has_port ? host_authority.port : 80U;
+    return source_port == 80U && host_port == 80U &&
            web_util_ascii_ieq(source_authority.host, source_authority.host_len,
                               host_authority.host, host_authority.host_len);
 }

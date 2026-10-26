@@ -1,10 +1,22 @@
 param(
-    [string]$Port = "COM3",
+    [string]$Port = "",
     [switch]$WriteHeader,
-    [string]$HeaderPath = (Join-Path $PSScriptRoot "..\components\motor\include\bemf_cal_base.h")
+    [string]$HeaderPath = (Join-Path $PSScriptRoot "components\motor\include\bemf_cal_base.h")
 )
 
 $ErrorActionPreference = "Stop"
+
+function Find-EspPort {
+    Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+        Where-Object { $_.PNPDeviceID -like "USB\VID_303A*PID_1001*" -and $_.Name -match "\((COM\d+)\)" } |
+        ForEach-Object { if ($_.Name -match "\((COM\d+)\)") { $Matches[1] } } |
+        Select-Object -First 1
+}
+if (-not $Port) { $Port = Find-EspPort }
+if (-not $Port) {
+    Write-Host "[ERROR] ESP32-S3 (VID_303A/PID_1001) not found. Specify -Port COMx." -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "[INFO] Port: $Port  baud: 115200"
 
@@ -69,7 +81,7 @@ if ($WriteHeader) {
         $sp.Close(); exit 1
     }
     $buf = ReadUntil "BEMF-HDR-END" 4000
-    $lines = $buf -split "`n"
+    $lines = $buf -split "\r?\n"
     $start = -1
     $end = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -82,7 +94,7 @@ if ($WriteHeader) {
         Write-Host $buf
         $sp.Close(); exit 1
     }
-    $hdr = $lines[$start..$end] -join "`r`n" + "`r`n"
+    $hdr = (($lines[$start..$end]) -join "`r`n") + "`r`n"
     $dir = Split-Path -Parent $HeaderPath
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     Set-Content -LiteralPath $HeaderPath -Value $hdr -Encoding ascii -NoNewline

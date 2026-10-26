@@ -18,6 +18,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -65,6 +66,39 @@ def _http(port, method, path, data=None):
         return resp.status, resp.read()
 
 
+def _asp(entries):
+    """Build a minimal AURASP01 container from (name, vol, ch, bits, rate, payload)."""
+    data_off = 16 + sum(16 + len(name.encode("utf-8")) for name, *_ in entries)
+    index = bytearray()
+    payloads = bytearray()
+    offset = data_off
+    for name, vol, ch, bits, rate, payload in entries:
+        raw_name = name.encode("utf-8")
+        index += struct.pack("<BBBBIII", len(raw_name), vol, ch, bits, rate, offset, len(payload))
+        index += raw_name
+        payloads += payload
+        offset += len(payload)
+    header = struct.pack("<8sHHI", b"AURASP01", 1, len(entries), data_off)
+    return header + bytes(index) + bytes(payloads)
+
+
+def _header_limits():
+    path = os.path.join(HERE, "..", "firmware", "components", "sound", "include", "sound_graph.h")
+    values = {}
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            match = re.match(r"\s*#define\s+(SG_[A-Z0-9_]+)\s+(.+?)\s*(?:/\*.*)?$", line)
+            if not match:
+                continue
+            name, expr = match.group(1), match.group(2).strip()
+            product = re.match(r"^\(?\s*(\d+)U?\s*\*\s*(\d+)U?\s*\)?$", expr)
+            if product:
+                values[name] = int(product.group(1)) * int(product.group(2))
+            elif expr.isdigit():
+                values[name] = int(expr)
+    return values
+
+
 def main():
     mock = _load_mock()
     pack = sys.argv[1] if len(sys.argv) > 1 else None
@@ -78,6 +112,25 @@ def main():
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
+        status, raw = _http(port, "GET", "/api/sound/graph/capabilities")
+        caps = json.loads(raw)
+        fw = _header_limits()
+        limits = caps.get("limits") or {}
+        expected = {
+            "states": fw["SG_MAX_STATES"],
+            "soundStates": fw["SG_MAX_SOUND_STATES"],
+            "transitions": fw["SG_MAX_TRANSITIONS"],
+            "effects": fw["SG_MAX_EFFECTS"],
+            "assets": fw["SG_MAX_ASSETS"],
+            "variables": fw["SG_MAX_VARIABLES"],
+            "jsonBytes": fw["SG_MAX_JSON"],
+        }
+        assert caps.get("ok") and caps.get("schemaVersion") == 1, caps
+        for key, value in expected.items():
+            assert limits.get(key) == value, (key, limits.get(key), value)
+        assert "state_enter" in caps.get("conditions", []), caps.get("conditions")
+        print("graph/capabilities limits match sound_graph.h: %s" % expected)
+
         status, raw = _http(port, "POST", "/api/audio/pack", body)
         res = json.loads(raw)
         assert status == 200 and res.get("ok"), res
@@ -149,6 +202,43 @@ def main():
         bad = json.loads(raw)
         assert status == 200 and bad.get("ok") is False, bad
         print("invalid pack rejected: %s" % bad.get("error"))
+
+        # An embedded graph must pass the same structural limits as the device.
+        over = {
+            "format": "sound-graph", "schemaVersion": 1, "id": "over", "name": "Over",
+            "engine": {"entry": "s0", "fn": 255}, "states": [
+                {"id": "s%d" % i, "name": "S", "file": "", "loop": False,
+                 "volume": 100, "rate": 1000}
+                for i in range(fw["SG_MAX_STATES"] + 1)
+            ],
+            "transitions": [], "effects": [], "assets": [], "editor": {},
+        }
+        bad_doc = _asp([("__aura_scheme__", 0, 0, 0, 0,
+                         json.dumps(over, separators=(",", ":")).encode("utf-8"))])
+        status, raw = _http(port, "POST", "/api/audio/pack", bad_doc)
+        bad = json.loads(raw)
+        assert status == 200 and bad.get("ok") is False, bad
+        assert "state capacity" in bad.get("error", ""), bad
+        print("over-limit embedded graph rejected: %s" % bad.get("error"))
+
+        malformed = {
+            "format": "sound-graph", "schemaVersion": 1, "id": "broken", "name": "Broken",
+            "engine": {"entry": "s0", "fn": 255},
+            "states": [
+                {"id": "s0", "name": "S0", "file": "", "loop": False, "volume": 100, "rate": 1000},
+                {"id": "s1", "name": "S1", "file": "", "loop": False, "volume": 100, "rate": 1000},
+            ],
+            "transitions": [{"id": "t0", "source": "s0", "target": "missing",
+                             "priority": 1, "timing": "immediate", "condition": {"type": "state_enter"}}],
+            "effects": [], "assets": [], "editor": {},
+        }
+        bad_doc = _asp([("__aura_scheme__", 0, 0, 0, 0,
+                         json.dumps(malformed, separators=(",", ":")).encode("utf-8"))])
+        status, raw = _http(port, "POST", "/api/audio/pack", bad_doc)
+        bad = json.loads(raw)
+        assert status == 200 and bad.get("ok") is False, bad
+        assert "dangling transition" in bad.get("error", ""), bad
+        print("malformed embedded graph rejected: %s" % bad.get("error"))
     finally:
         server.shutdown()
 

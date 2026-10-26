@@ -22,6 +22,9 @@ static const char *TAG = "audio";
  * task, so a voice can be (re)started safely from any other task. */
 #define MIX_RATE  22050
 #define MIX_BLOCK 256
+/* I2S recovery backoff: start small, double up to the cap. */
+#define I2S_BACKOFF_MIN_MS 10U
+#define I2S_BACKOFF_MAX_MS 500U
 #define AUDIO_PATH_MAX 160
 /* Per-voice stdio buffer. Kept small on purpose: with AUDIO_MAX_VOICES voices a
  * large buffer would consume a lot of internal DRAM (allocations below
@@ -120,8 +123,14 @@ static SemaphoreHandle_t s_req_mutex;
 static bool s_busy[AUDIO_MAX_VOICES];
 static bool s_inhibited;
 static bool s_initialized;
+static bool s_mixer_ready;
 static bool s_mixer_work;
 static unsigned s_validate_work;
+/* Consecutive failed/short I2S writes and the current bounded backoff. A
+ * persistent DMA/clock error must not turn the priority-7 mixer into a busy
+ * loop; every failure delays the next block and success clears the ratchet. */
+static uint32_t s_i2s_error_streak;
+static uint32_t s_i2s_backoff_ms;
 /* Anti-click fade length in mix blocks; test hook (0 disables the envelope). */
 static uint8_t s_fade_blocks = 2;
 
@@ -137,6 +146,21 @@ static uint16_t rate_clamp(uint16_t permille)
 }
 
 static void mixer_task(void *arg);
+
+/* Clear every per-play request so a reused voice cannot inherit the previous
+ * owner's path, rate, volume or one-shot live override. The playback state is
+ * reset by voice_start(); only the rate is carried in from a request. */
+static void voice_requests_reset(voice_t *vo)
+{
+    vo->req_play = false;
+    vo->req_stop = false;
+    vo->req_loop = false;
+    vo->req_volume = 100;
+    vo->req_volume_live_set = false;
+    vo->req_volume_live = 100;
+    vo->req_rate = 1000;
+    vo->req_path[0] = '\0';
+}
 
 static void voice_close(voice_state_t *st)
 {
@@ -182,16 +206,26 @@ static esp_err_t i2s_setup(void)
 
 esp_err_t audio_init(void)
 {
-    if (s_initialized) {
+    if (s_initialized || s_mixer_ready) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* Until the mixer task exists the public play APIs must reject work
+     * instead of queuing voices that no task will ever consume. */
+    s_initialized = false;
+    s_mixer_ready = false;
     s_req_mutex = xSemaphoreCreateMutex();
     if (s_req_mutex == NULL) {
         return ESP_ERR_NO_MEM;
     }
     for (int v = 0; v < AUDIO_MAX_VOICES; ++v) {
         s_busy[v] = false;
-        s_voice[v].req_rate = 1000;
+        s_voice[v].generation = 0;
+        s_voice[v].state = AUDIO_VOICE_FINISHED;
+        s_voice[v].file_open = false;
+        s_voice[v].published_active = false;
+        s_voice[v].published_position = 0;
+        s_voice[v].mix_generation = 0;
+        voice_requests_reset(&s_voice[v]);
     }
 
     gpio_config_t sd = {
@@ -218,6 +252,9 @@ esp_err_t audio_init(void)
 
     ESP_LOGI(TAG, "Audio mixer initialized (%u Hz mono, %u voices)", MIX_RATE, AUDIO_MAX_VOICES);
     s_inhibited = false;
+    s_i2s_error_streak = 0;
+    s_i2s_backoff_ms = 0;
+    s_mixer_ready = true;
     s_initialized = true;
     return ESP_OK;
 fail:
@@ -227,8 +264,15 @@ fail:
         (void)i2s_del_channel(s_tx);
         s_tx = NULL;
     }
-    vSemaphoreDelete(s_req_mutex);
-    s_req_mutex = NULL;
+    if (s_req_mutex != NULL) {
+        vSemaphoreDelete(s_req_mutex);
+        s_req_mutex = NULL;
+    }
+    s_mixer_ready = false;
+    s_initialized = false;
+    s_inhibited = false;
+    s_i2s_error_streak = 0;
+    s_i2s_backoff_ms = 0;
     return err;
 }
 
@@ -237,6 +281,8 @@ fail:
  * (1..2 ch) and mono IMA ADPCM (WAVE_FORMAT_IMA_ADPCM). */
 static bool wav_parse(FILE *f, wav_info_t *info, uint32_t *data_start, uint32_t *data_len)
 {
+    if (info == NULL || data_start == NULL || data_len == NULL) { return false; }
+    memset(info, 0, sizeof(*info));
     if (fseek(f, 0, SEEK_END) != 0) { return false; }
     long file_len = ftell(f);
     if (file_len < 12 || fseek(f, 0, SEEK_SET) != 0) { return false; }
@@ -248,8 +294,6 @@ static bool wav_parse(FILE *f, wav_info_t *info, uint32_t *data_start, uint32_t 
     uint64_t end = (uint64_t)riff.size + 8U;
     uint64_t pos = 12;
     bool has_fmt = false, has_data = false;
-    info->adpcm = false;
-    info->samples_per_block = 0;
     while (pos < end) {
         wav_chunk_t ch;
         if (end - pos < sizeof(ch) || fread(&ch, 1, sizeof(ch), f) != sizeof(ch)) {
@@ -285,7 +329,9 @@ static bool wav_parse(FILE *f, wav_info_t *info, uint32_t *data_start, uint32_t 
             }
             has_fmt = true;
         } else if (!memcmp(ch.id, "data", 4)) {
-            if (has_data) { return false; }
+            /* WAV requires fmt before data. Rejecting here also guarantees the
+             * frame size below is derived from a validated format header. */
+            if (has_data || !has_fmt) { return false; }
             *data_start = (uint32_t)pos;
             *data_len = ch.size;
             has_data = true;
@@ -293,8 +339,9 @@ static bool wav_parse(FILE *f, wav_info_t *info, uint32_t *data_start, uint32_t 
         if (fseek(f, (long)next, SEEK_SET) != 0) { return false; }
         pos = next;
     }
+    if (!has_fmt || !has_data) { return false; }
     uint32_t frame = info->adpcm ? (uint32_t)IMA_ADPCM_BLOCK_ALIGN : info->fmt.block_align;
-    if (!has_fmt || !has_data || *data_len < frame || *data_len % frame != 0U) { return false; }
+    if (frame == 0U || *data_len < frame || *data_len % frame != 0U) { return false; }
     return true;
 }
 
@@ -520,7 +567,7 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     st->storage_lease = true;
     if (setvbuf(f, NULL, _IOFBF, VOICE_IO_BUF) != 0) { (void)setvbuf(f, NULL, _IONBF, 0); }
 
-    wav_info_t info;
+    wav_info_t info = {0};
     uint32_t data_start = 0;
     uint32_t data_len = 0;
     if (!wav_parse(f, &info, &data_start, &data_len)) {
@@ -537,7 +584,7 @@ static esp_err_t voice_start(voice_state_t *st, const char *path, bool loop, uin
     }
 
     uint16_t rate = st->rate_permille;
-    if (rate < AUDIO_RATE_MIN) {
+    if (rate < AUDIO_RATE_MIN || rate > AUDIO_RATE_MAX) {
         rate = 1000; /* unset/invalid (e.g. zero-initialised state) -> nominal */
     }
 
@@ -623,6 +670,12 @@ static void mixer_task(void *arg)
                 vo->st.stopping = false;
                 vo->st.rate_permille = rate;
                 start_failed = voice_start(&vo->st, path, loop, volume) != ESP_OK;
+                /* The sound engine queues play and its first live volume in the
+                 * same tick. Apply the override after start so ducking/muting is
+                 * honoured for the first block instead of being dropped. */
+                if (!start_failed && vol_live) {
+                    vo->st.volume = vol_live_val > 100U ? 100U : vol_live_val;
+                }
             } else if (vo->st.active) {
                 vo->st.rate_permille = rate; /* live rate updates */
                 if (vol_live) { vo->st.volume = vol_live_val > 100U ? 100U : vol_live_val; }
@@ -652,7 +705,33 @@ static void mixer_task(void *arg)
         s_mixer_work = false;
         if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
         size_t written = 0;
-        (void)i2s_channel_write(s_tx, mix, sizeof(mix), &written, pdMS_TO_TICKS(1000));
+        esp_err_t werr = i2s_channel_write(s_tx, mix, sizeof(mix), &written,
+                                           pdMS_TO_TICKS(1000));
+        if (werr != ESP_OK || written != sizeof(mix)) {
+            if (s_i2s_error_streak < UINT32_MAX) { ++s_i2s_error_streak; }
+            uint32_t backoff = s_i2s_backoff_ms;
+            if (backoff == 0U) {
+                backoff = I2S_BACKOFF_MIN_MS;
+            } else if (backoff < I2S_BACKOFF_MAX_MS) {
+                backoff = backoff > I2S_BACKOFF_MAX_MS / 2U
+                              ? I2S_BACKOFF_MAX_MS
+                              : backoff * 2U;
+            }
+            s_i2s_backoff_ms = backoff;
+            /* Log the entry into the error state and then only occasionally, so
+             * a dead I2S link cannot flood the UART either. */
+            if (s_i2s_error_streak == 1U || (s_i2s_error_streak % 50U) == 0U) {
+                ESP_LOGW(TAG, "I2S write failed (%s, %u/%u bytes), backing off %u ms",
+                         esp_err_to_name(werr), (unsigned)written,
+                         (unsigned)sizeof(mix), (unsigned)backoff);
+            }
+            vTaskDelay(pdMS_TO_TICKS(backoff));
+        } else if (s_i2s_error_streak != 0U) {
+            ESP_LOGI(TAG, "I2S recovered after %u failed block(s)",
+                     (unsigned)s_i2s_error_streak);
+            s_i2s_error_streak = 0;
+            s_i2s_backoff_ms = 0;
+        }
         iters++;
     }
 }
@@ -667,14 +746,19 @@ static uint32_t next_generation(voice_t *vo)
 static esp_err_t queue_play(uint8_t voice, const char *path, bool loop, uint8_t volume,
                            audio_voice_handle_t *out)
 {
-    if (s_inhibited) { return ESP_ERR_INVALID_STATE; }
+    /* A failed/partial init (or a missing mixer task) leaves no consumer for a
+     * queued request, so refuse it instead of publishing AUDIO_VOICE_PENDING. */
+    if (!s_initialized || !s_mixer_ready || s_req_mutex == NULL || s_inhibited) {
+        return ESP_ERR_INVALID_STATE;
+    }
     voice_t *vo = &s_voice[voice];
+    /* Each play is a new owner: never let a previous file's rate or live
+     * volume carry over (the caller sets the new rate after this request). */
+    voice_requests_reset(vo);
     memcpy(vo->req_path, path, strlen(path) + 1);
     vo->req_loop = loop;
     vo->req_volume = volume > 100U ? 100U : volume;
-    vo->req_volume_live_set = false;
     vo->req_play = true;
-    vo->req_stop = false;
     s_busy[voice] = true;
     vo->state = AUDIO_VOICE_PENDING;
     vo->completion = AUDIO_COMPLETION_NONE;
@@ -689,6 +773,7 @@ esp_err_t audio_voice_play_generation(uint8_t voice, const char *path, bool loop
     if (voice >= AUDIO_MAX_VOICES || path == NULL || strlen(path) >= AUDIO_PATH_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (out != NULL) { *out = (audio_voice_handle_t){AUDIO_VOICE_NONE, 0}; }
     if (s_req_mutex != NULL) {
         xSemaphoreTake(s_req_mutex, portMAX_DELAY);
     }
@@ -751,11 +836,21 @@ esp_err_t audio_voice_alloc_owned(audio_voice_handle_t *out)
 {
     if (out == NULL) { return ESP_ERR_INVALID_ARG; }
     *out = (audio_voice_handle_t){AUDIO_VOICE_NONE, 0};
+    if (!s_initialized || !s_mixer_ready || s_req_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
     esp_err_t err = s_inhibited ? ESP_ERR_INVALID_STATE : ESP_ERR_NO_MEM;
     for (int v = 0; !s_inhibited && v < AUDIO_DYNAMIC_VOICES; ++v) {
         voice_t *vo = &s_voice[v];
         if (!s_busy[v] && !vo->file_open && !vo->req_play && !vo->req_stop) {
+            /* Reuse starts from a clean request table; otherwise a stale rate
+             * from the previous file would be applied to the next playback. */
+            voice_requests_reset(vo);
+            if (!vo->st.active) {
+                vo->st.rate_permille = 1000;
+                vo->st.rate_cur = 1.0f;
+            }
             s_busy[v] = true;
             *out = (audio_voice_handle_t){(uint8_t)v, next_generation(vo)};
             err = ESP_OK;
@@ -771,6 +866,9 @@ esp_err_t audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
 {
     if (handle == NULL || handle->voice >= AUDIO_DYNAMIC_VOICES || path == NULL ||
         strlen(path) >= AUDIO_PATH_MAX) { return ESP_ERR_INVALID_ARG; }
+    if (!s_initialized || !s_mixer_ready || s_req_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
     uint8_t v = handle->voice;
     esp_err_t err = ESP_ERR_INVALID_STATE;
@@ -788,7 +886,7 @@ void audio_voice_release_owned(audio_voice_handle_t handle)
     voice_t *vo = &s_voice[handle.voice];
     if (vo->generation == handle.generation) {
         s_busy[handle.voice] = false;
-        vo->req_play = false;
+        voice_requests_reset(vo);
         vo->req_stop = true;
         vo->state = AUDIO_VOICE_FINISHED;
         next_generation(vo);

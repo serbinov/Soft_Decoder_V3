@@ -33,13 +33,20 @@ typedef enum {
 /* Longest accepted effect period (ms); keeps the beacon decay math inside
  * 32-bit range. */
 #define AUXIO_PERIOD_MAX_MS 2000
+/* STROBE uses a two-flash pattern scaled from this reference period. Shorter
+ * periods are allowed down to the effect task's resolvable minimum (4 ticks of
+ * 20 ms), below which a double flash cannot be represented. */
+#define AUXIO_STROBE_PATTERN_MS 130U
+#define AUXIO_STROBE_MIN_PERIOD_MS 80U
 
 esp_err_t auxio_init(void);
 
 /* Enable/disable an output without changing its configured effect/PWM. */
 esp_err_t auxio_set_enabled(uint8_t channel, bool enabled);
 
-/* Effect output: blink/breath between pwm_off and pwm_on, period in ms. */
+/* Effect output: blink/breath between pwm_off and pwm_on, period in ms.
+ * pwm_off > pwm_on is rejected; STROBE requires period >=
+ * AUXIO_STROBE_MIN_PERIOD_MS so both flashes are resolvable. */
 esp_err_t auxio_set_effect(uint8_t channel, bool enabled,
                            uint8_t pwm_on, uint8_t pwm_off,
                            auxio_effect_t mode, uint16_t period_ms);

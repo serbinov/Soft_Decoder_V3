@@ -34,9 +34,34 @@ static bool s_manifest_pending;
 static esp_err_t s_last_error;
 static uint32_t s_retries;
 static bool s_ready;
+/* True while the durable NVS recovery marker asks for a manifest restore.
+ * Metadata written during this session supersedes that restore, so the marker
+ * is cleared by the first successful metadata save. */
+static bool s_recovery_marker;
+
+/* The manifest removal runs under the metadata lock held by factory reset.
+ * Declared here (same component) instead of the public header because it is
+ * only valid while settings_metadata_lock() is already held by this task. */
+esp_err_t settings_manifest_remove_locked(void);
+bool settings_manifest_restore_in_progress(void);
 
 #define CV_RECORD_HEADER 6U
 #define CV_RECORD_SIZE (CV_RECORD_HEADER + SETTINGS_CV_COUNT + 1U + 4U)
+
+/* Config volumes are 0..100 %; CV63 is the NMRA 0..255 alias. Round instead of
+ * truncating in both directions so a percent value survives a round trip. */
+static uint8_t volume_pct_to_cv(uint8_t pct)
+{
+    if (pct > 100U) {
+        pct = 100U;
+    }
+    return (uint8_t)(((uint16_t)pct * 255U + 50U) / 100U);
+}
+
+static uint8_t cv_to_volume_pct(uint8_t cv)
+{
+    return (uint8_t)(((uint16_t)cv * 100U + 127U) / 255U);
+}
 
 static uint32_t record_crc32(const uint8_t *data, size_t len)
 {
@@ -100,6 +125,7 @@ static void cv_set_defaults(void)
     s_cv[56] = 32;    /* BEMF Kd (~0.10) */
     s_cv[66] = 128;   /* forward trim: 100 % */
     s_cv[95] = 128;   /* reverse trim: 100 % */
+    s_cv[63] = volume_pct_to_cv(20); /* master volume alias */
     /* Reserved legacy sound rates: chuff/exhaust, bell and dynamic-brake
      * playback rate, 0..255 (51 = 1.0x). The graph engine does not read them. */
     s_cv[114] = 57;   /* chuff / exhaust rate */
@@ -153,6 +179,43 @@ static esp_err_t nvs_read_u8(const char *key, uint8_t *out, uint8_t def)
     return err;
 }
 
+/* A legacy or corrupt blob is not an I/O failure: it is an unusable base that
+ * the manifest restore may replace. Drop the bad key so a later save can
+ * recreate it with the current type/layout. */
+static bool blob_error_is_unusable(esp_err_t err)
+{
+    return err == ESP_ERR_NVS_INVALID_LENGTH || err == ESP_ERR_NVS_TYPE_MISMATCH;
+}
+
+static void nvs_discard_unusable_key(const char *key)
+{
+    esp_err_t err = nvs_erase_key(s_h, key);
+    if (err == ESP_OK) {
+        (void)nvs_commit(s_h);
+    }
+}
+
+/* Clear the recovery marker under the metadata lock (caller holds s_lock). */
+static esp_err_t recovery_clear_locked(void)
+{
+    if (!s_recovery_marker) {
+        return ESP_OK;
+    }
+    /* Saves performed by the restore itself must not clear the marker until
+     * every key has been written; the restore clears it on success. */
+    if (settings_manifest_restore_in_progress()) {
+        return ESP_OK;
+    }
+    esp_err_t err = nvs_set_u8(s_h, "recover", 0);
+    if (err == ESP_OK) {
+        err = nvs_commit(s_h);
+    }
+    if (err == ESP_OK) {
+        s_recovery_marker = false;
+    }
+    return err;
+}
+
 static esp_err_t nvs_read_str(const char *key, char *out, size_t len, const char *def)
 {
     size_t rl = len;
@@ -199,6 +262,7 @@ esp_err_t settings_init(void)
     s_cfg_valid = false;
     s_last_error = ESP_OK;
     s_retries = 0;
+    s_recovery_marker = false;
     /* One NVS blob is the atomic unit in IDF6. Never pair a new CV blob with a
      * separately updated checksum. Keep shipped legacy records untouched. */
     uint8_t record[CV_RECORD_SIZE];
@@ -242,7 +306,11 @@ esp_err_t settings_init(void)
     if (err == ESP_OK) err = settings_recovery_pending(&recovering);
     portENTER_CRITICAL(&s_cv_mux);
     s_ready = err == ESP_OK;
-    s_manifest_pending = recovering;
+    /* Recovery is completed synchronously from track_recover before web_init.
+     * Never schedule a background restore here: it could run after web_init
+     * and overwrite the metadata that the web caches already loaded. */
+    s_manifest_pending = false;
+    s_recovery_marker = recovering;
     s_pending_us = esp_timer_get_time();
     portEXIT_CRITICAL(&s_cv_mux);
     return err;
@@ -280,6 +348,7 @@ esp_err_t settings_load(settings_config_t *cfg)
     s_cfg_valid = true;
     portENTER_CRITICAL(&s_cv_mux);
     s_master_volume = cfg->master_volume;
+    s_cv[63] = volume_pct_to_cv(cfg->master_volume);
     portEXIT_CRITICAL(&s_cv_mux);
     xSemaphoreGive(s_lock);
     return ESP_OK;
@@ -319,6 +388,7 @@ esp_err_t settings_save(const settings_config_t *cfg)
     esp_err_t err = settings_store_locked(cfg);
     portENTER_CRITICAL(&s_cv_mux);
     s_master_volume = cfg->master_volume;
+    s_cv[63] = volume_pct_to_cv(cfg->master_volume);
     s_pending = err != ESP_OK;
     s_pending_us = esp_timer_get_time();
     s_last_error = err;
@@ -339,6 +409,7 @@ esp_err_t settings_save_deferred(const settings_config_t *cfg)
     s_cfg_valid = true;
     portENTER_CRITICAL(&s_cv_mux);
     s_master_volume = cfg->master_volume;
+    s_cv[63] = volume_pct_to_cv(cfg->master_volume);
     s_pending_us = esp_timer_get_time();
     s_pending = true;
     portEXIT_CRITICAL(&s_cv_mux);
@@ -376,7 +447,18 @@ esp_err_t settings_pending_flush(void)
     if (err == ESP_OK && manifest) {
         bool recovering = false;
         err = settings_recovery_pending(&recovering);
-        if (err == ESP_OK) err = recovering ? settings_manifest_load() : settings_manifest_sync();
+        if (err == ESP_OK && recovering) {
+            /* Never restore from the worker: web_init() has already cached the
+             * metadata, so a late restore would leave the running caches stale
+             * and could overwrite newer values. The durable marker is retried
+             * by track_recover on the next boot, before web_init(). */
+            ESP_LOGW(TAG, "manifest restore deferred to next boot");
+            portENTER_CRITICAL(&s_cv_mux);
+            s_manifest_pending = false;
+            portEXIT_CRITICAL(&s_cv_mux);
+        } else if (err == ESP_OK) {
+            err = settings_manifest_sync();
+        }
     }
     portENTER_CRITICAL(&s_cv_mux);
     s_last_error = err;
@@ -391,15 +473,11 @@ esp_err_t settings_cv_read(uint16_t idx, uint8_t *out)
         return ESP_ERR_INVALID_ARG;
     }
     if (idx == 63U) {
-        /* CV63 aliases the persisted master volume so the sound UI can drive it
-         * through the normal CV path. "mvol" is stored as 0..100 %; report it
-         * on the CV 0..255 scale. */
+        /* CV63 aliases the master volume. Keep the original CV value so a
+         * write/read round trip is not re-quantized through the 0..100 %
+         * config field. */
         portENTER_CRITICAL(&s_cv_mux);
-        uint8_t vol = s_master_volume;
-        if (vol > 100U) {
-            vol = 100U;
-        }
-        *out = (uint8_t)((uint16_t)vol * 255U / 100U);
+        *out = s_cv[63];
         portEXIT_CRITICAL(&s_cv_mux);
         return ESP_OK;
     }
@@ -414,8 +492,6 @@ esp_err_t settings_cv_snapshot(uint8_t out[SETTINGS_CV_COUNT + 1])
     if (out == NULL) return ESP_ERR_INVALID_ARG;
     portENTER_CRITICAL(&s_cv_mux);
     memcpy(out, s_cv, sizeof(s_cv));
-    uint8_t vol = s_master_volume > 100U ? 100U : s_master_volume;
-    out[63] = (uint8_t)((uint16_t)vol * 255U / 100U);
     portEXIT_CRITICAL(&s_cv_mux);
     return ESP_OK;
 }
@@ -445,9 +521,9 @@ esp_err_t settings_cv_write(uint16_t idx, uint8_t value)
     }
     if (idx == 63U) {
         /* CV63 aliases the master volume. The value is 0..255; "mvol" is
-         * stored as 0..100 %. The live volume and the
-         * cached config are updated by the caller (web_master_volume_changed). */
-        uint8_t vol = (uint8_t)((uint16_t)value * 100U / 255U);
+         * stored as 0..100 %. Keep both live copies in sync and retain the
+         * exact CV value for a lossless read-back. */
+        uint8_t vol = cv_to_volume_pct(value);
         if (xSemaphoreTake(s_lock, 0) != pdTRUE) {
             return ESP_ERR_TIMEOUT;
         }
@@ -493,6 +569,8 @@ esp_err_t settings_cv_reset_to_factory(void)
     /* Reset publication is indivisible to readers; flash is worker-only. */
     portENTER_CRITICAL(&s_cv_mux);
     cv_set_defaults();
+    s_master_volume = 20U;
+    s_cfg.master_volume = 20U;
     ++s_cv_generation;
     s_cv_pending = true;
     s_pending_us = esp_timer_get_time();
@@ -505,30 +583,37 @@ esp_err_t settings_factory_reset(void)
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t err = nvs_erase_all(s_h);
+    /* The metadata manifest lives on external storage and deliberately survives
+     * an NVS erase. Remove it while the metadata lock is held so no concurrent
+     * setter can recreate it, and only erase NVS once the backup is gone. A
+     * failed removal aborts the reset instead of leaving tracks.txt behind. */
+    esp_err_t merr = settings_manifest_remove_locked();
+    esp_err_t err = merr;
+    if (err == ESP_OK) {
+        err = nvs_erase_all(s_h);
+    }
     if (err == ESP_OK) {
         portENTER_CRITICAL(&s_cv_mux);
         cv_set_defaults();
         ++s_cv_generation;
         s_cv_pending = true;
         s_pending = false;
-        s_manifest_pending = false;
         s_master_volume = 20U;
+        s_cfg.master_volume = 20U;
         s_cfg_valid = false;
+        s_recovery_marker = false;
         portEXIT_CRITICAL(&s_cv_mux);
         err = cv_store_locked();
     }
+    portENTER_CRITICAL(&s_cv_mux);
+    /* Keep a failed removal pending so the worker retries it; never report a
+     * successful reset while the manifest may still trigger boot recovery. */
+    s_manifest_pending = merr != ESP_OK;
+    s_last_error = err;
+    portEXIT_CRITICAL(&s_cv_mux);
     xSemaphoreGive(s_lock);
-    /* The metadata manifest lives on external storage and deliberately survives
-     * an NVS erase, so boot recovery would otherwise restore the custom track
-     * names, categories and function map. Drop it so recovery rebuilds factory
-     * slots from the sound files instead. Best effort: a missing storage mount
-     * (or missing file) is not a reset failure. */
-    if (err == ESP_OK) {
-        esp_err_t rerr = settings_manifest_remove();
-        if (rerr != ESP_OK) {
-            ESP_LOGW(TAG, "Factory reset: manifest not cleared: %s", esp_err_to_name(rerr));
-        }
+    if (merr != ESP_OK) {
+        ESP_LOGW(TAG, "Factory reset: manifest not cleared: %s", esp_err_to_name(merr));
     }
     ESP_LOGI(TAG, "Full factory reset%s", err == ESP_OK ? "" : " (failed)");
     return err;
@@ -567,9 +652,23 @@ esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
     esp_err_t err = nvs_get_blob(s_h, "tracks", tracks, &len);
     if (err != ESP_OK) {
         *count = 0;
-        return err == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : err;
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (blob_error_is_unusable(err)) {
+            nvs_discard_unusable_key("tracks");
+            return ESP_ERR_NOT_FOUND;
+        }
+        return err;
     }
-    if ((len % sizeof(settings_track_t)) != 0U) { *count = 0; return ESP_ERR_INVALID_SIZE; }
+    if (len > sizeof(settings_track_t) * SETTINGS_MAX_TRACKS ||
+        (len % sizeof(settings_track_t)) != 0U) {
+        /* Legacy/truncated blob: no usable NVS base. The manifest restore (or
+         * file-name rebuild) replaces it with the current layout. */
+        nvs_discard_unusable_key("tracks");
+        *count = 0;
+        return ESP_ERR_NOT_FOUND;
+    }
     *count = len / sizeof(settings_track_t);
     for (size_t i = 0; i < *count; ++i) {
         /* Defensive: a legacy/corrupt blob might not be NUL-terminated. */
@@ -594,6 +693,7 @@ esp_err_t settings_tracks_save(const settings_track_t *tracks, size_t count)
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) err = recovery_clear_locked();
     if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
@@ -609,12 +709,22 @@ esp_err_t settings_track_cats_load(uint8_t *cats, size_t *count)
     }
     size_t len = sizeof(uint8_t) * SETTINGS_MAX_TRACKS;
     esp_err_t err = nvs_get_blob(s_h, "track_cat", cats, &len);
-    if (err != ESP_OK) {
+    bool unusable = err == ESP_OK &&
+                    (len > sizeof(uint8_t) * SETTINGS_MAX_TRACKS ||
+                     (len % sizeof(uint8_t)) != 0U);
+    if (err != ESP_OK || unusable) {
         for (size_t i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
             cats[i] = SETTINGS_TRACK_CAT_DEFAULT_SLOT((uint8_t)(i + 1U));
         }
         *count = SETTINGS_MAX_TRACKS;
-        return err == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : err;
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (unusable || blob_error_is_unusable(err)) {
+            nvs_discard_unusable_key("track_cat");
+            return ESP_ERR_NOT_FOUND;
+        }
+        return err;
     }
     *count = len / sizeof(uint8_t);
     return ESP_OK;
@@ -634,6 +744,7 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count)
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) err = recovery_clear_locked();
     if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
@@ -650,10 +761,9 @@ esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count)
     size_t len = sizeof(settings_func_map_t) * SETTINGS_FUNC_MAP_COUNT;
     esp_err_t err = nvs_get_blob(s_h, "func_map", map, &len);
     /* Ignore a blob written by an older firmware (different struct size). */
-    if (err == ESP_OK && len != sizeof(settings_func_map_t) * SETTINGS_FUNC_MAP_COUNT) {
-        err = ESP_ERR_INVALID_SIZE;
-    }
-    if (err != ESP_OK) {
+    bool unusable = err == ESP_OK &&
+                    len != sizeof(settings_func_map_t) * SETTINGS_FUNC_MAP_COUNT;
+    if (err != ESP_OK || unusable) {
         for (size_t i = 0; i < SETTINGS_FUNC_MAP_COUNT; ++i) {
             /* Hobby default: F0 = head light (front forward / rear reverse),
              * F1..F20 = the matching sound slot, everything else off. */
@@ -666,8 +776,14 @@ esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count)
             map[i].speed = SETTINGS_FUNC_SPD_NONE;
         }
         *count = SETTINGS_FUNC_MAP_COUNT;
-        return err == ESP_ERR_NVS_NOT_FOUND || err == ESP_ERR_INVALID_SIZE ||
-               err == ESP_ERR_NVS_INVALID_LENGTH ? ESP_ERR_NOT_FOUND : err;
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (unusable || blob_error_is_unusable(err)) {
+            nvs_discard_unusable_key("func_map");
+            return ESP_ERR_NOT_FOUND;
+        }
+        return err;
     }
     *count = len / sizeof(settings_func_map_t);
     return ESP_OK;
@@ -688,6 +804,7 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) err = recovery_clear_locked();
     if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
@@ -703,13 +820,20 @@ esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count)
     }
     size_t len = sizeof(func_binding_t) * FUNC_BIND_MAX;
     esp_err_t err = nvs_get_blob(s_h, "func_bind", bind, &len);
-    if (err == ESP_OK && (len % sizeof(func_binding_t)) != 0U) {
-        err = ESP_ERR_INVALID_SIZE;
-    }
-    if (err != ESP_OK) {
+    bool unusable = err == ESP_OK &&
+                    (len > sizeof(func_binding_t) * FUNC_BIND_MAX ||
+                     (len % sizeof(func_binding_t)) != 0U);
+    if (err != ESP_OK || unusable) {
         memset(bind, 0, sizeof(func_binding_t) * FUNC_BIND_MAX);
         *count = 0;
-        return (err == ESP_ERR_NVS_NOT_FOUND) ? ESP_ERR_NOT_FOUND : err;
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (unusable || blob_error_is_unusable(err)) {
+            nvs_discard_unusable_key("func_bind");
+            return ESP_ERR_NOT_FOUND;
+        }
+        return err;
     }
     *count = len / sizeof(func_binding_t);
     return ESP_OK;
@@ -731,6 +855,7 @@ esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count)
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    if (err == ESP_OK) err = recovery_clear_locked();
     if (err == ESP_OK) settings_manifest_dirty();
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
@@ -843,15 +968,17 @@ esp_err_t settings_aux_cfg_load(settings_aux_cfg_t *cfg, size_t *count)
     size_t len = sizeof(settings_aux_cfg_t) * SETTINGS_AUX_COUNT;
     esp_err_t err = nvs_get_blob(s_h, "aux_cfg", cfg, &len);
     /* Ignore a blob written by an older firmware (different struct size). */
-    if (err == ESP_OK && len != sizeof(settings_aux_cfg_t) * SETTINGS_AUX_COUNT) {
-        err = ESP_ERR_INVALID_SIZE;
-    }
-    if (err != ESP_OK) {
+    bool unusable = err == ESP_OK &&
+                    len != sizeof(settings_aux_cfg_t) * SETTINGS_AUX_COUNT;
+    if (err != ESP_OK || unusable) {
         for (size_t i = 0; i < SETTINGS_AUX_COUNT; ++i) {
             cfg[i].level = 100U; /* full on */
             cfg[i].effect = 0U;  /* plain output */
         }
         *count = SETTINGS_AUX_COUNT;
+        if (unusable || blob_error_is_unusable(err)) {
+            nvs_discard_unusable_key("aux_cfg");
+        }
         return ESP_ERR_NOT_FOUND;
     }
     *count = len / sizeof(settings_aux_cfg_t);
@@ -1011,9 +1138,24 @@ esp_err_t settings_recovery_pending(bool *out)
     if (settings_metadata_lock() != ESP_OK) return ESP_ERR_TIMEOUT;
     uint8_t value = 0;
     esp_err_t err = nvs_get_u8(s_h, "recover", &value);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        *out = false;
+        s_recovery_marker = false;
+        settings_metadata_unlock();
+        return ESP_OK;
+    }
+    if (blob_error_is_unusable(err)) {
+        /* A legacy/corrupt marker must not abort boot recovery. */
+        nvs_discard_unusable_key("recover");
+        *out = false;
+        s_recovery_marker = false;
+        settings_metadata_unlock();
+        return ESP_OK;
+    }
     *out = value != 0U;
+    s_recovery_marker = *out;
     settings_metadata_unlock();
-    return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+    return err;
 }
 
 esp_err_t settings_recovery_set_pending(bool pending)
@@ -1021,6 +1163,7 @@ esp_err_t settings_recovery_set_pending(bool pending)
     if (settings_metadata_lock() != ESP_OK) return ESP_ERR_TIMEOUT;
     esp_err_t err = nvs_set_u8(s_h, "recover", pending ? 1U : 0U);
     if (err == ESP_OK) err = nvs_commit(s_h);
+    if (err == ESP_OK) s_recovery_marker = pending;
     settings_metadata_unlock();
     return err;
 }

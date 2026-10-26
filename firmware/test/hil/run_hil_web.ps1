@@ -6,14 +6,20 @@
 # mode, control source, CV read/write, function map, track category, device
 # name, BEMF use, storage, log. Settings that are changed are restored.
 #
-# Destructive endpoints are intentionally NOT called: /api/reset (factory
-# reset), /api/ota/update, /api/wifi POST (reboots), /api/bemf/calibrate
-# (moves the motor), /api/audio/upload|delete.
+# Destructive endpoints are intentionally NOT called by default: /api/reset
+# (factory reset), /api/ota/update, /api/wifi POST (reboots),
+# /api/bemf/calibrate (moves the motor), /api/audio/upload|delete.
+#
+# -CalibrateBemf opts in to a real BEMF calibration on a FREE (unloaded) motor.
+# It starts the run, waits for a terminal state, verifies the motor target is
+# zero afterwards and (with -BemfCancelAfterMs) also exercises cancellation.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil_web.ps1 -RestoreSsid AlmaHome
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil_web.ps1 -SkipConnect -BaseUrl http://192.168.100.1
 #   powershell -ExecutionPolicy Bypass -File test\hil\run_hil_web.ps1 -ApPass "secret123"
+#   powershell -ExecutionPolicy Bypass -File test\hil\run_hil_web.ps1 -CalibrateBemf
+#   powershell -ExecutionPolicy Bypass -File test\hil\run_hil_web.ps1 -CalibrateBemf -BemfCancelAfterMs 500
 #
 # Exit code 0 = all checks passed.
 param(
@@ -21,7 +27,14 @@ param(
     [string]$ApSsid = "ADDITIPUS AURA-X",
     [string]$ApPass = "",
     [string]$RestoreSsid = "",
-    [switch]$SkipConnect
+    [switch]$SkipConnect,
+    # Destructive opt-in: spins a free motor and writes a new calibration.
+    [switch]$CalibrateBemf,
+    [ValidateSet("auto", "fast", "balanced", "thorough")]
+    [string]$BemfMode = "fast",
+    # >0 starts a calibration and cancels it after this many milliseconds.
+    [int]$BemfCancelAfterMs = 0,
+    [int]$BemfCalTimeoutSec = 90
 )
 
 $ErrorActionPreference = "Continue"
@@ -221,6 +234,59 @@ try {
 
     # Motor (stop, no movement), device name, mode, BEMF use, control source restore.
     Post-Ep "motor stop" "/api/motor?speed=0&forward=1" | Out-Null
+
+    # Opt-in BEMF calibration (G-TEST-5). Destructive: spins the motor and
+    # writes a new curve, so it only runs with -CalibrateBemf on a free motor.
+    if ($CalibrateBemf) {
+        Write-Host "[INFO] BEMF calibration HIL (free/unloaded motor required) ..." -ForegroundColor Yellow
+        if (-not (Post-Raw "/api/motor?speed=0&forward=1")) {
+            Add-Result "BEMF pre-stop" $false "motor stop rejected"
+        } else {
+            Add-Result "BEMF pre-stop" $true ""
+        }
+        $startResp = Post-Ep "bemf/calibrate start" "/api/bemf/calibrate?start=1&mode=$BemfMode"
+        if (-not ($startResp -and $startResp.ok)) {
+            Add-Result "BEMF calibration start" $false "start rejected"
+        } else {
+            Add-Result "BEMF calibration start" $true "mode=$BemfMode"
+            $calClock = [System.Diagnostics.Stopwatch]::StartNew()
+            $activeSeen = $false
+            $cancelSent = $false
+            $terminal = $null
+            while ($calClock.Elapsed.TotalSeconds -lt $BemfCalTimeoutSec) {
+                $cal = Get-Raw "/api/bemf/cal"
+                if ($cal) {
+                    if ($cal.active) { $activeSeen = $true }
+                    if ($BemfCancelAfterMs -gt 0 -and -not $cancelSent -and $cal.active -and
+                        $calClock.ElapsedMilliseconds -ge $BemfCancelAfterMs) {
+                        $cancelResp = Post-Ep "bemf/calibrate cancel" "/api/bemf/calibrate?cancel=1"
+                        Add-Result "BEMF calibration cancel" ([bool]($cancelResp -and $cancelResp.ok)) ""
+                        $cancelSent = $true
+                    }
+                    if (-not $cal.active) { $terminal = $cal; break }
+                }
+                Start-Sleep -Milliseconds 250
+            }
+            if (-not $terminal) { $terminal = Get-Raw "/api/bemf/cal" }
+            $inactive = [bool]($terminal -and (-not $terminal.active))
+            $resultName = if ($terminal -and ($terminal.PSObject.Properties.Name -contains 'result')) { [string]$terminal.result } else { "" }
+            Add-Result "BEMF calibration terminal" $inactive "active=$([bool]($terminal -and $terminal.active)) result=$resultName activeSeen=$activeSeen"
+            if ($BemfCancelAfterMs -gt 0) {
+                Add-Result "BEMF calibration cancelled" ($inactive -and $cancelSent -and $resultName -eq "cancelled") "result=$resultName"
+            } else {
+                Add-Result "BEMF calibration succeeded" ($inactive -and $resultName -eq "succeeded") "result=$resultName"
+            }
+            # Terminal motion check. REST exposes the target speed; the actual
+            # bridge duty is internal, but cancellation/stop zeroes it in the
+            # motor safety path and a non-zero target would be visible here.
+            Start-Sleep -Milliseconds 300
+            Post-Raw "/api/motor?speed=0&forward=1" | Out-Null
+            $motorAfter = Get-Raw "/api/motor"
+            $zero = [bool]($motorAfter -and $motorAfter.speed -eq 0)
+            Add-Result "BEMF post-run motor speed=0" $zero "speed=$($motorAfter.speed)"
+        }
+    }
+
     if ($device -and $device.name) {
         Post-Ep "device name" ("/api/device?name=" + [uri]::EscapeDataString($device.name)) | Out-Null
     }
@@ -253,6 +319,9 @@ foreach ($r in $script:results) {
     Write-Host ("  {0,-30} {1}" -f $r.Name, $(if ($r.Ok) { "OK" } else { "FAIL" })) -ForegroundColor $color
 }
 Write-Host ""
+if (-not $CalibrateBemf) {
+    Write-Host "HIL coverage gap: BEMF calibration was NOT exercised (opt-in -CalibrateBemf)." -ForegroundColor Yellow
+}
 if ($failed -gt 0) {
     Write-Host "WEB HIL: FAILED ($failed of $($script:results.Count))" -ForegroundColor Red
     exit 1

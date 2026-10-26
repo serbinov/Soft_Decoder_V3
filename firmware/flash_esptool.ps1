@@ -67,6 +67,77 @@ function Find-Esptool {
     return $null
 }
 
+# Pin a downloaded esptool.exe with a sidecar hash when one is shipped:
+#   firmware\tools\esptool\esptool.exe.sha256  or  ...\esptool.sha256
+# The file may be a bare digest or sha256sum output ("<hash>  <file>").
+function Test-EsptoolHash([string]$exe) {
+    $sidecars = @("$exe.sha256", (Join-Path (Split-Path $exe -Parent) "esptool.sha256"))
+    $pin = $sidecars | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    $expected = $env:AURA_ESPTOOL_SHA256
+    if (-not $expected -and $pin) {
+        $text = (Get-Content -LiteralPath $pin -Raw).Trim()
+        $expected = (($text -split "\s+") | Select-Object -First 1)
+    }
+    if (-not $expected) {
+        Write-Warn "esptool SHA256 is not pinned (set AURA_ESPTOOL_SHA256 or add esptool.sha256 next to the exe)."
+        return
+    }
+    $expected = $expected.ToLowerInvariant()
+    if ($expected -notmatch "^[0-9a-f]{64}$") {
+        throw "Invalid esptool SHA256 pin (need 64 hex characters)."
+    }
+    $actual = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        throw "esptool SHA256 mismatch: $exe (expected $expected, got $actual)"
+    }
+    Write-Info "esptool SHA256 verified"
+}
+
+# Refuse to flash a release whose manifest no longer matches its files, and
+# always reject an application larger than the ota_0 slot.
+function Test-ReleasePreflight([string]$dir) {
+    $app = Join-Path $dir "firmware.bin"
+    if (-not (Test-Path -LiteralPath $app)) { return }
+    $slotSize = [int64]0x1E0000
+    $appLen = (Get-Item -LiteralPath $app).Length
+    if ($appLen -gt $slotSize) {
+        throw ("firmware.bin is {0:N0} bytes; the ota_0 slot is only {1:N0} bytes" -f $appLen, $slotSize)
+    }
+    $release = Split-Path $dir -Parent
+    $manifestPath = Join-Path $release "manifest.json"
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        Write-Warn "release manifest not found; only the application size was checked"
+        return
+    }
+    $tool = Join-Path $PSScriptRoot "tools\release_artifacts.py"
+    $python = if ($esptool.kind -eq "py") { $esptool.py } else {
+        $cmd = Get-Command python -ErrorAction SilentlyContinue
+        if ($cmd) { $cmd.Source } else { $null }
+    }
+    if ($python -and (Test-Path -LiteralPath $tool)) {
+        Write-Info "verifying release images..."
+        & $python $tool verify --release $release
+        if ($LASTEXITCODE -ne 0) { throw "release verification failed; rebuild before flashing" }
+        Write-Ok "release images verified"
+        return
+    }
+    Write-Warn "Python not found; checking release hashes with PowerShell"
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.schema -ne 1 -or $manifest.chip -ne "esp32s3" -or $manifest.flash_size -ne 0x400000) {
+        throw "invalid release manifest"
+    }
+    foreach ($name in @("bootloader.bin", "partitions.bin", "ota_data_initial.bin", "firmware.bin")) {
+        $entry = @($manifest.files | Where-Object { $_.path -ceq ("flash_download_tool/" + $name) })
+        if ($entry.Count -ne 1) { throw ("release manifest is missing " + $name) }
+        $path = Join-Path $dir $name
+        if ((Get-Item -LiteralPath $path).Length -ne [int64]$entry[0].size) { throw ("release size mismatch: " + $name) }
+        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $entry[0].sha256) {
+            throw ("release hash mismatch: " + $name)
+        }
+    }
+    Write-Ok "release images verified"
+}
+
 $esptool = Find-Esptool
 if (-not $esptool) {
     Write-Err "esptool not found."
@@ -75,10 +146,14 @@ if (-not $esptool) {
     exit 2
 }
 if (-not $Port) { $Port = Find-EspPort }
-if (-not $Port) { Write-Err "ESP32-S3 (VID_303A) not found. Check USB."; exit 1 }
+if (-not $Port) { Write-Err "ESP32-S3 (VID_303A/PID_1001) not found. Specify -Port COMx or check USB."; exit 1 }
 
-if ($esptool.kind -eq "exe") { Write-Info "esptool : $($esptool.path) (standalone)" }
-else { Write-Info "esptool : $($esptool.py) -m esptool (ESP-IDF python env)" }
+if ($esptool.kind -eq "exe") {
+    Write-Info "esptool : $($esptool.path) (standalone)"
+    try { Test-EsptoolHash $esptool.path } catch { Write-Err $_.Exception.Message; exit 1 }
+} else {
+    Write-Info "esptool : $($esptool.py) -m esptool (ESP-IDF python env)"
+}
 Write-Info "Port    : $Port"
 
 $files = @{
@@ -94,6 +169,7 @@ foreach ($k in $files.Keys) {
         exit 1
     }
 }
+try { Test-ReleasePreflight $fwDir } catch { Write-Err $_.Exception.Message; exit 1 }
 if ($Sounds) {
     # Prefer <repo>\SOUND (Soft_Decoder_V3\SOUND); keep the sibling-of-repo
     # location as a fallback.

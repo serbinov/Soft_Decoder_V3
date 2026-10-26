@@ -30,6 +30,16 @@ foreach ($c in @((Join-Path $repo "SOUND"), (Join-Path (Split-Path $repo -Parent
     if ($c -and (Test-Path -LiteralPath $c)) { $sndDir = (Resolve-Path -LiteralPath $c).Path; break }
 }
 
+# Per-server-run token required by state-changing API calls. The browser can
+# read it from /api/session (same-origin only) or use the nonce cookie.
+function New-SessionNonce {
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
+}
+$script:sessionNonce = New-SessionNonce
+
 # ---- status helpers -------------------------------------------------------
 function Get-DevicePort {
     $p = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
@@ -167,7 +177,7 @@ function Get-ActionSpec([string]$action) {
     } else {
         # Fallback: pure-PowerShell ROM flasher (no ESP-IDF needed).
         switch ($action) {
-            "flash"        { return @{ script = $standalone; args = @("-NoErase", "-NoSounds") } }
+            "flash"        { return @{ script = $standalone; args = @("-NoSounds") } }
         }
     }
     if ($action -eq "ota") { return @{ script = (Join-Path $web "make_ota.ps1"); args = @() } }
@@ -225,10 +235,47 @@ $mime = @{
     ".txt"  = "text/plain; charset=utf-8"; ".md" = "text/plain; charset=utf-8"
     ".bin"  = "application/octet-stream"; ".wav" = "audio/wav"; ".ico" = "image/x-icon"
     ".svg"  = "image/svg+xml"; ".png" = "image/png"; ".jpg" = "image/jpeg"
+    ".asp"  = "application/octet-stream"; ".sha256" = "text/plain; charset=utf-8"
 }
-$repoFull = [IO.Path]::GetFullPath($repo)
-$sndFull  = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$repoFull    = [IO.Path]::GetFullPath($repo)
+$webFull     = [IO.Path]::GetFullPath($web)
+$releaseFull = [IO.Path]::GetFullPath((Join-Path $repo "release"))
+$sndFull     = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }
+$utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
+$expectedOrigin = $prefix.TrimEnd("/")
+$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "ota")
+
+function Get-FormBody($ctx) {
+    if (-not $ctx.Request.HasEntityBody) { return "" }
+    $encoding = $ctx.Request.ContentEncoding
+    if (-not $encoding) { $encoding = [Text.Encoding]::UTF8 }
+    $reader = New-Object IO.StreamReader($ctx.Request.InputStream, $encoding)
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
+function Get-RequestValue($ctx, $query, $form, [string]$name, [string]$key = "") {
+    if (-not $key) { $key = $name }
+    $value = $ctx.Request.Headers[$name]
+    if (-not $value -and $query) { $value = $query[$key] }
+    if (-not $value -and $form) { $value = $form[$key] }
+    return $value
+}
+function Test-StaticAllowed([string]$full) {
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $leaf = [IO.Path]::GetFileName($full)
+    $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
+    if ($full.StartsWith($webFull + $sep, [StringComparison]::OrdinalIgnoreCase)) {
+        return $ext -in @(".html", ".css", ".js", ".svg", ".ico", ".png", ".jpg") -and
+               $leaf -notmatch '^(start_flasher|make_sound_pack|release_info|flash_with_sound_pack|make_ota)\.'
+    }
+    if ($full.StartsWith($releaseFull + $sep, [StringComparison]::OrdinalIgnoreCase)) {
+        return $ext -in @(".bin", ".asp", ".txt", ".json", ".sha256") -and
+               $leaf -notmatch '^(sdkconfig|\.idf_path|partitions\.csv)'
+    }
+    if ($sndFull -and $full.StartsWith($sndFull + $sep, [StringComparison]::OrdinalIgnoreCase)) {
+        return $ext -eq ".wav"
+    }
+    return $false
+}
 
 # Idle watchdog: the page sends /api/ping; when it stops, the server exits.
 $script:lastPing = $null
@@ -266,6 +313,11 @@ while ($listener.IsListening) {
             $script:lastPing = Get-Date; $script:sawPing = $true
             Send-Text $ctx '{"ok":true}' "application/json; charset=utf-8"
         }
+        elseif ($pathQ -eq "/api/session") {
+            # Read-only: no state change. A cross-origin page cannot read this
+            # response without CORS headers, so it is safe to expose the nonce.
+            Send-Text $ctx (([ordered]@{ nonce = $script:sessionNonce }) | ConvertTo-Json -Compress) "application/json; charset=utf-8"
+        }
         elseif ($pathQ -eq "/api/status") {
             $releaseInfo = Get-FirmwareRelease -RepoRoot $repo
             $fwCount = $releaseInfo.files
@@ -293,10 +345,51 @@ while ($listener.IsListening) {
             Send-Text $ctx ($obj | ConvertTo-Json -Depth 6 -Compress) "application/json; charset=utf-8"
         }
         elseif ($pathQ -eq "/api/run") {
-            $action = $q["action"]
-            $id = Start-Action $action
-            if (-not $id) { Send-Text $ctx '{"error":"unknown action"}' "application/json; charset=utf-8" }
-            else { Send-Text $ctx ('{"id":"' + $id + '"}') "application/json; charset=utf-8" }
+            if ($ctx.Request.HttpMethod -ne "POST") {
+                $ctx.Response.StatusCode = 405
+                $ctx.Response.Headers["Allow"] = "POST"
+                Send-Text $ctx '{"error":"POST required"}' "application/json; charset=utf-8"
+            } else {
+                $origin = $ctx.Request.Headers["Origin"]
+                if (-not $origin -or $origin -ne $expectedOrigin) {
+                    $ctx.Response.StatusCode = 403
+                    Send-Text $ctx '{"error":"origin rejected"}' "application/json; charset=utf-8"
+                } else {
+                    $body = Get-FormBody $ctx
+                    $form = [System.Web.HttpUtility]::ParseQueryString($body)
+                    $nonce = Get-RequestValue $ctx $q $form "X-Aura-Nonce" "nonce"
+                    if (-not $nonce) {
+                        $cookie = $ctx.Request.Cookies["aura_nonce"]
+                        if ($cookie) { $nonce = $cookie.Value }
+                    }
+                    if (-not $nonce -or $nonce -cne $script:sessionNonce) {
+                        $ctx.Response.StatusCode = 403
+                        Send-Text $ctx '{"error":"nonce rejected"}' "application/json; charset=utf-8"
+                    } else {
+                        $action = Get-RequestValue $ctx $q $form "action"
+                        $confirm = Get-RequestValue $ctx $q $form "confirm"
+                        $needsConfirm = $destructiveActions -contains $action
+                        if ($needsConfirm -and $confirm -ne $action -and $confirm -ne "yes") {
+                            $ctx.Response.StatusCode = 400
+                            Send-Text $ctx '{"error":"confirmation required"}' "application/json; charset=utf-8"
+                        } else {
+                            try {
+                                $id = Start-Action $action
+                                if (-not $id) {
+                                    $ctx.Response.StatusCode = 400
+                                    Send-Text $ctx '{"error":"unknown action"}' "application/json; charset=utf-8"
+                                } else {
+                                    Send-Text $ctx ('{"id":"' + $id + '"}') "application/json; charset=utf-8"
+                                }
+                            } catch {
+                                $ctx.Response.StatusCode = 409
+                                $msg = ($_.Exception.Message | ConvertTo-Json -Compress)
+                                Send-Text $ctx ('{"error":' + $msg + '}') "application/json; charset=utf-8"
+                            }
+                        }
+                    }
+                }
+            }
         }
         elseif ($pathQ -eq "/api/state") {
             $pos = 0; [void][int]::TryParse($q["pos"], [ref]$pos)
@@ -349,14 +442,22 @@ while ($listener.IsListening) {
             }
         }
         else {
-            # static files
+            # static files: only the panel page, release artifacts and SOUND WAVs
             $rel = [Uri]::UnescapeDataString($pathQ).TrimStart("/") -replace "/", "\"
-            $full = $null; $root = $repoFull
-            if ($sndFull -and $rel -like "SOUND\*") { $full = Join-Path $sndFull $rel.Substring(6); $root = $sndFull }
-            else { $full = Join-Path $repoFull $rel }
-            $full = [IO.Path]::GetFullPath($full)
-            if (-not $full.StartsWith($root)) { $ctx.Response.StatusCode = 403 }
+            if (-not $rel) { $rel = "web_flasher\index.html" }
+            $full = $null
+            if ($sndFull -and ($rel -eq "SOUND" -or $rel -like "SOUND\*")) {
+                $sub = $rel.Substring(5).TrimStart("\")
+                if ($sub) { $full = Join-Path $sndFull $sub }
+            } else {
+                $full = Join-Path $repoFull $rel
+            }
+            $full = if ($full) { [IO.Path]::GetFullPath($full) } else { $null }
+            if (-not $full -or -not (Test-StaticAllowed $full)) { $ctx.Response.StatusCode = 403 }
             elseif (Test-Path -LiteralPath $full -PathType Leaf) {
+                if ($rel -eq "web_flasher\index.html") {
+                    $ctx.Response.Headers["Set-Cookie"] = "aura_nonce=$($script:sessionNonce); Path=/; HttpOnly; SameSite=Strict"
+                }
                 $ext = [IO.Path]::GetExtension($full).ToLower()
                 if ($mime.ContainsKey($ext)) { $ctx.Response.ContentType = $mime[$ext] }
                 $ctx.Response.Headers["Cache-Control"] = "no-store"
@@ -373,17 +474,25 @@ while ($listener.IsListening) {
     }
     }
     if (-not $NoIdleExit) {
-        if ($script:sawPing) {
-            if (((Get-Date) - $script:lastPing).TotalSeconds -gt 12) {
-                Write-Host "Страница закрыта - останавливаю сервер." -ForegroundColor DarkGray; break
+        # Never stop while a flash/erase/build child is still running: the panel
+        # must stay alive until the child exits, even if the page was closed.
+        $busy = [bool]($script:cur -and -not $script:cur.proc.HasExited)
+        if (-not $busy) {
+            if ($script:sawPing) {
+                if (((Get-Date) - $script:lastPing).TotalSeconds -gt 12) {
+                    Write-Host "Страница закрыта - останавливаю сервер." -ForegroundColor DarkGray; break
+                }
+            } elseif (((Get-Date) - $script:startedAt).TotalSeconds -gt 300) {
+                Write-Host "Страница не подключилась - останавливаю сервер." -ForegroundColor DarkGray; break
             }
-        } elseif (((Get-Date) - $script:startedAt).TotalSeconds -gt 300) {
-            Write-Host "Страница не подключилась - останавливаю сервер." -ForegroundColor DarkGray; break
         }
     }
 }
 } finally {
-    # Do not leave a flashing child holding the serial port after the panel exits.
-    if ($script:cur -and -not $script:cur.proc.HasExited) { try { $script:cur.proc.Kill() } catch { } }
+    # Never kill a running child; wait for the flash/erase operation to finish
+    # so the board and serial port are left in a consistent state.
+    if ($script:cur -and -not $script:cur.proc.HasExited) {
+        try { $script:cur.proc.WaitForExit() } catch { }
+    }
     try { $listener.Stop() } catch { }
 }

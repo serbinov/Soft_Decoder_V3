@@ -489,6 +489,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-27 (v0.13) — docs(skill): add Soft_Decoder_V3 project skill
 - 2026-10-27 (v0.13) — feat(motor): rewrite BEMF control and calibration for v0.13
 - 2026-10-26 (v0.12) — release: rebuild 0.12 firmware with factory wipe
 - 2026-10-26 (v0.12) — fix(firmware,web): harden runtime safety and add factory wipe

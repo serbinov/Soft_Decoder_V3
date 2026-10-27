@@ -1686,7 +1686,32 @@ void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg)
 
 static void cal_normalize_config(motor_bemf_cal_config_t *cfg)
 {
-    if (cfg->points < CAL_MIN_POINTS) cfg->points = 12;
+    if (cfg->mode == MOTOR_BEMF_MODE_CUSTOM) {
+        if (cfg->speed_count < 2U) {
+            cfg->mode = MOTOR_BEMF_MODE_AUTO;
+        } else if (cfg->points < cfg->speed_count) {
+            cfg->points = cfg->speed_count;
+        }
+    }
+    if (cfg->points < CAL_MIN_POINTS) {
+        switch (cfg->mode) {
+        case MOTOR_BEMF_MODE_FAST:
+            cfg->points = 10U;
+            break;
+        case MOTOR_BEMF_MODE_BALANCED:
+            cfg->points = 12U;
+            break;
+        case MOTOR_BEMF_MODE_THOROUGH:
+            cfg->points = 14U;
+            break;
+        case MOTOR_BEMF_MODE_CUSTOM:
+            cfg->points = cfg->speed_count;
+            break;
+        default:
+            cfg->points = 12U;
+            break;
+        }
+    }
     if (cfg->points > CAL_MAX_POINTS) cfg->points = CAL_MAX_POINTS;
     if (cfg->dwell_ms == 0U) cfg->dwell_ms = CAL_DEFAULT_DWELL_MS;
     if (cfg->dwell_ms > CAL_MAX_DWELL_MS) cfg->dwell_ms = CAL_MAX_DWELL_MS;
@@ -1696,9 +1721,6 @@ static void cal_normalize_config(motor_bemf_cal_config_t *cfg)
     if (cfg->interval_ms > CAL_MAX_INTERVAL_MS) cfg->interval_ms = CAL_MAX_INTERVAL_MS;
     if (cfg->samples < 2U) cfg->samples = CAL_DEFAULT_SAMPLES;
     if (cfg->samples > CAL_MAX_SAMPLES) cfg->samples = CAL_MAX_SAMPLES;
-    if (cfg->mode == MOTOR_BEMF_MODE_CUSTOM && cfg->speed_count < 2U) {
-        cfg->mode = MOTOR_BEMF_MODE_AUTO;
-    }
 }
 
 esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg)

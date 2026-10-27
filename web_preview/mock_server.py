@@ -1200,8 +1200,8 @@ def _bemf_start_config(query):
     modes = {"auto": 0, "adaptive": 0, "fast": 1, "balanced": 2,
              "thorough": 3, "custom": 4}
     mode = modes.get(name, 0)
-    default_total = {0: 16, 1: 10, 2: 12, 3: 16, 4: 16}.get(mode, 16)
-    default_settle = {0: 600, 1: 400, 2: 500, 3: 600, 4: 500}.get(mode, 600)
+    default_total = {0: 12, 1: 10, 2: 12, 3: 14, 4: 16}.get(mode, 12)
+    default_settle = {0: 220, 1: 220, 2: 220, 3: 220, 4: 220}.get(mode, 220)
     speeds = str(q1(query, "speeds", "") or "")
     if speeds:
         count = len([s for s in speeds.split(",") if s.strip()])
@@ -1209,7 +1209,10 @@ def _bemf_start_config(query):
             mode = 4
             default_total = count
     total = as_int(q1(query, "points"), default_total)
-    total = max(10, min(16, total))
+    if mode == 4:
+        total = max(2, min(16, total))
+    else:
+        total = max(10, min(14, total))
     settle = as_int(q1(query, "settle"), default_settle)
     settle = max(100, min(2000, settle))
     apply_pid = as_bool(q1(query, "apply_pid"), False)

@@ -11,6 +11,15 @@
 
 ## Релизы
 
+### 2026-10-27 — v0.14 — BEMF-режимы реально выбирают число точек
+
+- `FAST` = 10, `BALANCED` = 12, `AUTO` = 12, `THOROUGH` = 14. Явный `points`
+  по-прежнему переопределяет пресет; `CUSTOM` использует список скоростей.
+- Веб-панель отправляет только `mode=...`, поэтому раньше после переписывания
+  все режимы фактически шли по 12 точкам; теперь режим учитывается в прошивке.
+- `web_preview/mock_server.py` приведён к тем же значениям, чтобы симуляция
+  не расходилась с устройством.
+
 ### 2026-10-27 — v0.13 — мотор и BEMF переписаны с нуля
 
 - **Мотор:** базовый ШИМ теперь всегда open-loop по CV2/CV5/CV6 или CV67..94.
@@ -489,6 +498,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-27 (v0.14) — fix(bemf): honor calibration mode point presets (v0.14)
 - 2026-10-27 (v0.13) — docs(skill): add Soft_Decoder_V3 project skill
 - 2026-10-27 (v0.13) — feat(motor): rewrite BEMF control and calibration for v0.13
 - 2026-10-26 (v0.12) — release: rebuild 0.12 firmware with factory wipe

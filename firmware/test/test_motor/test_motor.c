@@ -744,6 +744,41 @@ static void test_custom_calibration_plan(void)
     cleanup_abandoned_calibration();
 }
 
+static void test_calibration_mode_selects_point_count(void)
+{
+    struct {
+        motor_bemf_cal_mode_t mode;
+        uint8_t points;
+    } cases[] = {
+        { MOTOR_BEMF_MODE_AUTO, 12 },
+        { MOTOR_BEMF_MODE_FAST, 10 },
+        { MOTOR_BEMF_MODE_BALANCED, 12 },
+        { MOTOR_BEMF_MODE_THOROUGH, 14 },
+    };
+    g_create_hook = capture_task;
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        motor_bemf_cal_config_t cfg;
+        motor_bemf_cal_default_config(&cfg);
+        cfg.mode = cases[i].mode;
+        cfg.points = 0; /* web UI sends only mode=... */
+        TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
+        TEST_ASSERT_EQUAL_UINT8(cases[i].points, s_cal_plan_count);
+        cleanup_abandoned_calibration();
+    }
+    g_create_hook = NULL;
+
+    /* An explicit points= value still overrides the preset. */
+    g_create_hook = capture_task;
+    motor_bemf_cal_config_t cfg;
+    motor_bemf_cal_default_config(&cfg);
+    cfg.mode = MOTOR_BEMF_MODE_FAST;
+    cfg.points = 14;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
+    g_create_hook = NULL;
+    TEST_ASSERT_EQUAL_UINT8(14, s_cal_plan_count);
+    cleanup_abandoned_calibration();
+}
+
 static void test_calibration_clear_removes_curve(void)
 {
     set_stored_curve();
@@ -909,6 +944,7 @@ int main(void)
     RUN_TEST(test_calibration_admission_requires_rest);
     RUN_TEST(test_stop_cancels_calibration_and_coasts);
     RUN_TEST(test_custom_calibration_plan);
+    RUN_TEST(test_calibration_mode_selects_point_count);
     RUN_TEST(test_calibration_clear_removes_curve);
     RUN_TEST(test_flat_stored_curve_does_not_enable_closed_loop);
     RUN_TEST(test_flat_sensor_calibration_fails_without_stopping_motor);

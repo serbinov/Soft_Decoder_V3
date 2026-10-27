@@ -59,7 +59,12 @@ if(NOT CMAKE_BUILD_EARLY_EXPANSION)
         VERBATIM)
 endif()
 
-idf_component_register(SRCS "src/web.c" "src/web_util.c" "src/audio_pack.c" "src/web_wifi.c" "${EDITOR_SOURCE}"
+idf_component_register(SRCS "src/web.c" "src/web_http.c" "src/web_log.c" "src/web_config.c"
+                            "src/web_control.c" "src/web_func.c" "src/web_func_api.c" "src/web_graph_api.c"
+                            "src/web_bemf_api.c" "src/web_motor_api.c" "src/web_settings_api.c"
+                            "src/web_audio_lib.c" "src/web_audio_api.c" "src/web_transfer.c"
+                            "src/web_stream.c" "src/web_upload.c" "src/web_pack.c" "src/web_pack_recovery.c" "src/web_ota.c"
+                            "src/web_util.c" "src/audio_pack.c" "src/web_wifi.c" "${EDITOR_SOURCE}"
                        INCLUDE_DIRS "include"
                        REQUIRES esp_http_server esp_wifi esp_netif esp_event esp_timer app_update
                                  nvs_flash audio auxio motor settings storage dcc sound)

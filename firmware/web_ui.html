@@ -119,7 +119,7 @@ label{color:var(--text);font-weight:600}
 .seg{display:flex;gap:6px;margin-bottom:8px}
 .seg .btn{flex:1}
 
-.speed-row{display:grid;grid-template-columns:70px 1fr 3.5em;gap:10px;align-items:center;margin-bottom:10px}
+.speed-row{display:grid;grid-template-columns:70px 1fr 4.5em;gap:10px;align-items:center;margin-bottom:10px}
 .speed-row label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
 .speed-row .val{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;color:var(--text);text-align:right}
 .dir-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
@@ -129,6 +129,21 @@ label{color:var(--text);font-weight:600}
 .btn.emergency:hover{border-color:#ffffff}
 .fn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:7px}
 .fn-grid .btn{min-height:44px;font-size:12px;font-weight:700}
+.speed-mode-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;margin:0 0 10px}
+.speed-mode-row label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
+.speed-mode-row select{width:auto;min-width:120px}
+.diag-card{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.diag-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.diag-head h2{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+.diag-badge{font-family:ui-monospace,Consolas,monospace;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.diag-badge.accel,.diag-badge.start{color:#ffcf70;border-color:#6b5420}
+.diag-badge.cruise{color:#7ee2a8;border-color:#245c3c}
+.diag-badge.decel,.diag-badge.reverse{color:#ff9f6e;border-color:#6b3b24}
+.diag-badge.inhibited,.diag-badge.no_tick{color:#ff7b7b;border-color:#6b2424}
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:5px 14px;font-size:12px}
+.diag-grid b{font-family:ui-monospace,Consolas,monospace;font-weight:700}
+.diag-log{margin-top:8px;max-height:120px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.45;color:var(--muted);border-top:1px solid var(--line);padding-top:6px}
+.diag-log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .locked{opacity:.45}
 
@@ -300,7 +315,7 @@ label{color:var(--text);font-weight:600}
 
 @media(max-width:420px){
   .dir-row{grid-template-columns:1fr 1fr}
-  .speed-row{grid-template-columns:56px 1fr 3em}
+  .speed-row{grid-template-columns:56px 1fr 4em}
   .vol{grid-template-columns:56px 1fr 2.5em}
   .page-tabs .nav-tab{padding:7px 6px}
   .brand small{font-size:9px}
@@ -350,6 +365,14 @@ label{color:var(--text);font-weight:600}
           <input type="range" id="speed" min="0" max="126" value="0" oninput="onSpeedInput()">
           <span class="val" id="speed_v">0</span>
         </div>
+        <div class="speed-mode-row">
+          <label for="speed_mode" data-i18n="dcc_step_mode">DCC шаги</label>
+          <select id="speed_mode" onchange="onSpeedModeChange()">
+            <option value="14" data-i18n="dcc_step_14">14 шагов</option>
+            <option value="28" data-i18n="dcc_step_28">28 шагов</option>
+            <option value="128" selected data-i18n="dcc_step_128">128 шагов</option>
+          </select>
+        </div>
         <div class="dir-row">
           <button class="btn" id="btn_rev" onclick="setDir(false)" data-i18n="ctrl_back">◀ Назад</button>
           <button class="btn danger" id="btn_stop" onclick="setStop()" data-i18n="ctrl_stop">■ Стоп</button>
@@ -358,6 +381,24 @@ label{color:var(--text);font-weight:600}
         </div>
         <div class="hint" id="dcc_live" style="font-family:ui-monospace,Consolas,monospace">DCC: —</div>
         <div class="fn-grid" id="fn_grid"></div>
+        <div class="diag-card" id="motor_diag_card">
+          <div class="diag-head">
+            <h2 data-i18n="motor_diag_title">Режим двигателя</h2>
+            <span class="diag-badge" id="md_mode">—</span>
+          </div>
+          <div class="diag-grid">
+            <div><span data-i18n="md_target">Цель</span>: <b id="md_target">—</b></div>
+            <div><span data-i18n="md_applied">Факт</span>: <b id="md_applied">—</b></div>
+            <div><span data-i18n="md_duty">ШИМ</span>: <b id="md_duty">—</b></div>
+            <div><span data-i18n="md_rail">Рельсы</span>: <b id="md_rail">—</b></div>
+            <div><span data-i18n="md_bemf">BEMF</span>: <b id="md_bemf">—</b></div>
+            <div><span data-i18n="md_pid">PID</span>: <b id="md_pid">—</b></div>
+            <div><span data-i18n="md_tick">Тик</span>: <b id="md_tick">—</b></div>
+            <div><span data-i18n="md_inhibit">Блокировка</span>: <b id="md_inhibit">—</b></div>
+          </div>
+          <div class="hint" id="md_dcc" style="margin-top:8px">DCC: —</div>
+          <div class="diag-log" id="dcc_cmd_log" aria-live="polite"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -697,6 +738,10 @@ ctrl_via:'Управление через',src_rails:'Рельсы',src_web:'В�
 ctrl_dc:'DC — аналоговое управление',ctrl_mode:'Режим',mode_hint:'DCC — цифровое управление с рельс. DC — управление от напряжения на рельсах.',
 ctrl_hint_default:'Управление скоростью и функциями — с выбранного источника.',
 ctrl_title:'Управление',ctrl_speed:'Скорость',
+dcc_step_mode:'DCC шаги',dcc_step_14:'14 шагов',dcc_step_28:'28 шагов',dcc_step_128:'128 шагов',
+motor_diag_title:'Режим двигателя',md_target:'Цель',md_applied:'Факт',md_duty:'ШИМ',md_rail:'Рельсы',md_bemf:'BEMF',md_pid:'PID',md_tick:'Тик',md_inhibit:'Блокировка',md_dcc_prefix:'DCC: ',
+md_mode_idle:'СТОП',md_mode_start:'СТАРТ',md_mode_accel:'РАЗГОН',md_mode_decel:'ТОРМОЖЕНИЕ',md_mode_cruise:'ХОД',md_mode_reverse:'РЕВЕРС',md_mode_inhibited:'БЛОКИРОВКА',md_mode_no_tick:'НЕТ ТИКА',md_mode_unknown:'—',
+md_bemf_off:'выкл',md_bemf_open:'открытый',md_bemf_closed:'замкнутый',md_yes:'да',md_no:'нет',
 ctrl_back:'◀ Назад',ctrl_stop:'■ Стоп',ctrl_emergency:'⛔ Экстренный Стоп',ctrl_fwd:'Вперёд ▶',
 hint_web:'Управление мотором и функциями — с веб-интерфейса.',
 hint_rails:'Управление — с рельс. По умолчанию режим DCC; включите «DC», чтобы управлять от напряжения на рельсах.',
@@ -760,6 +805,10 @@ ctrl_via:'Control via',src_rails:'Rails',src_web:'Web',
 ctrl_dc:'DC — analog control',ctrl_mode:'Mode',mode_hint:'DCC — digital control from the rails. DC — control by the voltage on the rails.',
 ctrl_hint_default:'Speed and function control come from the selected source.',
 ctrl_title:'Control',ctrl_speed:'Speed',
+dcc_step_mode:'DCC steps',dcc_step_14:'14 steps',dcc_step_28:'28 steps',dcc_step_128:'128 steps',
+motor_diag_title:'Motor mode',md_target:'Target',md_applied:'Applied',md_duty:'PWM',md_rail:'Rail',md_bemf:'BEMF',md_pid:'PID',md_tick:'Tick',md_inhibit:'Inhibit',md_dcc_prefix:'DCC: ',
+md_mode_idle:'IDLE',md_mode_start:'START',md_mode_accel:'ACCEL',md_mode_decel:'DECEL',md_mode_cruise:'CRUISE',md_mode_reverse:'REVERSE',md_mode_inhibited:'INHIBITED',md_mode_no_tick:'NO TICK',md_mode_unknown:'—',
+md_bemf_off:'off',md_bemf_open:'open-loop',md_bemf_closed:'closed-loop',md_yes:'yes',md_no:'no',
 ctrl_back:'◀ Reverse',ctrl_stop:'■ Stop',ctrl_emergency:'⛔ Emergency Stop',ctrl_fwd:'Forward ▶',
 hint_web:'Motor and function control come from the web interface.',
 hint_rails:'Control comes from the rails. DCC by default; enable «DC» to control from track voltage.',
@@ -998,6 +1047,7 @@ var rebooting=false,rebootRevision=0;
 var activeCv=1;
 var cvValues={};
 var statusTimer=null;
+var dccSpeedMode=128,motorDiagTimer=null;
 var statusBusy=false;
 var logSeq=0;
 
@@ -1024,6 +1074,7 @@ async function refreshStatus(){
       state.motor.speed=Number(d2.speed)||0;
       state.motor.forward=d2.forward===true||d2.forward==='true';
       renderMotor();
+      renderMotorDiag(d2);
     }
     if(document.hidden||uploadBusy||rebooting)return;
     var dd=await api('/api/dcc/status',{timeout:3000});
@@ -1307,16 +1358,81 @@ async function factoryReset(){
 }
 
 /* motor */
+function dccSteps(){return dccSpeedMode===14?14:(dccSpeedMode===28?28:126);}
+function dccSpeedFromStep(step){return Math.round(clamp(step,0,dccSteps())*126/dccSteps());}
+function dccStepFromSpeed(speed){return Math.round(clamp(speed,0,126)*dccSteps()/126);}
+function updateSpeedLabel(){
+  var step=dccStepFromSpeed(state.motor.speed);
+  setText('speed_v',step+'/'+dccSteps());
+}
 function renderMotor(){
   var el=byId('speed');
-  if(el&&document.activeElement!==el)el.value=state.motor.speed;
-  setText('speed_v',String(state.motor.speed));
+  if(el){
+    el.max=String(dccSteps());
+    if(document.activeElement!==el)el.value=String(dccStepFromSpeed(state.motor.speed));
+  }
+  var sel=byId('speed_mode');if(sel)sel.value=String(dccSpeedMode);
+  updateSpeedLabel();
   var stopped=state.motor.speed===0;
   var bf=byId('btn_fwd'),br=byId('btn_rev'),bs=byId('btn_stop');
   if(bf)bf.classList.toggle('active',!stopped&&state.motor.forward);
   if(br)br.classList.toggle('active',!stopped&&!state.motor.forward);
   if(bs)bs.classList.toggle('active',stopped);
 }
+function onSpeedModeChange(){
+  dccSpeedMode=Number(byId('speed_mode').value)||128;
+  renderMotor();
+}
+function _dccLog(text){
+  var el=byId('dcc_cmd_log');if(!el)return;
+  var row=document.createElement('div');
+  var now=new Date();
+  row.textContent=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0')+'  '+text;
+  el.insertBefore(row,el.firstChild);
+  while(el.children.length>20)el.removeChild(el.lastChild);
+}
+function _motorModeLabel(d){
+  var key='md_mode_'+String((d&&d.modeName)||'').replace(/[^a-z_]/g,'');
+  var label=t(key);
+  return (label&&label!==key)?label:((d&&d.modeName)?String(d.modeName).toUpperCase():'—');
+}
+function renderMotorDiag(d){
+  if(!d||!d.ok)return;
+  var modeName=String(d.modeName||'');
+  var badge=byId('md_mode');
+  if(badge){
+    badge.textContent=_motorModeLabel(d);
+    badge.className='diag-badge'+(modeName?' '+modeName:'');
+  }
+  var tgt=Number(d.targetSpeed!=null?d.targetSpeed:d.speed)||0;
+  var app=Number(d.appliedSpeed!=null?d.appliedSpeed:d.speed)||0;
+  setText('md_target',tgt+' '+(d.targetForward?'▶':'◀')+' · '+dccStepFromSpeed(tgt)+'/'+dccSteps());
+  setText('md_applied',app+' '+(d.appliedForward?'▶':'◀')+' · '+dccStepFromSpeed(app)+'/'+dccSteps());
+  var duty=Number(d.duty)||0,dmax=Number(d.dutyMax)||1023;
+  setText('md_duty',(dmax?Math.round(duty*100/dmax):0)+'% ('+duty+'/'+dmax+')');
+  var rail=Number(d.railMotorMv!=null?d.railMotorMv:d.railMv)||0;
+  setText('md_rail',(rail/1000).toFixed(1)+' В');
+  var bemfState=(!d.bemfEnabled||!d.bemfAcquired)?t('md_bemf_off'):(d.bemfClosedLoop?t('md_bemf_closed'):t('md_bemf_open'));
+  var bemfMv=Number(d.bemfMotorMv!=null?d.bemfMotorMv:d.bemfMv)||0;
+  setText('md_bemf',bemfState+' · '+bemfMv+' мВ');
+  setText('md_pid','corr '+(Number(d.corr)||0)+' · err '+(Number(d.err)||0)+(d.pidOk?'':' · off'));
+  setText('md_tick',(d.tickAgeMs==null||d.tickAgeMs<0)?'—':(Number(d.tickAgeMs)||0)+' мс');
+  setText('md_inhibit',d.inhibited?t('md_yes'):t('md_no'));
+}
+async function pollMotorDiag(){
+  if(document.hidden||uploadBusy||rebooting)return;
+  try{var d=await api('/api/motor',{timeout:2000});renderMotorDiag(d);}catch(e){}
+}
+function scheduleMotorDiagPoll(){
+  if(motorDiagTimer)return;
+  motorDiagTimer=setTimeout(async function(){
+    motorDiagTimer=null;
+    if(!document.hidden)await pollMotorDiag();
+    if(!document.hidden)scheduleMotorDiagPoll();
+  },500);
+}
+function startMotorDiagPoll(){scheduleMotorDiagPoll();}
+function stopMotorDiagPoll(){if(motorDiagTimer){clearTimeout(motorDiagTimer);motorDiagTimer=null;}}
 function renderDccLive(d){
   var el=byId('dcc_live');if(!el)return;
   if(!d){el.textContent='DCC: —';return;}
@@ -1329,12 +1445,14 @@ function renderDccLive(d){
   if(d.appliedSpeed!=null)txt+=' · mot '+d.appliedSpeed+(d.appliedForward?'f':'r');
   if(d.soundSpeed!=null)txt+=' · snd '+d.soundSpeed+(d.soundEngine?' eng':' idle');
   el.textContent=txt;
+  var md=byId('md_dcc');if(md)md.textContent=txt;
 }
 function onSpeedInput(){
   motorRevision++;
-  var v=clamp(byId('speed').value,0,126);
-  setText('speed_v',String(v));
+  var step=clamp(byId('speed').value,0,dccSteps());
+  var v=dccSpeedFromStep(step);
   state.motor.speed=v;
+  updateSpeedLabel();
   renderMotor();
   clearTimeout(speedTimer);
   speedTimer=setTimeout(sendMotorSpeed,250);
@@ -1347,6 +1465,7 @@ function queueMotorCommand(speed,forward){
     var d=await api('/api/motor?speed='+speed+'&forward='+(forward?1:0),{method:'POST',timeout:3000});
     if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('cmd_rejected'));
     if(revision===motorRevision){state.motor.speed=Number(d.speed)||0;state.motor.forward=d.forward===true||d.forward==='true';renderMotor();}
+    _dccLog('DCC '+dccSpeedMode+'-step: '+dccStepFromSpeed(speed)+'/'+dccSteps()+' ('+speed+') '+(forward?'fwd':'rev'));
   }).catch(function(e){log(t('tag_motor'),t('err_prefix')+e.message);}).finally(function(){motorPending--;});
   return motorQueue;
 }
@@ -1371,6 +1490,7 @@ function emergencyStop(){
   for(var f=0;f<=28;f++)state.fnStates[f]=false;
   renderMotor();renderFunctions();
   log(t('tag_stop'),t('emergency_log'));
+  _dccLog('DCC emergency stop');
   return api('/api/emergency',{method:'POST',timeout:3000}).then(function(d){
     if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('cmd_rejected'));
     refreshStatus();
@@ -1395,6 +1515,7 @@ function toggleFn(fn){
   api('/api/function?fn='+fn+'&state='+(next?1:0),{method:'POST'})
     .then(function(d){
       if(!d||!d.ok){state.fnStates[fn]=!next;renderFunctions();log(t('tag_fn'),t('err_prefix')+(d&&d.error?d.error:t('failed')));}
+      else _dccLog('DCC F'+fn+' '+(next?'on':'off'));
     })
     .catch(function(e){state.fnStates[fn]=!next;renderFunctions();log(t('tag_fn'),t('err_prefix')+e.message);});
 }
@@ -3039,6 +3160,7 @@ function showPage(name){
   if(ns)ns.classList.toggle('active',name==='settings');
   try{if(typeof history!=='undefined'&&history.replaceState)history.replaceState(null,'',name==='settings'?'#settings':'#control');}catch(e){}
   if(typeof applySettingsMode==='function')applySettingsMode();
+  if(name==='control')startMotorDiagPoll();else stopMotorDiagPoll();
 }
 function pageFromHash(){return (location.hash||'').replace('#','')==='settings'?'settings':'control';}
 

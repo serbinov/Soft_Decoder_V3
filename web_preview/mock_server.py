@@ -1130,8 +1130,52 @@ def device_json():
 
 
 def motor_json():
+    """Motor state with a simple ramp model so the diagnostics panel shows
+    start/accel/cruise/decel transitions in the preview."""
     m = STATE["motor"]
-    return ok(speed=m["speed"], forward=m["forward"])
+    now = time.time()
+    diag = m.setdefault("diag", {"applied": 0, "applied_forward": m["forward"],
+                                 "last": now})
+    target = int(m["speed"])
+    forward = bool(m["forward"])
+    if bool(diag["applied_forward"]) != forward:
+        diag["applied"] = 0
+        diag["applied_forward"] = forward
+    dt = max(0.0, min(0.5, now - float(diag["last"])))
+    diag["last"] = now
+    applied = int(diag["applied"])
+    step = max(1, int(90 * dt))
+    if applied < target:
+        applied = min(target, applied + step)
+    elif applied > target:
+        applied = max(target, applied - step)
+    diag["applied"] = applied
+
+    if target == 0 and applied == 0:
+        mode, mode_name = 1, "idle"
+    elif applied == 0:
+        mode, mode_name = 2, "start"
+    elif target > applied:
+        mode, mode_name = 3, "accel"
+    elif target < applied:
+        mode, mode_name = 4, "decel"
+    else:
+        mode, mode_name = 5, "cruise"
+
+    duty = int(round(applied * 1023.0 / 126.0))
+    bemf = int(round(applied * 12000.0 / 126.0))
+    moving = applied > 0
+    return ok(speed=target, forward=forward,
+              targetSpeed=target, targetForward=forward,
+              appliedSpeed=applied, appliedForward=forward,
+              duty=duty, dutyMax=1023,
+              railMv=16000, railMotorMv=16000,
+              bemfMv=bemf, bemfMotorMv=bemf, bemfFilteredMv=bemf,
+              bemfEnabled=True, bemfValid=moving, bemfAcquired=moving,
+              bemfClosedLoop=moving, openLoop=False, pidOk=moving,
+              corr=0, err=0, windowUs=300,
+              inhibited=False, inhibit=0, tickAgeMs=0,
+              mode=mode, modeName=mode_name)
 
 
 def functions_json():
@@ -1301,14 +1345,22 @@ def handle_api(method, path, query, body):
 
     if path == "/api/motor":
         if method == "POST":
+            m = s["motor"]
+            old_forward = bool(m["forward"])
             if q1(query, "speed") is not None:
-                s["motor"]["speed"] = max(0, min(126, as_int(q1(query, "speed"), 0)))
+                m["speed"] = max(0, min(126, as_int(q1(query, "speed"), 0)))
             if q1(query, "forward") is not None:
-                s["motor"]["forward"] = as_bool(q1(query, "forward"), True)
+                m["forward"] = as_bool(q1(query, "forward"), True)
+            diag = m.setdefault("diag", {})
+            diag["applied_forward"] = bool(m["forward"])
+            diag["last"] = time.time()
+            if bool(old_forward) != bool(m["forward"]):
+                diag["applied"] = 0
         return 200, motor_json()
 
     if path == "/api/emergency":
         s["motor"]["speed"] = 0
+        s["motor"].setdefault("diag", {})["applied"] = 0
         s["audio"]["playing"] = False
         s["audio"]["active_slot"] = 0
         s["fn"] = [0] * FN_COUNT

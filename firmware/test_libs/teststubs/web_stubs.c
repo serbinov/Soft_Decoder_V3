@@ -1381,6 +1381,30 @@ void motor_get_status(uint8_t *out_speed128, bool *out_forward)
     }
 }
 
+int64_t mock_motor_last_tick_us = 1;
+int64_t motor_last_tick_us(void)
+{
+    return mock_motor_last_tick_us;
+}
+
+void motor_bemf_diag(motor_bemf_diag_t *d)
+{
+    if (d == NULL) return;
+    memset(d, 0, sizeof(*d));
+    d->applied_speed = mock_motor_applied_speed;
+    d->duty = (uint32_t)mock_motor_applied_speed * 1023U / 126U;
+    d->rail_mv = 16000;
+    d->rail_motor_mv = 16000;
+    d->bemf1_mv = (uint32_t)mock_motor_applied_speed * 12000U / 126U;
+    d->bemf1_motor_mv = d->bemf1_mv;
+    d->bemf_filtered_mv = d->bemf1_mv;
+    d->bemf_valid = mock_motor_applied_speed > 0;
+    d->bemf_acquired = mock_motor_applied_speed > 0;
+    d->open_loop_fallback = false;
+    d->pid_ok = mock_motor_applied_speed > 0;
+    d->cal_valid = true;
+}
+
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info)
 {
     if (info != NULL) {

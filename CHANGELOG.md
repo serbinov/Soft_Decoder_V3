@@ -527,6 +527,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-28 (v0.15) — refactor(web): modularize HTTP API and add DCC motor diagnostics
 - 2026-10-27 (v0.15) — feat(dcc): align 28-step speed with sound simulator (v0.15)
 - 2026-10-27 (v0.14) — fix(ci): use MSYS2 output path and case-safe asset test
 - 2026-10-27 (v0.14) — fix(ci): generate web_html.h and support PowerShell 7 hosts

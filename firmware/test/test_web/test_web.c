@@ -110,6 +110,24 @@ esp_err_t test_web_hdr_value_str(httpd_req_t *req, const char *field, char *val,
 #define settings_manifest_sync test_metadata_sync
 #define rename test_atomic_rename
 #define open test_binary_open
+#include "../../components/web/src/web_http.c"
+#include "../../components/web/src/web_log.c"
+#include "../../components/web/src/web_config.c"
+#include "../../components/web/src/web_control.c"
+#include "../../components/web/src/web_func.c"
+#include "../../components/web/src/web_func_api.c"
+#include "../../components/web/src/web_graph_api.c"
+#include "../../components/web/src/web_bemf_api.c"
+#include "../../components/web/src/web_motor_api.c"
+#include "../../components/web/src/web_settings_api.c"
+#include "../../components/web/src/web_audio_lib.c"
+#include "../../components/web/src/web_audio_api.c"
+#include "../../components/web/src/web_transfer.c"
+#include "../../components/web/src/web_stream.c"
+#include "../../components/web/src/web_upload.c"
+#include "../../components/web/src/web_pack.c"
+#include "../../components/web/src/web_pack_recovery.c"
+#include "../../components/web/src/web_ota.c"
 #include "../../components/web/src/web.c"
 #include "../../components/web/src/web_wifi.c"
 #undef httpd_req_get_hdr_value_str
@@ -216,7 +234,7 @@ esp_err_t test_stalled_transfer_handler(httpd_req_t *req)
     /* No bytes moved: simulate the deadline expiring while blocked. */
     s_transfer_deadline = mock_timer_now_us - 1;
     bool aborted = transfer_supervisor_check();
-    test_stalled_saw_abort = aborted && transfer_aborted();
+    test_stalled_saw_abort = aborted && web_transfer_aborted();
     test_stalled_handler_rc = aborted ? ESP_FAIL : ESP_OK;
     if (aborted) {
         (void)httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "stalled transfer");
@@ -229,7 +247,7 @@ esp_err_t test_progress_transfer_handler(httpd_req_t *req)
 {
     FILE *f = fopen("web_tmp/audio/wdt_progress.tmp", "wb");
     if (f == NULL) return ESP_FAIL;
-    esp_err_t err = pipe_upload(req, f, &test_progress_total);
+    esp_err_t err = web_transfer_pipe_upload(req, f, &test_progress_total);
     fclose(f);
     return err;
 }
@@ -1761,8 +1779,9 @@ static void test_bemf_status_names_and_previous_curve(void)
 static void test_bemf_cancel_bypasses_admission_without_motor_control(void)
 {
     httpd_req_t req = make_req(0);
-    esp_err_t (*handler)(httpd_req_t *) = bemf_cal_post;
-    req.user_ctx = &handler;
+    web_route_t route = { .uri = "", .method = HTTP_POST, .handler = bemf_cal_post,
+        .admit = WEB_ADMIT_BEMF_CAL };
+    req.user_ctx = &route;
     s_cfg.control_source = 0;
     s_actuation_ready = false;
     s_maintenance_owner = (TaskHandle_t)2;
@@ -1864,12 +1883,14 @@ static void test_bemf_mode_queries_and_actuation_gates(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "actuation unavailable"));
     TEST_ASSERT_EQUAL_INT(0, mock_bemf_use_save_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_bemf_set_enabled_calls);
-    esp_err_t (*handler)(httpd_req_t *) = bemf_use_post;
-    req.user_ctx = &handler;
+    web_route_t route = { .uri = "", .method = HTTP_POST, .handler = bemf_use_post,
+        .admit = WEB_ADMIT_BEMF_USE };
+    req.user_ctx = &route;
     set_query("enabled=invalid"); reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
     TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
-    handler = bemf_cal_post;
+    route.handler = bemf_cal_post;
+    route.admit = WEB_ADMIT_BEMF_CAL;
     set_query("cancel=1&reset=1"); reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
     TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
@@ -1884,6 +1905,9 @@ static void test_motor_get_post(void)
     TEST_ASSERT_EQUAL(ESP_OK, motor_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":42"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"forward\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"targetSpeed\":42"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"appliedSpeed\":0"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"modeName\":\""));
 
     /* Rails control rejects web motor commands. */
     reset_resp();
@@ -2173,7 +2197,7 @@ static void test_stream_write_success(void)
     httpd_req_t req = make_req(3);
     set_body("abc", 3);
     int total = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, pipe_upload(&req, f, &total));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_pipe_upload(&req, f, &total));
     TEST_ASSERT_EQUAL_INT(3, total);
     fclose(f);
     FILE *r = fopen("web_tmp/audio/pw.bin", "rb");
@@ -2190,7 +2214,7 @@ static void test_stream_short_body(void)
     httpd_req_t req = make_req(4);
     set_body("abc", 3);
     int total = 0;
-    TEST_ASSERT_EQUAL(ESP_FAIL, pipe_upload(&req, f, &total));
+    TEST_ASSERT_EQUAL(ESP_FAIL, web_transfer_pipe_upload(&req, f, &total));
     fclose(f);
 }
 
@@ -2203,7 +2227,7 @@ static void test_stream_file_write_failure(void)
     httpd_req_t req = make_req(3);
     set_body("abc", 3);
     int total = 0;
-    TEST_ASSERT_EQUAL(ESP_FAIL, pipe_upload(&req, f, &total));
+    TEST_ASSERT_EQUAL(ESP_FAIL, web_transfer_pipe_upload(&req, f, &total));
     fclose(f);
 }
 
@@ -2664,7 +2688,7 @@ static void test_audio_upload_buf_alloc_fail_and_task_fail(void)
     reset_resp();
     set_body(data, sizeof(data));
     mock_task_create_ok = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, audio_upload_post));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, audio_upload_post, false));
     TEST_ASSERT_EQUAL_STRING("worker creation failed", mock_resp_send_err_msg);
     TEST_ASSERT_EQUAL_UINT32(1, test_complete_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_httpd_async_live);
@@ -3145,7 +3169,7 @@ static void test_stream_idle_retry(void)
     mock_recv_idle_n = 1;
     mock_recv_idle_val = HTTPD_SOCK_ERR_TIMEOUT;
     int total = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, pipe_upload(&req, f, &total));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_pipe_upload(&req, f, &total));
     fclose(f);
 }
 
@@ -3400,8 +3424,9 @@ static void test_register_route_failure(void)
 {
     int before_calls = mock_httpd_register_calls;
     uint32_t before_routes = s_route_count;
+    static const web_route_t route = { "/x", HTTP_GET, root_handler, WEB_ADMIT_PLAIN };
     mock_httpd_register_err = ESP_FAIL;
-    register_route("/x", HTTP_GET, root_handler);
+    web_server_register_routes(&route, 1);
     TEST_ASSERT_EQUAL_INT(before_calls + 1, mock_httpd_register_calls);
     TEST_ASSERT_EQUAL_UINT32(before_routes, s_route_count); /* failed route not counted */
     mock_httpd_register_err = 0;
@@ -3411,13 +3436,13 @@ static void test_start_servers(void)
 {
     mock_httpd_start_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, start_http_server());
-    TEST_ASSERT_EQUAL(ESP_FAIL, start_progress_server());
+    TEST_ASSERT_EQUAL(ESP_FAIL, web_transfer_start_progress_server());
 
     mock_httpd_start_err = 0;
     TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
     TEST_ASSERT_TRUE(mock_route_count > 10);
     TEST_ASSERT_NOT_NULL(mock_err_handler);
-    TEST_ASSERT_EQUAL(ESP_OK, start_progress_server());
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start_progress_server());
 }
 
 /* ---------- web_init ---------- */
@@ -4017,7 +4042,7 @@ static void test_startup_and_source_leases(void)
     TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
     mock_sem_take_fail = 1;
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_set_actuation_ready(false));
-    TEST_ASSERT_FALSE(actuation_ready());
+    TEST_ASSERT_FALSE(web_actuation_ready());
     mock_sem_take_fail = 0;
 }
 
@@ -4058,7 +4083,7 @@ static void test_maintenance_transient_inhibit_timeout_keeps_ready(void)
     test_sound_inhibit_calls = 0;
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_maintenance_begin(false));
     TEST_ASSERT_FALSE(web_maintenance_active());
-    TEST_ASSERT_TRUE(actuation_ready());
+    TEST_ASSERT_TRUE(web_actuation_ready());
     TEST_ASSERT_FALSE(motor_is_inhibited());
     TEST_ASSERT_FALSE(mock_sound_inhibited);
     TEST_ASSERT_FALSE(mock_audio_inhibited);
@@ -4075,7 +4100,7 @@ static void test_maintenance_persistent_inhibit_timeout_closes_ready(void)
     test_sound_inhibit_calls = 0;
     TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_maintenance_begin(false));
     TEST_ASSERT_FALSE(web_maintenance_active());
-    TEST_ASSERT_FALSE(actuation_ready());
+    TEST_ASSERT_FALSE(web_actuation_ready());
     TEST_ASSERT_TRUE(motor_is_inhibited());
     TEST_ASSERT_TRUE(mock_audio_inhibited);
     TEST_ASSERT_TRUE(test_sound_inhibit_last);
@@ -4090,7 +4115,7 @@ static void test_preinit_maintenance_and_readiness(void)
     TEST_ASSERT_EQUAL(ESP_OK, web_maintenance_begin(true));
     TEST_ASSERT_NOT_NULL(s_control_mutex);
     web_maintenance_end();
-    TEST_ASSERT_FALSE(actuation_ready());
+    TEST_ASSERT_FALSE(web_actuation_ready());
     TEST_ASSERT_FALSE(web_control_rails_begin(NULL));
     test_sound_inhibit_err = ESP_OK;
 }
@@ -4200,7 +4225,7 @@ static void test_async_transfer_admission_completion_and_readonly(void)
     const char body[] = "staged wave";
     httpd_req_t req = make_req(sizeof(body));
     set_body(body, sizeof(body)); set_query("slot=1");
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, audio_upload_post));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, audio_upload_post, false));
     TEST_ASSERT_NOT_NULL(test_pending_transfer);
     TEST_ASSERT_TRUE(web_maintenance_active());
     TEST_ASSERT_EQUAL_INT(0, mock_recv_calls);
@@ -4221,7 +4246,7 @@ static void test_async_transfer_admission_completion_and_readonly(void)
     TEST_ASSERT_TRUE(saved_track_exists(0));
     mock_current_task_handle = (TaskHandle_t)1;
     mock_task_create_ok = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, audio_upload_post));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, audio_upload_post, false));
     TEST_ASSERT_EQUAL_UINT32(2, test_complete_calls);
     TEST_ASSERT_FALSE(web_maintenance_active());
 }
@@ -4305,13 +4330,13 @@ static void test_async_begin_failure_and_exclusive_admission(void)
 {
     httpd_req_t req = make_req(16);
     mock_httpd_async_begin_err = ESP_ERR_NO_MEM;
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, audio_upload_post));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, audio_upload_post, false));
     TEST_ASSERT_FALSE(web_maintenance_active());
     TEST_ASSERT_EQUAL_INT(0, mock_httpd_async_live);
     TEST_ASSERT_EQUAL_INT(1, mock_httpd_shutdown_calls);
     mock_httpd_async_begin_err = ESP_OK;
     TEST_ASSERT_EQUAL(ESP_OK, web_maintenance_begin(false));
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, audio_upload_post));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, audio_upload_post, false));
     TEST_ASSERT_NULL(test_pending_transfer);
     TEST_ASSERT_TRUE(web_maintenance_active());
     TEST_ASSERT_EQUAL_INT(0, mock_httpd_async_live);
@@ -4320,7 +4345,7 @@ static void test_async_begin_failure_and_exclusive_admission(void)
     ++mock_timer_now_us;
     FILE *f = fopen("web_tmp/audio/deadline.bin", "wb");
     int total = -1;
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, pipe_upload(&req, f, &total)); fclose(f);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_transfer_pipe_upload(&req, f, &total)); fclose(f);
     TEST_ASSERT_EQUAL_INT(0, total);
 }
 
@@ -4418,7 +4443,7 @@ static void test_maintenance_existing_leases_and_no_resurrection(void)
 static void test_async_quiescence_failure_completes_and_closes(void)
 {
     httpd_req_t req = make_req(16);
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, audio_upload_post));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, audio_upload_post, false));
     TEST_ASSERT_NOT_NULL(test_pending_transfer);
     void *job = test_pending_transfer; test_pending_transfer = NULL;
     test_quiet_block = true;
@@ -4447,7 +4472,7 @@ static void test_web_init_required_maps_and_outputs_fail_closed(void)
     mock_auxio_init_ret = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, web_init());
     TEST_ASSERT_FALSE(web_control_rails_begin(NULL));
-    TEST_ASSERT_FALSE(actuation_ready());
+    TEST_ASSERT_FALSE(web_actuation_ready());
 }
 
 static void test_bad_actuation_parameters_do_not_fall_back(void)
@@ -4753,12 +4778,17 @@ static const char default_graph_fixture[] =
     "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
     "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
 
+static web_route_t s_test_route;
+
 static httpd_req_t graph_request(esp_err_t (*handler)(httpd_req_t *), const char *body)
 {
     httpd_req_t req = make_req(body ? strlen(body) : 0);
     snprintf(mock_content_type, sizeof(mock_content_type), "application/json; charset=utf-8");
     if (body) set_body(body, req.content_len);
-    s_route_handlers[63] = handler; req.user_ctx = &s_route_handlers[63];
+    s_test_route = (web_route_t){ .uri = "", .method = HTTP_POST, .handler = handler,
+        .admit = (handler == graph_save_post || handler == graph_validate_post)
+                     ? WEB_ADMIT_JSON : WEB_ADMIT_PLAIN };
+    req.user_ctx = &s_test_route;
     return req;
 }
 
@@ -4773,8 +4803,9 @@ static esp_err_t test_mutation_handler(httpd_req_t *req)
 static void test_mutation_dispatch_csrf_guard(void)
 {
     httpd_req_t req = make_req(0);
-    s_route_handlers[63] = test_mutation_handler;
-    req.user_ctx = &s_route_handlers[63];
+    s_test_route = (web_route_t){ .uri = "", .method = HTTP_POST,
+        .handler = test_mutation_handler, .admit = WEB_ADMIT_PLAIN };
+    req.user_ctx = &s_test_route;
     test_mutation_calls = 0;
 
     /* Cross-origin POST is rejected before the handler runs. */
@@ -5569,9 +5600,9 @@ static void test_binding_json_grows_with_count(void)
 static void test_ota_deadline_scales_with_length(void)
 {
     mock_timer_now_us = 1000000;
-    int64_t small = ota_deadline_from_len(0);
+    int64_t small = web_transfer_ota_deadline(0);
     TEST_ASSERT_TRUE(small - mock_timer_now_us >= 300000000LL);
-    int64_t large = ota_deadline_from_len(8 * 1024 * 1024);
+    int64_t large = web_transfer_ota_deadline(8 * 1024 * 1024);
     TEST_ASSERT_TRUE(large > small);
 
     httpd_req_t req = make_req(16);
@@ -5632,10 +5663,10 @@ static void test_absent_audio_does_not_block_ready_or_maintenance(void)
     test_sound_inhibit_err = ESP_ERR_INVALID_STATE;
     mock_audio_inhibit_ret = ESP_ERR_INVALID_STATE;
     TEST_ASSERT_EQUAL(ESP_OK, web_set_actuation_ready(true));
-    TEST_ASSERT_TRUE(actuation_ready());
+    TEST_ASSERT_TRUE(web_actuation_ready());
     TEST_ASSERT_EQUAL(ESP_OK, web_maintenance_begin(false));
     web_maintenance_end();
-    TEST_ASSERT_TRUE(actuation_ready());
+    TEST_ASSERT_TRUE(web_actuation_ready());
     test_sound_inhibit_err = ESP_OK;
     mock_audio_inhibit_ret = ESP_OK;
 }
@@ -5648,7 +5679,7 @@ static void test_stalled_worker_supervisor_releases_gate(void)
     set_query("slot=1");
     test_stalled_saw_abort = false;
     test_stalled_handler_rc = ESP_OK;
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, test_stalled_transfer_handler));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, test_stalled_transfer_handler, false));
     TEST_ASSERT_NOT_NULL(test_pending_transfer);
     TEST_ASSERT_TRUE(web_maintenance_active());
     void *job = test_pending_transfer;
@@ -5673,12 +5704,12 @@ static void test_transfer_wdt_feeds_only_on_bytes(void)
 {
     int before = mock_task_wdt_reset_calls;
     s_transfer_wdt_subscribed = false;
-    transfer_wdt_feed(1);
+    web_transfer_wdt_feed(1);
     TEST_ASSERT_EQUAL_INT(before, mock_task_wdt_reset_calls);
     s_transfer_wdt_subscribed = true;
-    transfer_wdt_feed(0);
+    web_transfer_wdt_feed(0);
     TEST_ASSERT_EQUAL_INT(before, mock_task_wdt_reset_calls);
-    transfer_wdt_feed(1);
+    web_transfer_wdt_feed(1);
     TEST_ASSERT_EQUAL_INT(before + 1, mock_task_wdt_reset_calls);
     s_transfer_wdt_subscribed = false;
 }
@@ -5691,7 +5722,7 @@ static void test_transfer_worker_feeds_twdt_on_received_bytes(void)
     set_body(body, sizeof(body));
     test_progress_total = -1;
     mock_task_wdt_reset_calls = 0;
-    TEST_ASSERT_EQUAL(ESP_OK, transfer_start(&req, test_progress_transfer_handler));
+    TEST_ASSERT_EQUAL(ESP_OK, web_transfer_start(&req, test_progress_transfer_handler, false));
     TEST_ASSERT_NOT_NULL(test_pending_transfer);
     void *job = test_pending_transfer;
     test_pending_transfer = NULL;

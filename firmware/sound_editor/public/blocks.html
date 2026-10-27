@@ -3929,7 +3929,7 @@ function buildSimPanel(){
   $("sim_start").onclick=simStart;
   $("sim_reset").onclick=simReset;
   $("sim_speed").oninput=e=>{if(!sim)return;sim.speed=Number(e.target.value)|0;$("sim_spd_v").textContent=String(sim.speed);renderSim();};
-  $("sim_dir").onchange=e=>{if(sim)sim.forward=e.target.value!=="rev";};
+  $("sim_dir").onchange=e=>{if(sim){sim.forward=e.target.value!=="rev";renderSim();}};
   $("sim_engine").onchange=e=>{if(sim)sim.engineOn=e.target.checked;renderSim();};
   el.querySelectorAll("[data-simfn]").forEach(b=>{
     const fn=Number(b.getAttribute("data-simfn"));

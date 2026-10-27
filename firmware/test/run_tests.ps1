@@ -15,7 +15,9 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $tmp  = $env:TEMP
-$isWindows = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+# Do not use $isWindows: PowerShell 7 defines it as a read-only automatic
+# variable, and assigning to it kills the run on windows-latest.
+$onWindows = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
 
 # --- locate compiler -------------------------------------------------------
 $cc = $env:DCC_TEST_CC
@@ -74,6 +76,21 @@ if (-not (Test-Path "$unitySrc\unity.c")) {
     if (-not (Test-Path "$unitySrc\unity.c")) { Write-Host "ERROR: Unity fetch failed"; exit 1 }
 }
 
+# --- generated web header --------------------------------------------------
+# web.c includes the generated web_html.h. A clean CI checkout has no header
+# (the ESP-IDF build creates it), so generate it before compiling C suites.
+$webPython = Get-Command python -ErrorAction SilentlyContinue
+if (-not $webPython) { $webPython = Get-Command py -ErrorAction SilentlyContinue }
+if (-not $webPython) {
+    Write-Host "ERROR: Python is required to generate web_html.h" -ForegroundColor Red
+    exit 1
+}
+& $webPython.Source "$root\tools\gen_web_html.py"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: web_html.h generation failed" -ForegroundColor Red
+    exit 1
+}
+
 # --- include paths ---------------------------------------------------------
 $inc = @(
     "-I$unitySrc",
@@ -125,7 +142,7 @@ foreach ($suite in $suites) {
         $suiteFlags = @()
         if ($suite -eq "test_concurrency" -or $suite -eq "test_motor_concurrency") {
             $suiteFlags += "-DMOCK_FREERTOS_REAL_SYNC"
-            if (-not $isWindows) { $suiteFlags += "-pthread" }
+            if (-not $onWindows) { $suiteFlags += "-pthread" }
         }
         if ($suite -eq "test_motor_concurrency") {
             # Reuse the host LEDC register shim used by test_motor.

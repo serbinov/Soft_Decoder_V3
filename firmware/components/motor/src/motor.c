@@ -1465,6 +1465,7 @@ static void bemf_cal_task(void *arg)
     uint8_t first_speed = 0;
     uint16_t first_frac = 0;
     uint16_t last_frac = 0;
+    uint8_t ceiling_speed = 0;
     bool complete = true;
 
     cal_set_phase(generation, MOTOR_BEMF_CAL_PHASE_PREFLIGHT);
@@ -1534,6 +1535,7 @@ static void bemf_cal_task(void *arg)
         }
         if (!complete) break;
         if (ceiling) {
+            ceiling_speed = spd;
             if (cal.count >= CAL_MIN_POINTS) {
                 ESP_LOGW(TAG, "BEMF calibration ceiling at speed %u; saving %u points",
                          (unsigned)spd, (unsigned)cal.count);
@@ -1601,11 +1603,13 @@ static void bemf_cal_task(void *arg)
 
     bool save = cal.count >= CAL_MIN_POINTS && last_frac >= CAL_MIN_END_FRAC &&
                 cal_curve_rising(&cal);
+    if (ceiling_speed != 0U) {
+        profile.ceiling_speed = ceiling_speed;
+    } else if (!save && cal.count > 0U && last_frac < CAL_MIN_END_FRAC) {
+        profile.ceiling_speed = cal.speed[cal.count - 1U];
+    }
     if (!save) {
         complete = false;
-        if (cal.count > 0U && last_frac < CAL_MIN_END_FRAC) {
-            profile.ceiling_speed = cal.speed[cal.count - 1U];
-        }
     }
     cal_finish(generation, &cal, complete, &profile, cfg.apply_pid);
 }
@@ -1703,9 +1707,6 @@ static void cal_normalize_config(motor_bemf_cal_config_t *cfg)
             break;
         case MOTOR_BEMF_MODE_THOROUGH:
             cfg->points = 14U;
-            break;
-        case MOTOR_BEMF_MODE_CUSTOM:
-            cfg->points = cfg->speed_count;
             break;
         default:
             cfg->points = 12U;

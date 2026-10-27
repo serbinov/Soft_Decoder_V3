@@ -11,6 +11,16 @@
 
 ## Релизы
 
+### 2026-10-27 — CI: генерация web_html.h и PowerShell 7
+
+- `run_tests.sh`, `run_tests.ps1` и `coverage.ps1` теперь генерируют
+  `web_html.h` перед сборкой host-тестов, поэтому чистый checkout CI больше не
+  падает на `web.c` без предварительной ESP-IDF сборки.
+- `run_tests.ps1` не пишет в read-only автоматическую переменную `$IsWindows`
+  (PowerShell 7 на windows-latest); используется локальная `$onWindows`.
+- `test_motor` расширен до 83 тестов; покрытие `motor.c` — 96,7 %, общий гейт
+  88,6 % (порог 88,0 %).
+
 ### 2026-10-27 — v0.14 — BEMF-режимы реально выбирают число точек
 
 - `FAST` = 10, `BALANCED` = 12, `AUTO` = 12, `THOROUGH` = 14. Явный `points`
@@ -498,6 +508,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-27 (v0.14) — fix(ci): generate web_html.h and support PowerShell 7 hosts
 - 2026-10-27 (v0.14) — fix(bemf): honor calibration mode point presets (v0.14)
 - 2026-10-27 (v0.13) — docs(skill): add Soft_Decoder_V3 project skill
 - 2026-10-27 (v0.13) — feat(motor): rewrite BEMF control and calibration for v0.13

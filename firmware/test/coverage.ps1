@@ -27,6 +27,13 @@ if (-not $gcov) { Write-Host "ERROR: gcov not found (needs gcc)" -ForegroundColo
 $gcov = $gcov.Source
 Write-Host "Compiler: $cc"
 
+# web.c includes the generated web_html.h; generate it in clean checkouts.
+$py = Get-Command python -ErrorAction SilentlyContinue
+if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue }
+if (-not $py) { Write-Host "ERROR: Python is required to generate web_html.h" -ForegroundColor Red; exit 1 }
+& $py.Source "$root\tools\gen_web_html.py"
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: web_html.h generation failed" -ForegroundColor Red; exit 1 }
+
 $unityDir = Join-Path $env:TEMP "unity_clone"
 if (-not (Test-Path "$unityDir\src\unity.c")) {
     git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git $unityDir | Out-Null

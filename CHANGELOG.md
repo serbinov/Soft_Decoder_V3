@@ -11,6 +11,31 @@
 
 ## Релизы
 
+### 2026-10-27 — v0.13 — мотор и BEMF переписаны с нуля
+
+- **Мотор:** базовый ШИМ теперь всегда open-loop по CV2/CV5/CV6 или CV67..94.
+  BEMF остаётся необязательной коррекцией и больше не может остановить мотор:
+  потеря сигнала отключает только PI и возвращает базовый duty.
+- **Датчик:** ноль/равные входы BEMF трактуются как отсутствие сигнала, а не
+  как «нулевая скорость». Валиден только диапазон `rail/64…0.90·rail`.
+  Убраны preflight/plausibility/sense-zero fault-latch, coasting и запрет
+  повторной команды.
+- **Калибровка:** простой прогон по фиксированной лестнице до 14 точек или
+  CUSTOM-списку; убраны адаптивный второй проход, boost-повторы и settle-
+  сходимость. Ошибка (`NO_RISE`/`CURVE`) сохраняет предыдущую кривую и не
+  мешает движению. Встроенная `BEMF_CAL_BASE` больше не подставляется
+  автоматически.
+- **Аналоговый вход:** учтены реальные делители AURA-X v1 — 10.2 кОм + 1.62 кОм
+  (0.1371) и 1 нФ на GND для `RAIL_SENSE`/`BEMF1`/`BEMF2`. Доли `BEMF/rail`
+  от коэффициента не зависят; реальные напряжения (`×7.296`) добавлены в
+  `BEMF-RAW`. Введён saturation guard: при >3000 мВ на пине (>~21.9 В rail)
+  BEMF-коррекция и калибровка отключаются, мотор едет open-loop.
+- **Малые скорости:** для CV-кривой добавлен floor 40/1023 на ступенях 1..5,
+  чтобы при CV2=0 мотор трогался уже на первых нотах.
+- **Тесты/доки:** `test_motor` и `test_motor_concurrency` переписаны под новый
+  контур; обновлены `ARCHITECTURE.md`, `BEMF_DIAGNOSTICS.md`,
+  `docs/known_issues.md`.
+
 ### 2026-10-26 — batch B: concurrency, audio/RTOS, CI и release hardening
 
 - **Concurrency/тесты:** добавлены real-sync наборы `test_concurrency` и
@@ -464,6 +489,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-27 (v0.13) — feat(motor): rewrite BEMF control and calibration for v0.13
 - 2026-10-26 (v0.12) — release: rebuild 0.12 firmware with factory wipe
 - 2026-10-26 (v0.12) — fix(firmware,web): harden runtime safety and add factory wipe
 - 2026-10-26 (v0.12) — release: 0.12 firmware binaries

@@ -331,7 +331,7 @@ test('BEMF phase and sensor error text are shown', async t => {
   context.api = async () => ({ ok: true, active: true, result: 'running', phase: 'preflight',
     progress: 1, total: 12 });
   await context.loadBemfCal();
-  assert.match(element('bemf_status').textContent, /проверка датчика BEMF/);
+  assert.match(element('bemf_status').textContent, /проверка покоя и датчика BEMF/);
 
   context.api = async () => ({ ok: true, active: false, result: 'failed', error: 'sensor',
     stored: true, valid: true, runId: 9 });

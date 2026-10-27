@@ -30,10 +30,9 @@ typedef enum {
 } motor_inhibit_reason_t;
 /* Independent owners cannot clear another owner's inhibit. */
 esp_err_t motor_set_inhibit_reason(motor_inhibit_reason_t reason, bool inhibited);
-/* Also reports the motor-owned feedback fault: closed-loop feedback loss holds
- * non-increasing duty for at most 100 ms, then coasts and rejects nonzero
- * commands. Only speed=0 or explicit BEMF disable clears that fault; neither
- * clears CONTROL, SAFETY or DCC_TIMEOUT. */
+/* True while any inhibit owner (CONTROL, SAFETY, DCC_TIMEOUT) is active.
+ * BEMF feedback is advisory: losing it disables the correction but never sets
+ * an inhibit and never coasts a moving motor. */
 bool motor_is_inhibited(void);
 /* Timestamp (us) of the last completed motor tick (0 before the first tick). */
 int64_t motor_last_tick_us(void);
@@ -74,9 +73,10 @@ typedef enum {
     MOTOR_BEMF_CAL_FAILED,
 } motor_bemf_cal_state_t;
 
-/* Adaptive calibration profiles. FAST is the legacy 10-point run and is kept
- * for compatibility (and for the plain motor_bemf_cal_start() call). AUTO uses
- * the thorough adaptive plan; CUSTOM honours the caller's speed list and
+/* Calibration profiles select a point count from the fixed speed ladder.
+ * FAST is the legacy 10-point run (used by motor_bemf_cal_start()). CUSTOM
+ * honours the caller's speed list; the other modes differ only in how many
+ * ladder points are measured. There is no adaptive second pass any more.
  * windows. */
 typedef enum {
     MOTOR_BEMF_MODE_AUTO = 0,
@@ -121,9 +121,8 @@ typedef enum {
     MOTOR_BEMF_CAL_ERR_NO_RISE,  /* no movement found up to the probe ceiling */
 } motor_bemf_cal_error_t;
 
-/* Calibration phases. The adaptive run executes PREFLIGHT (static sensor +
- * first-movement probe), WINDOW (delay sweep at the first moving speed), CURVE
- * (the measured curve) and SAVING. A failure keeps the phase where it stopped. */
+/* Calibration phases. The run executes PREFLIGHT (rest check), CURVE (the
+ * measured ladder) and SAVING. A failure keeps the phase where it stopped. */
 typedef enum {
     MOTOR_BEMF_CAL_PHASE_IDLE = 0,
     MOTOR_BEMF_CAL_PHASE_PREFLIGHT,
@@ -142,11 +141,11 @@ typedef struct {
     uint8_t measured_points;  /* successful rotating points */
     uint8_t stalled_points;   /* points that did not rotate */
     uint8_t ceiling_speed;     /* first speed above the measurement ceiling, 0=none */
-    uint8_t first_move_speed;  /* lowest successful speed (preflight probe) */
+    uint8_t first_move_speed;  /* lowest successful ladder speed */
     uint16_t first_frac;       /* BEMF at first_move_speed, x1024 */
-    uint16_t optimal_us;       /* selected PWM-off sample window */
-    uint16_t dwell_ms;         /* configured full-speed dwell per new point */
-    bool sensor_ok;            /* preflight static/probe/window/polarity passed */
+    uint16_t optimal_us;       /* active PWM-off sample window */
+    uint16_t dwell_ms;         /* configured dwell per measured point */
+    bool sensor_ok;            /* at least one point produced a valid BEMF */
     uint16_t settle_ms_avg;    /* average accepted settle time */
     uint16_t plant_gain_x1000; /* mV per duty count (x1000) */
     uint16_t kp_x100;          /* suggested Kp x100 */
@@ -160,7 +159,7 @@ typedef struct {
     bool active;      /* calibration running */
     uint8_t phase;    /* motor_bemf_cal_phase_t */
     uint8_t step;     /* current step while active (1-based) */
-    uint8_t total;    /* total steps (can grow when adaptive points are added) */
+    uint8_t total;    /* total steps for this run */
     uint8_t count;    /* measured points (current run or stored) */
     uint8_t speed[MOTOR_BEMF_CAL_MAX_POINTS];
     uint16_t frac[MOTOR_BEMF_CAL_MAX_POINTS]; /* rail fraction * 1024 */
@@ -174,16 +173,15 @@ typedef struct {
 } motor_bemf_cal_info_t;
 
 esp_err_t motor_bemf_cal_start(void);
-/* Fill a configuration with AUTO defaults (adaptive, up to 16 points). */
+/* Fill a configuration with AUTO defaults (12 ladder points). */
 void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg);
-/* Start an adaptive/custom calibration. cfg.mode selects the profile; CUSTOM
- * requires at least MOTOR_BEMF_CAL_MIN_POINTS explicit ascending speeds. The
- * engine settles each point until stable, retries noisy points, skips a
- * non-rotating point after a boost, inserts extra points where the curve is
- * steep/uncertain, and saves a partial curve if the ceiling is reached. */
+/* Start a calibration. cfg.mode selects a ladder point count; CUSTOM uses the
+ * explicit speed[] list. Each point is driven open-loop, sampled between
+ * `samples` coast windows and stored as a rail fraction. Non-rotating points
+ * are skipped; a ceiling stops the run and keeps the measured partial curve. */
 esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg);
 /* Independent 10 ms safety caller: no mutex, ADC, NVS, allocation or waits.
- * Coasts on stale/low rail or an expired 100 ms worker-only drive lease. */
+ * Coasts when the worker-only 100 ms drive lease expires. */
 void motor_bemf_cal_watchdog(void);
 /* Nonblocking, idempotent; inactive cancellation never stops normal motion.
  * The active reservation survives cancellation/failure until worker cleanup. */
@@ -195,7 +193,8 @@ esp_err_t motor_bemf_cal_cancel(void);
 bool motor_bemf_cal_active(void);
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info);
 esp_err_t motor_bemf_cal_clear(void);
-/* Re-read the stored calibration (or the firmware base curve) and apply it. */
+/* Re-read the stored calibration and apply it. If none is stored, closed-loop
+ * correction stays off and the motor runs open-loop. */
 esp_err_t motor_bemf_cal_reload(void);
 
 /* Enable/disable closed-loop BEMF regulation. When disabled the motor runs
@@ -215,10 +214,14 @@ bool motor_get_bemf_enabled(void);
 
 /* Raw BEMF measurement diagnostics for debugging the calibration / PID. */
 typedef struct {
-    uint32_t rail_mv;
-    uint32_t bemf1_mv;
-    uint32_t bemf2_mv;
-    uint32_t bemf_filtered_mv;
+    uint32_t rail_mv;              /* divider-domain (ADC pin) mV */
+    uint32_t bemf1_mv;             /* divider-domain (ADC pin) mV */
+    uint32_t bemf2_mv;             /* divider-domain (ADC pin) mV */
+    uint32_t bemf_filtered_mv;     /* divider-domain (ADC pin) mV */
+    uint32_t rail_motor_mv;        /* actual rail, reconstructed with 10.2k/1.62k */
+    uint32_t bemf1_motor_mv;       /* actual MOTOR+ voltage at BEMF1 */
+    uint32_t bemf2_motor_mv;       /* actual MOTOR- voltage at BEMF2 */
+    uint32_t bemf_filtered_motor_mv;
     bool bemf_valid;
     bool cal_valid;
     bool cal_active;
@@ -236,23 +239,20 @@ typedef struct {
 } motor_bemf_diag_t;
 void motor_bemf_diag(motor_bemf_diag_t *d);
 
-/* BEMF sensor verification + adaptive measurement-window selection.
+/* BEMF sensor verification.
  *
- * The check always runs the static part: with the bridge coasting it samples
- * both terminals at several delays, verifies a near-zero differential, checks
- * the offset/noise and rejects stuck/high or saturated nodes.
+ * The static part coasts the bridge and samples both terminals three times,
+ * verifying a near-zero differential and rejecting stuck/high or saturated
+ * nodes. With spin=true it additionally drives the motor open-loop for 200 ms
+ * forward and 200 ms reverse, coasts and samples each direction to verify a
+ * rising signal and opposite polarity. `optimal_us` reports the active
+ * PWM-off settle window; the check does not sweep or store it.
  *
- * With spin=true it additionally drives the motor open-loop for <=300 ms
- * (forward, and again reverse for polarity), coasts and sweeps the delays to
- * find the earliest stable BEMF plateau. On success the selected window is
- * stored in NVS and used by subsequent samples. The spin check is explicit and
- * bounded; the caller must release the motor inhibit first.
- *
- * Returns ESP_OK only when out->ok is true, ESP_ERR_INVALID_ARG for a NULL
- * result, ESP_ERR_INVALID_STATE when the motor is busy/inhibited/not at rest,
- * and ESP_FAIL when the check completed but failed (out->reason explains it).
- * `optimal_us` is <= the legacy 1000 us default for spin checks; a static-only
- * success leaves it 0 because no window was selected. */
+ * The spin check is explicit and bounded; the caller must release the motor
+ * inhibit first. Returns ESP_OK only when out->ok is true, ESP_ERR_INVALID_ARG
+ * for a NULL result, ESP_ERR_INVALID_STATE when the motor is busy/inhibited/
+ * not at rest, and ESP_FAIL when the check completed but failed
+ * (out->reason explains it). A static-only success leaves spin_ok false. */
 typedef enum {
     MOTOR_BEMF_CHECK_OK = 0,
     MOTOR_BEMF_CHECK_ERR_BUSY,

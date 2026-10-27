@@ -242,7 +242,7 @@ static void worker_thread(void *arg)
 
 static void adaptive_worker_thread(void *arg)
 {
-    bemf_cal_adaptive_task(arg);
+    bemf_cal_task(arg);
 }
 
 static void set_cal_adc(void)
@@ -282,25 +282,6 @@ void setUp(void)
     g_bemf_use = true;
     cv_defaults();
 
-    s_bemf_filtered = 0.0f;
-    s_bemf_valid = false;
-    s_bemf_filter_primed = false;
-    s_plausibility_clock_active = false;
-    s_plausibility_since_us = 0;
-    s_sat_clock_active = false;
-    s_sat_since_us = 0;
-    s_last_pid_us = 0;
-    s_pid_integral = 0.0f;
-    s_pid_prev_error = 0.0f;
-    s_last_duty = 0;
-    s_cal_active = false;
-    s_cal_task = NULL;
-    s_cal_total = BEMF_CAL_POINTS;
-    s_cal_measured = 0;
-    memset(&s_cal_profile, 0, sizeof(s_cal_profile));
-    s_stop_requested = false;
-    s_bemf_max_fraction = 0.85f;
-
     TEST_ASSERT_EQUAL(ESP_OK, motor_init());
     TEST_ASSERT_TRUE(motor_is_inhibited());
     TEST_ASSERT_EQUAL(ESP_OK, motor_set_inhibited(false));
@@ -318,9 +299,9 @@ void tearDown(void)
         vSemaphoreDelete(s_control_mutex);
         s_control_mutex = NULL;
     }
-    if (s_bemf_mutex != NULL) {
-        vSemaphoreDelete(s_bemf_mutex);
-        s_bemf_mutex = NULL;
+    if (s_adc_mutex != NULL) {
+        vSemaphoreDelete(s_adc_mutex);
+        s_adc_mutex = NULL;
     }
 }
 

@@ -801,16 +801,20 @@ static void handle_bemf_cmd(const char *line)
     if (strcmp(line, "BEMF-RAW") == 0) {
         motor_bemf_diag_t d;
         motor_bemf_diag(&d);
-        char buf[160];
+        char buf[192];
         snprintf(buf, sizeof(buf),
-                 "BEMF-RAW %lu %lu %lu %lu %u %u %u %u %u %lu %ld %ld %ld %u %ld",
+                 "BEMF-RAW %lu %lu %lu %lu %u %u %u %u %u %lu %ld %ld %ld %u %ld"
+                 " %lu %lu %lu %lu",
                  (unsigned long)d.rail_mv, (unsigned long)d.bemf1_mv,
                  (unsigned long)d.bemf2_mv, (unsigned long)d.bemf_filtered_mv,
                  d.bemf_valid ? 1 : 0, d.cal_valid ? 1 : 0,
                  d.cal_active ? 1 : 0, (unsigned)d.cal_step,
                  (unsigned)d.applied_speed, (unsigned long)d.duty,
                  (long)d.error, (long)d.integral, (long)d.corr,
-                 d.pid_ok ? 1 : 0, (long)d.target);
+                 d.pid_ok ? 1 : 0, (long)d.target,
+                 (unsigned long)d.rail_motor_mv, (unsigned long)d.bemf1_motor_mv,
+                 (unsigned long)d.bemf2_motor_mv,
+                 (unsigned long)d.bemf_filtered_motor_mv);
         send_line(buf);
         return;
     }

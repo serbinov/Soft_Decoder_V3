@@ -14,9 +14,10 @@
 
 static const char *TAG = "track";
 
-/* RAIL_SENSE divider: upper 10k, lower 1.62k -> ADC sees 0.139415 x rail.
- * ADC full scale at 12 dB attenuation is ~3100 mV. Values below are the
- * divider-domain voltage: 2500 mV ~ 18 V rail, 110 mV ~ 0.8 V rail. */
+/* RAIL_SENSE divider (AURA-X v1): R10 10.2k upper, R13 1.62k lower, C11 1nF
+ * -> ADC sees 1.62 / (10.2 + 1.62) = 0.13706 x rail. ADC full scale at 12 dB
+ * attenuation is ~3100 mV. Values below are divider-domain: 2500 mV is about
+ * 18.24 V of actual rail, 110 mV about 0.80 V. */
 #define DC_RAIL_FULL_MV     2500
 #define DC_RAIL_DEADBAND_MV 110
 

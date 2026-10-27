@@ -433,11 +433,8 @@ static void sound_task(void *arg)
         unsigned epoch = atomic_load(&s_motion_epoch);
         (void)motor_get_applied_speed(&spd, &fwd);
         /* The motor reports the DCC 128-step scale (0..126); the engine works
-         * on a normalized 0..255 scale. */
-        if (spd > 126U) {
-            spd = 126U;
-        }
-        sound_applied_speed((uint8_t)(((uint16_t)spd * 255U) / 126U), fwd,epoch);
+         * on a normalized 0..255 scale. Round to match the editor simulator. */
+        sound_applied_speed(sound_speed_from_dcc128(spd), fwd, epoch);
         sound_tick();
         iters++;
         if (s_task_iter_cap != 0U && iters >= s_task_iter_cap) {

@@ -37,6 +37,7 @@ jobs:
           python test/test_sound_editor_assets.py
           python test/test_release_artifacts.py
           python test/test_pack_crypto.py
+          python test/test_dcc28_sound_parity.py
 
   sanitizers:
     name: Host tests (ASan + UBSan)

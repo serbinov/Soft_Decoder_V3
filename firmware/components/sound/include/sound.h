@@ -29,6 +29,15 @@ typedef struct {
     bool retry_channel32;
 } sound_graph_status_t;
 
+/* DCC 128-step motor scale (0..126) to the graph's 0..255 speed. Rounding
+ * (not truncation) keeps the 28-step positions on the same percentage band
+ * boundaries as the sound editor simulator. */
+static inline uint8_t sound_speed_from_dcc128(uint8_t speed128)
+{
+    if (speed128 > 126U) speed128 = 126U;
+    return (uint8_t)(((uint16_t)speed128 * 255U + 63U) / 126U);
+}
+
 bool sound_graph_active(void);
 /* Invalid persisted graph retains routing ownership without playing anything. */
 void sound_graph_fail_closed(void);

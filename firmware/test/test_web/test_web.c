@@ -2024,10 +2024,24 @@ static void test_dcc_status_get(void)
     mock_timer_now_us = 1000000;
     mock_dcc_last_packet_us = 950000;
     mock_dcc_overruns = 7;
+    mock_dcc_speed = 36;
+    mock_dcc_step = 8;
+    mock_dcc_mode = 28;
+    mock_dcc_forward = true;
+    mock_motor_applied_speed = 36;
+    mock_motor_forward = true;
+    mock_graph_status.speed = 73;
+    mock_graph_status.engine = true;
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, dcc_status_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"overruns\":7"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"lastPacketMs\":50"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":36"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"step\":8"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"mode\":28"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"appliedSpeed\":36"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"soundSpeed\":73"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"soundEngine\":true"));
 }
 
 static void test_audio_status_get(void)

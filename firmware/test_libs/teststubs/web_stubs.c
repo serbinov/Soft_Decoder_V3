@@ -1579,8 +1579,20 @@ int mock_dcc_reload_config_calls = 0;
 bool mock_dcc_control_enabled;
 uint32_t mock_dcc_overruns;
 int64_t mock_dcc_last_packet_us;
+uint8_t mock_dcc_speed;
+uint8_t mock_dcc_step;
+uint8_t mock_dcc_mode;
+bool mock_dcc_forward;
 uint32_t dcc_get_isr_overruns(void) { return mock_dcc_overruns; }
 int64_t dcc_last_packet_us(void) { return mock_dcc_last_packet_us; }
+void dcc_get_speed_status(uint8_t *speed128, uint8_t *step, bool *forward,
+                          uint8_t *mode)
+{
+    if (speed128) *speed128 = mock_dcc_speed;
+    if (step) *step = mock_dcc_step;
+    if (forward) *forward = mock_dcc_forward;
+    if (mode) *mode = mock_dcc_mode;
+}
 
 void dcc_set_control_enabled(bool enabled)
 {
@@ -1780,6 +1792,10 @@ void mock_web_reset(void)
     mock_dcc_control_enabled = false;
     mock_dcc_overruns = 0;
     mock_dcc_last_packet_us = 0;
+    mock_dcc_speed = 0;
+    mock_dcc_step = 0;
+    mock_dcc_mode = 0;
+    mock_dcc_forward = true;
     mock_route_count = 0;
     memset(&mock_httpd_last_cfg, 0, sizeof(mock_httpd_last_cfg));
     memset(mock_routes, 0, sizeof(mock_routes));

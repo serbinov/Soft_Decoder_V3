@@ -7,6 +7,18 @@
 #include "esp_err.h"
 
 typedef void (*dcc_speed_cb_t)(uint8_t speed128, bool forward);
+
+/* Linear DCC speed-step maps shared by the decoder and the sound layer.
+ * step is the 1-based running notch (1..14 or 1..28); 0 = stop. The 28-step
+ * map uses 28 equal intervals from 1/28 to 28/28 so it matches the sound
+ * editor's percentage bands (step 8 = 28.6%, step 16 = 57.1%, ...). */
+uint8_t dcc_speed_from_14step(uint8_t step);
+uint8_t dcc_speed_from_28step(uint8_t step);
+
+/* Last decoded speed command: 0..126, 1-based running notch (14/28 mode),
+ * direction, and the packet speed mode (14, 28 or 128). Safe for polling. */
+void dcc_get_speed_status(uint8_t *speed128, uint8_t *step, bool *forward,
+                          uint8_t *mode);
 typedef void (*dcc_function_cb_t)(uint8_t fn, bool state);
 typedef esp_err_t (*dcc_cv_write_cb_t)(uint16_t cv, uint8_t value, bool service_mode);
 typedef bool (*dcc_cv_read_cb_t)(uint16_t cv, uint8_t *out_value);

@@ -11,6 +11,19 @@
 
 ## Релизы
 
+### 2026-10-27 — v0.15 — DCC 28 совпадает с симулятором
+
+- 28-ступенчатая DCC-скорость раскладывается линейно `1/28..28/28`
+  (`dcc_speed_from_28step`), а не `0..126` по 27 интервалам. Ноты 8, 12, 16,
+  20, 24 теперь попадают в те же звуковые диапазоны, что и симулятор.
+- `sound_speed_from_dcc128` округляет `0..126 → 0..255`, а не отбрасывает
+  дробь; исчезли сдвиги на границах 14/28/42/57/71/85 %.
+- `/api/dcc/status` показывает режим пакета (14/28/128), ноту, скорость,
+  направление, возраст пакета, applied speed мотора и speed/engine звука;
+  в веб-панели добавлена live-строка DCC.
+- Тесты: все 28 кодов и оба направления, 14-step parity, C-проверка
+  DCC→sound scale и Python-проверка диапазонов `default_scheme.json`.
+
 ### 2026-10-27 — CI: генерация web_html.h и PowerShell 7
 
 - `run_tests.sh`, `run_tests.ps1` и `coverage.ps1` теперь генерируют
@@ -514,6 +527,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-27 (v0.15) — feat(dcc): align 28-step speed with sound simulator (v0.15)
 - 2026-10-27 (v0.14) — fix(ci): use MSYS2 output path and case-safe asset test
 - 2026-10-27 (v0.14) — fix(ci): generate web_html.h and support PowerShell 7 hosts
 - 2026-10-27 (v0.14) — fix(bemf): honor calibration mode point presets (v0.14)

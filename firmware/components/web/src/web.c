@@ -3562,10 +3562,29 @@ static esp_err_t dcc_status_get(httpd_req_t *req)
         int64_t now = esp_timer_get_time();
         age = now > last ? (now - last) / 1000 : 0;
     }
-    char json[160];
+    uint8_t dcc_speed = 0, dcc_step = 0, dcc_mode = 0;
+    bool dcc_forward = true;
+    dcc_get_speed_status(&dcc_speed, &dcc_step, &dcc_forward, &dcc_mode);
+    uint8_t target = 0, applied = 0;
+    bool target_forward = true, applied_forward = true;
+    motor_get_status(&target, &target_forward);
+    motor_get_applied_speed(&applied, &applied_forward);
+    sound_graph_status_t snd = {0};
+    sound_graph_status_get(&snd);
+
+    char json[384];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"overruns\":%lu,\"lastPacketMs\":%lld}",
-             (unsigned long)dcc_get_isr_overruns(), (long long)age);
+             "{\"ok\":true,\"overruns\":%lu,\"lastPacketMs\":%lld,"
+             "\"speed\":%u,\"step\":%u,\"mode\":%u,\"forward\":%s,"
+             "\"targetSpeed\":%u,\"targetForward\":%s,"
+             "\"appliedSpeed\":%u,\"appliedForward\":%s,"
+             "\"soundSpeed\":%u,\"soundEngine\":%s}",
+             (unsigned long)dcc_get_isr_overruns(), (long long)age,
+             (unsigned)dcc_speed, (unsigned)dcc_step, (unsigned)dcc_mode,
+             dcc_forward ? "true" : "false",
+             (unsigned)target, target_forward ? "true" : "false",
+             (unsigned)applied, applied_forward ? "true" : "false",
+             (unsigned)snd.speed, snd.engine ? "true" : "false");
     return send_json(req, json);
 }
 

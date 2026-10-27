@@ -356,6 +356,7 @@ label{color:var(--text);font-weight:600}
           <button class="btn emergency" id="btn_emergency" onclick="emergencyStop()" data-i18n="ctrl_emergency">⛔ Экстренный Стоп</button>
           <button class="btn" id="btn_fwd" onclick="setDir(true)" data-i18n="ctrl_fwd">Вперёд ▶</button>
         </div>
+        <div class="hint" id="dcc_live" style="font-family:ui-monospace,Consolas,monospace">DCC: —</div>
         <div class="fn-grid" id="fn_grid"></div>
       </div>
     </div>
@@ -1025,6 +1026,9 @@ async function refreshStatus(){
       renderMotor();
     }
     if(document.hidden||uploadBusy||rebooting)return;
+    var dd=await api('/api/dcc/status',{timeout:3000});
+    if(dd&&dd.ok)renderDccLive(dd);
+    if(document.hidden||uploadBusy||rebooting)return;
     var d3=await api('/api/functions',{timeout:3000});
     if(d3&&d3.ok&&d3.states){
       for(var i=0;i<d3.states.length;i++)state.fnStates[i]=d3.states[i]===1;
@@ -1312,6 +1316,19 @@ function renderMotor(){
   if(bf)bf.classList.toggle('active',!stopped&&state.motor.forward);
   if(br)br.classList.toggle('active',!stopped&&!state.motor.forward);
   if(bs)bs.classList.toggle('active',stopped);
+}
+function renderDccLive(d){
+  var el=byId('dcc_live');if(!el)return;
+  if(!d){el.textContent='DCC: —';return;}
+  var mode=Number(d.mode)||0,step=Number(d.step)||0;
+  var txt='DCC';
+  if(mode)txt+=' '+mode;
+  if(step)txt+=' · notch '+step+'/'+mode;
+  txt+=' · spd '+(Number(d.speed)||0)+(d.forward?' fwd':' rev');
+  txt+=' · pkt '+(d.lastPacketMs==null?'—':d.lastPacketMs+' ms');
+  if(d.appliedSpeed!=null)txt+=' · mot '+d.appliedSpeed+(d.appliedForward?'f':'r');
+  if(d.soundSpeed!=null)txt+=' · snd '+d.soundSpeed+(d.soundEngine?' eng':' idle');
+  el.textContent=txt;
 }
 function onSpeedInput(){
   motorRevision++;

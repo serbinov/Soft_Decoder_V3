@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sound.h"
+
 /* White-box include: exposes dcc.c static internals for direct testing. The
  * native test env strips `static` only for this translation unit to avoid
  * breaking system headers. All standard headers the component pulls in
@@ -638,31 +640,48 @@ static void test_dcc_28step_code_mapping(void)
     TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
 
     g_emergency_calls = 0;
-    const struct {
-        uint8_t instr;
-        uint16_t expected;
-        bool fwd;
-    } cases[] = {
-        { 0x41, 1,   false }, /* code 2 -> step 1, reverse */
-        { 0x61, 1,   true  }, /* code 2 -> step 1 */
-        { 0x71, 5,   true  }, /* code 3 -> step 2 */
-        { 0x62, 10,  true  }, /* code 4 -> step 3 */
-        { 0x7E, 126, true  }, /* code 29 -> last running step */
-        { 0x7F, 126, true  }, /* code 31 -> clamped */
-    };
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        g_speed_calls = 0;
-        uint8_t packet[] = {0x03, cases[i].instr, 0x00};
-        packet[2] = (uint8_t)(0x03 ^ cases[i].instr);
-        feed_packet(packet, sizeof(packet), 12);
-        TEST_ASSERT_EQUAL_INT(0, g_emergency_calls);
-        TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-        TEST_ASSERT_EQUAL_UINT16(cases[i].expected, g_speed);
-        TEST_ASSERT_EQUAL(cases[i].fwd, g_forward);
+    /* All 28 running notches: code 2..29. The map is linear 1/28..28/28, so
+     * it matches the sound-editor percentage bands. */
+    for (uint8_t step = 1; step <= 28; ++step) {
+        uint8_t code = (uint8_t)(step + 1U);
+        uint8_t instr = (uint8_t)(0x60U | ((code >> 1) & 0x0FU) |
+                                  ((code & 1U) ? 0x10U : 0U));
+        for (uint8_t dir = 0; dir < 2; ++dir) {
+            bool fwd = dir == 0U;
+            uint8_t tx = (uint8_t)(fwd ? instr : (instr & ~0x20U));
+            g_speed_calls = 0;
+            uint8_t packet[] = {0x03, tx, 0x00};
+            packet[2] = (uint8_t)(0x03 ^ tx);
+            feed_packet(packet, sizeof(packet), 12);
+            TEST_ASSERT_EQUAL_INT(0, g_emergency_calls);
+            TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
+            TEST_ASSERT_EQUAL_UINT8(dcc_speed_from_28step(step), (uint8_t)g_speed);
+            TEST_ASSERT_EQUAL(fwd, g_forward);
+        }
+    }
+
+    /* Reserved codes 30/31 clamp to the last notch. */
+    const uint8_t clamped[] = {0x03, 0x7F, 0x7C};
+    feed_packet(clamped, sizeof(clamped), 12);
+    TEST_ASSERT_EQUAL_UINT16(126, g_speed);
+}
+
+static void test_dcc_28step_sound_scale(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(0, sound_speed_from_dcc128(0));
+    TEST_ASSERT_EQUAL_UINT8(255, sound_speed_from_dcc128(126));
+    for (uint8_t step = 1; step <= 28; ++step) {
+        uint8_t spd = dcc_speed_from_28step(step);
+        uint8_t sound = sound_speed_from_dcc128(spd);
+        int expected = (int)(((uint16_t)step * 255U + 14U) / 28U);
+        int diff = (int)sound - expected;
+        if (diff < 0) diff = -diff;
+        TEST_ASSERT_TRUE(diff <= 1);
+        TEST_ASSERT_TRUE(sound > 0U);
     }
 }
 
-/* Длинный адрес 8444 + 28-step: инструкция 0x49 -> скорость 75, реверс. */
+/* Длинный адрес 8444 + 28-step: инструкция 0x49 -> нота 17, скорость 77. */
 static void test_dcc_long_address_28step(void)
 {
     s_decoder_addr = 8444;
@@ -672,7 +691,7 @@ static void test_dcc_long_address_28step(void)
     feed_packet(packet, sizeof(packet), 12);
 
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(75, g_speed);
+    TEST_ASSERT_EQUAL_UINT16(77, g_speed);
     TEST_ASSERT_FALSE(g_forward);
 }
 
@@ -787,7 +806,7 @@ static void test_dcc_reload_config_long_address(void)
     const uint8_t packet[] = {0xE0, 0xFC, 0x49, 0x55};
     feed_packet(packet, sizeof(packet), 12);
     TEST_ASSERT_EQUAL_INT(1, g_speed_calls);
-    TEST_ASSERT_EQUAL_UINT16(75, g_speed);
+    TEST_ASSERT_EQUAL_UINT16(77, g_speed);
     TEST_ASSERT_FALSE(g_forward);
 
     /* The previous short address is no longer ours. */
@@ -1656,6 +1675,7 @@ int main(void)
     RUN_TEST(test_dcc_28step_f0_max_speed);
     RUN_TEST(test_dcc_28step_stop_forward);
     RUN_TEST(test_dcc_28step_code_mapping);
+RUN_TEST(test_dcc_28step_sound_scale);
     RUN_TEST(test_dcc_long_address_28step);
     RUN_TEST(test_dcc_14step_f0_function);
     RUN_TEST(test_dcc_14step_group_one_does_not_touch_f0);

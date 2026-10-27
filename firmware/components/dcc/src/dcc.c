@@ -109,6 +109,11 @@ static dcc_half_kind_t s_pending_half;
 static uint16_t s_decoder_addr;
 static bool s_decoder_long_addr;
 static bool s_speed_mode_14;
+/* Last successfully decoded speed command, for /api/dcc/status. */
+static volatile uint8_t s_last_speed128;
+static volatile uint8_t s_last_step;
+static volatile uint8_t s_last_speed_mode;
+static volatile bool s_last_forward = true;
 static uint8_t s_consist_addr;
 static bool s_consist_reverse;
 static bool s_direction_reverse;
@@ -420,12 +425,20 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         forward ^= reverse ^ (via_consist && consist_reverse);
         uint8_t raw = ext & 0x7FU;
         if (raw == 1U) {
+            s_last_speed128 = 0;
+            s_last_step = 0;
+            s_last_speed_mode = 128;
+            s_last_forward = forward;
             if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
             return;
         }
         if (is_broadcast && raw != 0U) return;
         s_function_forward = forward;
         uint8_t speed = (raw >= 2U) ? (uint8_t)(raw - 1U) : 0U;
+        s_last_speed128 = speed;
+        s_last_step = 0;
+        s_last_speed_mode = 128;
+        s_last_forward = forward;
         if (s_speed_cb != NULL) {
             s_speed_cb(speed, forward);
         }
@@ -439,15 +452,21 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         if (mode14) {
             uint8_t step14 = instr & 0x0FU;
             if (step14 == 1U) {
+                s_last_speed128 = 0;
+                s_last_step = 0;
+                s_last_speed_mode = 14;
+                s_last_forward = forward;
                 if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
                 return;
             }
             if (is_broadcast && step14 != 0U) return;
             s_function_forward = forward;
-            uint8_t speed = 0;
-            if (step14 >= 2U) {
-                speed = (uint8_t)(((uint16_t)(step14 - 1U) * 126U) / 14U);
-            }
+            uint8_t step = step14 >= 2U ? (uint8_t)(step14 - 1U) : 0U;
+            uint8_t speed = step != 0U ? dcc_speed_from_14step(step) : 0U;
+            s_last_speed128 = speed;
+            s_last_step = step;
+            s_last_speed_mode = 14;
+            s_last_forward = forward;
             emit_function(0, (instr & 0x10U) != 0, function_via_consist, forward, cv21, cv22);
             if (s_speed_cb != NULL) {
                 s_speed_cb(speed, forward);
@@ -456,19 +475,22 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         }
         uint8_t code = (uint8_t)(((instr & 0x0FU) << 1) | ((instr & 0x10U) >> 4));
         if (code == 1U) {
+            s_last_speed128 = 0;
+            s_last_step = 0;
+            s_last_speed_mode = 28;
+            s_last_forward = forward;
             if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
             return;
         }
         if (is_broadcast && code != 0U) return;
         s_function_forward = forward;
-        uint8_t speed = 0;
-        if (code >= 2U) {
-            if (code >= 29U) {
-                speed = 126U;
-            } else {
-                speed = (uint8_t)(1U + ((uint32_t)(code - 2U) * 125U) / 27U);
-            }
-        }
+        uint8_t step = code >= 2U ? (uint8_t)(code - 1U) : 0U;
+        if (step > 28U) step = 28U;
+        uint8_t speed = step != 0U ? dcc_speed_from_28step(step) : 0U;
+        s_last_speed128 = speed;
+        s_last_step = step;
+        s_last_speed_mode = 28;
+        s_last_forward = forward;
         if (s_speed_cb != NULL) {
             s_speed_cb(speed, forward);
         }
@@ -896,6 +918,21 @@ void dcc_reload_config(void)
 }
 
 void dcc_register_speed_cb(dcc_speed_cb_t cb) { s_speed_cb = cb; }
+
+void dcc_get_speed_status(uint8_t *speed128, uint8_t *step, bool *forward,
+                          uint8_t *mode)
+{
+    portENTER_CRITICAL(&s_edge_mux);
+    uint8_t speed = s_last_speed128;
+    uint8_t notch = s_last_step;
+    uint8_t packet_mode = s_last_speed_mode;
+    bool fwd = s_last_forward;
+    portEXIT_CRITICAL(&s_edge_mux);
+    if (speed128 != NULL) *speed128 = speed;
+    if (step != NULL) *step = notch;
+    if (forward != NULL) *forward = fwd;
+    if (mode != NULL) *mode = packet_mode;
+}
 void dcc_register_function_cb(dcc_function_cb_t cb) { s_function_cb = cb; }
 void dcc_register_cv_write_cb(dcc_cv_write_cb_t cb) { s_cv_write_cb = cb; }
 void dcc_register_cv_read_cb(dcc_cv_read_cb_t cb) { s_cv_read_cb = cb; }
@@ -965,6 +1002,20 @@ static void dcc_ack_task(void *arg)
         iters++;
     }
     vTaskDelete(NULL);
+}
+
+uint8_t dcc_speed_from_14step(uint8_t step)
+{
+    if (step == 0U) return 0U;
+    if (step >= 14U) return 126U;
+    return (uint8_t)(((uint16_t)step * 126U + 7U) / 14U);
+}
+
+uint8_t dcc_speed_from_28step(uint8_t step)
+{
+    if (step == 0U) return 0U;
+    if (step >= 28U) return 126U;
+    return (uint8_t)(((uint16_t)step * 126U + 14U) / 28U);
 }
 
 esp_err_t dcc_service_ack(void)

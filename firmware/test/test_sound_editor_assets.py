@@ -59,7 +59,20 @@ class EditorAssetTests(unittest.TestCase):
             self.assertIn('"/sound-editor/THIRD_PARTY_NOTICES.txt"', generated)
             self.assertLessEqual(total, 512 * 1024)
             # The embedded gzip stream must decompress to the exact source page.
-            numbers = re.search(r"\[\] = \{(.*?)\};", generated, re.S).group(1)
+            # Do not assume blocks.html is the first asset: dist is sorted and
+            # THIRD_PARTY_NOTICES.txt sorts before it on a case-sensitive host.
+            entry = re.search(
+                r'\{\"/sound-editor/blocks\.html\", "text/html; charset=utf-8", '
+                r'(\w+), sizeof\(\1\)',
+                generated,
+            )
+            self.assertIsNotNone(entry, "blocks.html entry missing from generated assets")
+            numbers = re.search(
+                r"static const unsigned char " + re.escape(entry.group(1)) +
+                r"\[\] = \{(.*?)\};",
+                generated,
+                re.S,
+            ).group(1)
             embedded = bytes(int(number) for number in re.findall(r"\d+", numbers))
             self.assertEqual((dist / "blocks.html").read_bytes(), gzip.decompress(embedded))
 

@@ -12,3 +12,10 @@ firmware/sound_editor/dist/** -text
 firmware/sound_editor/package.json text eol=lf
 firmware/sound_editor/scripts/** text eol=lf
 firmware/sound_editor/public/** text eol=lf
+
+# Release metadata is checksummed byte-for-byte. Without an explicit LF rule,
+# Git for Windows (core.autocrlf=true) rewrites manifest.json to CRLF on
+# checkout and SHA256SUMS.txt no longer matches the published hash.
+release/manifest.json text eol=lf
+release/SHA256SUMS.txt text eol=lf
+release/flash_download_tool/README.txt text eol=lf

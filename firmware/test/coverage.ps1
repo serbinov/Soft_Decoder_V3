@@ -16,7 +16,7 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 $cc = $env:DCC_TEST_CC
 if (-not $cc) {
-    foreach ($n in @("gcc", "clang", "cc")) {
+    foreach ($n in @("gcc", "x86_64-w64-mingw32-gcc", "clang", "cc")) {
         $c = Get-Command $n -ErrorAction SilentlyContinue
         if ($c) { $cc = $c.Source; break }
     }

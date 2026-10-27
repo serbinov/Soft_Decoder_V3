@@ -31,7 +31,7 @@ if (-not $cc) {
     }
 }
 if (-not $cc) {
-    foreach ($name in @("gcc", "clang", "cc")) {
+    foreach ($name in @("gcc", "x86_64-w64-mingw32-gcc", "clang", "cc")) {
         $found = Get-Command $name -ErrorAction SilentlyContinue
         if ($found) { $cc = $found.Source; break }
     }

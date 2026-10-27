@@ -18,6 +18,12 @@
   падает на `web.c` без предварительной ESP-IDF сборки.
 - `run_tests.ps1` не пишет в read-only автоматическую переменную `$IsWindows`
   (PowerShell 7 на windows-latest); используется локальная `$onWindows`.
+- Windows CI берёт путь MSYS2 из `steps.msys2.outputs.msys2-location`, а поиск
+  компилятора дополнительно понимает `x86_64-w64-mingw32-gcc`.
+- `.gitattributes` фиксирует LF для `release/manifest.json` и
+  `release/SHA256SUMS.txt`, иначе `core.autocrlf` ломает проверку контрольных сумм.
+- `test_sound_editor_assets` ищет именно `blocks.html`, а не первый
+  сгенерированный ассет: на Linux `THIRD_PARTY_NOTICES.txt` сортируется раньше.
 - `test_motor` расширен до 83 тестов; покрытие `motor.c` — 96,7 %, общий гейт
   88,6 % (порог 88,0 %).
 
@@ -508,6 +514,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-27 (v0.14) — fix(ci): use MSYS2 output path and case-safe asset test
 - 2026-10-27 (v0.14) — fix(ci): generate web_html.h and support PowerShell 7 hosts
 - 2026-10-27 (v0.14) — fix(bemf): honor calibration mode point presets (v0.14)
 - 2026-10-27 (v0.13) — docs(skill): add Soft_Decoder_V3 project skill

@@ -1429,7 +1429,6 @@ void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg)
 {
     if (cfg == NULL) return;
     memset(cfg, 0, sizeof(*cfg));
-    cfg->mode = MOTOR_BEMF_MODE_AUTO;
 }
 
 esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg)
@@ -1680,6 +1679,27 @@ esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, siz
     sg_graph_t *graph = malloc(sizeof(*graph));
     if (graph == NULL) return ESP_ERR_NO_MEM;
     esp_err_t err = sg_parse(json, len, graph, diag);
+    if (err == ESP_OK && strcmp(id, graph->id)) err = ESP_ERR_INVALID_ARG;
+    free(graph);
+    if (err != ESP_OK) return err;
+    if (expected != mock_graph_revision) {
+        if (diag) {
+            memset(diag, 0, sizeof(*diag));
+            snprintf(diag->code, sizeof(diag->code), "validation");
+            snprintf(diag->message, sizeof(diag->message), "Stale expectedRevision");
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+    memcpy(mock_graph_json, json, len); mock_graph_json[len] = '\0';
+    *revision = ++mock_graph_revision; return ESP_OK;
+}
+esp_err_t sg_store_save_draft(const char *id, uint32_t expected, const char *json, size_t len, uint32_t *revision, sg_diagnostic_t *diag)
+{
+    ++mock_graph_save_calls;
+    if (mock_graph_save_err != ESP_OK) return mock_graph_save_err;
+    sg_graph_t *graph = malloc(sizeof(*graph));
+    if (graph == NULL) return ESP_ERR_NO_MEM;
+    esp_err_t err = sg_parse_draft(json, len, graph, diag);
     if (err == ESP_OK && strcmp(id, graph->id)) err = ESP_ERR_INVALID_ARG;
     free(graph);
     if (err != ESP_OK) return err;

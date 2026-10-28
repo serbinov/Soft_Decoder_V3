@@ -173,6 +173,25 @@ static void test_stale_revision_and_id_checks(void)
     TEST_ASSERT_EQUAL_INT(ESP_ERR_INVALID_ARG, sg_store_save("../a", 0, json, strlen(json), &revision, NULL));
     assert_read("a", 0, 1, json); free(json);
 }
+static void test_draft_save_accepts_semantically_invalid_graph(void)
+{
+    char *json = fixture("a", "", NULL);
+    char *entry = strstr(json, "\"entry\":\"off\"");
+    TEST_ASSERT_NOT_NULL(entry);
+    memcpy(entry + strlen("\"entry\":\""), "bad", 3);
+    uint32_t revision = 99; sg_diagnostic_t diag = {0};
+    TEST_ASSERT_EQUAL_INT(ESP_ERR_INVALID_ARG,
+                          sg_store_save("a", 0, json, strlen(json), &revision, &diag));
+    TEST_ASSERT_EQUAL_UINT32(0, revision);
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_store_save_draft("a", 0, json, strlen(json), &revision, &diag));
+    TEST_ASSERT_EQUAL_UINT32(1, revision);
+    assert_read("a", 0, 1, json);
+    /* A draft is stored but still cannot be applied by the runtime. */
+    sg_graph_t graph; memset(&graph, 0, sizeof(graph));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, sg_parse_draft(json, strlen(json), &graph, &diag));
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, sg_validate(&graph, &diag));
+    free(json);
+}
 static void test_invalid_json_version_and_limits(void)
 {
     char *json = fixture("a", "", NULL); uint32_t revision;
@@ -656,6 +675,7 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_exact_roundtrip_and_historical_read);
     RUN_TEST(test_stale_revision_and_id_checks);
+    RUN_TEST(test_draft_save_accepts_semantically_invalid_graph);
     RUN_TEST(test_invalid_json_version_and_limits);
     RUN_TEST(test_selection_two_projects_and_legacy);
     RUN_TEST(test_corruption_is_safe_failure);

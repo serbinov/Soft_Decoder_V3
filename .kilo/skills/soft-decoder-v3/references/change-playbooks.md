@@ -165,8 +165,8 @@ python firmware\test\test_sound_editor_assets.py
 3. **COM3 pitfall:** не хардкодьте COM3 (старые команды/примеры могут уйти не
    на тот порт). Скрипты ищут ESP32-S3 по VID_303A/PID_1001; `-Port` задавайте явно.
 4. Release: `idf_build.ps1 -Release` → `publish` + `verify`; вручную
-   `manifest.json`/`SHA256SUMS.txt`/BIN не правьте. Versioned `.bin` и `_OTA.bin` —
-   копии raw application, не merged flash.
+   `manifest.json`/`SHA256SUMS.txt`/BIN не правьте. Versioned `ADDITIPUS_AURA-X_v<ver>.bin` —
+   единственная копия raw application (без merged flash и без дубля `_OTA.bin`).
 5. Версия: `firmware/tools/bump_version.ps1` обновляет `version.txt`, CV7 и
    тестовое ожидание. После bump — `-Clean` сборка.
 6. Flasher: `web_flasher\start_flasher.bat`; действия — только через

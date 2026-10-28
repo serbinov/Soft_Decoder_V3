@@ -62,7 +62,7 @@ int motor_adc_read_raw(int gpio_num);
  * stores the curve in NVS. Afterwards the PID targets the calibrated curve so
  * the no-load RPM is held even under load. */
 #define MOTOR_BEMF_CAL_MAX_POINTS 16
-#define MOTOR_BEMF_CAL_MIN_POINTS 10
+#define MOTOR_BEMF_CAL_MIN_POINTS 2
 
 typedef enum {
     MOTOR_BEMF_CAL_IDLE,
@@ -73,40 +73,18 @@ typedef enum {
     MOTOR_BEMF_CAL_FAILED,
 } motor_bemf_cal_state_t;
 
-/* Calibration profiles select a point count from the fixed speed ladder.
- * FAST is the legacy 10-point run (used by motor_bemf_cal_start()). CUSTOM
- * honours the caller's speed list; the other modes differ only in how many
- * ladder points are measured. There is no adaptive second pass any more.
- * windows. */
+/* Calibration is a single PWM sweep: 5% steps, 2 s per step, first BEMF level
+ * is the closed-loop threshold, speed 1 is 10 points lower (open loop) and
+ * 95% is full speed. The stored curve is linear between those two anchors. */
 typedef enum {
     MOTOR_BEMF_MODE_AUTO = 0,
-    MOTOR_BEMF_MODE_FAST,
-    MOTOR_BEMF_MODE_BALANCED,
-    MOTOR_BEMF_MODE_THOROUGH,
-    MOTOR_BEMF_MODE_CUSTOM,
 } motor_bemf_cal_mode_t;
 /* Profile marker for a curve loaded from NVS/base without a live run. */
 #define MOTOR_BEMF_MODE_STORED 0xFFU
 
 typedef struct {
-    motor_bemf_cal_mode_t mode;
-    uint8_t points;          /* target total, 0 = mode default (min 10, max 16) */
-    uint16_t settle_ms;      /* minimum settle, 0 = mode default */
-    uint16_t settle_max_ms;  /* maximum settle, 0 = 4 x settle */
-    uint16_t dwell_ms;       /* full drive time at a new speed before measuring,
-                              * 0 = mode default (1000 ms); max 5000 */
-    uint16_t interval_ms;    /* sample/probe interval, 0 = 40; max 80 */
-    uint8_t samples;         /* measured samples per point, 0 = mode default */
-    uint8_t retries;         /* point retries; 0 = mode default for non-custom */
-    uint16_t boost_ms;       /* first/stall boost, 0 = mode default */
-    bool adaptive;           /* CUSTOM only: allow adaptive insertion */
     bool apply_pid;          /* apply the recommended Kp/Ki/Kd after success */
-    uint8_t speed_count;     /* CUSTOM: number of explicit speeds (>=10) */
-    uint8_t speed[MOTOR_BEMF_CAL_MAX_POINTS];
 } motor_bemf_cal_config_t;
-
-#define MOTOR_BEMF_CAL_DWELL_DEFAULT_MS 1000U
-#define MOTOR_BEMF_CAL_DWELL_MAX_MS     5000U
 
 typedef enum {
     MOTOR_BEMF_CAL_ERR_NONE,
@@ -121,8 +99,8 @@ typedef enum {
     MOTOR_BEMF_CAL_ERR_NO_RISE,  /* no movement found up to the probe ceiling */
 } motor_bemf_cal_error_t;
 
-/* Calibration phases. The run executes PREFLIGHT (rest check), CURVE (the
- * measured ladder) and SAVING. A failure keeps the phase where it stopped. */
+/* Calibration phases. The run executes PREFLIGHT (rest check), CURVE (the PWM
+ * sweep) and SAVING. A failure keeps the phase where it stopped. */
 typedef enum {
     MOTOR_BEMF_CAL_PHASE_IDLE = 0,
     MOTOR_BEMF_CAL_PHASE_PREFLIGHT,
@@ -153,6 +131,9 @@ typedef struct {
     uint16_t kd_x100;          /* suggested Kd x100 */
     uint8_t quality;           /* average sample quality, 0..100 */
     bool pid_applied;          /* suggested gains were written to CV54..56 */
+    uint8_t pwm_min_pct;       /* AUTO sweep: first PWM step with BEMF signal */
+    uint8_t pwm_start_pct;     /* AUTO sweep: open-loop speed-1 PWM (min - 10%) */
+    uint8_t pwm_max_pct;       /* AUTO sweep: highest PWM step with BEMF signal */
 } motor_bemf_profile_t;
 
 typedef struct {
@@ -173,12 +154,10 @@ typedef struct {
 } motor_bemf_cal_info_t;
 
 esp_err_t motor_bemf_cal_start(void);
-/* Fill a configuration with AUTO defaults (12 ladder points). */
+/* Fill a configuration with AUTO defaults (5% PWM sweep, 2 s per step). */
 void motor_bemf_cal_default_config(motor_bemf_cal_config_t *cfg);
-/* Start a calibration. cfg.mode selects a ladder point count; CUSTOM uses the
- * explicit speed[] list. Each point is driven open-loop, sampled between
- * `samples` coast windows and stored as a rail fraction. Non-rotating points
- * are skipped; a ceiling stops the run and keeps the measured partial curve. */
+/* Start a calibration. The PWM sweep is the only algorithm; `apply_pid`
+ * optionally writes the recommended Kp/Ki/Kd. */
 esp_err_t motor_bemf_cal_start_ex(const motor_bemf_cal_config_t *cfg);
 /* Independent 10 ms safety caller: no mutex, ADC, NVS, allocation or waits.
  * Coasts when the worker-only 100 ms drive lease expires. */

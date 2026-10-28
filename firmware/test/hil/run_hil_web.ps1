@@ -30,8 +30,6 @@ param(
     [switch]$SkipConnect,
     # Destructive opt-in: spins a free motor and writes a new calibration.
     [switch]$CalibrateBemf,
-    [ValidateSet("auto", "fast", "balanced", "thorough")]
-    [string]$BemfMode = "fast",
     # >0 starts a calibration and cancels it after this many milliseconds.
     [int]$BemfCancelAfterMs = 0,
     [int]$BemfCalTimeoutSec = 90
@@ -244,11 +242,11 @@ try {
         } else {
             Add-Result "BEMF pre-stop" $true ""
         }
-        $startResp = Post-Ep "bemf/calibrate start" "/api/bemf/calibrate?start=1&mode=$BemfMode"
+        $startResp = Post-Ep "bemf/calibrate start" "/api/bemf/calibrate?start=1"
         if (-not ($startResp -and $startResp.ok)) {
             Add-Result "BEMF calibration start" $false "start rejected"
         } else {
-            Add-Result "BEMF calibration start" $true "mode=$BemfMode"
+            Add-Result "BEMF calibration start" $true "PWM sweep"
             $calClock = [System.Diagnostics.Stopwatch]::StartNew()
             $activeSeen = $false
             $cancelSent = $false

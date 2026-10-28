@@ -1,7 +1,7 @@
 ﻿# Local control panel for the ADDITIPUS flasher.
 #
 # The web page is configuration/status only: the actual flashing is done by the
-# project scripts (firmware\flash_standalone.ps1, make_ota.ps1). This server
+# project scripts (firmware\flash_standalone.ps1, flash_with_sound_pack.ps1). This server
 # serves the page, reports device/files status, runs the selected script and
 # streams its output back to the page.
 #
@@ -188,7 +188,6 @@ function Get-ActionSpec([string]$action) {
             "flash"        { return @{ script = $standalone; args = @("-NoSounds") } }
         }
     }
-    if ($action -eq "ota") { return @{ script = (Join-Path $web "make_ota.ps1"); args = @() } }
     return $null
 }
 
@@ -251,7 +250,7 @@ $releaseFull = [IO.Path]::GetFullPath((Join-Path $repo "release"))
 $sndFull     = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }
 $utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
 $expectedOrigin = $prefix.TrimEnd("/")
-$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "ota", "factory")
+$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "factory")
 
 function Get-FormBody($ctx) {
     if (-not $ctx.Request.HasEntityBody) { return "" }
@@ -273,7 +272,7 @@ function Test-StaticAllowed([string]$full) {
     $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
     if ($full.StartsWith($webFull + $sep, [StringComparison]::OrdinalIgnoreCase)) {
         return $ext -in @(".html", ".css", ".js", ".svg", ".ico", ".png", ".jpg") -and
-               $leaf -notmatch '^(start_flasher|make_sound_pack|release_info|flash_with_sound_pack|make_ota)\.'
+               $leaf -notmatch '^(start_flasher|make_sound_pack|release_info|flash_with_sound_pack)\.'
     }
     if ($full.StartsWith($releaseFull + $sep, [StringComparison]::OrdinalIgnoreCase)) {
         return $ext -in @(".bin", ".asp", ".txt", ".json", ".sha256") -and

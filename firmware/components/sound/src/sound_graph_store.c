@@ -186,8 +186,9 @@ static esp_err_t json_read(const char *id, uint32_t rev, char **out, size_t *len
     json[size] = 0;
     sg_graph_t *graph = malloc(sizeof(*graph));
     if (!graph) { free(json); return ESP_ERR_NO_MEM; }
-    err = sg_parse(json, size, graph, NULL);
-    if (err == ESP_OK) { err = sg_validate(graph, NULL); }
+    /* Structural checks only: an editor draft may be semantically invalid.
+     * Boot and apply re-parse and validate before use. */
+    err = sg_parse_draft(json, size, graph, NULL);
     if (err == ESP_OK && strcmp(graph->id, id)) { err = ESP_FAIL; }
     free(graph);
     if (err != ESP_OK) { free(json); return err; }
@@ -303,7 +304,7 @@ static void prune_locked(const char *id, uint32_t latest)
 }
 
 static esp_err_t store_save_impl(const char *id, uint32_t expected, bool check_expected,
-                                 const char *json, size_t len, uint32_t *newrev,
+                                 bool validate, const char *json, size_t len, uint32_t *newrev,
                                  sg_diagnostic_t *diag)
 {
     if (diag) { memset(diag, 0, sizeof(*diag)); }
@@ -312,8 +313,8 @@ static esp_err_t store_save_impl(const char *id, uint32_t expected, bool check_e
     if (!len || len > SG_MAX_JSON) { return ESP_ERR_INVALID_SIZE; }
     sg_graph_t *graph = malloc(sizeof(*graph));
     if (!graph) { return ESP_ERR_NO_MEM; }
-    esp_err_t err = sg_parse(json, len, graph, diag);
-    if (err == ESP_OK) { err = sg_validate(graph, diag); }
+    esp_err_t err = validate ? sg_parse(json, len, graph, diag)
+                             : sg_parse_draft(json, len, graph, diag);
     if (err == ESP_OK && strcmp(graph->id, id)) {
         err = diagnostic(diag, ESP_ERR_INVALID_ARG, "Project ID does not match JSON");
     }
@@ -351,13 +352,19 @@ static esp_err_t store_save_impl(const char *id, uint32_t expected, bool check_e
 esp_err_t sg_store_save(const char *id, uint32_t expected, const char *json, size_t len,
                         uint32_t *newrev, sg_diagnostic_t *diag)
 {
-    return store_save_impl(id, expected, true, json, len, newrev, diag);
+    return store_save_impl(id, expected, true, true, json, len, newrev, diag);
+}
+
+esp_err_t sg_store_save_draft(const char *id, uint32_t expected, const char *json, size_t len,
+                              uint32_t *newrev, sg_diagnostic_t *diag)
+{
+    return store_save_impl(id, expected, true, false, json, len, newrev, diag);
 }
 
 esp_err_t sg_store_save_force(const char *id, const char *json, size_t len,
                               uint32_t *newrev, sg_diagnostic_t *diag)
 {
-    return store_save_impl(id, 0, false, json, len, newrev, diag);
+    return store_save_impl(id, 0, false, true, json, len, newrev, diag);
 }
 
 static esp_err_t selection_write(const char *payload)

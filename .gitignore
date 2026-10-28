@@ -17,5 +17,5 @@ desktop.ini
 # Flasher panel statistics (machine-local history)
 web_flasher/stats.json
 
-# Release images (ADDITIPUS_AURA-X_v*_OTA.bin, *_with_sounds.bin, manifest) are
+# Release images (ADDITIPUS_AURA-X_v*.bin, *_with_sounds.bin, manifest) are
 # deliverables published by build_firmware.bat and are intentionally tracked.

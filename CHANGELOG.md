@@ -23,6 +23,20 @@
   в веб-панели добавлена live-строка DCC.
 - Тесты: все 28 кодов и оба направления, 14-step parity, C-проверка
   DCC→sound scale и Python-проверка диапазонов `default_scheme.json`.
+- Редактор блок-схем: сохранение больше не сбрасывает ревизию на применённую
+  (`/api/sound/graph/state`), поэтому повторное сохранение после отказа apply не
+  получает `Stale expectedRevision`/`ESP_ERR_INVALID_STATE`.
+- Если мотор движется, проект сохраняется, а включение схемы откладывается и
+  выполняется автоматически после остановки; красная ошибка больше не остаётся
+  после успешного сохранения.
+- Кнопка «Сохранить» сохраняет схему с ошибками проверки как черновик
+  (`draft=1`): ошибки остаются на экране, но проект не теряется; применение
+  по-прежнему требует валидную схему.
+- Калибровка BEMF переведена на единственный ШИМ-свип 5…95% шагом 5% с
+  выдержкой 2 с: порог появления сигнала, скорость 1 на 10% ниже порога
+  (открытый контур), 95% как максимум; сохраняется линейная кривая speed 1…126.
+  Свип не учитывает Vmax и всегда проходит все шаги; режимы FAST/BALANCED/
+  THOROUGH/CUSTOM и их параметры удалены.
 
 ### 2026-10-27 — CI: генерация web_html.h и PowerShell 7
 
@@ -527,6 +541,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-10-29 (v0.15) — feat(firmware): unify release image, draft saves and PWM BEMF sweep
 - 2026-10-28 (v0.15) — refactor(web): modularize HTTP API and add DCC motor diagnostics
 - 2026-10-27 (v0.15) — feat(dcc): align 28-step speed with sound simulator (v0.15)
 - 2026-10-27 (v0.14) — fix(ci): use MSYS2 output path and case-safe asset test

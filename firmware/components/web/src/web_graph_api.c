@@ -226,13 +226,19 @@ esp_err_t graph_save_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = {0}, id[SG_ID_CAP]; uint32_t expected;
     if (!graph_query(req, query, sizeof(query)) || !graph_param(query, "id", id, sizeof(id)) || !sg_id_valid(id) || !graph_revision(query, "expectedRevision", &expected)) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
+    char draft_value[8] = {0};
+    bool draft_set = graph_param(query, "draft", draft_value, sizeof(draft_value));
+    bool draft = draft_set && (!strcmp(draft_value, "1") || !strcmp(draft_value, "true"));
+    if (draft_set && !draft) return close_rejected_body(req, graph_result_error(req, ESP_ERR_INVALID_ARG));
     char *json = NULL;
     esp_err_t response = graph_receive(req, &json);
     if (json == NULL) return response;
     uint32_t revision = 0; sg_diagnostic_t diag = {0};
-    esp_err_t err = sg_store_save(id, expected, json, req->content_len, &revision, &diag);
+    esp_err_t err = draft ? sg_store_save_draft(id, expected, json, req->content_len, &revision, &diag)
+                          : sg_store_save(id, expected, json, req->content_len, &revision, &diag);
     free(json);
     if (err == ESP_ERR_INVALID_ARG && diag.message[0]) return graph_diagnostic_response(req, &diag, false);
+    if (err == ESP_ERR_INVALID_STATE && diag.message[0]) return graph_error(req, "409 Conflict", diag.message);
     if (err != ESP_OK) return graph_result_error(req, err);
     char result[64];
     snprintf(result, sizeof(result), "{\"ok\":true,\"revision\":%lu}", (unsigned long)revision);
@@ -255,11 +261,21 @@ esp_err_t graph_apply_post(httpd_req_t *req)
     /* Reserve after preparation so validation/OOM never disturbs live audio. */
     if (err == ESP_OK) err = sound_graph_prepare(graph, id, actual, &prepared);
     bool maintenance = false, lease = false;
+    const char *conflict = NULL;
     if (err == ESP_OK) {
         err = web_control_maintenance_reserve(true);
         maintenance = err == ESP_OK;
     }
-    if (err == ESP_OK && !web_control_motor_stopped()) err = ESP_ERR_INVALID_STATE;
+    if (err == ESP_ERR_INVALID_STATE) {
+        /* Motor speed can change between the early check and the reserve (DCC
+         * traffic is asynchronous); report the same conflict, not a raw code. */
+        conflict = !web_control_motor_stopped() ? "motor must be stopped" :
+            (web_maintenance_active() ? "another operation is in progress" : "device is not ready");
+    }
+    if (err == ESP_OK && !web_control_motor_stopped()) {
+        err = ESP_ERR_INVALID_STATE;
+        conflict = "motor must be stopped";
+    }
     if (err == ESP_OK) err = web_control_maintenance_quiesce(false);
     if (err == ESP_OK) { err = storage_access_begin(); lease = err == ESP_OK; }
     if (err == ESP_OK) err = sg_assets_validate(graph, &diag);
@@ -271,6 +287,7 @@ esp_err_t graph_apply_post(httpd_req_t *req)
     sound_graph_prepared_free(prepared); free(graph);
     if (lease) storage_access_end();
     if (maintenance) web_maintenance_end();
+    if (conflict != NULL) return graph_error(req, "409 Conflict", conflict);
     if (err != ESP_OK && diag.message[0] && err != ESP_ERR_NO_MEM && err != ESP_ERR_TIMEOUT) return graph_diagnostic_response(req, &diag, false);
     if (err != ESP_OK) return graph_result_error(req, err);
     return send_json(req, "{\"ok\":true}");

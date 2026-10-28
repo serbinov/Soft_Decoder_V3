@@ -124,7 +124,8 @@ cd firmware
 ## Сборка и прошивка
 
 Из корня проекта **`build_firmware.bat`** собирает без прошивки и публикует
-проверенный комплект в `release/`: `ADDITIPUS_AURA-X_v<ver>.bin`, `_OTA.bin`,
+проверенный комплект в `release/`: единый образ `ADDITIPUS_AURA-X_v<ver>.bin`
+(он же файл для обновления через веб-интерфейс декодера),
 четыре фиксированных файла в `release/flash_download_tool/` и `manifest.json`
 с версией, адресами и SHA256. Этот комплект использует `web_flasher`.
 Для автоматизации: `build_firmware.bat --no-pause`. Полная офлайн-проверка:

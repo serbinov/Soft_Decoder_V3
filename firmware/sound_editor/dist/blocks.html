@@ -344,7 +344,7 @@ ready_blocks:"Готовые блоки",palette_blocks:"Блоки",block_setup
 select_hint:"Выберите блок на холсте или добавьте новый слева.",
 scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Экспорт блок-схемы в JPG",download_txt:"Экспорт блок-схемы в TXT",pack_import:"Импорт звуков и схемы (.asp)",pack_export:"Экспорт звуков и схемы (.asp)",st_pack_import_hint:"Импорт откроется в главном окне. После импорта вернитесь в редактор.",st_pack_updated:"Пакет импортирован, проект обновлён.",ready:"Готово",
 st_checking:"Проверка...",st_has_errors:"Есть ошибки",st_check_ok:"Проверка пройдена",st_error_prefix:"Ошибка: ",
-st_saving:"Сохранение...",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранено",st_saved_not_applied:"Сохранено, но не применено",st_not_applied:"Не применено: ",st_not_saved:"Не сохранено: ",
+st_saving:"Сохранение...",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранено",st_saved_with_errors:"Сохранено с ошибками; схема не применена",st_saved_pending_motor:"Сохранено; включится после остановки мотора",st_applied:"Применено",st_saved_not_applied:"Сохранено, но не применено",st_not_applied:"Не применено: ",st_not_saved:"Не сохранено: ",
 st_applying:"Применение...",st_applied_prefix:"Применена версия ",st_applied_suffix:", выходы записаны",st_not_applied:"Не применено: ",
 err_not_json:"Устройство вернуло не-JSON (",err_http:"Ошибка ",
 pal_fx:" · выбор эффекта",ns_engine_auto:"авто",ns_steps:"Ступени: ",ns_prot:" · защита ",ns_speed:"Скорость % · диапазонов ",ns_decel:" · по замедлению",ns_file_none:" · файл не задан",ns_start:"Запуск: ",ns_end:"Конец: ",ns_simple:"Звук: ",ns_loop:"Цикл: ",ns_mute:"Пауза",
@@ -405,7 +405,7 @@ ready_blocks:"Ready blocks",palette_blocks:"Blocks",block_setup:"Block settings"
 select_hint:"Select a block on the canvas or add a new one on the left.",
 scheme_title:"Diagram and link table",close_tip:"Close",download_png:"Export scheme to JPG",download_txt:"Export scheme to TXT",ready:"Ready",
 st_checking:"Validating...",st_has_errors:"There are errors",st_check_ok:"Validation passed",st_error_prefix:"Error: ",
-st_saving:"Saving...",err_fix_before_save:"Fix the errors before saving",st_saved_version:"Saved",st_saved_not_applied:"Saved but not applied",st_not_applied:"Not applied: ",st_not_saved:"Not saved: ",
+st_saving:"Saving...",err_fix_before_save:"Fix the errors before saving",st_saved_version:"Saved",st_saved_with_errors:"Saved with errors; scheme not applied",st_saved_pending_motor:"Saved; it will take effect when the motor stops",st_applied:"Applied",st_saved_not_applied:"Saved but not applied",st_not_applied:"Not applied: ",st_not_saved:"Not saved: ",
 st_applying:"Applying...",st_applied_prefix:"Applied version ",st_applied_suffix:", outputs written",st_not_applied:"Not applied: ",
 err_not_json:"Device returned non-JSON (",err_http:"Error ",
 pal_fx:" · choose effect",ns_engine_auto:"auto",ns_steps:"Steps: ",ns_prot:" · margin ",ns_speed:"Speed % · bands ",ns_decel:" · deceleration-based",ns_file_none:" · no file set",ns_start:"Launch: ",ns_end:"End: ",ns_simple:"Sound: ",ns_loop:"Loop: ",ns_mute:"Pause",
@@ -848,7 +848,7 @@ const REFERENCE_PROJECT_ID="locomotive_default";
 const MAX_SAVED_PROJECTS=10;
 let activeProjectId=REFERENCE_ID,referenceMode=false;
 let packImportPending=null,packImportToken=0;
-let soundFiles=[],diagnostics=[],assets={},assetsReady=false;
+let soundFiles=[],diagnostics=[],assets={},assetsReady=false,pendingApply=null;
 let history=[],hIndex=-1,lastSig=null;
 let readyIds=new Set(),selectedLink="",deviceBinds=[],deviceAux=[];
 let viewMode="mix",activeSchemeId="",renamingSchemeId="",mixReturnState=null;
@@ -980,7 +980,7 @@ async function newProjectUI(){
     close();
     project=newProject();project.name=finalName;project.id=makeProjectId(finalName);ensureProjectTitle(project);
     viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();
-    revision=0;savedId="";savedSig=null;assets={};diagnostics=[];referenceMode=false;revisionConflict=null;
+    revision=0;savedId="";savedSig=null;assets={};diagnostics=[];referenceMode=false;revisionConflict=null;pendingApply=null;
     applyViewport();renderSnapBtn();historyReset();render();setStatus(t("st_new_scheme"));
     autoSaveProject();
   };
@@ -2397,7 +2397,7 @@ async function adoptActiveDeviceProject(srvId,srvRev,opts){
   }
   selected="";selectedIds=new Set();selectedLink="";assets={};assetsReady=false;
   diagnostics=restored?(restored.warnings||[]):[];
-  savedId=srvId===REFERENCE_PROJECT_ID?"":srvId;revision=srvId===REFERENCE_PROJECT_ID?0:srvRev;savedSig=projectSig();referenceMode=srvId===REFERENCE_PROJECT_ID;revisionConflict=null;
+  savedId=srvId===REFERENCE_PROJECT_ID?"":srvId;revision=srvId===REFERENCE_PROJECT_ID?0:srvRev;savedSig=projectSig();referenceMode=srvId===REFERENCE_PROJECT_ID;revisionConflict=null;pendingApply=null;
   if(viewMode==="scheme")fitViewport();else applyViewport();
   renderSnapBtn();historyReset();render();
   if(restored){renderDiag();setTimeout(()=>{if(online)importOutputs();},200);}
@@ -2442,15 +2442,39 @@ async function refreshStatus(){
      * base revision must stay at the loaded version: advancing it would let a
      * later save silently overwrite another client's changes. */
      if(srvId&&srvId!==REFERENCE_PROJECT_ID&&project.id===srvId){
-       if(isDirty()){
-         if(srvRev!==revision){
-           revisionConflict={id:srvId,expectedRevision:revision,remoteRevision:srvRev};
-           setStatus(t("st_revision_conflict"));
-         }else revisionConflict=null;
-       }else{
-         revisionConflict=null;savedId=srvId;revision=srvRev;
-       }
+        if(isDirty()){
+          /* Only a newer *applied* revision means another client changed the
+             project. A lower one is our own save still waiting for apply. */
+          if(srvRev>revision){
+            revisionConflict={id:srvId,expectedRevision:revision,remoteRevision:srvRev};
+            setStatus(t("st_revision_conflict"));
+          }else revisionConflict=null;
+        }else{
+          /* `revision` is the last saved revision; /state reports the applied
+             one. After a save whose apply was rejected (motor running) the
+             applied revision is older: never regress, or the next save sends a
+             stale expectedRevision and fails with 409. */
+          revisionConflict=null;savedId=srvId;revision=Math.max(revision,srvRev);
+        }
      }
+    /* A save whose apply was refused because the motor was running stays
+       pending; switch it live as soon as the motor reports speed 0. */
+    if(pendingApply&&!busy&&project.id===pendingApply.id&&revision===pendingApply.revision){
+      try{
+        const mot=await req("/api/motor");
+        if((Number(mot.speed)||0)===0){
+          await req("/api/sound/graph/apply?"+qs({id:pendingApply.id,revision:pendingApply.revision}),{method:"POST"});
+          await applyOutputs();
+          pendingApply=null;diagnostics=[];renderSummary();renderDiag();
+          setStatus(t("st_applied"));
+        }
+      }catch(e){
+        const msg=e&&e.message?String(e.message):String(e);
+        if(!/motor must be stopped/i.test(msg)){
+          pendingApply=null;setStatus(t("st_not_applied")+msg);
+        }
+      }
+    }
   }catch(e){online=false;if(firstCheck)activeProjectAutoLoadDone=true;}
   $("on").classList.toggle("on",online);
   const statusEl=$("on_txt").parentElement;
@@ -2481,7 +2505,8 @@ async function doValidate(){
     renderSummary();renderDiag();setStatus(diagnostics.some(d=>d.severity!=="warning")?t("st_has_errors"):t("st_check_ok"));
   }catch(e){setStatus(t("st_error_prefix")+e.message);}finally{busy=false;refreshButtons();}
 }
-async function doSave(){
+async function doSave(opts){
+  const force=!!(opts&&opts.force);
   if(busy)return;
   if(referenceMode){
     /* The reference project is immutable: saving it creates an editable
@@ -2522,30 +2547,61 @@ async function doSave(){
   busy=true;refreshButtons();setStatus(t("st_saving"));
   try{project.editor.bindTuples=desiredBindings().map(bindKey);project.editor.auxChannels=auxConfigs().map(c=>c.ch);
     if(revisionConflict&&project.id===savedId)throw new Error(t("st_revision_conflict"));
-    const v=validate();if(v.diagnostics.some(d=>d.severity!=="warning")){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
+    const v=validate();const invalid=v.diagnostics.some(d=>d.severity!=="warning");
+    if(invalid&&!force){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
     /* Always refresh asset metadata: after a sound-pack replacement the cached
        size/CRC would make apply fail with a stale manifest. */
     await fetchAssets(v.files,true);
     const missing=v.files.filter(f=>!assets[f]);
-    if(missing.length){diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));renderDiag();throw new Error(t("v_assets_missing")+missing.join(", "));}
+    if(missing.length&&!force){diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));renderDiag();throw new Error(t("v_assets_missing")+missing.join(", "));}
+    if(missing.length)v.diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));
     v.payload.assets=v.files.map(f=>assets[f]).filter(Boolean);
-    const r=await req("/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0}),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(wirePayload(v.payload))});
+    /* A manual save of a graph with errors stores a draft: it is listed and
+       reloadable, but never selected or applied until it validates. */
+    const draft=force&&(invalid||missing.length>0);
+    const savePath="/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0})+(draft?"&draft=1":"");
+    const r=await req(savePath,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(wirePayload(v.payload))});
     revision=Number(r.revision)||revision;savedId=project.id;savedSig=projectSig();revisionConflict=null;knownProjectNames.add(normProjectName(project.name));updateSaveButton();
+    if(draft){
+      pendingApply=null;
+      diagnostics=v.diagnostics;renderSummary();renderDiag();
+      setStatus(t("st_saved_with_errors"));
+      if($("tm_saved")&&$("tm_saved").classList.contains("open"))refreshSavedProjects();
+      return;
+    }
     let applied=false,applyErr="";
     try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});await applyOutputs();applied=true;}
     catch(e){applyErr=e&&e.message?e.message:String(e);}
     await refreshStatus();
+    const warnings=v.diagnostics.filter(d=>d.severity==="warning");
     if(applied){
       activeProjectId=project.id;referenceMode=false;
+      pendingApply=null;diagnostics=warnings;renderSummary();renderDiag();
       setStatus(t("st_saved_version"));
     }
+    else if(/motor must be stopped/i.test(applyErr)){
+      /* The project is saved; only the live switch is deferred until the motor
+         stops (the poll below retries it automatically). */
+      pendingApply={id:project.id,revision};
+      diagnostics=warnings.concat([{id:"",message:t("st_saved_pending_motor"),severity:"warning"}]);
+      renderSummary();renderDiag();
+      setStatus(t("st_saved_pending_motor"));
+    }
     else{
-      diagnostics=v.diagnostics.concat([{id:"",message:t("st_not_applied")+applyErr,severity:"error"}]);
-      renderDiag();
+      pendingApply=null;
+      diagnostics=warnings.concat([{id:"",message:t("st_not_applied")+applyErr,severity:"error"}]);
+      renderSummary();renderDiag();
       setStatus(t("st_saved_not_applied")+": "+applyErr);
     }
     if($("tm_saved")&&$("tm_saved").classList.contains("open"))refreshSavedProjects();
-  }catch(e){setStatus(t("st_not_saved")+e.message);}finally{busy=false;refreshButtons();setTimeout(()=>{if(sb&&!busy)sb.classList.remove("primary");},400);}
+  }catch(e){
+    const msg=e&&e.message?String(e.message):String(e);
+    if(/Stale expectedRevision/i.test(msg)){
+      revisionConflict={id:project.id,expectedRevision:revision,remoteRevision:0};
+      setStatus(t("st_revision_conflict"));
+      try{await refreshStatus();}catch(_){}
+    }else setStatus(t("st_not_saved")+msg);
+  }finally{busy=false;refreshButtons();setTimeout(()=>{if(sb&&!busy)sb.classList.remove("primary");},400);}
 }
 function autoSaveProject(){
   if(!online)return;
@@ -2762,7 +2818,7 @@ function prepareClone(data,name,exactName){
   ensureProjectTitle(project);
   viewMode="mix";activeSchemeId="";renamingSchemeId="";selected="";selectedIds=new Set();selectedLink="";
   revision=0;savedId="";savedSig=null;assets={};assetsReady=false;diagnostics=[];
-  referenceMode=false;revisionConflict=null;
+  referenceMode=false;revisionConflict=null;pendingApply=null;
   applyViewport();renderSnapBtn();historyReset();render();
 }
 async function cloneReferenceProject(){
@@ -4051,7 +4107,7 @@ async function importBlocksFile(file){
   viewMode=project.editor&&project.editor.mode==="scheme"&&(project.schemes||[]).length?"scheme":"mix";
   activeSchemeId=viewMode==="scheme"?(project.editor.activeScheme||(project.schemes[0]||{}).id||""):"";
   selected="";selectedIds=new Set();selectedLink="";assets={};assetsReady=false;diagnostics=[];
-  revision=0;savedId="";savedSig=null;referenceMode=false;revisionConflict=null;activeProjectAutoLoadDone=true;
+  revision=0;savedId="";savedSig=null;referenceMode=false;revisionConflict=null;pendingApply=null;activeProjectAutoLoadDone=true;
   applyViewport();renderSnapBtn();historyReset();render();saveDraft();
   setStatus(t("st_imported"));
   return true;
@@ -4060,7 +4116,7 @@ function loadDefaultProject(){
   backupDraft();
   project=defaultProject();viewMode="mix";activeSchemeId="";renamingSchemeId="";
   selected="";selectedIds=new Set();revision=0;savedId="";assets={};assetsReady=false;diagnostics=[];
-  revisionConflict=null;
+  revisionConflict=null;pendingApply=null;
   referenceMode=true;
   applyViewport();renderSnapBtn();historyReset();
   savedSig=projectSig();
@@ -5882,7 +5938,7 @@ window.addEventListener("keydown",ev=>{
   else if(is("C")){ev.preventDefault();copySelected();}
   else if(is("V")){ev.preventDefault();pasteClip();}
 });
-$("b_save").onclick=doSave;
+$("b_save").onclick=()=>doSave({force:true});
 
 /* ---- boot ------------------------------------------------------------ */
 lang=detectLang();

@@ -1,4 +1,4 @@
-#include <unity.h>
+﻿#include <unity.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -243,6 +243,36 @@ static void constant_bemf_adc(int channel)
     }
 }
 
+static uint32_t g_sweep_max_duty;
+
+static void sweep_rail_refresh(TickType_t ticks)
+{
+    (void)ticks;
+    motor_set_rail_voltage_mv(2500);
+}
+
+static void sweep_bemf_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        uint32_t duty = s_last_duty;
+        if (duty > g_sweep_max_duty) g_sweep_max_duty = duty;
+        uint32_t mv = duty > 200U ? (duty - 200U) * 2300U / 823U : 0U;
+        mock_adc_raw[channel] = mv_to_raw((int)mv);
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[channel] = 0;
+    }
+}
+
+static void zero_sweep_bemf_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        if (s_last_duty > g_sweep_max_duty) g_sweep_max_duty = s_last_duty;
+        mock_adc_raw[channel] = 0;
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[channel] = 0;
+    }
+}
+
 static void flat_when_spinning_adc(int channel)
 {
     if (channel == (int)(PIN_BEMF1 - 1)) {
@@ -278,6 +308,16 @@ static void spin_same_polarity_adc(int channel)
     if (channel == (int)(PIN_BEMF1 - 1)) {
         ++g_check_reads;
         mock_adc_raw[channel] = g_check_reads <= 3U ? 0 : mv_to_raw(300);
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[channel] = 0;
+    }
+}
+
+static void sweep_ceiling_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        uint32_t mv = s_last_duty > 300U ? 950U : s_last_duty * 800U / 1023U;
+        mock_adc_raw[channel] = mv_to_raw((int)mv);
     } else if (channel == (int)(PIN_BEMF2 - 1)) {
         mock_adc_raw[channel] = 0;
     }
@@ -694,48 +734,79 @@ static void test_diag_reports_terminal_voltages(void)
 
 /* ---- calibration ---------------------------------------------------- */
 
-static void start_calibration_and_run(motor_bemf_cal_mode_t mode, uint8_t points)
+static void start_calibration_and_run(void)
 {
     motor_bemf_cal_config_t cfg;
     motor_bemf_cal_default_config(&cfg);
-    cfg.mode = mode;
-    cfg.points = points;
-    cfg.dwell_ms = 60;
-    cfg.settle_ms = 40;
-    cfg.interval_ms = 10;
-    cfg.samples = 3;
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
 }
 
-static void test_calibration_success_stores_curve(void)
+static void test_auto_calibration_pwm_sweep(void)
 {
-    g_adc_hook = duty_bemf_adc;
+    motor_set_rail_voltage_mv(2500);
+    g_sweep_max_duty = 0;
+    g_adc_hook = sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
+    g_delay_hook = NULL;
 
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
     TEST_ASSERT_FALSE(info.active);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
+    TEST_ASSERT_EQUAL_UINT8(2, info.count);
+    TEST_ASSERT_EQUAL_UINT8(1, info.speed[0]);
+    TEST_ASSERT_EQUAL_UINT8(126, info.speed[1]);
+    TEST_ASSERT_TRUE(info.frac[1] >= 51U);
+    TEST_ASSERT_TRUE(info.frac[1] > info.frac[0]);
+    TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_min_pct);
+    TEST_ASSERT_EQUAL_UINT8(15, info.profile.pwm_start_pct);
+    TEST_ASSERT_EQUAL_UINT8(95, info.profile.pwm_max_pct);
+    TEST_ASSERT_EQUAL_UINT8(0, info.profile.ceiling_speed);
+    TEST_ASSERT_TRUE(g_sweep_max_duty >= 970U);
+
+    TEST_ASSERT_EQUAL_UINT8(2, g_cal.count);
+    TEST_ASSERT_EQUAL_UINT8(1, g_cal.speed[0]);
+    TEST_ASSERT_EQUAL_UINT8(126, g_cal.speed[1]);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_reload());
+    motor_bemf_cal_info(&info);
     TEST_ASSERT_TRUE(info.valid);
-    TEST_ASSERT_TRUE(info.stored);
-    TEST_ASSERT_TRUE(info.count >= CAL_MIN_POINTS);
-    for (uint8_t i = 1; i < info.count; ++i) {
-        TEST_ASSERT_TRUE(info.speed[i] > info.speed[i - 1U]);
-        TEST_ASSERT_TRUE(info.frac[i] >= info.frac[i - 1U]);
-    }
-    TEST_ASSERT_TRUE(g_cal_valid);
+    TEST_ASSERT_EQUAL_UINT8(2, info.count);
+}
+
+static void test_auto_sweep_without_signal_fails(void)
+{
+    motor_set_rail_voltage_mv(2500);
+    g_sweep_max_duty = 0;
+    g_adc_hook = zero_sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
+    g_create_hook = run_task_now;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    g_delay_hook = NULL;
+
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, info.result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NO_RISE, info.reason);
+    TEST_ASSERT_FALSE(info.stored);
+    /* The sweep always runs to 95%, even with no BEMF. */
+    TEST_ASSERT_TRUE(g_sweep_max_duty >= 970U);
 }
 
 static void test_zero_bemf_calibration_fails_but_keeps_old_curve(void)
 {
     set_stored_curve();
     settings_bemf_cal_t before = g_cal;
-    g_adc_hook = zero_bemf_adc;
+    motor_set_rail_voltage_mv(2500);
+    g_adc_hook = zero_sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
+    g_delay_hook = NULL;
 
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
@@ -754,7 +825,7 @@ static void test_calibration_rejects_coasting_motor(void)
 {
     g_adc_hook = constant_bemf_adc;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
 
     motor_bemf_cal_info_t info;
@@ -795,58 +866,6 @@ static void test_stop_cancels_calibration_and_coasts(void)
     cleanup_abandoned_calibration();
 }
 
-static void test_custom_calibration_plan(void)
-{
-    g_create_hook = capture_task;
-    motor_bemf_cal_config_t cfg;
-    motor_bemf_cal_default_config(&cfg);
-    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
-    cfg.speed_count = 2;
-    cfg.speed[0] = 20;
-    cfg.speed[1] = 80;
-    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
-    g_create_hook = NULL;
-    TEST_ASSERT_EQUAL_UINT8(2, s_cal_plan_count);
-    TEST_ASSERT_EQUAL_UINT8(20, s_cal_plan[0]);
-    TEST_ASSERT_EQUAL_UINT8(80, s_cal_plan[1]);
-    cleanup_abandoned_calibration();
-}
-
-static void test_calibration_mode_selects_point_count(void)
-{
-    struct {
-        motor_bemf_cal_mode_t mode;
-        uint8_t points;
-    } cases[] = {
-        { MOTOR_BEMF_MODE_AUTO, 12 },
-        { MOTOR_BEMF_MODE_FAST, 10 },
-        { MOTOR_BEMF_MODE_BALANCED, 12 },
-        { MOTOR_BEMF_MODE_THOROUGH, 14 },
-    };
-    g_create_hook = capture_task;
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        motor_bemf_cal_config_t cfg;
-        motor_bemf_cal_default_config(&cfg);
-        cfg.mode = cases[i].mode;
-        cfg.points = 0; /* web UI sends only mode=... */
-        TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
-        TEST_ASSERT_EQUAL_UINT8(cases[i].points, s_cal_plan_count);
-        cleanup_abandoned_calibration();
-    }
-    g_create_hook = NULL;
-
-    /* An explicit points= value still overrides the preset. */
-    g_create_hook = capture_task;
-    motor_bemf_cal_config_t cfg;
-    motor_bemf_cal_default_config(&cfg);
-    cfg.mode = MOTOR_BEMF_MODE_FAST;
-    cfg.points = 14;
-    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
-    g_create_hook = NULL;
-    TEST_ASSERT_EQUAL_UINT8(14, s_cal_plan_count);
-    cleanup_abandoned_calibration();
-}
-
 static void test_calibration_clear_removes_curve(void)
 {
     set_stored_curve();
@@ -873,10 +892,13 @@ static void test_flat_stored_curve_does_not_enable_closed_loop(void)
 
 static void test_flat_sensor_calibration_fails_without_stopping_motor(void)
 {
+    motor_set_rail_voltage_mv(2500);
     g_adc_hook = flat_when_spinning_adc;
+    g_delay_hook = sweep_rail_refresh;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
+    g_delay_hook = NULL;
 
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
@@ -1083,12 +1105,12 @@ static void test_curve_with_zero_and_flat_fill(void)
     TEST_ASSERT_EQUAL_UINT16(700, s_cal_frac_table[126]);
 }
 
-static void test_legacy_cal_start_uses_fast_preset(void)
+static void test_legacy_cal_start_uses_sweep(void)
 {
     g_create_hook = capture_task;
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start());
     g_create_hook = NULL;
-    TEST_ASSERT_EQUAL_UINT8(10, s_cal_plan_count);
+    TEST_ASSERT_EQUAL_UINT8(19, s_cal_total);
     cleanup_abandoned_calibration();
 }
 
@@ -1149,7 +1171,7 @@ static void test_cal_sample_rail_failure(void)
     g_adc_hook = zero_bemf_adc;
     g_delay_hook = rail_zero_after_first_delays;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
     g_delay_hook = refresh_rail;
     motor_bemf_cal_info_t info;
@@ -1163,7 +1185,7 @@ static void test_cal_rest_check_low_rail(void)
     TEST_ASSERT_EQUAL(ESP_OK, motor_set_rail_voltage_mv(0));
     g_adc_hook = zero_bemf_adc;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
@@ -1174,7 +1196,7 @@ static void test_cal_rest_check_adc_failure(void)
 {
     mock_adc_ok = 0;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
@@ -1186,7 +1208,7 @@ static void test_cal_sample_adc_failure(void)
     g_adc_hook = zero_bemf_adc;
     g_delay_hook = adc_fail_after_first_delays;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
     g_delay_hook = refresh_rail;
     motor_bemf_cal_info_t info;
@@ -1196,24 +1218,31 @@ static void test_cal_sample_adc_failure(void)
 
 static void test_cal_ceiling_saves_partial_curve(void)
 {
-    g_adc_hook = ceiling_after_two_adc;
+    motor_set_rail_voltage_mv(1000);
+    g_adc_hook = sweep_ceiling_adc;
+    g_delay_hook = refresh_rail;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
+    g_delay_hook = NULL;
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
     TEST_ASSERT_EQUAL_UINT8(2, info.count);
-    TEST_ASSERT_EQUAL_UINT8(80, info.profile.ceiling_speed);
+    TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_max_pct);
+    TEST_ASSERT_TRUE(info.profile.ceiling_speed > 0U);
 }
 
 static void test_cal_storage_failure(void)
 {
     g_save_error = ESP_FAIL;
-    g_adc_hook = duty_bemf_adc;
+    motor_set_rail_voltage_mv(2500);
+    g_adc_hook = sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
     g_create_hook = run_task_now;
-    start_calibration_and_run(MOTOR_BEMF_MODE_CUSTOM, 4);
+    start_calibration_and_run();
     g_create_hook = NULL;
+    g_delay_hook = NULL;
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, info.result);
@@ -1222,72 +1251,21 @@ static void test_cal_storage_failure(void)
 
 static void test_cal_apply_pid_writes_cv54_56(void)
 {
-    g_adc_hook = duty_bemf_adc;
+    motor_set_rail_voltage_mv(2500);
+    g_adc_hook = sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
     g_create_hook = run_task_now;
     motor_bemf_cal_config_t cfg;
     motor_bemf_cal_default_config(&cfg);
-    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
-    cfg.points = 4;
-    cfg.dwell_ms = 60;
-    cfg.settle_ms = 40;
-    cfg.interval_ms = 10;
-    cfg.samples = 3;
     cfg.apply_pid = true;
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
     g_create_hook = NULL;
+    g_delay_hook = NULL;
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
     TEST_ASSERT_TRUE(info.profile.pid_applied);
     TEST_ASSERT_TRUE(g_cv[54] != 128 || g_cv[55] != 60 || g_cv[56] != 32);
-}
-
-static void test_cal_invalid_custom_speeds_rejected(void)
-{
-    g_create_hook = capture_task;
-    motor_bemf_cal_config_t cfg;
-    motor_bemf_cal_default_config(&cfg);
-    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
-    cfg.speed_count = 2;
-    cfg.speed[0] = 80;
-    cfg.speed[1] = 20;
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_bemf_cal_start_ex(&cfg));
-    g_create_hook = NULL;
-}
-
-static void test_custom_points_defaults_to_speed_count(void)
-{
-    g_create_hook = capture_task;
-    motor_bemf_cal_config_t cfg;
-    motor_bemf_cal_default_config(&cfg);
-    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
-    cfg.points = 0;
-    cfg.speed_count = 2;
-    cfg.speed[0] = 20;
-    cfg.speed[1] = 80;
-    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
-    g_create_hook = NULL;
-    TEST_ASSERT_EQUAL_UINT8(2, s_cal_plan_count);
-    cleanup_abandoned_calibration();
-}
-
-static void test_cal_info_reports_active_points(void)
-{
-    g_create_hook = capture_task;
-    motor_bemf_cal_config_t cfg;
-    motor_bemf_cal_default_config(&cfg);
-    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
-    g_create_hook = NULL;
-    s_cal_measured = 1;
-    s_cal_run_speed[0] = 20;
-    s_cal_run_frac[0] = 123;
-    motor_bemf_cal_info_t info;
-    motor_bemf_cal_info(&info);
-    TEST_ASSERT_TRUE(info.active);
-    TEST_ASSERT_EQUAL_UINT8(1, info.count);
-    TEST_ASSERT_EQUAL_UINT8(20, info.speed[0]);
-    TEST_ASSERT_EQUAL_UINT16(123, info.frac[0]);
-    cleanup_abandoned_calibration();
 }
 
 static void test_bemf_check_not_initialized(void)
@@ -1458,19 +1436,16 @@ static void test_bemf_check_spin_adc_failure(void)
 static void test_cal_apply_pid_write_failure_is_reported(void)
 {
     g_cv_write_error = ESP_FAIL;
-    g_adc_hook = duty_bemf_adc;
+    motor_set_rail_voltage_mv(2500);
+    g_adc_hook = sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
     g_create_hook = run_task_now;
     motor_bemf_cal_config_t cfg;
     motor_bemf_cal_default_config(&cfg);
-    cfg.mode = MOTOR_BEMF_MODE_CUSTOM;
-    cfg.points = 4;
-    cfg.dwell_ms = 60;
-    cfg.settle_ms = 40;
-    cfg.interval_ms = 10;
-    cfg.samples = 3;
     cfg.apply_pid = true;
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_start_ex(&cfg));
     g_create_hook = NULL;
+    g_delay_hook = NULL;
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
@@ -1503,13 +1478,12 @@ int main(void)
     RUN_TEST(test_bemf_above_ceiling_is_rejected);
     RUN_TEST(test_saturated_rail_disables_correction_but_motor_runs);
     RUN_TEST(test_diag_reports_terminal_voltages);
-    RUN_TEST(test_calibration_success_stores_curve);
+    RUN_TEST(test_auto_calibration_pwm_sweep);
+    RUN_TEST(test_auto_sweep_without_signal_fails);
     RUN_TEST(test_zero_bemf_calibration_fails_but_keeps_old_curve);
     RUN_TEST(test_calibration_rejects_coasting_motor);
     RUN_TEST(test_calibration_admission_requires_rest);
     RUN_TEST(test_stop_cancels_calibration_and_coasts);
-    RUN_TEST(test_custom_calibration_plan);
-    RUN_TEST(test_calibration_mode_selects_point_count);
     RUN_TEST(test_calibration_clear_removes_curve);
     RUN_TEST(test_flat_stored_curve_does_not_enable_closed_loop);
     RUN_TEST(test_flat_sensor_calibration_fails_without_stopping_motor);
@@ -1530,7 +1504,7 @@ int main(void)
     RUN_TEST(test_coast_read);
     RUN_TEST(test_coast_read_busy_is_ignored);
     RUN_TEST(test_curve_with_zero_and_flat_fill);
-    RUN_TEST(test_legacy_cal_start_uses_fast_preset);
+    RUN_TEST(test_legacy_cal_start_uses_sweep);
     RUN_TEST(test_cal_cancel_api);
     RUN_TEST(test_cal_watchdog_timeout);
     RUN_TEST(test_cal_clear_is_rejected_while_active);
@@ -1542,9 +1516,6 @@ int main(void)
     RUN_TEST(test_cal_ceiling_saves_partial_curve);
     RUN_TEST(test_cal_storage_failure);
     RUN_TEST(test_cal_apply_pid_writes_cv54_56);
-    RUN_TEST(test_cal_invalid_custom_speeds_rejected);
-    RUN_TEST(test_custom_points_defaults_to_speed_count);
-    RUN_TEST(test_cal_info_reports_active_points);
     RUN_TEST(test_bemf_check_not_initialized);
     RUN_TEST(test_bemf_check_control_timeout);
     RUN_TEST(test_bemf_check_low_rail_and_moving);

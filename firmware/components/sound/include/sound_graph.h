@@ -87,6 +87,8 @@ typedef struct {
 /* Caller allocates graph on heap. Editor JSON is checked, not retained here.
  * Store callers preserve original bytes. Validation resolves index fields. */
 esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_t *diag);
+/* Structural parse for editor drafts: no referential/semantic validation. */
+esp_err_t sg_parse_draft(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_t *diag);
 esp_err_t sg_validate(sg_graph_t *graph, sg_diagnostic_t *diag);
 bool sg_file_used(const sg_graph_t *graph, const char *file);
 bool sg_id_valid(const char *id);

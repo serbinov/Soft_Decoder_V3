@@ -919,6 +919,95 @@ test('27l. New projects get unique ids, auto-save and mark the Save button dirty
   assert.equal(dom.getEl('saved_projects_panel').children.length, 3, 'both projects remain next to the reference');
 });
 
+test('27l2. Apply refused by the motor keeps the saved revision and clears the red error', async t => {
+  let activeRevision = 5, latestRevision = 5, motorSpeed = 1, applyOk = false;
+  const saves = [], applies = [];
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: 'demo', revision: activeRevision };
+    if (url.startsWith('/api/sound/graph/save')) {
+      const u = new URL(url, 'http://preview');
+      saves.push(Number(u.searchParams.get('expectedRevision')) || 0);
+      latestRevision += 1;
+      return { ok: true, revision: latestRevision };
+    }
+    if (url.startsWith('/api/sound/graph/apply')) {
+      const u = new URL(url, 'http://preview');
+      applies.push(Number(u.searchParams.get('revision')) || 0);
+      if (!applyOk) return { ok: false, status: 409, error: 'motor must be stopped' };
+      activeRevision = latestRevision;
+      return { ok: true };
+    }
+    if (url.startsWith('/api/motor')) return { ok: true, speed: motorSpeed };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    if (url.startsWith('/api/audio/volume')) return { ok: true };
+    if (url.startsWith('/api/sound/graph/asset')) return { ok: true, asset: { file: 'horn.wav', size: 1000, crc32: '12345678', sampleRate: 22050, channels: 1, bits: 16, durationMs: 200 } };
+    if (url.startsWith('/api/sound/graph/validate')) return { ok: true, diagnostics: [] };
+    return { ok: true };
+  } });
+  api.setProject(Object.assign({}, api.project(), { id: 'demo' }));
+  api.setMeta('demo', 5);
+  await api.refreshStatus();
+
+  api.setProject(Object.assign({}, api.project(), { name: 'Edited while moving' }));
+  await dom.getEl('b_save').onclick();
+  assert.deepEqual(saves, [5], 'the first save uses the loaded revision');
+  assert.equal(api.meta().revision, 6, 'the saved revision advances even when apply is refused');
+  assert.equal(applies[0], 6, 'apply targets the saved revision');
+  assert.match(dom.getEl('diag').innerHTML, /остановки мотора/);
+  assert.doesNotMatch(dom.getEl('diag').innerHTML, /Не применено/);
+
+  await api.refreshStatus();
+  assert.equal(api.meta().revision, 6, 'status polling must not regress to the applied revision');
+
+  api.setProject(Object.assign({}, api.project(), { name: 'Edited while pending' }));
+  await api.refreshStatus();
+  assert.equal(api.stateProbe().conflict, null, 'an own save awaiting apply is not a remote conflict');
+
+  motorSpeed = 0; applyOk = true;
+  await api.refreshStatus();
+  assert.equal(applies[1], 6, 'the pending apply runs once the motor stops');
+  assert.equal(dom.getEl('diag').innerHTML, '');
+  assert.match(dom.getEl('status_txt').textContent, /Применено/);
+
+  api.setProject(Object.assign({}, api.project(), { name: 'Edited after apply' }));
+  await dom.getEl('b_save').onclick();
+  assert.equal(saves[1], 6, 'the next save uses the advanced revision');
+});
+
+test('27l3. Manual save stores an invalid graph as a draft and keeps the errors', async t => {
+  let applies = 0, saved = null;
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: 'demo', revision: 5 };
+    if (url.startsWith('/api/sound/graph/save')) { saved = new URL(url, 'http://preview'); return { ok: true, revision: 6 }; }
+    if (url.startsWith('/api/sound/graph/apply')) { applies += 1; return { ok: true }; }
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    if (url.startsWith('/api/motor')) return { ok: true, speed: 0 };
+    if (url.startsWith('/api/sound/graph/asset')) return { ok: true, asset: { file: 'horn.wav', size: 1000, crc32: '12345678', sampleRate: 22050, channels: 1, bits: 16, durationMs: 200 } };
+    return { ok: true };
+  } });
+  api.setProject(Object.assign({}, api.project(), { id: 'demo' }));
+  api.setMeta('demo', 5);
+  await api.refreshStatus();
+
+  const p = api.project();
+  const cue = p.mix.blocks.find(b => b.type === 'sound_cue' && b.scheme);
+  assert.ok(cue, 'the default project has a Sound block with a scheme');
+  p.mix.links = p.mix.links.filter(l => l.to !== cue.id);
+  api.setProject(p);
+  assert.ok(api.validate().diagnostics.some(d => d.severity !== 'warning'), 'the graph has validation errors');
+
+  await dom.getEl('b_save').onclick();
+  assert.equal(applies, 0, 'a draft is not applied');
+  assert.equal(saved.searchParams.get('draft'), '1', 'the manual save sends draft=1');
+  assert.equal(Number(saved.searchParams.get('expectedRevision')), 5);
+  assert.match(dom.getEl('diag').innerHTML, /Fx/, 'validation errors remain visible after saving');
+  assert.match(dom.getEl('status_txt').textContent, /Сохранено с ошибками/);
+});
+
 test('27m. Status polling keeps metadata for a non-active loaded project', async t => {
   const { api } = createEditorFixture(t, { fetch: async url => {
     if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: 'deviceB', revision: 9 };

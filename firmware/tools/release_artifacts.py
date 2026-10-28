@@ -306,11 +306,12 @@ def publish(args):
             require(info["entries"] == source_partitions(args.partitions), "Binary/source partitions differ")
         payloads[release / "flash_download_tool" / name] = (build / source).read_bytes()
         manifest["files"].append(dict(path="flash_download_tool/" + name, offset=offset, **info))
+    # One versioned raw application is published; the same file is used for
+    # USB flashing and for the device's web OTA page.
     app = payloads[release / "flash_download_tool" / "firmware.bin"]
-    for suffix in (".bin", "_OTA.bin"):
-        name = f"ADDITIPUS_AURA-X_v{version}{suffix}"
-        payloads[release / name] = app
-        manifest["files"].append(dict(path=name, offset=None, **image_info(app)))
+    name = f"ADDITIPUS_AURA-X_v{version}.bin"
+    payloads[release / name] = app
+    manifest["files"].append(dict(path=name, offset=None, **image_info(app)))
     # Sound packs are deliverables too: publish the hashes of every pack that is
     # already present, so later verification notices tampering or truncation.
     for path in sorted(release.glob("*.asp")):
@@ -325,6 +326,12 @@ def publish(args):
     for path, data in payloads.items():
         atomic_write(path, data)
         require(path.read_bytes() == data, f"Publication copy mismatch: {path}")
+    # Older releases also published `*_OTA.bin` duplicates; the versioned BIN is
+    # now the only application deliverable, so drop such stale copies.
+    for duplicate in release.glob("ADDITIPUS_AURA-X_v*_OTA.bin"):
+        if duplicate.is_file():
+            print(f"Removed stale duplicate: {duplicate.name}")
+            duplicate.unlink()
     atomic_write(manifest_path, (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     checksums = {path.relative_to(release).as_posix() for path in payloads}
     checksums.add("manifest.json")
@@ -432,7 +439,7 @@ def verify(args):
         try:
             info = inspect(path, legacy)
             if info["role"] in ("application", "AURAOTA2"):
-                match = re.search(r"_v(.+?)(?:_OTA|_with_sounds)?\.bin$", path.name)
+                match = re.search(r"_v(.+?)(?:_with_sounds)?\.bin$", path.name)
                 require(match is not None and match[1] == info["version"],
                         "Historical filename/version mismatch")
                 if info["version"] == manifest["version"]:

@@ -1610,20 +1610,23 @@ static void test_bemf_cal_get(void)
     mock_bemf_cal_info.frac[0] = 512;
     mock_bemf_cal_info.speed[1] = 6;
     mock_bemf_cal_info.frac[1] = 1024;
-    mock_bemf_cal_info.profile.mode = MOTOR_BEMF_MODE_THOROUGH;
-    mock_bemf_cal_info.profile.planned_points = 16;
-    mock_bemf_cal_info.profile.measured_points = 14;
-    mock_bemf_cal_info.profile.stalled_points = 2;
-    mock_bemf_cal_info.profile.ceiling_speed = 120;
-    mock_bemf_cal_info.profile.first_move_speed = 5;
+    mock_bemf_cal_info.profile.mode = MOTOR_BEMF_MODE_AUTO;
+    mock_bemf_cal_info.profile.planned_points = 19;
+    mock_bemf_cal_info.profile.measured_points = 2;
+    mock_bemf_cal_info.profile.stalled_points = 0;
+    mock_bemf_cal_info.profile.ceiling_speed = 0;
+    mock_bemf_cal_info.profile.first_move_speed = 1;
     mock_bemf_cal_info.profile.first_frac = 100;
-    mock_bemf_cal_info.profile.settle_ms_avg = 600;
+    mock_bemf_cal_info.profile.settle_ms_avg = 0;
     mock_bemf_cal_info.profile.plant_gain_x1000 = 2400;
     mock_bemf_cal_info.profile.kp_x100 = 42;
     mock_bemf_cal_info.profile.ki_x1000 = 21;
     mock_bemf_cal_info.profile.kd_x100 = 5;
     mock_bemf_cal_info.profile.quality = 88;
     mock_bemf_cal_info.profile.pid_applied = true;
+    mock_bemf_cal_info.profile.pwm_min_pct = 25;
+    mock_bemf_cal_info.profile.pwm_start_pct = 15;
+    mock_bemf_cal_info.profile.pwm_max_pct = 95;
     mock_bemf_cal_info.phase = MOTOR_BEMF_CAL_PHASE_CURVE;
     mock_bemf_cal_info.profile.phase = MOTOR_BEMF_CAL_PHASE_CURVE;
     mock_bemf_cal_info.profile.sensor_ok = true;
@@ -1640,6 +1643,9 @@ static void test_bemf_cal_get(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"firstFrac\":100"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"quality\":88"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"pidApplied\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"pwmMin\":25"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"pwmStart\":15"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"pwmMax\":95"));
 }
 
 static void test_bemf_phase_names(void)
@@ -1703,29 +1709,18 @@ static void test_bemf_cal_post_paths(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "calibration busy"));
 
     reset_resp();
-    set_query("start=1&mode=thorough&points=16&settle=600&interval=50&samples=10&retries=2&apply_pid=1");
+    set_query("start=1&apply_pid=1");
     int before_ex = mock_bemf_cal_start_ex_calls;
     TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
     TEST_ASSERT_EQUAL_INT(before_ex + 1, mock_bemf_cal_start_ex_calls);
-    TEST_ASSERT_EQUAL(MOTOR_BEMF_MODE_THOROUGH, mock_bemf_cal_config.mode);
-    TEST_ASSERT_EQUAL_UINT8(16, mock_bemf_cal_config.points);
-    TEST_ASSERT_EQUAL_UINT16(600, mock_bemf_cal_config.settle_ms);
-    TEST_ASSERT_EQUAL_UINT16(50, mock_bemf_cal_config.interval_ms);
-    TEST_ASSERT_EQUAL_UINT8(10, mock_bemf_cal_config.samples);
-    TEST_ASSERT_EQUAL_UINT8(2, mock_bemf_cal_config.retries);
     TEST_ASSERT_TRUE(mock_bemf_cal_config.apply_pid);
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
 
     reset_resp();
-    set_query("start=1&speeds=12,18,24,32,40,52,66,80,100,126");
+    set_query("start=1&mode=fast");
     before_ex = mock_bemf_cal_start_ex_calls;
     TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
-    TEST_ASSERT_EQUAL_INT(before_ex + 1, mock_bemf_cal_start_ex_calls);
-    TEST_ASSERT_EQUAL(MOTOR_BEMF_MODE_CUSTOM, mock_bemf_cal_config.mode);
-    TEST_ASSERT_EQUAL_UINT8(10, mock_bemf_cal_config.speed_count);
-    TEST_ASSERT_EQUAL_UINT8(12, mock_bemf_cal_config.speed[0]);
-    TEST_ASSERT_EQUAL_UINT8(126, mock_bemf_cal_config.speed[9]);
-    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_INT(before_ex, mock_bemf_cal_start_ex_calls);
 }
 
 static void test_bemf_use_get_post(void)
@@ -4772,6 +4767,12 @@ static const char graph_fixture[] =
     "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
     "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
 
+static const char invalid_graph_fixture[] =
+    "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"demo\",\"name\":\"Demo\","
+    "\"engine\":{\"entry\":\"missing\",\"fn\":1},\"hysteresis\":3,"
+    "\"states\":[{\"id\":\"off\",\"name\":\"Off\",\"file\":\"\",\"loop\":false,\"volume\":100,\"rate\":1000}],"
+    "\"transitions\":[],\"effects\":[],\"assets\":[],\"editor\":{\"zoom\":1}}";
+
 static const char default_graph_fixture[] =
     "{\"format\":\"sound-graph\",\"schemaVersion\":1,\"id\":\"" SG_DEFAULT_PROJECT_ID "\",\"name\":\"ChME3\","
     "\"engine\":{\"entry\":\"off\",\"fn\":1},\"hysteresis\":3,"
@@ -4875,6 +4876,34 @@ static void test_graph_save_validate_do_not_actuate(void)
     req = graph_request(graph_save_post, graph_fixture);
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
     TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "Stale expectedRevision"));
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_revision);
+}
+
+static void test_graph_save_accepts_invalid_draft(void)
+{
+    set_query("id=demo&expectedRevision=0&draft=1");
+    httpd_req_t req = graph_request(graph_save_post, invalid_graph_fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"revision\":1"));
+    TEST_ASSERT_EQUAL_STRING(invalid_graph_fixture, mock_graph_json);
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_revision);
+    TEST_ASSERT_FALSE(mock_graph_status.active);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_graph_select_calls);
+    reset_resp();
+    /* The same revision cannot be saved through the validated path. */
+    set_query("id=demo&expectedRevision=1");
+    req = graph_request(graph_save_post, invalid_graph_fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"diagnostics\""));
+    TEST_ASSERT_EQUAL_UINT32(1, mock_graph_revision);
+    reset_resp();
+    set_query("id=demo&expectedRevision=1&draft=maybe");
+    req = graph_request(graph_save_post, invalid_graph_fixture);
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_STRING("400 Bad Request", mock_resp_status);
     TEST_ASSERT_EQUAL_UINT32(1, mock_graph_revision);
 }
 
@@ -4967,9 +4996,11 @@ static void test_graph_apply_motion_and_transaction_failures(void)
     mock_motor_speed = 1;
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
     TEST_ASSERT_EQUAL_STRING("409 Conflict", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "motor must be stopped"));
     TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
     mock_motor_speed = 0; mock_motor_applied_speed = 1; reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "motor must be stopped"));
     TEST_ASSERT_EQUAL_UINT32(0, mock_motor_emergency_stop_calls);
     mock_motor_applied_speed = 0; mock_graph_prepare_err = ESP_ERR_NO_MEM; reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
@@ -5744,6 +5775,7 @@ int main(void)
     RUN_TEST(test_graph_projects_get_error);
     RUN_TEST(test_graph_query_values_are_not_truncated_or_ambiguous);
     RUN_TEST(test_graph_save_validate_do_not_actuate);
+    RUN_TEST(test_graph_save_accepts_invalid_draft);
     RUN_TEST(test_graph_body_bounds_mime_and_eof);
     RUN_TEST(test_graph_schema_and_allocation_failures);
     RUN_TEST(test_graph_exact_max_body_and_trailing_json);

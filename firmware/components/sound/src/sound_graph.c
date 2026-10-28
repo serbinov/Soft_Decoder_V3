@@ -209,7 +209,8 @@ static int sg_enum(const char *s, const char *const *names, int count)
 {
     for (int i = 0; i < count; ++i) { if (!strcmp(s, names[i])) { return i; } } return -1;
 }
-esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_t *diag)
+static esp_err_t sg_parse_impl(const char *json, size_t len, sg_graph_t *out,
+                               sg_diagnostic_t *diag, bool validate)
 {
     if (diag) { memset(diag, 0, sizeof(*diag)); }
     if (!json || !out || !len || len > SG_MAX_JSON || memchr(json, 0, len)) { return sg_error(diag, 0, "invalid JSON size/input"); }
@@ -299,12 +300,20 @@ esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_
         SG_NUM(obj,"channels",a->channels,UINT32_MAX); SG_NUM(obj,"bits",a->bits,UINT32_MAX); SG_NUM(obj,"durationMs",a->durationMs,UINT32_MAX);
     }
     obj = sg_get(&p,0,"editor"); if (obj < 0 || p.tokens[obj].type != '{') { goto fail; }
-    result = sg_validate(out,diag); free(p.tokens); return result;
+    result = validate ? sg_validate(out,diag) : ESP_OK; free(p.tokens); return result;
 fail:
     result = sg_error(diag,p.pos,"invalid, duplicate, over-limit or missing JSON field"); free(p.tokens); memset(out,0,sizeof(*out)); return result;
 #undef SG_STR
 #undef SG_NUM
 #undef SG_ARRAY
+}
+esp_err_t sg_parse(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_t *diag)
+{
+    return sg_parse_impl(json, len, out, diag, true);
+}
+esp_err_t sg_parse_draft(const char *json, size_t len, sg_graph_t *out, sg_diagnostic_t *diag)
+{
+    return sg_parse_impl(json, len, out, diag, false);
 }
 bool sg_id_valid(const char *id)
 {

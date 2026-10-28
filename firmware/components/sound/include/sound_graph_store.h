@@ -22,6 +22,12 @@ typedef struct {
 esp_err_t sg_store_save(const char *id, uint32_t expected_revision,
                         const char *json, size_t len, uint32_t *new_revision,
                         sg_diagnostic_t *diag);
+/* Save a structurally valid but semantically invalid draft (editor errors) so
+ * no work is lost. Drafts are never selected or applied; apply/boot still run
+ * sg_validate and can only load a valid revision. */
+esp_err_t sg_store_save_draft(const char *id, uint32_t expected_revision,
+                              const char *json, size_t len, uint32_t *new_revision,
+                              sg_diagnostic_t *diag);
 /* Save a graph revision unconditionally (creating or advancing past any
  * existing latest revision), used when unpacking a bundled .asp sound pack. */
 esp_err_t sg_store_save_force(const char *id, const char *json, size_t len,

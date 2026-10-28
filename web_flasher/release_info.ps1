@@ -1,4 +1,4 @@
-# Offline preflight shared by the local panel and OTA-copy command.
+# Offline preflight shared by the local panel and release commands.
 function Get-FirmwareRelease {
     param([Parameter(Mandatory = $true)][string]$RepoRoot)
     $result = [ordered]@{ ready = $false; version = ""; files = 0; missing = @(); errors = @() }
@@ -36,6 +36,28 @@ function Get-FirmwareRelease {
             if ($name -eq "firmware.bin" -and ($entry[0].version -cne $result.version -or $length -gt 0x1e0000)) {
                 throw "Application identity/size mismatch."
             }
+        }
+        # The versioned application is the single image for both USB flashing
+        # and the device's web OTA page; it must not be duplicated or stale.
+        $apps = @($manifest.files | Where-Object { $_.role -eq "application" -and $_.path -notlike "flash_download_tool/*" })
+        if ($apps.Count -ne 1) { throw "Release must publish exactly one application BIN." }
+        $imageName = "ADDITIPUS_AURA-X_v" + $result.version + ".bin"
+        if ($apps[0].path -cne $imageName) { throw ("Unexpected release image name: " + $apps[0].path) }
+        $imagePath = Join-Path $release $imageName
+        if (-not (Test-Path -LiteralPath $imagePath -PathType Leaf)) { throw ("Missing release image: " + $imageName) }
+        $imageLength = (Get-Item -LiteralPath $imagePath).Length
+        $imageHash = (Get-FileHash -LiteralPath $imagePath -Algorithm SHA256).Hash
+        $firmwareHash = (Get-FileHash -LiteralPath (Join-Path $folder "firmware.bin") -Algorithm SHA256).Hash
+        if ($imageLength -ne [int64]$apps[0].size -or $imageHash -ine $apps[0].sha256 -or
+            $imageHash -ine $firmwareHash) {
+            throw ("Release image changed or differs from firmware.bin: " + $imageName)
+        }
+        $duplicates = @(Get-ChildItem -LiteralPath $release -Filter "*_OTA.bin" -File -ErrorAction SilentlyContinue)
+        if ($duplicates.Count) {
+            # Harmless for USB flashing; publish/verify prune them. Warn only so
+            # a legacy copy cannot lock the panel out of flashing.
+            $result.errors += "Duplicate OTA copies are ignored (not used for flashing): " +
+                (($duplicates | ForEach-Object Name) -join ", ")
         }
         # Sound packs published in the manifest are deliverables too: their
         # names, sizes and hashes must match before the panel calls the release ready.

@@ -1,4 +1,4 @@
-/* Sound-pack import transaction, journal and boot recovery. */
+﻿/* Sound-pack import transaction, journal and boot recovery. */
 
 #include "web.h"
 #include "web_internal.h"
@@ -75,7 +75,7 @@ static esp_err_t pack_collect_old(pack_tx_t *tx)
         if (ent == NULL) break;
         size_t name_len = strlen(ent->d_name);
         if (!web_name_is_wav(ent->d_name) || name_len >= WEB_LIB_NAME_MAX) continue;
-        if (tx->old_count >= 512U) {
+        if (tx->old_count >= PACK_JOURNAL_MAX_NAMES) {
             closedir(d);
             return ESP_ERR_INVALID_SIZE;
         }

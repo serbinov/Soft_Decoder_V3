@@ -82,8 +82,8 @@
       "offset": 131072,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1404720,
-      "sha256": "716639f52ab4a94e2f719a486bccb7bf2fef9e4a9152b051c9ec59fa898bda58",
+      "size": 1438496,
+      "sha256": "6ab4c05b7e16d2e250fcc9a1cfbf9593ec743078320853be96ceadcdfba34c57",
       "image_hash_appended": true,
       "version": "0.15",
       "project": "soft_decoder_v3",
@@ -94,8 +94,8 @@
       "offset": null,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1404720,
-      "sha256": "716639f52ab4a94e2f719a486bccb7bf2fef9e4a9152b051c9ec59fa898bda58",
+      "size": 1438496,
+      "sha256": "6ab4c05b7e16d2e250fcc9a1cfbf9593ec743078320853be96ceadcdfba34c57",
       "image_hash_appended": true,
       "version": "0.15",
       "project": "soft_decoder_v3",
@@ -119,8 +119,8 @@
       "format": "AURASP01",
       "encrypted": false,
       "legacy": false,
-      "size": 3919437,
-      "sha256": "52fdabf3bd509c72db0922d38d6fad321117151b0a089092f99fa7a298ba5f56",
+      "size": 3920789,
+      "sha256": "efcff1ef3ad2b4fe168d78bb19d2cb7cfec5e912cb2d8548acb0cad7fd447b01",
       "files": 303
     }
   ]

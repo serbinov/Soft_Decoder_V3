@@ -453,10 +453,11 @@ esp_err_t device_get(httpd_req_t *req)
     /* 32-bit seconds: fits for >100 years. Do NOT use %lld here — newlib nano
      * (CONFIG_NEWLIB_NANO_FORMAT) has no 64-bit printf conversion. */
     uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
-    char json[192];
+    char json[224];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"name\":\"%s\",\"version\":\"" WEB_FW_VERSION "\",\"uptime\":%lu}",
-             esc, (unsigned long)uptime_s);
+             "{\"ok\":true,\"name\":\"%s\",\"version\":\"" WEB_FW_VERSION "\","
+             "\"uptime\":%lu,\"railOffsetMv\":%u}",
+             esc, (unsigned long)uptime_s, (unsigned)cfg.rail_offset_mv);
     return send_json(req, json);
 }
 
@@ -477,10 +478,22 @@ esp_err_t device_post(httpd_req_t *req)
         }
         web_log_event("Имя", "%s", next.device_name);
     }
+    uint16_t rail_offset = 0;
+    if (query_has_key(query, "rail_offset")) {
+        if (!parse_u16(query, "rail_offset", &rail_offset) || rail_offset > 5000U) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid rail offset");
+        }
+        next.rail_offset_mv = rail_offset;
+        if (web_cfg_save(&next, false) != ESP_OK) {
+            return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+        }
+        web_log_event("Рельсы", "поправка %u мВ", (unsigned)rail_offset);
+    }
     char esc[SETTINGS_NAME_MAX * 2];
     json_escape(next.device_name, esc, sizeof(esc));
-    char json[128];
-    snprintf(json, sizeof(json), "{\"ok\":true,\"name\":\"%s\"}", esc);
+    char json[192];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"name\":\"%s\",\"railOffsetMv\":%u}",
+             esc, (unsigned)next.rail_offset_mv);
     return send_json(req, json);
 }
 

@@ -1,4 +1,4 @@
-"""Publish and verify offline ESP32-S3 release images. Never accesses hardware."""
+﻿"""Publish and verify offline ESP32-S3 release images. Never accesses hardware."""
 import argparse
 import csv
 import hashlib
@@ -16,7 +16,7 @@ ASP_MAGIC = b"AURASP01"
 ASP_PW_MAGIC = b"AURAPW01"
 ASP_PW2_MAGIC = b"AURAPW02"
 ASP_MAX_SIZE = 15 * 1024 * 1024
-ASP_MAX_FILES = 400
+ASP_MAX_FILES = 560
 ASP_SCHEME_NAME = "__aura_scheme__"
 ASP_SCHEME_MAX = 131072
 FLASH_FILES = {

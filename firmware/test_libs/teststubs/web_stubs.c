@@ -1360,6 +1360,35 @@ void motor_emergency_stop(void)
     mock_motor_emergency_stop_calls++;
 }
 
+bool mock_motor_test_active = false;
+uint16_t mock_motor_test_duty = 0;
+bool mock_motor_test_forward = true;
+uint32_t mock_motor_test_left_ms = 0;
+int mock_motor_test_calls = 0;
+esp_err_t mock_motor_test_ret = ESP_OK;
+uint16_t mock_motor_test_last_duty = 0;
+uint32_t mock_motor_test_last_ms = 0;
+
+esp_err_t motor_test_duty(uint16_t duty, bool forward, uint32_t duration_ms)
+{
+    if (motor_is_inhibited()) { return ESP_ERR_INVALID_STATE; }
+    mock_motor_test_calls++;
+    mock_motor_test_last_duty = duty;
+    mock_motor_test_last_ms = duration_ms;
+    mock_motor_test_active = mock_motor_test_ret == ESP_OK;
+    mock_motor_test_duty = duty;
+    mock_motor_test_forward = forward;
+    return mock_motor_test_ret;
+}
+
+bool motor_test_info(uint16_t *out_duty, bool *out_forward, uint32_t *out_left_ms)
+{
+    if (out_duty) *out_duty = mock_motor_test_duty;
+    if (out_forward) *out_forward = mock_motor_test_forward;
+    if (out_left_ms) *out_left_ms = mock_motor_test_left_ms;
+    return mock_motor_test_active;
+}
+
 esp_err_t motor_set_speed(uint8_t speed128, bool forward)
 {
     if (motor_is_inhibited()) { return ESP_ERR_INVALID_STATE; }
@@ -1403,6 +1432,13 @@ void motor_bemf_diag(motor_bemf_diag_t *d)
     d->open_loop_fallback = false;
     d->pid_ok = mock_motor_applied_speed > 0;
     d->cal_valid = true;
+}
+
+size_t motor_bemf_cal_log_copy(motor_bemf_cal_step_log_t *out, size_t max)
+{
+    (void)out;
+    (void)max;
+    return 0U;
 }
 
 void motor_bemf_cal_info(motor_bemf_cal_info_t *info)
@@ -1988,6 +2024,12 @@ void mock_web_reset(void)
     mock_motor_set_speed_calls = 0;
     mock_motor_set_speed_value = 0;
     mock_motor_set_speed_fwd = true;
+    mock_motor_test_active = false;
+    mock_motor_test_duty = 0;
+    mock_motor_test_forward = true;
+    mock_motor_test_left_ms = 0;
+    mock_motor_test_calls = 0;
+    mock_motor_test_ret = ESP_OK;
     memset(&mock_bemf_cal_info, 0, sizeof(mock_bemf_cal_info));
     memset(&mock_bemf_base_info, 0, sizeof(mock_bemf_base_info));
     mock_bemf_enabled = 1;

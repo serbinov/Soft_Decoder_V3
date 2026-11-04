@@ -198,7 +198,7 @@ bool web_maintenance_active(void)
 
 const char *storage_get_root(void) { return "prov_tmp"; }
 
-esp_err_t audio_validate_wav(const char *path)
+esp_err_t audio_inspect_wav(const char *path)
 {
     TEST_ASSERT_NOT_NULL(path);
     TEST_ASSERT_FALSE(g_fs_closed);

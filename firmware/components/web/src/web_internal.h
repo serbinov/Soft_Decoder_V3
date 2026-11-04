@@ -157,6 +157,7 @@ esp_err_t graph_reference_post(httpd_req_t *req);
 /* Motor and BEMF endpoints (web_motor_api.c, web_bemf_api.c). */
 esp_err_t motor_get(httpd_req_t *req);
 esp_err_t motor_post(httpd_req_t *req);
+esp_err_t motor_duty_post(httpd_req_t *req);
 esp_err_t emergency_post(httpd_req_t *req);
 esp_err_t bemf_cal_get(httpd_req_t *req);
 esp_err_t bemf_base_get(httpd_req_t *req);

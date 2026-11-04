@@ -1,4 +1,4 @@
-const assert = require('node:assert/strict');
+﻿const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -212,7 +212,7 @@ function deviceStubs(h, opts = {}) {
   h.ctx.promptPasswordDialog = async () => opts.password || '';
 }
 
-async function exportPack(h, password = '', confirm = true) {
+async function exportPack(h, password = 'password8', confirm = true) {
   deviceStubs(h, { password });
   h.reset();
   let stats = null;
@@ -268,20 +268,22 @@ test('JS export -> Python unpack: real files, scheme manifest and volumes', asyn
   const dir = tmpDir('export');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const h = harness();
-  const { bytes, name, stats } = await exportPack(h, '');
+  const { bytes, name, stats } = await exportPack(h);
   assert.ok(bytes, 'export produced a blob: ' + h.logs.join(' | '));
   assert.equal(name, 'Pack Test.asp');
   assert.ok(stats, 'save dialog shown');
   assert.equal(stats.name, 'Pack Test.asp');
   assert.equal(stats.download.name, 'Pack Test.asp');
   assert.match(stats.download.url, /^blob:/);
-  const info = h.ctx.parseAspPack(new Uint8Array(bytes));
+  const plain = await h.ctx.decryptAspBytes(new Uint8Array(bytes), 'password8');
+  assert.ok(plain, 'exported pack is password-protected and decrypts');
+  const info = h.ctx.parseAspPack(new Uint8Array(plain));
   assert.equal(info.audio.length, 4);
   assert.equal(info.adpcm, 4, 'all PCM (16 and 8 bit) is compressed to ADPCM on export');
   assert.equal(info.pcm, 0);
   assert.equal(info.scheme.id, 'packtest');
   const asp = path.join(dir, 'pack.asp');
-  fs.writeFileSync(asp, bytes);
+  fs.writeFileSync(asp, plain);
   const out = path.join(dir, 'out');
   runPython([asp, '--unpack', '-o', out]);
 
@@ -349,7 +351,7 @@ test('JS encrypted export -> Python unpack with the same password', async t => {
 
 test('JS export can be cancelled from the save dialog without downloading', async t => {
   const h = harness();
-  const { bytes, name, stats } = await exportPack(h, '', false);
+  const { bytes, name, stats } = await exportPack(h, 'password8', false);
   assert.ok(stats, 'save dialog is shown before the download');
   assert.ok(bytes, 'the pack was built before asking for confirmation');
   assert.equal(name, '', 'no download is started');

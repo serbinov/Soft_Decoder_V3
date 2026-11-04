@@ -5,6 +5,7 @@
 #include "web_util.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -133,11 +134,15 @@ int bemf_cal_action(const char *query)
 
 esp_err_t bemf_cal_get(httpd_req_t *req)
 {
+#define BEMF_CAL_JSON_MAX 4096U
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
-    char json[1792];
+    char *json = malloc(BEMF_CAL_JSON_MAX);
+    if (json == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    }
     size_t used = 0;
-    buf_appendf(json, sizeof(json), &used,
+    buf_appendf(json, BEMF_CAL_JSON_MAX, &used,
                 "{\"ok\":true,\"active\":%s,\"phase\":\"%s\",\"progress\":%u,\"total\":%u,"
                 "\"valid\":%s,\"stored\":%s,\"use\":%s,"
                 "\"runId\":%lu,\"result\":\"%s\",\"error\":\"%s\",\"errorCode\":%d,\"points\":[",
@@ -150,17 +155,17 @@ esp_err_t bemf_cal_get(httpd_req_t *req)
                 (unsigned long)info.run_id, bemf_result_name(info.result),
                 bemf_error_name(info.reason), (int)info.error_code);
     for (uint8_t i = 0; i < info.count; ++i) {
-        uint16_t pct = (uint16_t)((info.frac[i] * 100U) / 1024U);
-        buf_appendf(json, sizeof(json), &used,
+        uint16_t pct = (uint16_t)((info.frac[i] * 100U + 512U) / 1024U);
+        buf_appendf(json, BEMF_CAL_JSON_MAX, &used,
                     "%s{\"speed\":%u,\"frac\":%u}",
                     i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);
     }
-    buf_appendf(json, sizeof(json), &used,
+    buf_appendf(json, BEMF_CAL_JSON_MAX, &used,
                 "],\"profile\":{\"mode\":%u,\"phase\":\"%s\",\"sensorOk\":%s,"
                 "\"optimalUs\":%u,\"dwellMs\":%u,\"planned\":%u,\"measured\":%u,"
                 "\"stalled\":%u,\"ceiling\":%u,\"first\":%u,\"firstFrac\":%u,\"settle\":%u,"
                 "\"gain\":%u,\"kp\":%u,\"ki\":%u,\"kd\":%u,\"quality\":%u,"
-                "\"pidApplied\":%s,\"pwmMin\":%u,\"pwmStart\":%u,\"pwmMax\":%u}}",
+                "\"pidApplied\":%s,\"pwmMin\":%u,\"pwmStart\":%u,\"pwmMax\":%u},\"windows\":[",
                 (unsigned)info.profile.mode,
                 bemf_phase_name(info.profile.phase),
                 info.profile.sensor_ok ? "true" : "false",
@@ -180,7 +185,31 @@ esp_err_t bemf_cal_get(httpd_req_t *req)
                 (unsigned)info.profile.pwm_min_pct,
                 (unsigned)info.profile.pwm_start_pct,
                 (unsigned)info.profile.pwm_max_pct);
-    return send_json(req, json);
+    for (uint8_t i = 0; i < info.profile.window_count; ++i) {
+        buf_appendf(json, BEMF_CAL_JSON_MAX, &used,
+                    "%s{\"us\":%u,\"frac\":%u}",
+                    i == 0 ? "" : ",", (unsigned)info.profile.window_us[i],
+                    (unsigned)((info.profile.window_frac[i] * 100U) / 1024U));
+    }
+    buf_appendf(json, BEMF_CAL_JSON_MAX, &used, "],\"steps\":[");
+    motor_bemf_cal_step_log_t steps[MOTOR_BEMF_CAL_LOG_MAX];
+    size_t step_count = motor_bemf_cal_log_copy(steps, MOTOR_BEMF_CAL_LOG_MAX);
+    for (size_t i = 0; i < step_count; ++i) {
+        const motor_bemf_cal_step_log_t *s = &steps[i];
+        uint16_t fpct = (uint16_t)((s->frac * 100U + 512U) / 1024U);
+        buf_appendf(json, BEMF_CAL_JSON_MAX, &used,
+                    "%s{\"s\":%u,\"dut\":%u,\"spd\":%u,\"rail\":%u,"
+                    "\"b1\":%u,\"b2\":%u,\"dv\":%u,\"frac\":%u,\"q\":%u,\"st\":%u}",
+                    i == 0 ? "" : ",", (unsigned)s->step, (unsigned)s->duty,
+                    (unsigned)s->speed, (unsigned)s->rail_mv, (unsigned)s->b1_mv,
+                    (unsigned)s->b2_mv, (unsigned)s->diff_mv, (unsigned)fpct,
+                    (unsigned)s->quality, (unsigned)s->state);
+    }
+    buf_appendf(json, BEMF_CAL_JSON_MAX, &used, "]}");
+    esp_err_t err = send_json(req, json);
+    free(json);
+    return err;
+#undef BEMF_CAL_JSON_MAX
 }
 
 esp_err_t bemf_base_get(httpd_req_t *req)
@@ -191,10 +220,10 @@ esp_err_t bemf_base_get(httpd_req_t *req)
     size_t used = 0;
     buf_appendf(json, sizeof(json), &used,
                 "{\"ok\":true,\"start\":%u,\"full\":%u,\"points\":[",
-                (unsigned)((info.start_frac * 100U) / 1024U),
-                (unsigned)((info.full_frac * 100U) / 1024U));
+                (unsigned)((info.start_frac * 100U + 512U) / 1024U),
+                (unsigned)((info.full_frac * 100U + 512U) / 1024U));
     for (uint8_t i = 0; i < info.count; ++i) {
-        uint16_t pct = (uint16_t)((info.frac[i] * 100U) / 1024U);
+        uint16_t pct = (uint16_t)((info.frac[i] * 100U + 512U) / 1024U);
         buf_appendf(json, sizeof(json), &used,
                     "%s{\"speed\":%u,\"frac\":%u}",
                     i == 0 ? "" : ",", (unsigned)info.speed[i], (unsigned)pct);

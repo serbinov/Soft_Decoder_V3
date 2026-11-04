@@ -80,6 +80,11 @@ typedef struct {
     uint8_t effects_volume;
     uint8_t active_slot;
     uint8_t control_source;     /* 0=rails, 1=web */
+    /* Display-only correction for the track voltage shown in the web UI. The
+     * rail sense sits after the input bridge, so the motor rail reads lower
+     * than the supply measured before the diodes. Added to the reported rail
+     * only; BEMF fractions and control keep using the raw sense value. */
+    uint16_t rail_offset_mv;
     char device_name[SETTINGS_NAME_MAX];
 } settings_config_t;
 
@@ -230,7 +235,7 @@ esp_err_t settings_bemf_use_save(bool enabled);
  * calibration curve. */
 #define SETTINGS_BEMF_WINDOW_DEFAULT_US 1000U
 #define SETTINGS_BEMF_WINDOW_MIN_US     100U
-#define SETTINGS_BEMF_WINDOW_MAX_US     2000U
+#define SETTINGS_BEMF_WINDOW_MAX_US     20000U
 esp_err_t settings_bemf_window_load(uint16_t *out_us);
 esp_err_t settings_bemf_window_save(uint16_t us);
 

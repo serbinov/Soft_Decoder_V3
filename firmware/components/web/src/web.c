@@ -340,6 +340,7 @@ static esp_err_t start_http_server(void)
         { "/api/bemf/use", HTTP_POST, bemf_use_post, WEB_ADMIT_BEMF_USE },
         { "/api/motor", HTTP_GET, motor_get, WEB_ADMIT_PLAIN },
         { "/api/motor", HTTP_POST, motor_post, WEB_ADMIT_ACTUATION },
+        { "/api/motor/duty", HTTP_POST, motor_duty_post, WEB_ADMIT_ACTUATION },
         { "/api/emergency", HTTP_POST, emergency_post, WEB_ADMIT_PLAIN },
         { "/api/functions", HTTP_GET, functions_get, WEB_ADMIT_PLAIN },
         { "/api/function", HTTP_POST, function_post, WEB_ADMIT_ACTUATION },

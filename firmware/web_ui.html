@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -324,6 +324,18 @@ label{color:var(--text);font-weight:600}
 @media(min-width:1800px){
   .shell{max-width:1800px;margin:0 auto}
 }
+
+.wiz-steps{display:flex;gap:6px;margin:4px 0 12px;flex-wrap:wrap}
+.wiz-step{display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #2a3040;border-radius:8px;font-size:12px;color:#8b93a7;background:#11151d}
+.wiz-step b{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#222a38;color:#aab3c5;font-size:11px}
+.wiz-step.active{color:#fff;border-color:#4c8dff;background:#15233b}
+.wiz-step.active b{background:#4c8dff;color:#fff}
+.wiz-step.done{color:#9fb4d8;border-color:#2f5f9e}
+.wiz-step.done b{background:#2f5f9e;color:#fff}
+.wiz-pane{border:1px solid #2a3040;border-radius:10px;padding:10px;background:#0f131b}
+.wiz-summary{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12px;margin:6px 0 10px}
+.cal-log{margin-top:8px;max-height:220px;overflow:auto;background:#0b0f16;border:1px solid #2a3040;border-radius:8px;padding:8px;font:11px/1.35 ui-monospace,Consolas,monospace;color:#aab3c5;white-space:pre}
+@media(max-width:700px){.wiz-summary{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -392,6 +404,7 @@ label{color:var(--text);font-weight:600}
             <div><span data-i18n="md_duty">ШИМ</span>: <b id="md_duty">—</b></div>
             <div><span data-i18n="md_rail">Рельсы</span>: <b id="md_rail">—</b></div>
             <div><span data-i18n="md_bemf">BEMF</span>: <b id="md_bemf">—</b></div>
+            <div><span data-i18n="md_bemf_sensor">Датчик BEMF</span>: <b id="md_bemf_sensor">—</b></div>
             <div><span data-i18n="md_pid">PID</span>: <b id="md_pid">—</b></div>
             <div><span data-i18n="md_tick">Тик</span>: <b id="md_tick">—</b></div>
             <div><span data-i18n="md_inhibit">Блокировка</span>: <b id="md_inhibit">—</b></div>
@@ -456,41 +469,83 @@ label{color:var(--text);font-weight:600}
       <span class="chev" id="chev_bemf">▸</span>
     </div>
     <div class="bd" id="bd_bemf" style="display:none">
-      <div class="row" style="margin-bottom:8px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-          <input type="checkbox" id="bemf_use" style="width:auto" onchange="setBemfUse()"><span data-i18n="bemf_use">Использовать BEMF для двигателя</span>
+      <div class="wiz-steps" id="wiz_steps">
+        <div class="wiz-step active" id="wiz_st1"><b>1</b><span data-i18n="wiz_step1">Старт</span></div>
+        <div class="wiz-step" id="wiz_st2"><b>2</b><span data-i18n="wiz_step2">Минимальный ход</span></div>
+        <div class="wiz-step" id="wiz_st3"><b>3</b><span data-i18n="wiz_step3">Авто-калибровка</span></div>
+        <div class="wiz-step" id="wiz_st4"><b>4</b><span data-i18n="wiz_step4">Результат</span></div>
+      </div>
+
+      <div class="wiz-pane" id="wiz_p1">
+        <div class="row">
+          <button class="btn primary" id="wiz_start" onclick="wizStart()" data-i18n="wiz_start">Начать калибровку</button>
+        </div>
+        <label style="display:none">
+          <input type="checkbox" id="bemf_use" checked style="width:auto" onchange="setBemfUse()"><span data-i18n="bemf_use">Использовать BEMF для двигателя</span>
         </label>
       </div>
-      <div class="row" style="margin-bottom:8px;align-items:center;gap:8px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px">
-          <input type="checkbox" id="bemf_cal_apply_pid" style="width:auto"><span data-i18n="bemf_apply_pid">Применить рекомендованные PID</span>
+
+      <div class="wiz-pane" id="wiz_p2" style="display:none">
+        <div class="hint" style="margin-bottom:8px" data-i18n="wiz_low_hint">Шаг 2. Двигатель свободен? Поднимите ШИМ до минимального устойчивого вращения и нажмите «Далее» — авто-калибровка запустится сама.</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="range" id="bemf_low_slider" min="0" max="30" step="0.1" value="9" style="flex:1" oninput="onBemfLowSlider()">
+          <b id="bemf_low_value" style="min-width:120px;text-align:right">9.0% · 92/1023</b>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" id="bemf_low_run" onclick="toggleBemfLowRun()" data-i18n="bemf_low_run">Пуск ШИМ</button>
+          <button class="btn" id="bemf_low_save" onclick="wizSaveLow()" data-i18n="wiz_low_save">Далее</button>
+          <button class="btn danger" id="wiz_cancel_low" onclick="wizBack()" data-i18n="wiz_cancel">Отмена</button>
+        </div>
+        <div class="hint" id="bemf_low_live" style="margin-top:6px;font-family:ui-monospace,Consolas,monospace">Датчик: —</div>
+        <div class="hint" id="bemf_low_hint" data-i18n="bemf_low_hint">Диапазон 0…30 % ШИМ, шаг 0.1 %. Петля BEMF разомкнута (без PID); пуск держится до 5 с. На 20 кГц ниже ~8 % импульс короче 4 мкс и входной фильтр DRV8870 его не пропускает — это не нелинейность, а нижняя граница драйвера.</div>
+      </div>
+
+      <div class="wiz-pane" id="wiz_p3" style="display:none">
+        <div class="hint" style="margin-bottom:8px" data-i18n="wiz_auto_hint">Шаг 3. Авто-калибровка запускается автоматически: свип ШИМ, поиск окна замера, PID и сохранение результата.</div>
+        <div class="muted" id="wiz_saved_low" style="margin-bottom:8px">Старт: —</div>
+        <label style="display:none">
+          <input type="checkbox" id="bemf_cal_apply_pid" checked><span data-i18n="bemf_apply_pid">Применить рекомендованные PID</span>
         </label>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()" style="display:none" data-i18n="wiz_auto_retry">Повторить авто-калибровку</button>
+          <button class="btn" id="bemf_clear_btn" onclick="clearBemfCal()" style="display:none" data-i18n="wiz_factory">Заводские</button>
+          <button class="btn danger" id="bemf_cancel_btn" onclick="cancelBemfCal()" disabled data-i18n="bemf_cancel">Отменить</button>
+        </div>
+        <div class="muted" id="bemf_status" data-i18n="bemf_status_idle">Статус: —</div>
+        <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
+        <div class="up-meta" id="bemf_meta"></div>
+        <pre id="bemf_cal_log" class="cal-log" data-i18n="bemf_log_wait">Лог шагов появится во время свипа.</pre>
       </div>
-      <div class="row" style="margin-bottom:8px">
-        <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()" data-i18n="bemf_calibrate">Калибровать</button>
-        <button class="btn danger" id="bemf_clear_btn" onclick="clearBemfCal()" data-i18n="bemf_reset">Сброс</button>
-        <button class="btn danger" id="bemf_cancel_btn" onclick="cancelBemfCal()" disabled data-i18n="bemf_cancel">Отменить</button>
-      </div>
-      <div class="muted" id="bemf_status" data-i18n="bemf_status_idle">Статус: —</div>
-      <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
-      <div class="up-meta" id="bemf_meta"></div>
-      <div id="bemf_profile" style="display:none;margin-top:8px;padding:8px;border:1px solid #2a3040;border-radius:8px">
-        <div class="muted" style="margin-bottom:6px" data-i18n="bemf_profile_title">Параметры калибровки BEMF</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12px">
-          <div><span class="muted" data-i18n="bemf_profile_mode">Режим</span>: <b id="bemf_prof_mode">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_points">Точки</span>: <b id="bemf_prof_points">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_stalled">Пропущено (stall)</span>: <b id="bemf_prof_stalled">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_ceiling">Потолок</span>: <b id="bemf_prof_ceiling">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_first">Первый ход</span>: <b id="bemf_prof_first">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_pwm">Порог ШИМ (мин/старт/макс)</span>: <b id="bemf_prof_pwm">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_sensor">Датчик BEMF</span>: <b id="bemf_prof_sensor">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_window">Окно замера</span>: <b id="bemf_prof_window">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_dwell">Выдержка</span>: <b id="bemf_prof_dwell">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_settle">Средний settle</span>: <b id="bemf_prof_settle">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_gain">Наклон BEMF</span>: <b id="bemf_prof_gain">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_pid">PID (Kp/Ki/Kd)</span>: <b id="bemf_prof_pid">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_quality">Качество</span>: <b id="bemf_prof_quality">—</b></div>
-          <div><span class="muted" data-i18n="bemf_profile_applied">PID применены</span>: <b id="bemf_prof_applied">—</b></div>
+
+      <div class="wiz-pane" id="wiz_p4" style="display:none">
+        <div class="hint" style="margin-bottom:8px" data-i18n="wiz_saved_note">Готово. Результаты сохранены автоматически; новая калибровка затрёт их.</div>
+        <div class="wiz-summary">
+          <div><span class="muted" data-i18n="wiz_res_low_lbl">Минимальный ход</span>: <b id="wiz_res_low">—</b></div>
+          <div><span class="muted" data-i18n="wiz_res_curve_lbl">Кривая BEMF</span>: <b id="wiz_res_mode">—</b></div>
+        </div>
+        <div id="bemf_profile" style="display:none;margin-top:8px;padding:8px;border:1px solid #2a3040;border-radius:8px">
+          <div class="muted" style="margin-bottom:6px" data-i18n="bemf_profile_title">Параметры калибровки BEMF</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12px">
+            <div id="row_mode" style="display:none"><span class="muted" data-i18n="bemf_profile_mode">Режим</span>: <b id="bemf_prof_mode">—</b></div>
+            <div id="row_points" style="display:none"><span class="muted" data-i18n="bemf_profile_points">Точки кривой</span>: <b id="bemf_prof_points">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_sweep">Шаги свипа</span>: <b id="bemf_prof_sweep">—</b></div>
+            <div id="row_stalled" style="display:none"><span class="muted" data-i18n="bemf_profile_stalled">Пропущено</span>: <b id="bemf_prof_stalled">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_ceiling">Потолок BEMF</span>: <b id="bemf_prof_ceiling">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_first">Первый сигнал BEMF</span>: <b id="bemf_prof_first">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_pwm">ШИМ BEMF (первый/последний)</span>: <b id="bemf_prof_pwm">—</b></div>
+            <div id="row_sensor" style="display:none"><span class="muted" data-i18n="bemf_profile_sensor">Датчик BEMF</span>: <b id="bemf_prof_sensor">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_window">Окно BEMF</span>: <b id="bemf_prof_window">—</b></div>
+            <div id="row_dwell" style="display:none"><span class="muted" data-i18n="bemf_profile_dwell">Выдержка</span>: <b id="bemf_prof_dwell">—</b></div>
+            <div id="row_settle" style="display:none"><span class="muted" data-i18n="bemf_profile_settle">Средний settle</span>: <b id="bemf_prof_settle">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_gain">Наклон BEMF</span>: <b id="bemf_prof_gain">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_pid">PID (Kp/Ki/Kd)</span>: <b id="bemf_prof_pid">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_quality">Качество</span>: <b id="bemf_prof_quality">—</b></div>
+            <div><span class="muted" data-i18n="bemf_profile_applied">PID в CV54..56</span>: <b id="bemf_prof_applied">—</b></div>
+          </div>
+          <div class="hint" style="margin-top:6px" data-i18n="bemf_profile_hint">AUTO хранит 2 опорные точки (speed 1 и 126). Нижняя — измеренный BEMF на первом движении, верхняя — измеренный максимум (не ниже 85 %). Свип останавливается на потолке BEMF (90 % rail); PID работает с самого начала вращения.</div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="wiz_done" onclick="wizDone()" data-i18n="wiz_done">Готово</button>
         </div>
       </div>
     </div>
@@ -657,10 +712,11 @@ label{color:var(--text);font-weight:600}
   <div class="modal" id="pw_modal">
     <div class="box">
       <div class="msg" id="pw_modal_msg"></div>
-      <input type="password" id="pw_modal_inp" autocomplete="off" style="width:100%;margin-bottom:12px" onkeydown="if(event.key==='Enter'){event.preventDefault();pwAnswer(true);}">
+      <input type="password" id="pw_modal_inp" autocomplete="off" style="width:100%;margin-bottom:8px" oninput="pwInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();if(!byId('pw_modal_ok').disabled)pwAnswer(true);}">
+      <div class="hint" id="pw_modal_hint" style="min-height:16px;margin:0 0 10px"></div>
       <div class="acts">
         <button class="btn" id="pw_modal_cancel" onclick="pwAnswer(false)" data-i18n="bemf_cancel">Отменить</button>
-        <button class="btn primary" id="pw_modal_ok" onclick="pwAnswer(true)">OK</button>
+        <button class="btn primary" id="pw_modal_ok" onclick="pwAnswer(true)" disabled>OK</button>
       </div>
     </div>
   </div>
@@ -744,7 +800,7 @@ info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Со�
 set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Конфигурация',grp_settings:'Настройки',grp_service:'Сервис',
 nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Звуки',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_pack_import:'Импорт звуков и схемы',nav_pack_export:'Экспорт звуков и схемы',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
-bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode_auto:'Стандартный (AUTO, ШИМ-свип)',bemf_apply_pid:'Применить рекомендованные PID',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки',bemf_profile_stalled:'Пропущено (stall)',bemf_profile_ceiling:'Потолок',bemf_profile_first:'Первый ход',bemf_profile_pwm:'Порог ШИМ (мин/старт/макс)',bemf_profile_sensor:'Датчик BEMF',bemf_profile_window:'Окно замера',bemf_profile_dwell:'Выдержка',bemf_profile_unit_us:'мкс',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID применены',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
+bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode_auto:'Стандартный (AUTO, ШИМ-свип)',bemf_apply_pid:'Применить рекомендованные PID',bemf_profile_points:'Точки кривой',bemf_profile_sweep:'Шаги свипа',bemf_profile_points_auto:'AUTO',bemf_profile_hint:'AUTO хранит 2 опорные точки (speed 1 и 126). Нижняя — измеренный BEMF на первом движении, верхняя — измеренный максимум (не ниже 85 %). Свип останавливается на потолке BEMF (90 % rail); PID работает с самого начала вращения.',bemf_log_wait:'Лог шагов появится во время свипа.',md_bemf_sensor:'Датчик BEMF',bemf_low_title:'Минимальный устойчивый ход',bemf_low_run:'Пуск ШИМ',bemf_low_stop:'Стоп',bemf_low_save:'Сохранить старт и калибровать',bemf_low_hint:'Найдите минимальный процент, при котором двигатель устойчиво вращается, затем сохраните: CV2 станет стартовым ШИМ (duty/4), и запустится AUTO-калибровка с этим порогом. Пуск держится до 5 с и продлевается, пока страница открыта.',bemf_low_saved:'Минимальный ход сохранён',bemf_low_run_on:'Тест ШИМ включён',bemf_low_run_off:'Тест ШИМ остановлен',wiz_step1:'Старт',wiz_step2:'Минимальный ход',wiz_step3:'Авто-калибровка',wiz_step4:'Результат',wiz_start:'Начать калибровку',wiz_factory:'Заводские',wiz_start_hint:'Новая калибровка затирает сохранённые значения. «Заводские» возвращают встроенную кривую BEMF (CV2 не меняется).',wiz_low_hint:'Шаг 2 (0…30 % ШИМ, шаг 0.1 %). Петля BEMF разомкнута: ШИМ задаётся напрямую, без PID. На 20 кГц ниже ~8 % импульс короче 4 мкс и входной фильтр DRV8870 его не пропускает — это нижняя граница драйвера, а не нелинейность. Поднимите ШИМ до минимального устойчивого вращения и нажмите «Далее».',wiz_loop_open:'петля BEMF разомкнута',wiz_low_save:'Далее',wiz_cancel:'Отмена',wiz_auto_hint:'Шаг 3. Авто-калибровка запускается автоматически: свип ШИМ, поиск окна замера, PID и сохранение результата.',wiz_auto_start:'Запустить авто-калибровку',wiz_auto_retry:'Повторить авто-калибровку',wiz_auto_starting:'Запуск авто-калибровки…',wiz_saved_note:'Готово. Результаты сохранены автоматически; новая калибровка затрёт их.',wiz_res_low_lbl:'Минимальный ход',wiz_res_curve_lbl:'Кривая BEMF',wiz_new:'Новая калибровка',wiz_done:'Готово',wiz_confirm_new:'Начать новую калибровку? Сохранённая кривая будет удалена.',wiz_confirm_factory:'Вернуть заводские параметры? Сохранённая кривая BEMF будет удалена; CV2 не изменится.',wiz_current_stored:'Сохранённая',wiz_current_factory:'Заводская (встроенная кривая)',wiz_saved_low:'Старт',wiz_sensor:'Датчик',wiz_started:'Калибровка начата',wiz_reset_done:'Заводские параметры восстановлены',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки кривой',bemf_profile_stalled:'Пропущено',bemf_profile_ceiling:'Потолок BEMF',bemf_profile_first:'Первый сигнал BEMF',bemf_profile_pwm:'ШИМ BEMF (первый/последний)',bemf_profile_sensor:'Датчик BEMF',bemf_profile_window:'Окно BEMF',bemf_profile_dwell:'Выдержка',bemf_profile_unit_us:'мкс',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID в CV54..56',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
 bemf_status_idle:'Статус: —',
 bemf_lbl_idle:'Калибровка не выполнялась',bemf_lbl_running:'Калибровка идёт, не трогайте мотор...',bemf_lbl_saving:'Сохранение калибровки...',bemf_lbl_succeeded:'Новая калибровка завершена и сохранена',bemf_lbl_cancelled:'Калибровка отменена',bemf_lbl_failed:'Калибровка не удалась',
 bemf_phase_preflight:'проверка покоя и датчика BEMF...',bemf_phase_window:'подбор окна замера...',bemf_phase_curve:'измерение кривой...',bemf_phase_saving:'сохранение...',
@@ -760,7 +816,7 @@ pack_uploading:'пакет ',pack_done:'пакет загружен, звуко�
 cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
 cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
 upload_wav:'Загрузить WAV',del_track_title:'Удалить звук',del_sound_confirm:'Удалить звук «',del_sound_confirm_b:'» с устройства?',
-pw_export_msg:'Пароль для экспорта (scrypt + ChaCha20, ≥8 символов; пусто — без пароля):',pw_import_msg:'Пакет защищён паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль или повреждённый пакет',pw_short:'пароль должен быть не короче 8 символов',pack_legacy_warn:'старый формат защиты пакета; пересохраните пакет с новым паролем',pack_checking:'проверка пароля...',pack_exporting:'Экспорт звуков и схемы...',pack_exported:'Звуки и схема сохранены: ',pack_stats_title:'Звуковой пакет и схема',pack_save_title:'Сохранить звуковой пакет и схему?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 400 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
+pw_export_msg:'Пароль для экспорта (минимум 8 символов):',pw_import_msg:'Пакет защищён паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль или повреждённый пакет',pw_short:'пароль должен быть не короче 8 символов',pw_min_hint:'Минимум {n} символов: {cur}/{n}',pack_legacy_warn:'старый формат защиты пакета; пересохраните пакет с новым паролем',pack_checking:'проверка пароля...',pack_exporting:'Экспорт звуков и схемы...',pack_exported:'Звуки и схема сохранены: ',pack_stats_title:'Звуковой пакет и схема',pack_save_title:'Сохранить звуковой пакет и схему?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 560 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
 cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',cv_search_ph:'Поиск CV...',cv_show_table:'Таблица CV67..94',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
@@ -811,7 +867,7 @@ info_fw:'Firmware version',info_addr:'Address',info_state:'State',
 set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Configuration',grp_settings:'Settings',grp_service:'Service',
 nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sounds',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_pack_import:'Import sounds & scheme',nav_pack_export:'Export sounds & scheme',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
-bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode_auto:'Standard (AUTO, PWM sweep)',bemf_apply_pid:'Apply recommended PID',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Points',bemf_profile_stalled:'Skipped (stall)',bemf_profile_ceiling:'Ceiling',bemf_profile_first:'First move',bemf_profile_pwm:'PWM threshold (min/start/max)',bemf_profile_sensor:'BEMF sensor',bemf_profile_window:'Sample window',bemf_profile_dwell:'Dwell',bemf_profile_unit_us:'µs',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID applied',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
+bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode_auto:'Standard (AUTO, PWM sweep)',bemf_apply_pid:'Apply recommended PID',bemf_profile_points:'Curve points',bemf_profile_sweep:'Sweep steps',bemf_profile_points_auto:'AUTO',bemf_profile_hint:'AUTO stores 2 anchors (speed 1 and 126). The low anchor is the measured BEMF at the first movement, the top anchor is the measured maximum (at least 85 %). The sweep stops at the BEMF ceiling (90 % rail); the PID runs from the first movement.',bemf_log_wait:'The step log appears during the sweep.',md_bemf_sensor:'BEMF sensor',bemf_low_title:'Minimum stable crawl',bemf_low_run:'Run PWM',bemf_low_stop:'Stop',bemf_low_save:'Save start and calibrate',bemf_low_hint:'Find the lowest percentage where the motor rotates steadily, then save: CV2 becomes the start PWM (duty/4) and AUTO calibration starts from that threshold. The run is held for up to 5 s and refreshed while this page is open.',bemf_low_saved:'Crawl threshold saved',bemf_low_run_on:'PWM test on',bemf_low_run_off:'PWM test stopped',wiz_step1:'Start',wiz_step2:'Minimum crawl',wiz_step3:'Auto calibration',wiz_step4:'Result',wiz_start:'Start calibration',wiz_factory:'Factory',wiz_start_hint:'A new calibration overwrites the stored values. Factory restores the built-in BEMF curve (CV2 is unchanged).',wiz_low_hint:'Step 2 (0…30 % PWM, 0.1 % steps). The BEMF loop is open: PWM is commanded directly, without the PID. At 20 kHz below ~8 % the pulse is shorter than 4 us and the DRV8870 input filter drops it — this is the driver floor, not a nonlinearity. Raise PWM to the lowest steady rotation and press Next.',wiz_loop_open:'BEMF loop open',wiz_low_save:'Next',wiz_cancel:'Cancel',wiz_auto_hint:'Step 3. Auto calibration starts automatically: PWM sweep, settle-window search, PID and result storage.',wiz_auto_start:'Run auto calibration',wiz_auto_retry:'Retry auto calibration',wiz_auto_starting:'Starting auto calibration…',wiz_saved_note:'Done. Results were saved automatically; a new calibration overwrites them.',wiz_res_low_lbl:'Minimum crawl',wiz_res_curve_lbl:'BEMF curve',wiz_new:'New calibration',wiz_done:'Done',wiz_confirm_new:'Start a new calibration? The stored curve will be deleted.',wiz_confirm_factory:'Restore factory settings? The stored BEMF curve will be deleted; CV2 is unchanged.',wiz_current_stored:'Stored',wiz_current_factory:'Factory (built-in curve)',wiz_saved_low:'Start',wiz_sensor:'Sensor',wiz_started:'Calibration started',wiz_reset_done:'Factory settings restored',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Curve points',bemf_profile_stalled:'Skipped',bemf_profile_ceiling:'BEMF ceiling',bemf_profile_first:'First BEMF signal',bemf_profile_pwm:'BEMF PWM (first/last)',bemf_profile_sensor:'BEMF sensor',bemf_profile_window:'BEMF window',bemf_profile_dwell:'Dwell',bemf_profile_unit_us:'µs',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID in CV54..56',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
 bemf_status_idle:'Status: —',
 bemf_lbl_idle:'Calibration has not been run',bemf_lbl_running:'Calibration in progress, do not touch the motor...',bemf_lbl_saving:'Saving calibration...',bemf_lbl_succeeded:'New calibration completed and stored',bemf_lbl_cancelled:'Calibration cancelled',bemf_lbl_failed:'Calibration failed',
 bemf_phase_preflight:'rest and BEMF sensor check...',bemf_phase_window:'selecting the sample window...',bemf_phase_curve:'measuring the curve...',bemf_phase_saving:'saving...',
@@ -827,7 +883,7 @@ pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_scheme_loaded:' 
 cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
 cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
 upload_wav:'Upload WAV',del_track_title:'Delete sound',del_sound_confirm:'Delete sound "',del_sound_confirm_b:'" from the device?',
-pw_export_msg:'Password for export (scrypt + ChaCha20, at least 8 characters; empty = none):',pw_import_msg:'This sound pack is password-protected. Enter password to import:',pw_wrong:'wrong password or damaged sound pack',pw_short:'password must be at least 8 characters',pack_legacy_warn:'legacy pack protection; re-save with a new password',pack_checking:'checking password...',pack_exporting:'Exporting sounds & scheme...',pack_exported:'Sounds & scheme saved: ',pack_stats_title:'Sound pack & scheme',pack_save_title:'Save sound pack & scheme?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 400 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
+pw_export_msg:'Password for export (at least 8 characters):',pw_import_msg:'This sound pack is password-protected. Enter password to import:',pw_wrong:'wrong password or damaged sound pack',pw_short:'password must be at least 8 characters',pw_min_hint:'At least {n} characters: {cur}/{n}',pack_legacy_warn:'legacy pack protection; re-save with a new password',pack_checking:'checking password...',pack_exporting:'Exporting sounds & scheme...',pack_exported:'Sounds & scheme saved: ',pack_stats_title:'Sound pack & scheme',pack_save_title:'Save sound pack & scheme?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 560 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
 cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',cv_search_ph:'Search CV...',cv_show_table:'Table CV67..94',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
@@ -925,9 +981,18 @@ function dlgAnswer(ok){
   byId('modal').classList.remove('show');
   if(dlgResolve){var r=dlgResolve;dlgResolve=null;r(ok);}
 }
-var pwResolve=null;
-function promptPasswordDialog(msg){
+var pwResolve=null,pwMinLen=0,pwShowHint=false;
+function pwInput(){
+  var inp=byId('pw_modal_inp'),ok=byId('pw_modal_ok'),hint=byId('pw_modal_hint');
+  var len=inp?String(inp.value||'').length:0;
+  if(ok)ok.disabled=len<pwMinLen;
+  if(hint)hint.textContent=(pwShowHint&&pwMinLen>0)?t('pw_min_hint').replace(/\{n\}/g,pwMinLen).replace('{cur}',len):'';
+}
+function promptPasswordDialog(msg,opts){
   if(pwResolve){pwResolve(null);pwResolve=null;}
+  opts=opts||{};
+  pwMinLen=Math.max(0,Number(opts.minLen)||0);
+  pwShowHint=!!opts.showHint;
   return new Promise(function(resolve){
     pwResolve=resolve;
     setText('pw_modal_msg',msg);
@@ -935,10 +1000,13 @@ function promptPasswordDialog(msg){
     if(inp){inp.value='';}
     var m=byId('pw_modal');
     if(m)m.classList.add('show');
+    pwInput();
     if(inp&&inp.focus)setTimeout(function(){inp.focus();},30);
   });
 }
 function pwAnswer(ok){
+  var okEl=byId('pw_modal_ok');
+  if(ok&&okEl&&okEl.disabled)return;
   var m=byId('pw_modal');
   if(m)m.classList.remove('show');
   var inp=byId('pw_modal_inp');
@@ -1102,7 +1170,7 @@ async function refreshStatus(){
 function startStatusPoll(){stopStatusPoll();if(!document.hidden&&!uploadBusy&&!rebooting)statusTimer=setInterval(refreshStatus,3000);}
 function stopStatusPoll(){if(statusTimer)clearInterval(statusTimer);statusTimer=null;}
 document.addEventListener('visibilitychange',function(){
-  if(document.hidden){stopStatusPoll();stopHeartbeat();stopUpPoll();if(bemfPollTimer)clearInterval(bemfPollTimer);bemfPollTimer=null;}
+  if(document.hidden){stopStatusPoll();stopHeartbeat();stopUpPoll();if(bemfPollTimer)clearInterval(bemfPollTimer);bemfPollTimer=null;if(bemfLowActive)stopBemfLow();}
   else if(!rebooting){
     if(uploadBusy)startUpPoll();else{startStatusPoll();startHeartbeat();refreshStatus();}
     if(bemfPollActive&&!uploadBusy)bemfStartPoll();
@@ -1181,6 +1249,7 @@ function renderBemfButtons(){
 }
 async function startBemfCal(){
   if(bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown)return;
+  if(bemfLowActive){stopBemfLow();await new Promise(function(r){setTimeout(r,400);});}
   bemfCommandBusy=true;bemfUnknown=true;++bemfRevision;renderBemfButtons();
   try{
     var url='/api/bemf/calibrate?start=1';
@@ -1200,6 +1269,7 @@ async function clearBemfCal(){
     var d=await api('/api/bemf/calibrate?reset=1',{method:'POST',timeout:3000});
     if(!d||!d.ok)throw new Error(t('failed'));
     log(t('tag_bemf'),t('bemf_log_cleared'));
+    wizSavedLow=null;wizGo(1);
   }catch(e){log(t('tag_bemf'),t('bemf_log_reset')+e.message);
   }finally{bemfCommandBusy=false;++bemfRevision;bemfDiscoverTries=5;renderBemfButtons();bemfStartPoll();}
 }
@@ -1226,18 +1296,23 @@ function renderBemfProfile(d){
   var mode=Number(p.mode)===255?t('bemf_mode_stored'):t('bemf_mode_auto');
   setText('bemf_prof_mode',mode||'—');
   var planned=Number(p.planned)||0,measured=Number(p.measured)||0;
-  setText('bemf_prof_points',planned>0?(measured+' / '+planned):String(measured));
+  setText('bemf_prof_points',String(measured));
+  setText('bemf_prof_sweep',planned>0?((Number(d.progress)||0)+' / '+planned):'—');
   setText('bemf_prof_stalled',String(Number(p.stalled)||0));
-  setText('bemf_prof_ceiling',Number(p.ceiling)>0?String(p.ceiling):'—');
+  var rowStalled=byId('row_stalled');
+  if(rowStalled)rowStalled.style.display=(Number(p.stalled)>0)?'':'none';
+  setText('bemf_prof_ceiling',Number(p.ceiling)>0?('speed '+p.ceiling):'—');
   if(Number(p.first)>0){
     var pct=Math.round((Number(p.firstFrac)||0)/1024*100);
-    setText('bemf_prof_first',p.first+' ('+pct+'%)');
+    setText('bemf_prof_first','PWM '+p.pwmMin+' % · '+pct+'% rail');
   }else setText('bemf_prof_first','—');
-  setText('bemf_prof_pwm',Number(p.pwmMax)>0?(p.pwmMin+' / '+p.pwmStart+' / '+p.pwmMax+' %'):'—');
+  setText('bemf_prof_pwm',Number(p.pwmMax)>0?('первый '+p.pwmMin+' % · последний '+p.pwmMax+' %'):'—');
   setText('bemf_prof_sensor',p.sensorOk?t('bemf_profile_yes'):'—');
   setText('bemf_prof_window',Number(p.optimalUs)>0?(Number(p.optimalUs)+' '+t('bemf_profile_unit_us')):'—');
   setText('bemf_prof_dwell',Number(p.dwellMs)>0?(Number(p.dwellMs)+' '+t('bemf_profile_unit_ms')):'—');
   setText('bemf_prof_settle',Number(p.settle)>0?(Number(p.settle)+' '+t('bemf_profile_unit_ms')):'—');
+  var rowSettle=byId('row_settle');
+  if(rowSettle)rowSettle.style.display=(Number(p.settle)>0)?'':'none';
   setText('bemf_prof_gain',Number(p.gain)>0?((Number(p.gain)/1000).toFixed(2)+' '+t('bemf_profile_unit_gain')):'—');
   if(Number(p.kp)>0||Number(p.ki)>0||Number(p.kd)>0){
     setText('bemf_prof_pid',(Number(p.kp)/100).toFixed(2)+' / '+(Number(p.ki)/1000).toFixed(3)+' / '+(Number(p.kd)/100).toFixed(2));
@@ -1245,6 +1320,31 @@ function renderBemfProfile(d){
   setText('bemf_prof_quality',Number(p.quality)>0?(Number(p.quality)+'%'):'—');
   setText('bemf_prof_applied',p.pidApplied?t('bemf_profile_yes'):t('bemf_profile_no'));
   el.style.display='block';
+}
+function renderBemfLog(d){
+  var el=byId('bemf_cal_log');if(!el)return;
+  var steps=(d&&d.steps)||[];
+  if(!steps.length){el.textContent=t('bemf_log_wait');return;}
+  var planned=(d&&d.profile&&Number(d.profile.planned))||steps.length;
+  var out=[];
+  for(var i=0;i<steps.length;i++){
+    var s=steps[i];
+    var pct=(Number(s.dut)*100/1023).toFixed(1);
+    var st=s.st===0?'OK':(s.st===2?'CEIL':'SKIP');
+    var railV=Number(s.rail)/1000;
+    var uappV=(Number(s.dut)/1023)*railV;
+    var bemfV=(Number(s.frac)/100)*railV;
+    out.push(('0'+s.s).slice(-2)+'/'+planned+
+      '  PWM '+pct+'% ('+s.dut+')'+
+      '  notch '+s.spd+
+      '  rail(mot) '+railV.toFixed(1)+' V'+
+      '  Uappl '+uappV.toFixed(1)+' V'+
+      '  B1 '+s.b1+' / B2 '+s.b2+' / Δ '+s.dv+' mV'+
+      '  BEMF '+s.frac+'% ('+bemfV.toFixed(1)+' V)'+
+      '  q'+s.q+'  '+st);
+  }
+  el.textContent=out.join('\n');
+  el.scrollTop=el.scrollHeight;
 }
 async function loadBemfCal(){
   if(bemfPollBusy||document.hidden||uploadBusy||rebooting)return;
@@ -1278,6 +1378,12 @@ async function loadBemfCal(){
     }
     setText('bemf_meta',d.stored&&result!=='succeeded'?t('bemf_prev'):(result==='running'?t('bemf_meta_running'):''));
     renderBemfProfile(d);
+    renderBemfLog(d);
+    wizRenderCurrent(d);
+    if(wizStep===1&&bemfActive)wizGo(3);
+    else if(wizStep===3&&!bemfActive&&!bemfUnknown&&result==='succeeded')wizFinish(d);
+    var retryBtn=byId('bemf_cal_btn');
+    if(retryBtn)retryBtn.style.display=(wizStep===3&&(result==='failed'||result==='cancelled'))?'':'none';
     var useCb=byId('bemf_use');
     if(useCb&&!bemfUseBusy&&useRevision===bemfUseRevision&&typeof d.use!=='undefined'){
       bemfUseActual=(d.use===true||d.use==='true');useCb.checked=bemfUseActual;
@@ -1305,6 +1411,207 @@ async function setBemfUse(){
     try{var actual=await api('/api/bemf/use',{timeout:3000});if(actual&&actual.ok&&typeof actual.enabled==='boolean')bemfUseActual=actual.enabled;}catch(ignored){}
     if(bemfUseActual!==null)cb.checked=bemfUseActual;
   }finally{bemfUseBusy=false;cb.disabled=false;}
+}
+
+/* Interactive low-speed setup: drive a raw duty with the same 5 s lease as the
+ * bench API, find the lowest stable crawl, then persist CV2 and calibrate. */
+var bemfLowTimer=null,bemfLowActive=false,bemfLowBusy=false,bemfLowDuty=92,bemfLowInit=false;
+var wizStep=1,wizBusy=false,wizSavedLow=null,wizLowPollTimer=null;
+
+function wizGo(n){
+  wizStep=n;
+  if(n!==2)stopBemfLow();
+  for(var i=1;i<=4;i++){var p=byId('wiz_p'+i);if(p)p.style.display=(i===n)?'':'none';}
+  for(var j=1;j<=4;j++){
+    var s=byId('wiz_st'+j);if(!s)continue;
+    s.classList.toggle('active',j===n);
+    s.classList.toggle('done',j<n);
+  }
+  if(n===2){
+    renderBemfLow();initBemfLow();
+    if(!wizLowPollTimer)wizLowPollTimer=setInterval(wizLowPoll,700);
+    wizLowPoll();
+  }else if(wizLowPollTimer){
+    clearInterval(wizLowPollTimer);wizLowPollTimer=null;
+  }
+  if(n===3){
+    renderWizSavedLow();
+    var retry=byId('bemf_cal_btn');if(retry)retry.style.display='none';
+  }
+}
+
+function wizLowPoll(){
+  if(wizStep!==2)return;
+  api('/api/motor',{timeout:2000}).then(function(m){
+    if(wizStep!==2||!m||!m.ok)return;
+    setText('bemf_low_live',t('wiz_sensor')+': B1 '+m.bemf1PinMv+' / B2 '+m.bemf2PinMv+
+      ' · Δ '+m.bemfDiffPinMv+' мВ (pin) · '+m.bemfDiffMotorMv+' мВ (мотор) · '+
+      m.duty+'/1023 · '+t('wiz_loop_open'));
+  }).catch(function(){});
+}
+
+function wizRenderCurrent(d){
+  var el=byId('wiz_current');if(!el)return;
+  var pts=(d&&d.points)||[];
+  var label=(d&&d.stored)?t('wiz_current_stored'):t('wiz_current_factory');
+  if(pts.length){
+    var first=Math.round(Number(pts[0].frac)||0);
+    var last=Math.round(Number(pts[pts.length-1].frac)||0);
+    var p=(d&&d.profile)||{};
+    var detail='';
+    /* PWM/PID are runtime-only and disappear after a reboot; the curve points
+     * (stored or factory base) are always available from the API. */
+    if(Number(p.measured)>0){
+      detail=' · PWM '+p.pwmMin+'/'+p.pwmStart+'/'+p.pwmMax+'%';
+      if(Number(p.kp)>0||Number(p.ki)>0||Number(p.kd)>0){
+        detail+=' · PID '+(Number(p.kp)/100).toFixed(2)+' / '+
+          (Number(p.ki)/1000).toFixed(3)+' / '+(Number(p.kd)/100).toFixed(2);
+      }
+    }
+    setText('wiz_current',label+': speed1 '+first+'% → 126 '+last+'%'+detail);
+  }else{
+    setText('wiz_current',label);
+  }
+}
+
+function renderWizSavedLow(){
+  var el=byId('wiz_saved_low');if(!el)return;
+  setText('wiz_saved_low',wizSavedLow
+    ?(t('wiz_saved_low')+': '+Number(wizSavedLow.pct).toFixed(1)+'% ('+wizSavedLow.duty+'/1023) · CV2='+wizSavedLow.cv2)
+    :(t('wiz_saved_low')+': —'));
+}
+
+async function ensureBemfUse(){
+  var cb=byId('bemf_use');
+  if(cb&&!cb.checked){
+    cb.checked=true;
+    try{await setBemfUse();}catch(e){}
+  }
+}
+async function wizStart(){
+  if(wizBusy)return;
+  if(!confirm(t('wiz_confirm_new')))return;
+  wizBusy=true;var b=byId('wiz_start');if(b)b.disabled=true;
+  try{
+    await ensureBemfUse();
+    var d=await api('/api/bemf/calibrate?reset=1',{method:'POST',timeout:4000});
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+    wizSavedLow=null;
+    log(t('tag_bemf'),t('wiz_started'));
+    await initBemfLow(true);
+    wizGo(2);
+  }catch(e){log(t('tag_bemf'),t('err_prefix')+e.message);}
+  finally{wizBusy=false;if(b)b.disabled=false;}
+}
+
+async function wizFactory(){
+  if(wizBusy)return;
+  if(!confirm(t('wiz_confirm_factory')))return;
+  wizBusy=true;
+  try{
+    var d=await api('/api/bemf/calibrate?reset=1',{method:'POST',timeout:4000});
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+    wizSavedLow=null;
+    log(t('tag_bemf'),t('wiz_reset_done'));
+    wizGo(1);
+    bemfDiscoverTries=5;loadBemfCal();
+  }catch(e){log(t('tag_bemf'),t('err_prefix')+e.message);}
+  finally{wizBusy=false;}
+}
+
+function wizBack(){stopBemfLow();wizGo(1);}
+
+function bemfLowDutyFromSlider(){
+  var pct=clamp(byId('bemf_low_slider').value,0,30);
+  return Math.round(Number(pct)*1023/100);
+}
+function renderBemfLow(){
+  var el=byId('bemf_low_slider');if(!el)return;
+  var pct=Number(el.value)||0;
+  bemfLowDuty=bemfLowDutyFromSlider();
+  setText('bemf_low_value',pct.toFixed(1)+'% · '+bemfLowDuty+'/1023');
+}
+function onBemfLowSlider(){
+  renderBemfLow();
+  if(bemfLowActive&&!bemfLowBusy)sendBemfLowDuty(bemfLowDuty);
+}
+async function sendBemfLowDuty(duty){
+  if(bemfLowBusy)return;
+  bemfLowBusy=true;
+  try{
+    var d=await api('/api/motor/duty?duty='+duty+'&ms=5000&forward=1',{method:'POST',timeout:3000});
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+  }catch(e){
+    log(t('tag_bemf'),t('err_prefix')+e.message);
+    stopBemfLow();
+  }finally{bemfLowBusy=false;}
+}
+function bemfLowTick(){if(bemfLowActive&&!bemfLowBusy)sendBemfLowDuty(bemfLowDuty);}
+function toggleBemfLowRun(){
+  if(bemfLowActive){stopBemfLow();return;}
+  bemfLowActive=true;renderBemfLow();
+  var b=byId('bemf_low_run');if(b)b.textContent=t('bemf_low_stop');
+  log(t('tag_bemf'),t('bemf_low_run_on'));
+  sendBemfLowDuty(bemfLowDuty);
+  if(!bemfLowTimer)bemfLowTimer=setInterval(bemfLowTick,2000);
+}
+function stopBemfLow(){
+  if(!bemfLowActive&&!bemfLowTimer)return;
+  bemfLowActive=false;
+  if(bemfLowTimer){clearInterval(bemfLowTimer);bemfLowTimer=null;}
+  var b=byId('bemf_low_run');if(b)b.textContent=t('bemf_low_run');
+  log(t('tag_bemf'),t('bemf_low_run_off'));
+  api('/api/motor/duty?duty=0&ms=100',{method:'POST',timeout:3000}).catch(function(){});
+}
+async function initBemfLow(force){
+  if(bemfLowInit&&!force)return;
+  bemfLowInit=true;
+  try{
+    var d=await api('/api/cv/read?index=2',{timeout:3000});
+    if(d&&d.ok&&typeof d.value==='number'){
+      var duty=clamp(Number(d.value)*4,0,1023);
+      byId('bemf_low_slider').value=clamp(duty*100/1023,0,30).toFixed(1);
+      renderBemfLow();
+    }
+  }catch(e){}
+}
+async function wizSaveLow(){
+  if(wizBusy)return;
+  renderBemfLow();
+  var cv2=clamp(Math.round(bemfLowDuty/4),0,255);
+  stopBemfLow();
+  wizBusy=true;
+  try{
+    var d=await api('/api/cv/write?index=2&value='+cv2,{method:'POST',timeout:3000});
+    if(!d||!d.ok)throw new Error(d&&d.error?d.error:t('failed'));
+    wizSavedLow={duty:bemfLowDuty,pct:Number(Number(byId('bemf_low_slider').value).toFixed(1)),cv2:cv2};
+    log(t('tag_bemf'),t('bemf_low_saved')+' · CV2='+cv2+' ('+bemfLowDuty+'/1023)');
+    await new Promise(function(r){setTimeout(r,500);});
+    wizGo(3);
+    var pidCb=byId('bemf_cal_apply_pid');if(pidCb)pidCb.checked=true;
+    setText('bemf_status',t('wiz_auto_starting'));
+    await new Promise(function(r){setTimeout(r,250);});
+    if(wizStep===3)await startBemfCal();
+  }catch(e){log(t('tag_bemf'),t('err_prefix')+e.message);}
+  finally{wizBusy=false;}
+}
+function wizFinish(d){
+  renderBemfProfile(d);
+  setText('wiz_res_low',wizSavedLow
+    ?(Number(wizSavedLow.pct).toFixed(1)+'% ('+wizSavedLow.duty+'/1023) · CV2='+wizSavedLow.cv2)
+    :'—');
+  var pts=(d&&d.points)||[];
+  setText('wiz_res_mode',pts.length
+    ?('speed 1 → '+Math.round(Number(pts[0].frac)||0)+'% · 126 → '+
+      Math.round(Number(pts[pts.length-1].frac)||0)+'%')
+    :'—');
+  wizGo(4);
+}
+function wizRestart(){wizGo(1);}
+function wizDone(){wizGo(1);}
+
+if(typeof window!=='undefined'){
+  window.addEventListener('pagehide',function(){if(bemfLowActive)stopBemfLow();});
 }
 
 /* After a save/reset the board reboots and its HTTP server disappears for a
@@ -1401,11 +1708,15 @@ function renderMotorDiag(d){
   setText('md_applied',app+' '+(d.appliedForward?'▶':'◀')+' · '+dccStepFromSpeed(app)+'/'+dccSteps());
   var duty=Number(d.duty)||0,dmax=Number(d.dutyMax)||1023;
   setText('md_duty',(dmax?Math.round(duty*100/dmax):0)+'% ('+duty+'/'+dmax+')');
-  var rail=Number(d.railMotorMv!=null?d.railMotorMv:d.railMv)||0;
+  var rail=Number(d.railTrackMv!=null?d.railTrackMv:(d.railMotorMv!=null?d.railMotorMv:d.railMv))||0;
   setText('md_rail',(rail/1000).toFixed(1)+' В');
   var bemfState=(!d.bemfEnabled||!d.bemfAcquired)?t('md_bemf_off'):(d.bemfClosedLoop?t('md_bemf_closed'):t('md_bemf_open'));
-  var bemfMv=Number(d.bemfMotorMv!=null?d.bemfMotorMv:d.bemfMv)||0;
-  setText('md_bemf',bemfState+' · '+bemfMv+' мВ');
+  var bemfMv=Number(d.bemfFilteredMotorMv!=null?d.bemfFilteredMotorMv:
+    (d.bemfFilteredMv!=null?Number(d.bemfFilteredMv)*7.296:NaN));
+  if(!isFinite(bemfMv)) bemfMv=Number(d.bemfDiffMotorMv!=null?d.bemfDiffMotorMv:d.bemfMotorMv)||0;
+  setText('md_bemf',bemfState+' · Δ(фильтр) '+Math.round(bemfMv)+' мВ');
+  var b1=Number(d.bemf1PinMv)||0,b2=Number(d.bemf2PinMv)||0,bd=Number(d.bemfDiffPinMv)||0;
+  setText('md_bemf_sensor',(d.bemfSampleOk?'':'— ')+'B1 '+b1+' / B2 '+b2+' · Δ '+bd+' мВ');
   setText('md_pid','corr '+(Number(d.corr)||0)+' · err '+(Number(d.err)||0)+(d.pidOk?'':' · off'));
   setText('md_tick',(d.tickAgeMs==null||d.tickAgeMs<0)?'—':(Number(d.tickAgeMs)||0)+' мс');
   setText('md_inhibit',d.inhibited?t('md_yes'):t('md_no'));
@@ -2185,7 +2496,7 @@ function parseAspPack(bytes){
   var dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   var version=dv.getUint16(8,true),count=dv.getUint16(10,true),dataOff=dv.getUint32(12,true);
   if(version!==1)throw new Error(t('pack_err_version'));
-  if(count<1||count>400)throw new Error(t('pack_err_index'));
+  if(count<1||count>560)throw new Error(t('pack_err_index'));
   if(dataOff<16+count*16||dataOff>bytes.length)throw new Error(t('pack_err_index'));
   var pos=16,payloadOff=dataOff,audio=[],scheme=null,pcm=0,adpcm=0,totalData=0,rates={},seen={};
   for(var e=0;e<count;e++){
@@ -2532,24 +2843,34 @@ function schemeBytesForPack(project,entries){
 }
 async function exportSoundPack(){
   if(uploadBusy){log(t('tag_sound'),t('upload_busy'));return;}
-  var pw=await promptPasswordDialog(t('pw_export_msg'));
+  var pw=await promptPasswordDialog(t('pw_export_msg'),{minLen:8,showHint:true});
   if(pw===null)return;
-  if(pw&&pw.length<8){log(t('tag_sound'),t('pw_short'));return;}
+  if(!pw||pw.length<8){log(t('tag_sound'),t('pw_short'));return;}
   showSetting('panel_snd');
+  toast(t('pack_exporting'));
   log(t('tag_sound'),t('pack_exporting'));
   try{
     await loadLibrary();
-    if(libTotal>400)throw new Error(t('pack_err_library_big')+libTotal);
+    if(libTotal>560)throw new Error(t('pack_err_library_big')+libTotal);
     var devName='';
     try{
       var dev=await api('/api/device',{timeout:4000,cache:'no-store'});
       if(dev&&dev.ok)devName=String(dev.name||'').trim();
     }catch(e){}
-    var st=await api('/api/sound/graph/state');
+    var exportId='',exportRev=0;
+    try{
+      var eq=new URLSearchParams(location.search||'');
+      exportId=eq.get('id')||'';
+      exportRev=Number(eq.get('revision'))||0;
+    }catch(e){}
     var projectObj=null,projId='locomotive_default';
-    if(st&&st.ok&&st.id&&st.revision>0){
-      projId=st.id;
-      var pr=await api('/api/sound/graph/project?id='+encodeURIComponent(st.id)+'&revision='+st.revision);
+    if(!exportId||exportRev<=0){
+      var st=await api('/api/sound/graph/state');
+      if(st&&st.ok&&st.id&&st.revision>0){exportId=st.id;exportRev=Number(st.revision)||0;}
+    }
+    if(exportId&&exportRev>0){
+      projId=exportId;
+      var pr=await api('/api/sound/graph/project?id='+encodeURIComponent(exportId)+'&revision='+exportRev);
       if(pr&&pr.ok&&pr.project){
         var bindRes=null,auxRes=null;
         try{bindRes=await api('/api/func-map?view=bind');}catch(e){}
@@ -2558,15 +2879,25 @@ async function exportSoundPack(){
         if(bindRes&&bindRes.ok&&bindRes.binds)pr.project.editor.binds=bindRes.binds;
         if(auxRes&&auxRes.ok&&auxRes.aux)pr.project.editor.aux=auxRes.aux;
         projectObj=pr.project;
+      }else{
+        throw new Error(t('st_no_active_project'));
       }
     }
     var entries=[];
     var compressed=0;
     packRepairs=[];
     for(var i=0;i<libFiles.length;i++){
+      if((i%25)===0)toast(t('pack_exporting')+' '+(i+1)+'/'+libFiles.length);
       var f=libFiles[i];
-      var r=await fetch('/api/audio/raw/'+encodeURIComponent(f.name),{cache:'no-store'});
-      if(!r.ok)throw new Error('raw fetch failed: '+f.name);
+      var r=null,lastStatus=0;
+      for(var attempt=0;attempt<3;attempt++){
+        r=await fetch('/api/audio/raw/'+encodeURIComponent(f.name),{cache:'no-store'});
+        if(r.ok)break;
+        lastStatus=r.status;
+        if(r.status<500)break;
+        await new Promise(function(res){setTimeout(res,150);});
+      }
+      if(!r||!r.ok)throw new Error('raw fetch failed: '+f.name+(lastStatus?' ('+lastStatus+')':''));
       var ab=await r.arrayBuffer();
       var rate=Number(r.headers.get('X-Audio-Rate'))||22050;
       var ch=Number(r.headers.get('X-Audio-Channels'))||1;
@@ -2582,7 +2913,7 @@ async function exportSoundPack(){
       entries.push({name:'__aura_scheme__',vol:0,ch:0,bits:0,rate:0,data:schemeBytesForPack(projectObj,entries)});
     }
     if(!entries.length)throw new Error(t('pack_empty'));
-    if(entries.length>400)throw new Error(t('pack_err_index'));
+    if(entries.length>560)throw new Error(t('pack_err_index'));
     var audioCount=0,audioPayload=0;
     for(var q=0;q<entries.length;q++){
       if(utf8Bytes(entries[q].name).length>63)throw new Error(t('pack_err_name')+entries[q].name);
@@ -2718,7 +3049,7 @@ async function uploadPack(input){
   var encrypted=isEncryptedAsp(rawBuf);
   if(encrypted){
     if(isLegacyAsp(rawBuf))log(t('tag_upload'),t('pack_legacy_warn'));
-    var pw=await promptPasswordDialog(t('pw_import_msg'));
+    var pw=await promptPasswordDialog(t('pw_import_msg'),{minLen:1});
     if(pw===null){input.value='';return;}
     log(t('tag_upload'),t('pack_checking'));
     var dec=await decryptAspBytes(rawBuf,pw);
@@ -3151,6 +3482,7 @@ function showPage(name){
   if(ns)ns.classList.toggle('active',name==='settings');
   try{if(typeof history!=='undefined'&&history.replaceState)history.replaceState(null,'',name==='settings'?'#settings':'#control');}catch(e){}
   if(typeof applySettingsMode==='function')applySettingsMode();
+  if(name!=='settings')stopBemfLow();
   if(name==='control')startMotorDiagPoll();else stopMotorDiagPoll();
 }
 function pageFromHash(){return (location.hash||'').replace('#','')==='settings'?'settings':'control';}
@@ -3161,7 +3493,7 @@ function isWide(){return (typeof window!=='undefined')&&Number(window.innerWidth
 function loadSettingData(name){
   if(name==='snd'){var pt=byId('play_target');if(pt)pt.value=getPlayTarget();loadLibrary();refreshStatus();loadFreeSpace();}
   if(name==='wifi'&&!wifiLoaded){loadWifi();}
-  if(name==='bemf'){loadBemfCal();}
+  if(name==='bemf'){loadBemfCal();initBemfLow();}else{stopBemfLow();}
   if(name==='mode'){renderMode();}
   if(name==='cv'){loadCvValues();}
 }

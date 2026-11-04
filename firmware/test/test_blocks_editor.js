@@ -1,4 +1,4 @@
-const assert = require('node:assert/strict');
+﻿const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -9,6 +9,15 @@ const { test } = require('node:test');
 const htmlPath = path.join(__dirname, '..', 'sound_editor', 'public', 'blocks.html');
 const html = fs.readFileSync(htmlPath, 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+async function waitFor(fn, ms = 2500) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (fn()) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail('condition not met in time');
+}
 
 function createDomMock() {
   const elements = new Map();
@@ -835,6 +844,7 @@ test('27j. Saved projects are in the File submenu and playback is a Settings ite
 });
 
 test('27k. New project asks for a name and applies it', async t => {
+  const applies = [];
   const { api, dom } = createEditorFixture(t);
   dom.getEl('b_new').onclick();
   for (let i = 0; i < 100 && !dom.getEl('new_project_dialog').children.length; i++) {
@@ -860,7 +870,7 @@ test('27k. New project asks for a name and applies it', async t => {
 });
 
 test('27l. New projects get unique ids, auto-save and mark the Save button dirty', async t => {
-  const saves = [];
+  const saves = [], applies = [];
   let activeId = '';
   let revision = 0;
   const { api, dom } = createEditorFixture(t, { fetch: async (url, init) => {
@@ -873,7 +883,7 @@ test('27l. New projects get unique ids, auto-save and mark the Save button dirty
       revision += 1;
       return { ok: true, revision };
     }
-    if (url.startsWith('/api/sound/graph/apply')) return { ok: true };
+    if (url.startsWith('/api/sound/graph/apply')) { applies.push(url); return { ok: true }; }
     if (url.startsWith('/api/sound/graph/projects')) {
       return { ok: true, projects: saves.map((x, i) => ({ id: x.id, name: x.name, revision: i + 1 })) };
     }
@@ -1000,12 +1010,46 @@ test('27l3. Manual save stores an invalid graph as a draft and keeps the errors'
   api.setProject(p);
   assert.ok(api.validate().diagnostics.some(d => d.severity !== 'warning'), 'the graph has validation errors');
 
-  await dom.getEl('b_save').onclick();
+  const saving = dom.getEl('b_save').onclick();
+  await waitFor(() => dom.getEl('save_overlay_errors').innerHTML.length > 0);
+  assert.ok(dom.getEl('save_overlay').classList.contains('on'), 'the save overlay is visible');
+  assert.match(dom.getEl('save_overlay_errors').innerHTML, /Fx/, 'the overlay lists the errors');
+  assert.ok(!dom.getEl('save_overlay_actions').classList.contains('hide'), 'OK is offered');
+  dom.getEl('save_overlay_ok').onclick();
+  await saving;
   assert.equal(applies, 0, 'a draft is not applied');
   assert.equal(saved.searchParams.get('draft'), '1', 'the manual save sends draft=1');
   assert.equal(Number(saved.searchParams.get('expectedRevision')), 5);
   assert.match(dom.getEl('diag').innerHTML, /Fx/, 'validation errors remain visible after saving');
   assert.match(dom.getEl('status_txt').textContent, /Сохранено с ошибками/);
+  await waitFor(() => !dom.getEl('save_overlay').classList.contains('on'));
+  assert.ok(!dom.getEl('save_overlay').classList.contains('on'), 'the overlay closes after saving');
+});
+
+test('27l3b. A clean save shows Saved in the overlay and then hides it', async t => {
+  const applies = [];
+  const { api, dom } = createEditorFixture(t, { fetch: async url => {
+    if (url.startsWith('/api/sound/graph/state')) return { ok: true, id: 'demo', revision: 5 };
+    if (url.startsWith('/api/sound/graph/save')) return { ok: true, revision: 6 };
+    if (url.startsWith('/api/sound/graph/apply')) { applies.push(url); return { ok: true }; }
+    if (url.startsWith('/api/motor')) return { ok: true, speed: 0 };
+    if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };
+    if (url.startsWith('/api/sound/graph/asset')) return { ok: true, asset: { file: 'horn.wav', size: 1000, crc32: '12345678', sampleRate: 22050, channels: 1, bits: 16, durationMs: 200 } };
+    return { ok: true };
+  } });
+  api.setProject(Object.assign({}, api.project(), { id: 'demo' }));
+  api.setMeta('demo', 5);
+  await api.refreshStatus();
+  api.setProject(Object.assign({}, api.project(), { name: 'Clean save' }));
+
+  const saving = dom.getEl('b_save').onclick();
+  await waitFor(() => dom.getEl('save_overlay_title').textContent === 'Сохранено');
+  assert.ok(dom.getEl('save_overlay').classList.contains('on'), 'blur overlay stays while Saved is shown');
+  await saving;
+  await waitFor(() => !dom.getEl('save_overlay').classList.contains('on'));
+  assert.ok(!dom.getEl('save_overlay').classList.contains('on'), 'the overlay disappears after the delay');
 });
 
 test('27m. Status polling keeps metadata for a non-active loaded project', async t => {
@@ -1124,7 +1168,7 @@ test('27p. Selecting a saved project applies it and moves the active check', asy
 });
 
 test('27q. The reference project can be cloned into a separate saved project', async t => {
-  const saves = [];
+  const saves = [], applies = [];
   const { api, dom } = createEditorFixture(t, { fetch: async url => {
     if (url.startsWith('/api/sound/graph/state')) return { ok: true, active: false, id: '', revision: 0 };
     if (url.startsWith('/api/sound/graph/projects')) {
@@ -1135,7 +1179,7 @@ test('27q. The reference project can be cloned into a separate saved project', a
       saves.push({ id: u.searchParams.get('id'), expected: Number(u.searchParams.get('expectedRevision')) || 0, name: 'Clone' });
       return { ok: true, revision: saves.length };
     }
-    if (url.startsWith('/api/sound/graph/apply')) return { ok: true };
+    if (url.startsWith('/api/sound/graph/apply')) { applies.push(url); return { ok: true }; }
     if (url.startsWith('/api/sound/graph/asset')) {
       const file = new URL(url, 'http://preview').searchParams.get('file');
       return { ok: true, asset: { file, size: 100, crc32: '0', sampleRate: 44100, channels: 1, bits: 16, durationMs: 100 } };
@@ -1169,7 +1213,8 @@ test('27q. The reference project can be cloned into a separate saved project', a
   assert.equal(saves.length, 1, 'the clone is saved once');
   assert.equal(saves[0].expected, 0, 'the clone is a new project');
   assert.notEqual(saves[0].id, '__reference__');
-  assert.equal(api.stateProbe().activeProjectId, saves[0].id);
+  assert.equal(applies.length, 0, 'saving a clone must not change the active scheme');
+  assert.equal(api.stateProbe().activeProjectId, '__reference__');
   assert.equal(api.stateProbe().referenceMode, false);
   assert.equal(api.project().id, saves[0].id);
   assert.equal(api.project().name, 'Мой клон', 'the entered clone name is used');
@@ -1323,6 +1368,7 @@ test('27v. Creating or cloning an 11th project is blocked with a warning', async
 });
 
 test('27w. A saved project can be renamed from the pencil action', async t => {
+  const applies = [];
   let projects = [{ id: 'saved1', name: 'Old name', revision: 1 }];
   let savedProject = null;
   const calls = [];
@@ -1338,7 +1384,7 @@ test('27w. A saved project can be renamed from the pencil action', async t => {
       projects = [{ id: 'saved1', name: doc.name, revision: 2 }];
       return { ok: true, revision: 2 };
     }
-    if (url.startsWith('/api/sound/graph/apply')) return { ok: true };
+    if (url.startsWith('/api/sound/graph/apply')) { applies.push(url); return { ok: true }; }
     if (url.startsWith('/api/sound-files')) return { ok: true, files: [] };
     if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
     if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: [] };

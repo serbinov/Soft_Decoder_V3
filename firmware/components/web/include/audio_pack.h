@@ -1,4 +1,4 @@
-#ifndef AUDIO_PACK_H
+﻿#ifndef AUDIO_PACK_H
 #define AUDIO_PACK_H
 
 #include <stdbool.h>
@@ -37,7 +37,7 @@
 #define AUDIO_PACK_VERSION       1
 #define AUDIO_PACK_HDR_LEN       16
 #define AUDIO_PACK_ENTRY_HDR_LEN 16
-#define AUDIO_PACK_MAX_FILES     400
+#define AUDIO_PACK_MAX_FILES     560
 #define AUDIO_PACK_NAME_MAX      63
 /* WAV header written on unpack: 44 bytes for PCM16, 60 for mono IMA ADPCM
  * (extra 20-byte fmt + 12-byte fact chunk). */

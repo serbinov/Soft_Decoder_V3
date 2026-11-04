@@ -1,9 +1,12 @@
-import importlib.util
+﻿import importlib.util
 import json
 import os
 from pathlib import Path
+import struct
 import tempfile
 import unittest
+import wave
+import wave
 
 PACK = Path(__file__).resolve().parents[1] / "tools" / "pack_sounds.py"
 SPEC = importlib.util.spec_from_file_location("pack_sounds_crypto", PACK)
@@ -80,6 +83,32 @@ class AspCryptoTests(unittest.TestCase):
         self.assertEqual(MODULE.decrypt_asp(legacy, "old"), plain)
         with self.assertRaises(SystemExit):
             MODULE.decrypt_asp(legacy, "wrong")
+
+    def test_alias_entries_keep_legacy_names(self):
+        import csv
+        from array import array
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "src"
+            src.mkdir()
+            with wave.open(str(src / "NewName.wav"), "wb") as fh:
+                fh.setnchannels(1)
+                fh.setsampwidth(2)
+                fh.setframerate(22050)
+                fh.writeframes(array("h", [0] * 100).tobytes())
+            aliases = Path(tmp) / "aliases.csv"
+            with open(aliases, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(["old", "new"])
+                writer.writerow(["OldName.wav", "NewName.wav"])
+            out = Path(tmp) / "compat.asp"
+            MODULE.pack(str(src), str(out), 22050, False, 100, "name", True,
+                        aliases_path=str(aliases))
+            header = out.read_bytes()[:16]
+            self.assertEqual(struct.unpack_from("<H", header, 10)[0], 2)
+            dst = Path(tmp) / "out"
+            MODULE.unpack(str(out), str(dst))
+            self.assertTrue((dst / "OldName.wav").is_file())
+            self.assertTrue((dst / "NewName.wav").is_file())
 
 
 if __name__ == "__main__":

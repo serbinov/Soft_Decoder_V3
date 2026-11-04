@@ -1,4 +1,4 @@
-# Sound engine (`components/sound`)
+﻿# Sound engine (`components/sound`)
 
 Version: firmware 0.12. The graph engine is the **single** sound behaviour
 model. The legacy MDS/table sound-scheme subsystem (`sound_store`, `sound_scheme_t`,
@@ -163,7 +163,7 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
     {
       "id": "idle_cue-idle_loop_play",
       "name": "Цикл",
-      "file": "567_ChME3_idle_loop.wav",
+      "file": "engine_idle_loop.wav",
       "loop": true,
       "volume": 80,
       "rate": 1000
@@ -179,7 +179,7 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
     {
       "id": "horn_cue-h_start_play",
       "name": "Старт",
-      "file": "horn-low-init.wav",
+      "file": "horn_low_start.wav",
       "loop": false,
       "volume": 90,
       "rate": 1000
@@ -187,7 +187,7 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
     {
       "id": "horn_cue-h_loop_play",
       "name": "Цикл",
-      "file": "horn-low-loop.wav",
+      "file": "horn_low_loop.wav",
       "loop": true,
       "volume": 90,
       "rate": 1000
@@ -195,7 +195,7 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
     {
       "id": "horn_cue-h_end_end",
       "name": "Конец",
-      "file": "horn-low-exit.wav",
+      "file": "horn_low_stop.wav",
       "loop": false,
       "volume": 90,
       "rate": 1000
@@ -313,11 +313,11 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
 ### 6.3. Типовые шаблоны цепочек (для генератора схем)
 
 1. **Одиночный звук по нажатию F-клавиши (`Старт`):**
-   * Тихое состояние `S_off` (`file: ""`) и звучащее `S_play` (`file: "bell.wav", loop: false`).
+   * Тихое состояние `S_off` (`file: ""`) и звучащее `S_play` (`file: "radio_channel_beep.wav", loop: false`).
    * `S_off -> S_play` по `{"type": "fn_press", "fn": 5}`.
    * `S_play -> S_off` по `{"type": "sample_done"}`.
 2. **Удерживаемый звук из 3 фаз (`Старт -> Цикл -> Конец`, например Тифон на `F2`):**
-   * Состояния: `H_off` (тихое), `H_start` (`init.wav`, `loop: false`), `H_loop` (`loop.wav`, `loop: true`), `H_end` (`exit.wav`, `loop: false`).
+   * Состояния: `H_off` (тихое), `H_start` (`horn_low_start.wav`, `loop: false`), `H_loop` (`horn_low_loop.wav`, `loop: true`), `H_end` (`horn_low_stop.wav`, `loop: false`).
    * `H_off -> H_start` (`fn_on, fn: 2`, prio 60);
    * `H_start -> H_loop` (`sample_done`, prio 60);
    * `H_start -> H_end` (`fn_off, fn: 2`, prio 70 — раннее отпускание клавиши до окончания атаки);
@@ -329,7 +329,7 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
      * `engine_1_off -> step_i_play` (`speed: [lo, hi]`, `timing: "after_sample"`);
      * `step_i_play -> engine_1_off` при выходе скорости ниже `lo` (`speed: [0, lo-1]`, `timing: "after_sample"`) и выше `hi` (`speed: [hi+1, 255]`, `timing: "after_sample"`).
 4. **Звук торможения по замедлению (`Торможение`):**
-   * Отдельный эффект в `effects[]` со своим тихим входом `brake_off` и звуком `brake_play` (`bremse.wav`, `loop: false`):
+   * Отдельный эффект в `effects[]` со своим тихим входом `brake_off` и звуком `brake_play` (`brake_apply.wav`, `loop: false`):
    * `brake_off -> brake_play` (`{"type": "decel", "min": 1, "max": 255}`);
    * `brake_play -> brake_off` (`{"type": "sample_done"}`).
 
@@ -353,9 +353,9 @@ SELFTEST/HIL and voice 19 for the engine), `assets` 128, `variables` 16, JSON bo
       "id": "horn_scheme",
       "name": "Тифон (низкий)",
       "blocks": [
-        { "id": "h_start", "type": "start", "name": "Старт", "volume": 90, "files": { "sound": "horn-low-init.wav" }, "outEvent": "finish", "outDelay": 0, "x": 60, "y": 80 },
-        { "id": "h_loop",  "type": "loop",  "name": "Цикл",  "volume": 90, "files": { "sound": "horn-low-loop.wav" }, "loopMode": "hold",   "outDelay": 0, "x": 360, "y": 80 },
-        { "id": "h_end",   "type": "end",   "name": "Конец", "volume": 90, "files": { "sound": "horn-low-exit.wav" }, "x": 660, "y": 80 }
+        { "id": "h_start", "type": "start", "name": "Старт", "volume": 90, "files": { "sound": "horn_low_start.wav" }, "outEvent": "finish", "outDelay": 0, "x": 60, "y": 80 },
+        { "id": "h_loop",  "type": "loop",  "name": "Цикл",  "volume": 90, "files": { "sound": "horn_low_loop.wav" }, "loopMode": "hold",   "outDelay": 0, "x": 360, "y": 80 },
+        { "id": "h_end",   "type": "end",   "name": "Конец", "volume": 90, "files": { "sound": "horn_low_stop.wav" }, "x": 660, "y": 80 }
       ],
       "links": [
         { "id": "l1", "from": "h_start", "to": "h_loop", "kind": "after", "cond": "out" },

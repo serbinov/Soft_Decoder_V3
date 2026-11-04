@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Pack a folder of WAV files into an AURA Sound Pack (.asp).
 
 The device output is fixed mono 22050 Hz PCM16, so this packer downmixes and
@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import binascii
+import csv
 import hashlib
 import hmac
 import json
@@ -43,7 +44,7 @@ import sys
 MAGIC = b"AURASP01"
 PW_MAGIC = b"AURAPW01"
 VERSION = 1
-MAX_FILES = 400
+MAX_FILES = 560
 NAME_MAX = 63
 SCHEME_ENTRY_NAME = "__aura_scheme__"
 SCHEME_MAX_BYTES = 131072
@@ -694,10 +695,26 @@ def _load_only_names(path: str) -> set[str]:
     return names
 
 
+def _load_aliases(path: str) -> list[tuple[str, str]]:
+    """Read old->new sound names from a CSV with `old` and `new` columns.
+
+    The compatibility build packs the same payload under both names so existing
+    device schemes keep working after the library was renamed.
+    """
+    rows = []
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        for row in csv.DictReader(fh):
+            old = (row.get("old") or "").strip()
+            new = (row.get("new") or "").strip()
+            if old and new:
+                rows.append((old, new))
+    return rows
+
+
 def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
          default_volume: int, order: str, adpcm: bool,
          scheme_path: str | None = None, password: str = "",
-         only_from: str | None = None) -> int:
+         only_from: str | None = None, aliases_path: str | None = None) -> int:
     if not os.path.isdir(src_dir):
         raise SystemExit("source folder not found: %s" % src_dir)
     only = _load_only_names(only_from) if only_from else None
@@ -760,6 +777,23 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
     if not entries:
         raise SystemExit("no selected .wav files")
 
+    alias_count = 0
+    if aliases_path:
+        by_name = {e[0]: e for e in entries}
+        for old, new in _load_aliases(aliases_path):
+            oname = _truncate_utf8(_sanitize(os.path.splitext(old)[0]), NAME_MAX)
+            nname = _truncate_utf8(_sanitize(os.path.splitext(new)[0]), NAME_MAX)
+            if not oname or oname == nname or oname in used_names:
+                continue
+            source = by_name.get(nname)
+            if source is None:
+                continue
+            if len(entries) >= MAX_FILES:
+                raise SystemExit("too many entries with aliases (max %d)" % MAX_FILES)
+            used_names.add(oname)
+            entries.append((oname, source[1], source[2], source[3], source[4], source[5]))
+            alias_count += 1
+
     resolved_scheme = _find_scheme_file(src_dir, scheme_path)
     if resolved_scheme:
         scheme_bytes = _prepare_scheme_payload(resolved_scheme, entries)
@@ -795,7 +829,7 @@ def pack(src_dir: str, out_path: str, rate: int, stereo: bool,
     total = len(blob)
     wav_entries = [e for e in entries if e[4] != 0]
     print("Packed %d WAV file(s)%s%s, %d B -> %s (%s)" %
-          (len(wav_entries),
+          (len(wav_entries) - alias_count if alias_count else len(wav_entries),
            " + sound scheme (%s)" % os.path.basename(resolved_scheme) if resolved_scheme else "",
            " [password-protected]" if password else "",
            total, out_path,
@@ -829,6 +863,8 @@ def main(argv) -> int:
     ap.add_argument("--order", choices=("name", "mtime"), default="name", help="index order")
     ap.add_argument("--only-from", default=None,
                     help="text file with sanitized sound names (one per line) to include")
+    ap.add_argument("--aliases", default=None,
+                    help="CSV with old,new sound names; duplicate payloads under legacy names")
     args = ap.parse_args(argv)
     if not args.src:
         ap.error("src path is required")
@@ -843,7 +879,7 @@ def main(argv) -> int:
     out = args.output or (args.src.rstrip("/\\") + ".asp")
     return pack(args.src, out, max(1, args.rate), args.stereo,
                 max(0, min(100, args.volume)), args.order, adpcm, args.scheme, args.password,
-                args.only_from)
+                args.only_from, args.aliases)
 
 
 if __name__ == "__main__":

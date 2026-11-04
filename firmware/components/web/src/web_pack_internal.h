@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -37,7 +37,7 @@ typedef struct {
 #define PACK_JOURNAL_MAGIC_OLD "AURAPKJ1"
 #define PACK_JOURNAL_PREPARED 1U
 #define PACK_JOURNAL_COMMITTED 2U
-#define PACK_JOURNAL_MAX_NAMES 512U
+#define PACK_JOURNAL_MAX_NAMES 600U
 #define PACK_JOURNAL_PATH WEB_AUDIO_DIR "/.packjournal"
 #define PACK_JOURNAL_TMP  PACK_JOURNAL_PATH ".tmp"
 

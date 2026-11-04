@@ -5203,8 +5203,8 @@ static void test_graph_get_roundtrip_assets_and_routes(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
     TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
     reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
-    TEST_ASSERT_EQUAL_UINT32(63, s_route_count);
-    TEST_ASSERT_EQUAL_UINT32(63, mock_route_count);
+    TEST_ASSERT_EQUAL_UINT32(64, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(64, mock_route_count);
 }
 
 static void test_graph_referenced_uploads_fail_closed(void)

@@ -1541,7 +1541,10 @@ static bool provision_transfer(bool *maintenance_started)
     for (size_t i = 0; i < s_stage_count; ++i) {
         char path[192];
         snprintf(path, sizeof(path), "%s/%s", PROV_STAGE_DIR, s_stage_names[i]);
-        if (audio_validate_wav(path) != ESP_OK) {
+        /* The listener runs in-place, so web maintenance has already inhibited
+         * playback. Inspection is read-only and allowed while inhibited;
+         * audio_validate_wav() would reject every file with INVALID_STATE. */
+        if (audio_inspect_wav(path) != ESP_OK) {
             send_line("PROV-ERR wav");
             return false;
         }

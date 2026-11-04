@@ -1,0 +1,233 @@
+old,new,confidence,reason,seconds,centroid_hz,dominant_hz,sha16
+Air Compressor Notch 2.WAV,air_compressor_notch_2.wav,high,air compressor notch,0.1529,3409.2,213.6,ac02fed569dbe4e0
+Air Compressor Notch 3.WAV,air_compressor_notch_3.wav,high,air compressor notch,0.1298,3328.9,213.6,355b8a66a47215f0
+Air Compressor Notch 4.WAV,air_compressor_notch_4.wav,high,air compressor notch,0.122,3328.9,213.6,8a3c3a961fba2ac5
+Air Compressor Notch 5.WAV,air_compressor_notch_5.wav,high,air compressor notch,0.1159,3329.0,213.6,6659beaedac80b97
+Air Compressor Notch 6.WAV,air_compressor_notch_6.wav,high,air compressor notch,0.1008,3328.7,213.6,e419148328bf52ad
+Air Compressor Notch 7.WAV,air_compressor_notch_7.wav,high,air compressor notch,0.0886,3328.4,213.6,1929bf21164581a8
+Air Compressor Notch 8.WAV,air_compressor_notch_8.wav,high,air compressor notch,0.0782,3329.0,213.6,b89d6731e481f683
+Russische-Durchsage #10-Gleis3-Vorsicht-Zug-fährt-durch.wav,announcement_ru_track3_caution_train_passing.wav,high,German title translated,7.0305,2334.4,537.9,3a2577bbd15b50fb
+Russische-Durchsage #4-Moskau-St.Petersburg.wav,announcement_ru_moscow_spb.wav,high,German title translated,10.6527,2362.4,858.3,24b01077da9b618e
+Russische-Durchsage #7-Gorkii1-Omsk.wav,announcement_ru_gorky_omsk.wav,high,German title translated,11.6248,2299.6,1607.9,da26ed6dca3dc5d4
+Silence_NM_standard.wav,silence_nm_standard.wav,high,already descriptive,0.0754,0,0,4b1fc37505226c0f
+a2-1.WAV,engine_decel_2_to_1.wav,medium,long low-pitch down-shift,1.1467,1463.6,76.3,44b84d33a5d5888c
+a2-3-2.WAV,engine_accel_2_to_3_take2.wav,medium,short up-shift take (measured high pitch),0.353,2996.3,99.2,bcd19517c4c029ad
+a3-2.WAV,engine_decel_3_to_2.wav,medium,long low-pitch down-shift,0.8428,1043.8,83.9,db9c0da2a6c32478
+a3-4-2.WAV,engine_accel_3_to_4_take2.wav,medium,short up-shift take (measured high pitch),0.2629,3166.9,167.8,3cdddbe3b213bf30
+a4-3.WAV,engine_decel_4_to_3.wav,medium,long low-pitch down-shift,0.7336,1007.3,99.2,a1359a78fd7024f0
+a4-5-2.WAV,engine_accel_4_to_5_take2.wav,medium,short up-shift take (measured high pitch),0.2505,3246.7,167.8,b2091466fbb43cd3
+a5-4.WAV,engine_decel_5_to_4.wav,medium,long low-pitch down-shift,0.5645,1165.6,110.6,1fc20f6b47762a4d
+a5-6-2.WAV,engine_accel_5_to_6_take2.wav,medium,short up-shift take (measured high pitch),0.2198,3436.6,106.8,511cd6a499fb9597
+a6-5.WAV,engine_decel_6_to_5.wav,medium,long low-pitch down-shift,0.7148,1289.6,122.1,d873eee7890af784
+a6-7-2.WAV,engine_accel_6_to_7_take2.wav,medium,short up-shift take (measured high pitch),0.2769,3365.0,148.8,3e2821ec947b970d
+a7-6.WAV,engine_decel_7_to_6.wav,medium,long low-pitch down-shift,0.8093,1459.6,141.1,9b55fe0a80814b00
+a8-7.WAV,engine_decel_8_to_7.wav,medium,long low-pitch down-shift,1.1216,1777.7,324.2,65e26d60dd61bf6b
+ad1-2-2.WAV,engine_transition_1_to_2_long_ad_take2.wav,medium,long AD transition,2.79,2701.4,95.4,cc8ce8faa24844ab
+ad1-2.WAV,engine_transition_1_to_2_long_ad.wav,medium,long AD transition,2.7941,2674.8,95.4,d4ce573da8a9b3b6
+ad2-1.WAV,engine_transition_2_to_1_long_ad.wav,medium,long AD transition,1.1749,2636.0,286.1,16a85590661cbd0a
+ad2-3-2.WAV,engine_transition_2_to_3_long_ad_take2.wav,medium,long AD transition,4.1708,2939.2,103.0,797f3f0754e7b664
+ad2-3.WAV,engine_transition_2_to_3_long_ad.wav,medium,long AD transition,4.1749,2917.8,103.0,c8c785a184c96f80
+ad3-2.WAV,engine_transition_3_to_2_long_ad.wav,medium,long AD transition,1.0897,2787.3,103.0,10851d5c584c3a24
+ad3-4-2.WAV,engine_transition_3_to_4_long_ad_take2.wav,medium,long AD transition,2.2281,3377.1,110.6,dd820cc7e988888f
+ad3-4.WAV,engine_transition_3_to_4_long_ad.wav,medium,long AD transition,2.2322,3378.3,110.6,9bbbbf888831ba5d
+ad4-3.WAV,engine_transition_4_to_3_long_ad.wav,medium,long AD transition,0.9784,3494.5,167.8,7268a9f1efa92b6a
+ad4-5-2.WAV,engine_transition_4_to_5_long_ad_take2.wav,medium,long AD transition,1.5738,3433.1,114.4,ff223978a96a5577
+ad4-5.WAV,engine_transition_4_to_5_long_ad.wav,medium,long AD transition,1.5779,3411.2,114.4,b0873c7af1afac15
+ad5-4.WAV,engine_transition_5_to_4_long_ad.wav,medium,long AD transition,0.913,3565.2,110.6,198ad0275ccc4f60
+ad5-6-2.WAV,engine_transition_5_to_6_long_ad_take2.wav,medium,long AD transition,1.9128,3372.5,125.9,57695500aaaf2e39
+ad5-6.WAV,engine_transition_5_to_6_long_ad.wav,medium,long AD transition,1.917,3360.9,125.9,f90eae682d9a50c0
+ad6-5.WAV,engine_transition_6_to_5_long_ad.wav,medium,long AD transition,0.9193,3641.7,114.4,7ef2df6748bc2c7e
+ad6-7-2.WAV,engine_transition_6_to_7_long_ad_take2.wav,medium,long AD transition,2.1847,3663.3,137.3,143221520c6771ba
+ad6-7.WAV,engine_transition_6_to_7_long_ad.wav,medium,long AD transition,2.1888,3657.0,137.3,e2194bb11a4d487a
+ad7-6.WAV,engine_transition_7_to_6_long_ad.wav,medium,long AD transition,0.8695,3752.5,125.9,65fb1d8e75c05f4c
+ad7-8.WAV,engine_transition_7_to_8_long_ad.wav,medium,long AD transition,0.9872,4246.2,156.4,49fe0a9e40f843ac
+ad8-7.WAV,engine_transition_8_to_7_long_ad.wav,medium,long AD transition,0.7543,3872.6,141.1,6bfddad891d4768d
+beep.WAV,beep.wav,high,already descriptive,6.3887,0,0,44cc9b6735654c61
+brake-squeal-02-loop1.1.wav,brake_squeal_02_loop_1.wav,high,variant take,0.6759,4905.2,4200.0,81f3b9addc0dcca6
+brake-squeal-02-loop1.2.wav,brake_squeal_02_loop_2.wav,high,variant take,0.6712,4781.9,4188.5,28528f8ac2a9e6e0
+brake-squeal-02-loop1.3.wav,brake_squeal_02_loop_3.wav,high,variant take,0.7102,4633.7,4184.7,dc28c8605ee5326e
+brake-squeal-02-loop1.5.wav,brake_squeal_02_loop_5.wav,high,variant take,0.6428,4697.7,4188.5,d5c31222d805216e
+bremse-anlegen_zugbremse.WAV,train_brake_apply.wav,high,German translated,6.7166,6480.1,5607.6,b26ff1e0d87d0a29
+bremse-lösen_zugbremse.WAV,train_brake_release.wav,high,German translated,1.2811,4969.2,3604.9,a205d83a731dfd63
+bremstaste-#2.wav,brake_button_2.wav,high,German bremstaste = brake button,1.3337,4975.7,2277.4,6b172cad278c389e
+bremstaste-#3.wav,brake_button_3.wav,high,German bremstaste = brake button,2.2154,4089.8,1186.4,45806cb289247a21
+bremstaste-#4.wav,brake_button_4.wav,high,German bremstaste = brake button,1.0744,4577.3,1277.9,6e2f95183842642f
+bremstaste-#5.wav,brake_button_5.wav,high,German bremstaste = brake button,1.0737,4989.5,2277.4,c492da3a369e1595
+curve-squeal-speed1-exit.wav,curve_squeal_speed1_exit.wav,high,exit sample,1.1081,1896.6,507.4,7383b06026ab7dfd
+curve-squeal-speed1-loop1.1.wav,curve_squeal_speed1_loop_1.wav,high,variant take,1.0004,4718.3,4627.2,1ecfebd1a1a44d36
+curve-squeal-speed1-loop1.2.wav,curve_squeal_speed1_loop_2.wav,high,variant take,1.0002,5037.4,4592.9,ddc9c0de8e9e2a15
+curve-squeal-speed1-loop1.3.wav,curve_squeal_speed1_loop_3.wav,high,variant take,0.9998,4732.3,2674.1,11e01b0e993269db
+curve-squeal-speed1-loop1.4.wav,curve_squeal_speed1_loop_4.wav,high,variant take,1.0002,4431.1,621.8,ea2f893b3e38f822
+curve-squeal-speed1-loop1.5.wav,curve_squeal_speed1_loop_5.wav,high,variant take,1.0002,5087.9,392.9,9f36e03d41e97441
+curve-squeal-speed1-loop1.6.wav,curve_squeal_speed1_loop_6.wav,high,variant take,0.9998,1801.9,507.4,dfd9d5fdd92de665
+curve-squeal-speed1-loop1.7.wav,curve_squeal_speed1_loop_7.wav,high,variant take,1.0002,4648.1,5573.3,cc83d1afb2be9827
+curve-squeal-speed1-loop1.8.wav,curve_squeal_speed1_loop_8.wav,high,variant take,0.999,3824.9,373.8,7d27335ab8711234
+curve-squeal-speed2-loop1.1.wav,curve_squeal_speed2_loop_1.wav,high,variant take,1.8752,4255.0,3307.3,08911a7163f1b7fa
+curve-squeal-speed2-loop1.2.wav,curve_squeal_speed2_loop_2.wav,high,variant take,2.1572,4630.0,3006.0,b1cde491acc9a4af
+curve-squeal-speed2-loop1.3.wav,curve_squeal_speed2_loop_3.wav,high,variant take,2.0414,5306.5,3330.2,ab38180365088490
+curve-squeal-speed2-loop1.4.wav,curve_squeal_speed2_loop_4.wav,high,variant take,2.2086,4919.9,5229.9,f3a68218487f6fe4
+curve-squeal-speed2-loop1.6.wav,curve_squeal_speed2_loop_6.wav,high,variant take,1.9159,4642.3,4310.6,78f3cc7a49a61f82
+curve-squeal-speed2-loop1.7.wav,curve_squeal_speed2_loop_7.wav,high,variant take,2.0271,4926.0,347.1,42ee3142cdac9155
+curve-squeal-speed2-loop1.8.wav,curve_squeal_speed2_loop_8.wav,high,variant take,1.8704,4468.6,3379.8,725c36e947788339
+curve-squeal-speed2-to-speed1.wav,curve_squeal_speed2_to_speed1.wav,high,transition sample,1.0002,4176.6,450.1,7329b135d46216df
+curve-squeal-speed2-to-speed3.wav,curve_squeal_speed2_to_speed3.wav,high,transition sample,1.0079,4456.1,476.8,132f05d0be20f0e9
+curve-squeal-speed3-exit.wav,curve_squeal_speed3_exit.wav,high,exit sample,1.3487,5560.5,389.1,70dfad4a23330f72
+curve-squeal-speed3-loop1.1.wav,curve_squeal_speed3_loop_1.wav,high,variant take,1.1518,4512.3,495.9,e08b1262976c8c07
+curve-squeal-speed3-loop1.2.wav,curve_squeal_speed3_loop_2.wav,high,variant take,1.5548,6641.1,4344.9,2abfeb9c6c855d72
+curve-squeal-speed3-loop1.3.wav,curve_squeal_speed3_loop_3.wav,high,variant take,1.6462,6487.5,3738.4,bc02be15db483603
+curve-squeal-speed3-loop1.4.wav,curve_squeal_speed3_loop_4.wav,high,variant take,1.6226,4853.1,537.9,e5b8adcbb639aedc
+curve-squeal-speed3-loop1.5.wav,curve_squeal_speed3_loop_5.wav,high,variant take,1.3787,5531.2,4631.0,746e4372fa2806bb
+curve-squeal-speed3-loop1.6.wav,curve_squeal_speed3_loop_6.wav,high,variant take,1.5451,6423.0,7122.0,63f1c1447c14e2be
+curve-squeal-speed3-loop1.7.wav,curve_squeal_speed3_loop_7.wav,high,variant take,1.3585,5403.4,347.1,7b19b13d64ed66e4
+curve-squeal-speed3-loop1.8.wav,curve_squeal_speed3_loop_8.wav,high,variant take,1.742,4859.3,507.4,fbc10bfea8684009
+curve-squeal-speed3-to-speed2.wav,curve_squeal_speed3_to_speed2.wav,high,transition sample,0.9795,4862.4,469.2,590a889ddcee2145
+d1-2.WAV,engine_accel_1_to_2_alt.wav,medium,short engine up-shift source (clean name exists),0.2894,2721.6,91.6,512f4dbe2f49704d
+d2-3.WAV,engine_accel_2_to_3_alt.wav,medium,short engine up-shift source (clean name exists),0.4486,3578.0,99.2,913f98ee7cff66db
+d3-4.WAV,engine_accel_3_to_4_alt.wav,medium,short engine up-shift source (clean name exists),0.3339,3618.6,72.5,a2884ab9861214c8
+d4-5.WAV,engine_accel_4_to_5_alt.wav,medium,short engine up-shift source (clean name exists),3.7744,3254.0,110.6,250d84c599603a41
+d5-6.WAV,engine_accel_5_to_6_alt.wav,medium,short engine up-shift source (clean name exists),2.9487,3582.8,125.9,3a074c10563d3724
+d6-7.WAV,engine_accel_6_to_7_alt.wav,medium,short engine up-shift source (clean name exists),2.217,3792.8,137.3,eb55ae6ee1619827
+d7-8.WAV,engine_accel_7_to_8_alt.wav,medium,short engine up-shift source (clean name exists),3.034,4218.6,152.6,24e55e315a53b9e8
+da1-2.WAV,engine_transition_1_to_2_long_da.wav,medium,long DA transition,0.7551,1237.2,83.9,0c81c03a5b01e562
+da2-1.WAV,engine_transition_2_to_1_long_da.wav,medium,long DA transition,1.2279,2314.9,76.3,18a75a585a75738f
+da2-3.WAV,engine_transition_2_to_3_long_da.wav,medium,long DA transition,1.0131,2504.5,95.4,78e1cd599c7922c4
+da3-2.WAV,engine_transition_3_to_2_long_da.wav,medium,long DA transition,1.1443,3642.2,137.3,d0d28aa513bf9ddc
+da3-4.WAV,engine_transition_3_to_4_long_da.wav,medium,long DA transition,0.7448,3490.0,110.6,bb1238eada43bb7c
+da4-3.WAV,engine_transition_4_to_3_long_da.wav,medium,long DA transition,1.1503,4396.3,110.6,1e4585e434e10e89
+da4-5.WAV,engine_transition_4_to_5_long_da.wav,medium,long DA transition,0.7841,3232.9,114.4,d9840095e763e8ec
+da5-4.WAV,engine_transition_5_to_4_long_da.wav,medium,long DA transition,1.0625,3625.5,118.3,95b38264cf1289c8
+da5-6.WAV,engine_transition_5_to_6_long_da.wav,medium,long DA transition,0.7129,3410.9,125.9,166389944a0c6750
+da6-5.WAV,engine_transition_6_to_5_long_da.wav,medium,long DA transition,1.0403,3770.4,129.7,c927041836376961
+da6-7.WAV,engine_transition_6_to_7_long_da.wav,medium,long DA transition,0.6656,3608.8,137.3,9363535a0930dfb2
+da7-6.WAV,engine_transition_7_to_6_long_da.wav,medium,long DA transition,0.9908,3848.1,141.1,bace2f5a125e1e12
+da7-8.WAV,engine_transition_7_to_8_long_da.wav,medium,long DA transition,0.5892,3743.4,148.8,a879cd26e4d3a584
+da8-7.WAV,engine_transition_8_to_7_long_da.wav,medium,long DA transition,0.5791,4258.9,156.4,1866ae457ea38365
+e-motor-deep-loop1.1.wav,traction_motor_deep_loop_1.wav,high,variant take,0.4652,1229.6,450.1,ef571d05ab35c0f9
+e-motor-deep-loop1.2.wav,traction_motor_deep_loop_2.wav,high,variant take,0.4733,1200.4,87.7,85643d787d0a6f01
+e-motor-deep-loop1.3.wav,traction_motor_deep_loop_3.wav,high,variant take,0.4706,1168.4,438.7,76000886db23fd42
+e-motor-deep-loop1.5.wav,traction_motor_deep_loop_5.wav,high,variant take,0.4615,1164.6,438.7,3afd4676d67d9493
+e-motor-deep-loop1.6.wav,traction_motor_deep_loop_6.wav,high,variant take,0.4736,1202.6,87.7,bd8410409dfa0608
+e-motor-deep-loop1.7.wav,traction_motor_deep_loop_7.wav,high,variant take,0.4764,1224.5,450.1,fc3829f48b704faa
+lok-mit-3-wagen-von-gleis1-nach-gleis31_alexander-russian.wav,announcement_ru_train_3_wagons_track1_to_31.wav,high,Russian announcement title,4.664,3625.3,1426.7,13448825a422d638
+lokbremse-anlegen.wav,loco_brake_apply.wav,high,German translated,5.0272,3478.6,1537.3,5a3841d2ceb73353
+lüfter_loop_1.2.WAV,fan_loop_1_2.wav,high,German Lüfter = fan,0.4387,2530.0,1285.6,5a09401b6184af9d
+lüfter_loop_1.3.WAV,fan_loop_1_3.wav,high,German Lüfter = fan,0.4394,2412.4,1285.6,24b51b8762ce3ec9
+lüfter_loop_1.4.WAV,fan_loop_1_4.wav,high,German Lüfter = fan,0.4388,2493.8,1285.6,904f7871be061849
+ms failed part-1.WAV,engine_start_failed_part_1.wav,low,guessed from name; verify by ear,7.4285,1245.6,145.0,fe35160a92293a28
+ms failed part-2.WAV,engine_start_failed_part_2.wav,low,guessed from name; verify by ear,1.9481,1817.7,190.7,4a31b9dfbf06cb53
+noch-drei-längen_alexander-russian.wav,announcement_ru_three_lengths.wav,high,Russian announcement title,1.4346,3954.5,2090.5,7fe41a206e8e47d6
+noch-eine_alexander-russian.wav,announcement_ru_one_more.wav,high,Russian announcement title,0.9117,3402.0,1281.7,f0b6ad6a5a462cd2
+noch-eine_halbe_alexander-russian.wav,announcement_ru_one_and_half.wav,high,Russian announcement title,1.1217,3816.8,2182.0,5976908f65a74a84
+noch-zwei_alexander-russian.wav,announcement_ru_two_more.wav,high,Russian announcement title,0.8864,4281.9,2006.5,2d70cdfafc8d05d0
+notch 2-loop1.1.WAV,engine_notch_2_loop_v1.wav,high,diesel notch loop take,0.6114,2535.8,99.2,deb772984d270436
+notch 2-loop1.2.WAV,engine_notch_2_loop_v2.wav,high,diesel notch loop take,0.6122,2111.7,99.2,77cd97c154ad3a4b
+notch 2-loop1.3.WAV,engine_notch_2_loop_v3.wav,high,diesel notch loop take,0.6133,2362.1,99.2,42b68982b6fa27e0
+notch 3-loop1.1.WAV,engine_notch_3_loop_v1.wav,high,diesel notch loop take,0.5734,3196.8,103.0,2938bd8d2c4f71ec
+notch 3-loop1.2.WAV,engine_notch_3_loop_v2.wav,high,diesel notch loop take,0.5741,3163.2,103.0,15372fa02632bb2d
+notch 3-loop1.4.WAV,engine_notch_3_loop_v4.wav,high,diesel notch loop take,0.5621,3058.5,118.3,b553a0ec20af8fed
+notch 4-loop1.2.WAV,engine_notch_4_loop_v2.wav,high,diesel notch loop take,0.815,3599.5,76.3,f54ce44099137048
+notch 4-loop1.3.WAV,engine_notch_4_loop_v3.wav,high,diesel notch loop take,0.8118,3457.7,110.6,a2993c825524ad17
+notch 4-loop1.4.WAV,engine_notch_4_loop_v4.wav,high,diesel notch loop take,0.5444,3839.4,110.6,b92b93c97aaf63b0
+notch 5-loop1.1.WAV,engine_notch_5_loop_v1.wav,high,diesel notch loop take,0.7771,3794.4,118.3,8f2f3dd867554f8b
+notch 5-loop1.2.WAV,engine_notch_5_loop_v2.wav,high,diesel notch loop take,0.7782,3424.0,118.3,78ba34d5a460b855
+notch 5-loop1.4.WAV,engine_notch_5_loop_v4.wav,high,diesel notch loop take,0.7852,3602.0,118.3,50779addaccb1b7b
+notch 6-loop1.1.WAV,engine_notch_6_loop_v1.wav,high,diesel notch loop take,0.7064,3989.1,129.7,ece5de49e6d5cd50
+notch 6-loop1.2.WAV,engine_notch_6_loop_v2.wav,high,diesel notch loop take,0.7075,3580.0,129.7,f3d844e558e35194
+notch 6-loop1.4.WAV,engine_notch_6_loop_v4.wav,high,diesel notch loop take,0.7098,3796.6,129.7,eeeaef7530c64a7e
+notch 7-loop1.1.WAV,engine_notch_7_loop_v1.wav,high,diesel notch loop take,0.6422,4124.3,145.0,e565776abae27271
+notch 7-loop1.2.WAV,engine_notch_7_loop_v2.wav,high,diesel notch loop take,0.6431,3720.1,141.1,917c04fe460475d3
+notch 7-loop1.4.WAV,engine_notch_7_loop_v4.wav,high,diesel notch loop take,0.6452,3948.2,141.1,9536694aa8b3feba
+notch 8-loop1.2.WAV,engine_notch_8_loop_v2.wav,high,diesel notch loop take,0.5847,3854.1,156.4,26ff71a736cc0921
+notch 8-loop1.3.WAV,engine_notch_8_loop_v3.wav,high,diesel notch loop take,0.5855,3661.7,156.4,2a4d4637af3323ac
+notch 8-loop1.4.WAV,engine_notch_8_loop_v4.wav,high,diesel notch loop take,0.5866,4082.5,156.4,ff02a31aeda6e46f
+pressluft-ablassen-init-universal.wav,air_release_init.wav,high,German Pressluft = compressed air,0.2098,4380.0,999.5,329638c4de68cb05
+pressluft-ablassen-loop1.2-universal.wav,air_release_loop_2.wav,high,German Pressluft = compressed air,0.2483,5835.3,7827.8,60a4b8a2c5cfa6ca
+pressluft-ablassen-loop1.3-universal.wav,air_release_loop_3.wav,high,German Pressluft = compressed air,0.2486,5616.9,4005.4,b70f8ba3e32246a9
+pressluft-ablassen-loop1.4-universal.wav,air_release_loop_4.wav,high,German Pressluft = compressed air,0.2485,5697.1,4142.8,8799bee9aee12966
+pressluft-ablassen-loop1.5-universal.wav,air_release_loop_5.wav,high,German Pressluft = compressed air,0.2499,5638.9,2235.4,dc8b28a51dd57732
+pressluft-ablassen-loop1.6-universal.wav,air_release_loop_6.wav,high,German Pressluft = compressed air,0.2483,5563.6,5134.6,ff06e6ad11a387cc
+pressluft-ablassen-loop1.7-universal.wav,air_release_loop_7.wav,high,German Pressluft = compressed air,0.2493,5709.9,4150.4,02f5a0b0fcd44467
+pressluft-ablassen-loop1.8-universal.wav,air_release_loop_8.wav,high,German Pressluft = compressed air,0.2529,5680.9,4020.7,79f21aca1e8ffb53
+rail-clank#1-fast2.wav,rail_clank_1_fast_2.wav,high,already descriptive,0.1525,2014.3,259.4,bbb2fc03d0fb2c0f
+rail-clank#1-fast3.wav,rail_clank_1_fast_3.wav,high,already descriptive,0.1007,2225.8,198.4,79e4675827047235
+rail-clank#1-fast4.wav,rail_clank_1_fast_4.wav,high,already descriptive,0.1901,2497.5,236.5,2dc3e8f6bcfb87e8
+rail-clank#1-slow2.wav,rail_clank_1_slow_2.wav,high,already descriptive,0.2283,2013.4,259.4,9aad39b9c5694337
+rail-clank#1-slow3.wav,rail_clank_1_slow_3.wav,high,already descriptive,0.1468,2197.1,206.0,ffde866c62ddab76
+rail-clank#1-slow4.wav,rail_clank_1_slow_4.wav,high,already descriptive,0.2301,2506.0,236.5,d9fba55adf3d3b5f
+rail-clank#2-fast1.wav,rail_clank_2_fast_1.wav,high,already descriptive,0.1,2160.2,167.8,aeb78fe4447250e7
+rail-clank#2-fast2.wav,rail_clank_2_fast_2.wav,high,already descriptive,0.1525,2106.4,175.5,520029992d828a06
+rail-clank#2-fast3.wav,rail_clank_2_fast_3.wav,high,already descriptive,0.1007,1354.8,61.0,1afffed62eaebbd0
+rail-clank#2-fast4.wav,rail_clank_2_fast_4.wav,high,already descriptive,0.1901,2125.0,244.1,85ccb6bb940dad00
+rail-clank#2-slow1.wav,rail_clank_2_slow_1.wav,high,already descriptive,0.1395,2205.4,160.2,a5af6a5dcea6e819
+rail-clank#2-slow2.wav,rail_clank_2_slow_2.wav,high,already descriptive,0.1924,2100.5,175.5,d682f64b3efc1071
+rail-clank#2-slow3.wav,rail_clank_2_slow_3.wav,high,already descriptive,0.1468,1580.5,61.0,bc0bd7052a098a15
+rail-clank#2-slow4.wav,rail_clank_2_slow_4.wav,high,already descriptive,0.2301,2158.8,244.1,86b3c2cbd1d69c52
+rail-clank#3-fast1.wav,rail_clank_3_fast_1.wav,high,already descriptive,0.1,3800.4,244.1,5906b5e01c49bd5a
+rail-clank#3-fast2.wav,rail_clank_3_fast_2.wav,high,already descriptive,0.1525,4428.8,236.5,5a575ef6769ffb2f
+rail-clank#3-fast3.wav,rail_clank_3_fast_3.wav,high,already descriptive,0.1007,4264.3,1159.7,37a51fba9bc12ffc
+rail-clank#3-fast4.wav,rail_clank_3_fast_4.wav,high,already descriptive,0.1901,4102.5,366.2,917d81ed791d791b
+rail-clank#3-slow1.wav,rail_clank_3_slow_1.wav,high,already descriptive,0.1395,4263.8,473.0,4964fac8d80fb825
+rail-clank#3-slow2.wav,rail_clank_3_slow_2.wav,high,already descriptive,0.2283,4426.5,236.5,a8a896f155d94f9d
+rail-clank#3-slow3.wav,rail_clank_3_slow_3.wav,high,already descriptive,0.1468,4606.5,259.4,8bb3a5c000747625
+rail-clank#3-slow4.wav,rail_clank_3_slow_4.wav,high,already descriptive,0.2301,4101.8,366.2,d41a56cbe72edc77
+rail-clank#4-fast1.wav,rail_clank_4_fast_1.wav,high,already descriptive,0.1,2504.1,91.6,e9e68fff09c268d3
+rail-clank#4-fast2.wav,rail_clank_4_fast_2.wav,high,already descriptive,0.1525,2842.0,91.6,6182e4e1cc545b35
+rail-clank#4-fast3.wav,rail_clank_4_fast_3.wav,high,already descriptive,0.1007,2476.2,122.1,8705e48f2dc14986
+rail-clank#4-fast4.wav,rail_clank_4_fast_4.wav,high,already descriptive,0.1901,2884.3,282.3,95bf79d8a633f31f
+rail-clank#4-slow1.wav,rail_clank_4_slow_1.wav,high,already descriptive,0.1395,2314.1,328.1,7b38ae9db89bdbe5
+rail-clank#4-slow2.wav,rail_clank_4_slow_2.wav,high,already descriptive,0.2283,2851.8,91.6,76f0ff1c47e5c3e4
+rail-clank#4-slow3.wav,rail_clank_4_slow_3.wav,high,already descriptive,0.1468,2319.3,328.1,5fa630503a1e7d23
+rail-clank#4-slow4.wav,rail_clank_4_slow_4.wav,high,already descriptive,0.2301,2887.1,282.3,ea2489286d2710d5
+s-loop1.2.WAV,engine_idle_loop_v2.wav,low,matches idle/decel timbre; original s-loop,0.7851,1797.9,76.3,f54b07f70f984553
+s-loop1.3.WAV,engine_idle_loop_v3.wav,low,matches idle/decel timbre; original s-loop,0.7866,1817.1,76.3,1dbb0765bc46a714
+s-loop1.4.WAV,engine_idle_loop_v4.wav,low,matches idle/decel timbre; original s-loop,0.7866,1785.2,76.3,8b1fc66df815fd60
+sanden-loop1.1.wav,sander_loop_1.wav,high,German sanden = sanding,0.1703,6471.0,5455.0,727e1d511dfd28b7
+sanden-loop1.2.wav,sander_loop_2.wav,high,German sanden = sanding,0.1005,6306.7,5447.4,56e02d86f86367db
+sanden-loop1.3.wav,sander_loop_3.wav,high,German sanden = sanding,0.2414,6523.3,5592.3,cb92cd7c85cbc196
+sanden-loop1.4.wav,sander_loop_4.wav,high,German sanden = sanding,0.1206,6261.4,3402.7,faf5eea29c2a5f0d
+sanden-loop1.5.wav,sander_loop_5.wav,high,German sanden = sanding,0.1265,6417.7,5462.6,80ccf47c34bf0fc6
+sanden-loop1.6.wav,sander_loop_6.wav,high,German sanden = sanding,0.1731,6355.5,5394.0,91c9acfee7885df6
+sanden-loop1.8.wav,sander_loop_8.wav,high,German sanden = sanding,0.1683,6462.8,5523.7,dd4403386cd0e756
+schaffnerpfiff#2.wav,conductor_whistle_2.wav,high,German translated,1.9271,4756.1,2964.0,bff400e548c482f3
+schaffnerpfiff#3.wav,conductor_whistle_3.wav,high,German translated,2.102,6273.7,2529.1,123c16f7e7fb7415
+schaffnerpfiff#4.wav,conductor_whistle_4.wav,high,German translated,1.6616,5652.3,2941.1,9f481aa8896925c8
+sd.WAV,engine_decel_to_idle_alt.wav,low,matches decel-to-idle timbre; verify by ear,1.5808,1993.2,76.3,ff8b88d9fb7c0bf6
+silence-100ms-31k.wav,silence_100ms_31k.wav,high,already descriptive,0.0998,0,0,811e77b3fa70adae
+sm.WAV,ambient_low_rumble_sm.wav,low,9.9 s low rumble; unclear source,9.8668,2060.9,293.7,b2e7a7fbd2c2dc90
+switch-flange#10.wav,switch_flange_10.wav,high,already descriptive,1.0657,5149.4,6076.8,498800020b0e91c8
+switch-flange#11.wav,switch_flange_11.wav,high,already descriptive,1.3508,6241.0,1617.4,406dd0fcb83ea993
+switch-flange#12.wav,switch_flange_12.wav,high,already descriptive,1.544,5781.9,423.4,05efdcfbc987e2e2
+switch-flange#13.wav,switch_flange_13.wav,high,already descriptive,1.3758,5674.8,4196.2,802b4f066ddf70fe
+switch-flange#2.wav,switch_flange_2.wav,high,already descriptive,1.2365,5075.9,991.8,cf1989dd7e1ea42a
+switch-flange#3.wav,switch_flange_3.wav,high,already descriptive,1.1478,4876.0,4356.4,554c196d03e0b27f
+switch-flange#4.wav,switch_flange_4.wav,high,already descriptive,1.1756,4559.8,4581.5,6f39d2d5d94e99a3
+switch-flange#5.wav,switch_flange_5.wav,high,already descriptive,1.2789,5019.0,1083.4,94d8e892f8ac149d
+switch-flange#6.wav,switch_flange_6.wav,high,already descriptive,1.0644,4680.0,3646.9,c5c2271bad0653cf
+switch-flange#7.wav,switch_flange_7.wav,high,already descriptive,0.9852,4994.0,4402.2,814ded5baedd01ec
+switch-flange#8.wav,switch_flange_8.wav,high,already descriptive,0.9852,4678.0,3536.2,562080a86e8103a2
+switch-flange#9.wav,switch_flange_9.wav,high,already descriptive,1.1725,4331.1,6797.8,7a1d296e7feb7c21
+turbo-loop1.2.wav,turbo_loop_2.wav,high,variant take,0.559,2177.0,1791.0,5af2b7da346ca64e
+turbo-loop1.3.wav,turbo_loop_3.wav,high,variant take,0.598,2201.6,1789.1,2318747c91fcd2d0
+turbo-loop1.4.wav,turbo_loop_4.wav,high,variant take,0.5352,2192.9,1789.1,f579e549b9fa8dfe
+umschaltung-schnellgang.wav,high_speed_gear_shift.wav,high,German translated,1.8368,2218.2,141.1,f4bc7dc61c15890c
+und-halt_alexander-russian.wav,announcement_ru_and_stop.wav,high,Russian announcement title,0.7936,3317.0,515.0,149bcacd9c95cefb
+whistle-FAST-exit.wav,whistle_fast_exit.wav,high,already descriptive,0.7187,3637.6,682.8,e7bfd76ac58180e6
+whistle-init#2.wav,whistle_start_2.wav,high,init = start,0.0803,5384.8,2044.7,638c16908400bf25
+whistle-loop1.1.wav,whistle_loop_1.wav,high,variant take,0.4968,5699.6,682.8,e586b239dd26beda
+whistle-loop1.10.wav,whistle_loop_10.wav,high,variant take,0.5016,5736.6,682.8,31f6c01a5e3a3a51
+whistle-loop1.2.wav,whistle_loop_2.wav,high,variant take,0.4968,5864.3,682.8,4ae5f11cf3a7855d
+whistle-loop1.3.wav,whistle_loop_3.wav,high,variant take,0.4968,5787.1,682.8,38d6f54e4e2f9fd9
+whistle-loop1.4.wav,whistle_loop_4.wav,high,variant take,0.4968,5864.3,682.8,a04bfba8b7b202fb
+whistle-loop1.6.wav,whistle_loop_6.wav,high,variant take,0.4968,5741.2,682.8,8d42c7117a6ec090
+whistle-loop1.7.wav,whistle_loop_7.wav,high,variant take,0.4968,5630.4,682.8,ca863f769f577823
+whistle-loop1.8.wav,whistle_loop_8.wav,high,variant take,0.4968,5700.2,2048.5,38f14abc57975a56
+whistle-loop1.9.wav,whistle_loop_9.wav,high,variant take,0.4968,5744.1,682.8,66438cc3901f4b3d
+whistle-s1.1.wav,whistle_short_1_1.wav,medium,0.1 s slice of the whistle loop,0.1001,5556.8,2044.7,47158b696126066f
+whistle-s1.2.wav,whistle_short_1_2.wav,medium,0.1 s slice of the whistle loop,0.1001,5477.1,686.6,b8fa04a7c155a7be
+whistle-s1.3.wav,whistle_short_1_3.wav,medium,0.1 s slice of the whistle loop,0.1001,5193.5,686.6,885bd9ddd4e04e54
+whistle-s1.4.wav,whistle_short_1_4.wav,medium,0.1 s slice of the whistle loop,0.1001,5048.4,686.6,0e4f75d9b448e235
+whistle-s1.5.wav,whistle_short_1_5.wav,medium,0.1 s slice of the whistle loop,0.1001,5735.5,2044.7,e6ba050fa47a16ca
+whistle-s1.6.wav,whistle_short_1_6.wav,medium,0.1 s slice of the whistle loop,0.1001,5545.1,2044.7,f6d49b66a28c8215
+whistle-s1.7.wav,whistle_short_1_7.wav,medium,0.1 s slice of the whistle loop,0.1001,5192.0,686.6,6b7e2311251f51bf
+whistle-s1.8.wav,whistle_short_1_8.wav,medium,0.1 s slice of the whistle loop,0.1001,5341.8,2044.7,72cb58f0032dca5d
+whistle-s1.9.wav,whistle_short_1_9.wav,medium,0.1 s slice of the whistle loop,0.1001,5460.4,2044.7,d9f40ce04d005c32

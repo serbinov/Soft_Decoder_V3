@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
@@ -31,6 +31,24 @@
   .boot-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;font-size:11px;color:var(--muted)}
   .boot-skip{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:7px;padding:6px 10px;font:inherit;font-size:11px;cursor:pointer}
   .boot-skip:hover{border-color:var(--accent)}
+  .save-overlay{position:fixed;inset:0;z-index:19000;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(6,10,18,.62);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+  .save-overlay.on{display:flex}
+  .save-card{width:min(430px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+  .save-spinner{width:26px;height:26px;margin:0 auto 12px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:save-spin .8s linear infinite}
+  .save-spinner.hide{display:none}
+  @keyframes save-spin{to{transform:rotate(360deg)}}
+  .save-title{font-size:16px;font-weight:700;margin-bottom:6px;text-align:center}
+  .save-msg{font-size:12px;color:var(--muted);min-height:16px;margin-bottom:10px;text-align:center;overflow-wrap:anywhere}
+  .save-errors{max-height:38vh;overflow:auto;margin:0 0 12px;display:flex;flex-direction:column;gap:6px}
+  .save-errors.hide{display:none}
+  .save-err{font-size:12px;line-height:1.3;padding:7px 9px;border:1px solid var(--line);border-left:3px solid var(--danger,#e05a5a);border-radius:7px;background:var(--panel2)}
+  .save-err.warn{border-left-color:var(--warn,#d1a33a)}
+  .save-actions{display:flex;justify-content:center;gap:8px}
+  .save-actions.hide{display:none}
+  .save-actions button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:7px;padding:8px 18px;font:inherit;cursor:pointer}
+  .save-actions .save-ok{background:var(--accent);border-color:var(--accent);color:#08101c;font-weight:700}
+  .save-actions button.hide{display:none}
+  .save-actions button:hover{filter:brightness(1.08)}
   header.top{position:relative;z-index:70;flex:0 0 auto;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
   .hd-left{display:flex;align-items:center;gap:8px;justify-self:start;min-width:0}
   .hd-mid{display:flex;align-items:center;gap:8px;justify-self:center;flex-wrap:wrap}
@@ -225,6 +243,18 @@
     </div>
   </div>
 </div>
+<div class="save-overlay" id="save_overlay" role="dialog" aria-modal="true" aria-labelledby="save_overlay_title">
+  <div class="save-card">
+    <div class="save-spinner" id="save_overlay_spinner"></div>
+    <div class="save-title" id="save_overlay_title" data-i18n="st_saving">Сохранение...</div>
+    <div class="save-msg" id="save_overlay_msg"></div>
+    <div class="save-errors hide" id="save_overlay_errors"></div>
+    <div class="save-actions hide" id="save_overlay_actions">
+      <button type="button" class="save-cancel hide" id="save_overlay_cancel" data-i18n="save_overlay_cancel">Отмена</button>
+      <button type="button" class="save-ok" id="save_overlay_ok" data-i18n="save_overlay_ok">OK</button>
+    </div>
+  </div>
+</div>
 <header class="top">
   <div class="hd-left">
     <button id="b_pal" class="mob" title="Палитра" data-i18n-title="palette">☰</button>
@@ -344,7 +374,7 @@ ready_blocks:"Готовые блоки",palette_blocks:"Блоки",block_setup
 select_hint:"Выберите блок на холсте или добавьте новый слева.",
 scheme_title:"Схема и таблица связей",close_tip:"Закрыть",download_png:"Экспорт блок-схемы в JPG",download_txt:"Экспорт блок-схемы в TXT",pack_import:"Импорт звуков и схемы (.asp)",pack_export:"Экспорт звуков и схемы (.asp)",st_pack_import_hint:"Импорт откроется в главном окне. После импорта вернитесь в редактор.",st_pack_updated:"Пакет импортирован, проект обновлён.",ready:"Готово",
 st_checking:"Проверка...",st_has_errors:"Есть ошибки",st_check_ok:"Проверка пройдена",st_error_prefix:"Ошибка: ",
-st_saving:"Сохранение...",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранено",st_saved_with_errors:"Сохранено с ошибками; схема не применена",st_saved_pending_motor:"Сохранено; включится после остановки мотора",st_applied:"Применено",st_saved_not_applied:"Сохранено, но не применено",st_not_applied:"Не применено: ",st_not_saved:"Не сохранено: ",
+st_saving:"Сохранение...",save_overlay_errors_title:"В схеме есть ошибки",save_overlay_errors_msg:"Схема будет сохранена как черновик и не применится. Продолжить?",save_overlay_failed:"Не сохранено",save_overlay_ok:"OK",save_overlay_cancel:"Отмена",st_save_cancelled:"Сохранение отменено",err_fix_before_save:"Исправьте ошибки перед сохранением",st_saved_version:"Сохранено",st_saved_keep_active:"Сохранено; активная схема не изменена",st_saved_with_errors:"Сохранено с ошибками; схема не применена",st_saved_pending_motor:"Сохранено; включится после остановки мотора",st_applied:"Применено",st_saved_not_applied:"Сохранено, но не применено",st_not_applied:"Не применено: ",st_not_saved:"Не сохранено: ",
 st_applying:"Применение...",st_applied_prefix:"Применена версия ",st_applied_suffix:", выходы записаны",st_not_applied:"Не применено: ",
 err_not_json:"Устройство вернуло не-JSON (",err_http:"Ошибка ",
 pal_fx:" · выбор эффекта",ns_engine_auto:"авто",ns_steps:"Ступени: ",ns_prot:" · защита ",ns_speed:"Скорость % · диапазонов ",ns_decel:" · по замедлению",ns_file_none:" · файл не задан",ns_start:"Запуск: ",ns_end:"Конец: ",ns_simple:"Звук: ",ns_loop:"Цикл: ",ns_mute:"Пауза",
@@ -405,7 +435,7 @@ ready_blocks:"Ready blocks",palette_blocks:"Blocks",block_setup:"Block settings"
 select_hint:"Select a block on the canvas or add a new one on the left.",
 scheme_title:"Diagram and link table",close_tip:"Close",download_png:"Export scheme to JPG",download_txt:"Export scheme to TXT",ready:"Ready",
 st_checking:"Validating...",st_has_errors:"There are errors",st_check_ok:"Validation passed",st_error_prefix:"Error: ",
-st_saving:"Saving...",err_fix_before_save:"Fix the errors before saving",st_saved_version:"Saved",st_saved_with_errors:"Saved with errors; scheme not applied",st_saved_pending_motor:"Saved; it will take effect when the motor stops",st_applied:"Applied",st_saved_not_applied:"Saved but not applied",st_not_applied:"Not applied: ",st_not_saved:"Not saved: ",
+st_saving:"Saving...",save_overlay_errors_title:"The scheme has errors",save_overlay_errors_msg:"It will be saved as a draft and will not be applied. Continue?",save_overlay_failed:"Not saved",save_overlay_ok:"OK",save_overlay_cancel:"Cancel",st_save_cancelled:"Save cancelled",err_fix_before_save:"Fix the errors before saving",st_saved_version:"Saved",st_saved_keep_active:"Saved; active scheme unchanged",st_saved_with_errors:"Saved with errors; scheme not applied",st_saved_pending_motor:"Saved; it will take effect when the motor stops",st_applied:"Applied",st_saved_not_applied:"Saved but not applied",st_not_applied:"Not applied: ",st_not_saved:"Not saved: ",
 st_applying:"Applying...",st_applied_prefix:"Applied version ",st_applied_suffix:", outputs written",st_not_applied:"Not applied: ",
 err_not_json:"Device returned non-JSON (",err_http:"Error ",
 pal_fx:" · choose effect",ns_engine_auto:"auto",ns_steps:"Steps: ",ns_prot:" · margin ",ns_speed:"Speed % · bands ",ns_decel:" · deceleration-based",ns_file_none:" · no file set",ns_start:"Launch: ",ns_end:"End: ",ns_simple:"Sound: ",ns_loop:"Loop: ",ns_mute:"Pause",
@@ -848,7 +878,7 @@ const REFERENCE_PROJECT_ID="locomotive_default";
 const MAX_SAVED_PROJECTS=10;
 let activeProjectId=REFERENCE_ID,referenceMode=false;
 let packImportPending=null,packImportToken=0;
-let soundFiles=[],diagnostics=[],assets={},assetsReady=false,pendingApply=null;
+let soundFiles=[],diagnostics=[],assets={},assetsReady=false,pendingApply=null,lastSavedProject=null;
 let history=[],hIndex=-1,lastSig=null;
 let readyIds=new Set(),selectedLink="",deviceBinds=[],deviceAux=[];
 let viewMode="mix",activeSchemeId="",renamingSchemeId="",mixReturnState=null;
@@ -1054,14 +1084,14 @@ function defaultProject(){
   const newScheme=(id,name)=>{const s={id,name,blocks:[],links:[],texts:[]};p.schemes.push(s);return s;};
   const cue=(id,scheme,name,x,y)=>add(p.mix,id,"sound_cue",{scheme:scheme.id,volume:100,name:name||scheme.name,x,y});
 
-  /* F2: Тифон (низкий) — horn-low-init.wav -> horn-low-loop.wav -> horn-low-exit.wav */
+  /* F2: Тифон (низкий) — horn_low_start.wav -> horn_low_loop.wav -> horn_low_stop.wav */
   const horn=newScheme("horn_scheme",t("default_horn_scheme"));
   const hStart=add(horn,"h_start","start",{files:{sound:"horn_low_start.wav"},x:60,y:80});
   const hLoop=add(horn,"h_loop","loop",{files:{sound:"horn_low_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
   const hEnd=add(horn,"h_end","end",{files:{sound:"horn_low_stop.wav"},x:700,y:80});
   link(horn,hStart,hLoop);link(horn,hLoop,hEnd);
 
-  /* F1: Свисток ЧМЭ3 — whistle-init_1.wav -> whistle-loop1.5.wav -> whistle-exit.wav */
+  /* F1: Свисток ЧМЭ3 — whistle_start.wav -> whistle_loop.wav -> whistle_stop.wav */
   const whistleS=newScheme("whistle_scheme",t("default_whistle_scheme"));
   const wStart=add(whistleS,"w_start","start",{files:{sound:"whistle_start.wav"},x:60,y:80});
   const wLoop=add(whistleS,"w_loop","loop",{files:{sound:"whistle_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
@@ -1076,7 +1106,7 @@ function defaultProject(){
   const bEnd=add(bellS,"b_end","end",{files:{sound:"radio_ptt_release.wav"},x:1020,y:80});
   link(bellS,bStart,bBeep);link(bellS,bBeep,bMsg);link(bellS,bMsg,bEnd);
 
-  /* F6: Компрессор КТ-6 — Air_Compressor_Start.wav -> Air_Compressor_Idle.wav -> Air_Compressor_End.wav */
+  /* F6: Компрессор КТ-6 — compressor_start.wav -> compressor_loop.wav -> compressor_stop.wav */
   const compS=newScheme("compressor_scheme",t("default_compressor_scheme"));
   const cStart=add(compS,"c_start","start",{files:{sound:"compressor_start.wav"},x:60,y:80});
   const cLoop=add(compS,"c_loop","loop",{files:{sound:"compressor_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
@@ -1087,14 +1117,14 @@ function defaultProject(){
   const couplerS=newScheme("coupler_scheme",t("default_coupler_scheme"));
   add(couplerS,"k_start","start",{files:{sound:"coupler_attach.wav"},x:60,y:80});
 
-  /* F8: Песочница — sanden-init.wav -> sanden-loop1.7.wav -> sanden-exit.wav */
+  /* F8: Песочница — sander_start.wav -> sander_loop.wav -> sander_stop.wav */
   const sanderS=newScheme("sander_scheme",t("default_sander_scheme"));
   const sStart=add(sanderS,"s_start","start",{files:{sound:"sander_start.wav"},x:60,y:80});
   const sLoop=add(sanderS,"s_loop","loop",{files:{sound:"sander_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
   const sEnd=add(sanderS,"s_end","end",{files:{sound:"sander_stop.wav"},x:700,y:80});
   link(sanderS,sStart,sLoop);link(sanderS,sLoop,sEnd);
 
-  /* F14: Вентилятор холодильника ЧМЭ3 — lüfter_init.wav -> lüfter_loop_1.1.wav -> lüfter_exit.wav */
+  /* F14: Вентилятор холодильника ЧМЭ3 — fan_start.wav -> fan_loop.wav -> fan_stop.wav */
   const fanS=newScheme("fan_scheme",t("default_fan_scheme"));
   const fnStart=add(fanS,"fn_start","start",{files:{sound:"fan_start.wav"},x:60,y:80});
   const fnLoop=add(fanS,"fn_loop","loop",{files:{sound:"fan_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
@@ -1111,7 +1141,7 @@ function defaultProject(){
   const uncouplerS=newScheme("uncoupler_scheme",t("default_uncoupler_scheme"));
   add(uncouplerS,"uc_start","start",{files:{sound:"coupler_detach.wav"},x:60,y:80});
 
-  /* F16: Турбокомпрессор ПДГ ЧМЭ3 — turbo-init.wav -> turbo-loop1.1.wav -> turbo-fast-exit.wav */
+  /* F16: Турбокомпрессор ПДГ ЧМЭ3 — turbo_start.wav -> turbo_loop.wav -> turbo_stop.wav */
   const turboS=newScheme("turbo_scheme",tr({ru:"Турбокомпрессор ЧМЭ3",en:"ChME3 Turbocharger"}));
   const tbStart=add(turboS,"tb_start","start",{files:{sound:"turbo_start.wav"},x:60,y:80});
   const tbLoop=add(turboS,"tb_loop","loop",{files:{sound:"turbo_loop.wav"},loopMode:"hold",trigger:"fn",dirTrigger:"fwd",x:380,y:80});
@@ -2506,7 +2536,7 @@ async function doValidate(){
   }catch(e){setStatus(t("st_error_prefix")+e.message);}finally{busy=false;refreshButtons();}
 }
 async function doSave(opts){
-  const force=!!(opts&&opts.force);
+  const force=!!(opts&&opts.force),ui=!!(opts&&opts.ui);
   if(busy)return;
   if(referenceMode){
     /* The reference project is immutable: saving it creates an editable
@@ -2530,8 +2560,10 @@ async function doSave(opts){
     else mixReturnState={cueId:"",viewport:null,saved:true};
     renderReturnBar();
     if(!online){
+      if(ui){saveOverlayShow();await nextPaint();}
       saveDraft();
       setStatus(t("st_saved_version"));
+      if(ui)saveOverlayFinish(t("st_saved_version"),600);
       setTimeout(()=>{if(sb&&!busy)sb.classList.remove("primary");},300);
       return;
     }
@@ -2544,17 +2576,29 @@ async function doSave(opts){
       return;
     }
   }
+  const wasActive=project.id===activeProjectId;
   busy=true;refreshButtons();setStatus(t("st_saving"));
+  if(ui){saveOverlayShow();await nextPaint();}
   try{project.editor.bindTuples=desiredBindings().map(bindKey);project.editor.auxChannels=auxConfigs().map(c=>c.ch);
     if(revisionConflict&&project.id===savedId)throw new Error(t("st_revision_conflict"));
     const v=validate();const invalid=v.diagnostics.some(d=>d.severity!=="warning");
     if(invalid&&!force){diagnostics=v.diagnostics;renderDiag();throw new Error(t("err_fix_before_save"));}
+    if(invalid&&force&&ui){
+      diagnostics=v.diagnostics;renderDiag();
+      const ok=await saveOverlayAskErrors(v.diagnostics);
+      if(!ok){saveOverlayHide();setStatus(t("st_save_cancelled"));return;}
+    }
     /* Always refresh asset metadata: after a sound-pack replacement the cached
        size/CRC would make apply fail with a stale manifest. */
     await fetchAssets(v.files,true);
     const missing=v.files.filter(f=>!assets[f]);
     if(missing.length&&!force){diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));renderDiag();throw new Error(t("v_assets_missing")+missing.join(", "));}
     if(missing.length)v.diagnostics=v.diagnostics.concat(missing.map(f=>({id:"",message:t("v_assets_missing")+f,severity:"error"})));
+    if(missing.length&&force&&ui){
+      diagnostics=v.diagnostics;renderDiag();
+      const ok=await saveOverlayAskErrors(v.diagnostics);
+      if(!ok){saveOverlayHide();setStatus(t("st_save_cancelled"));return;}
+    }
     v.payload.assets=v.files.map(f=>assets[f]).filter(Boolean);
     /* A manual save of a graph with errors stores a draft: it is listed and
        reloadable, but never selected or applied until it validates. */
@@ -2562,22 +2606,34 @@ async function doSave(opts){
     const savePath="/api/sound/graph/save?"+qs({id:project.id,expectedRevision:project.id===savedId?revision:0})+(draft?"&draft=1":"");
     const r=await req(savePath,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(wirePayload(v.payload))});
     revision=Number(r.revision)||revision;savedId=project.id;savedSig=projectSig();revisionConflict=null;knownProjectNames.add(normProjectName(project.name));updateSaveButton();
+    lastSavedProject={id:project.id,revision,valid:!draft};
     if(draft){
       pendingApply=null;
       diagnostics=v.diagnostics;renderSummary();renderDiag();
       setStatus(t("st_saved_with_errors"));
       if($("tm_saved")&&$("tm_saved").classList.contains("open"))refreshSavedProjects();
+      if(ui)saveOverlayFinish(t("st_saved_with_errors"),900);
       return;
     }
     let applied=false,applyErr="";
-    try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});await applyOutputs();applied=true;}
-    catch(e){applyErr=e&&e.message?e.message:String(e);}
+    if(wasActive){
+      try{await req("/api/sound/graph/apply?"+qs({id:project.id,revision}),{method:"POST"});await applyOutputs();applied=true;}
+      catch(e){applyErr=e&&e.message?e.message:String(e);}
+    }
     await refreshStatus();
     const warnings=v.diagnostics.filter(d=>d.severity==="warning");
-    if(applied){
+    if(!wasActive){
+      /* A newly created or non-active project must not take over the decoder:
+         only the human selection in the Projects menu changes the active scheme. */
+      pendingApply=null;diagnostics=warnings;renderSummary();renderDiag();
+      setStatus(t("st_saved_keep_active"));
+      if(ui)saveOverlayFinish(t("st_saved_keep_active"),900);
+    }
+    else if(applied){
       activeProjectId=project.id;referenceMode=false;
       pendingApply=null;diagnostics=warnings;renderSummary();renderDiag();
       setStatus(t("st_saved_version"));
+      if(ui)saveOverlayFinish(t("st_saved_version"),700);
     }
     else if(/motor must be stopped/i.test(applyErr)){
       /* The project is saved; only the live switch is deferred until the motor
@@ -2586,21 +2642,26 @@ async function doSave(opts){
       diagnostics=warnings.concat([{id:"",message:t("st_saved_pending_motor"),severity:"warning"}]);
       renderSummary();renderDiag();
       setStatus(t("st_saved_pending_motor"));
+      if(ui)saveOverlayFinish(t("st_saved_pending_motor"),1200);
     }
     else{
       pendingApply=null;
       diagnostics=warnings.concat([{id:"",message:t("st_not_applied")+applyErr,severity:"error"}]);
       renderSummary();renderDiag();
       setStatus(t("st_saved_not_applied")+": "+applyErr);
+      if(ui)saveOverlayFinish(t("st_saved_not_applied")+": "+applyErr,1400);
     }
     if($("tm_saved")&&$("tm_saved").classList.contains("open"))refreshSavedProjects();
   }catch(e){
     const msg=e&&e.message?String(e.message):String(e);
+    let overlayMsg=msg;
     if(/Stale expectedRevision/i.test(msg)){
       revisionConflict={id:project.id,expectedRevision:revision,remoteRevision:0};
       setStatus(t("st_revision_conflict"));
+      overlayMsg=t("st_revision_conflict");
       try{await refreshStatus();}catch(_){}
     }else setStatus(t("st_not_saved")+msg);
+    if(ui)await saveOverlayFail(overlayMsg);
   }finally{busy=false;refreshButtons();setTimeout(()=>{if(sb&&!busy)sb.classList.remove("primary");},400);}
 }
 function autoSaveProject(){
@@ -3565,6 +3626,86 @@ function finishBoot(text){
   setTimeout(hideBootOverlay,350);
   startStatusPolling();
 }
+/* ---- save overlay ---------------------------------------------------- */
+let saveOverlaySeq=0;
+function saveEl(id){return document.getElementById(id);}
+function saveText(id,text){const el=saveEl(id);if(el)el.textContent=text||"";}
+function saveOverlayHide(){
+  ++saveOverlaySeq;
+  const o=saveEl("save_overlay");
+  if(o)o.classList.remove("on");
+}
+function saveOverlayActions(mode){
+  const box=saveEl("save_overlay_actions"),ok=saveEl("save_overlay_ok"),cancel=saveEl("save_overlay_cancel");
+  if(box)box.classList.toggle("hide",mode==="none");
+  if(ok)ok.classList.toggle("hide",mode==="none");
+  if(cancel)cancel.classList.toggle("hide",mode!=="confirm");
+}
+function saveOverlayErrors(list){
+  const box=saveEl("save_overlay_errors");
+  if(!box)return;
+  const items=(list||[]).filter(d=>d&&d.message);
+  box.innerHTML=items.map(d=>'<div class="save-err '+(d.severity==="warning"?"warn":"err")+'">'+esc(d.message)+'</div>').join("");
+  box.classList.toggle("hide",!items.length);
+}
+function saveOverlayShow(){
+  ++saveOverlaySeq;
+  const o=saveEl("save_overlay");
+  if(o)o.classList.add("on");
+  const spinner=saveEl("save_overlay_spinner");
+  if(spinner)spinner.classList.remove("hide");
+  saveText("save_overlay_title",t("st_saving"));
+  saveText("save_overlay_msg","");
+  saveOverlayErrors([]);
+  saveOverlayActions("none");
+}
+function saveOverlayAskErrors(list){
+  return new Promise(resolve=>{
+    const spinner=saveEl("save_overlay_spinner");
+    if(spinner)spinner.classList.add("hide");
+    saveText("save_overlay_title",t("save_overlay_errors_title"));
+    saveText("save_overlay_msg",t("save_overlay_errors_msg"));
+    saveOverlayErrors(list);
+    saveOverlayActions("confirm");
+    saveText("save_overlay_ok",t("save_overlay_ok"));
+    saveText("save_overlay_cancel",t("save_overlay_cancel"));
+    const ok=saveEl("save_overlay_ok"),cancel=saveEl("save_overlay_cancel");
+    if(ok)ok.onclick=()=>{saveOverlayShow();resolve(true);};
+    if(cancel)cancel.onclick=()=>resolve(false);
+  });
+}
+function saveOverlayFail(text){
+  return new Promise(resolve=>{
+    const spinner=saveEl("save_overlay_spinner");
+    if(spinner)spinner.classList.add("hide");
+    saveText("save_overlay_title",t("save_overlay_failed"));
+    saveText("save_overlay_msg",text||"");
+    saveOverlayErrors([]);
+    saveOverlayActions("ok");
+    saveText("save_overlay_ok",t("save_overlay_ok"));
+    const ok=saveEl("save_overlay_ok");
+    if(ok)ok.onclick=()=>{saveOverlayHide();resolve();};
+  });
+}
+function saveOverlayFinish(text,delay){
+  const seq=++saveOverlaySeq;
+  const spinner=saveEl("save_overlay_spinner");
+  if(spinner)spinner.classList.add("hide");
+  saveText("save_overlay_title",text||t("st_saved_version"));
+  saveText("save_overlay_msg","");
+  saveOverlayErrors([]);
+  saveOverlayActions("none");
+  return new Promise(resolve=>setTimeout(()=>{if(seq===saveOverlaySeq)saveOverlayHide();resolve();},delay||800));
+}
+function nextPaint(){
+  return new Promise(resolve=>{
+    let done=false;
+    const finish=()=>{if(!done){done=true;resolve();}};
+    if(typeof requestAnimationFrame==="function")requestAnimationFrame(()=>requestAnimationFrame(finish));
+    setTimeout(finish,120);
+  });
+}
+
 async function startBootPreload(){
   if(bootDone)return;
   preloadCancel=false;
@@ -5909,7 +6050,23 @@ if($("b_pack_import"))$("b_pack_import").onclick=()=>{
   try{if(window.open)window.open('/?pack=import#settings','aura_pack_import');}catch(e){}
   setStatus(t("st_pack_import_hint"));
 };
-if($("b_pack_export"))$("b_pack_export").onclick=()=>window.open('/?pack=export#settings','aura_pack_export');
+if($("b_pack_export"))$("b_pack_export").onclick=async()=>{
+  if(busy)return;
+  let win=null;
+  try{win=window.open('','aura_pack_export');}catch(e){}
+  if(online&&isDirty()){
+    await doSave({force:true,ui:true});
+    if(isDirty()||pendingApply){try{if(win)win.close();}catch(e){}return;}
+  }
+  let target=null;
+  if(lastSavedProject&&lastSavedProject.valid&&lastSavedProject.id===project.id){
+    target=lastSavedProject;
+  }else if(savedId===project.id&&revision>0&&!diagnostics.some(d=>d.severity!=="warning")){
+    target={id:project.id,revision};
+  }
+  const url='/?pack=export'+(target?('&id='+encodeURIComponent(target.id)+'&revision='+target.revision):'')+'#settings';
+  try{if(win)win.location.replace(url);else window.open(url,'aura_pack_export');}catch(e){}
+};
 window.addEventListener("focus",()=>{if(packImportPending)schedulePackImportPoll();});
 window.addEventListener("storage",ev=>{
   if(!packImportPending)return;
@@ -5938,7 +6095,7 @@ window.addEventListener("keydown",ev=>{
   else if(is("C")){ev.preventDefault();copySelected();}
   else if(is("V")){ev.preventDefault();pasteClip();}
 });
-$("b_save").onclick=()=>doSave({force:true});
+$("b_save").onclick=()=>doSave({force:true,ui:true});
 
 /* ---- boot ------------------------------------------------------------ */
 lang=detectLang();

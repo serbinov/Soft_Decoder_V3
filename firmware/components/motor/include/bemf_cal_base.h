@@ -14,10 +14,14 @@
 
 #include "settings.h"
 
+/* Bench-determined factory curve for the AURA-X reference motor:
+ * notch 1 = 9.0% of rail (duty 92), notch 126 = 84.0% of rail.
+ * The low-speed floor is CV2 = 23 (start duty 92); below base duty 160 the
+ * controller stays open-loop because the BEMF sense reads flyback there. */
 static const settings_bemf_cal_t BEMF_CAL_BASE = {
-    .count = 10,
-    .speed = { 12, 24, 36, 48, 60, 72, 84, 96, 108, 126 },
-    .frac  = { 62, 160, 230, 300, 373, 483, 574, 661, 687, 725 },
+    .count = 2,
+    .speed = { 1, 126 },
+    .frac  = { 92, 860 },
 };
 
 #endif /* BEMF_CAL_BASE_H */

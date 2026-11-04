@@ -119,7 +119,7 @@ static void cv_set_defaults(void)
 {
     memset(s_cv, 0, sizeof(s_cv));
     s_cv[1] = 3;      /* short address */
-    s_cv[2] = 0;      /* Vstart: 0 at step 1 so the lowest steps creep slowly */
+    s_cv[2] = 23;     /* Vstart: measured crawl floor (duty 92 / 1023 ≈ 9%) */
     s_cv[5] = 255;    /* Vhigh: full PWM at step 126 */
     s_cv[6] = 128;    /* Vmid: half PWM at step 63 (linear 0..max curve) */
     s_cv[7] = SETTINGS_CV7_VERSION; /* decoder version (matches version.txt) */
@@ -159,18 +159,18 @@ static void cv_migrate_version(void)
 
 /* One-time migration: the old factory speed curve (Vstart=24 with Vmid/Vhigh
  * left at 0) made the lowest speed steps run fast. Move an untouched store to
- * the new linear curve (0 / 128 / 255). A store whose curve was tuned by the
- * user does not match and is left alone. Safe to call with any s_cv content. */
+ * the bench-determined curve (23 / 128 / 255). A store whose curve was tuned by
+ * the user does not match and is left alone. Safe to call with any s_cv content. */
 static void cv_migrate_curve(void)
 {
     if (s_cv[2] != 24U || s_cv[5] != 0U || s_cv[6] != 0U) {
         return;
     }
-    s_cv[2] = 0U;
+    s_cv[2] = 23U;
     s_cv[5] = 255U;
     s_cv[6] = 128U;
     s_cv_pending = true;
-    ESP_LOGI(TAG, "CV speed curve migrated: Vstart 24->0, Vmid=128, Vhigh=255");
+    ESP_LOGI(TAG, "CV speed curve migrated: Vstart 24->23, Vmid=128, Vhigh=255");
 }
 
 static esp_err_t nvs_read_u8(const char *key, uint8_t *out, uint8_t def)
@@ -217,6 +217,17 @@ static esp_err_t recovery_clear_locked(void)
     }
     if (err == ESP_OK) {
         s_recovery_marker = false;
+    }
+    return err;
+}
+
+static esp_err_t nvs_read_u16(const char *key, uint16_t *out, uint16_t def)
+{
+    uint16_t v = def;
+    esp_err_t err = nvs_get_u16(s_h, key, &v);
+    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
+        *out = v;
+        return ESP_OK;
     }
     return err;
 }
@@ -362,6 +373,8 @@ esp_err_t settings_load(settings_config_t *cfg)
     LOAD(nvs_read_u8("fvol", &cfg->effects_volume, 20));
     LOAD(nvs_read_u8("slot", &cfg->active_slot, 0));
     LOAD(nvs_read_u8("csrc", &cfg->control_source, 0));
+    LOAD(nvs_read_u16("rail_off", &cfg->rail_offset_mv, 0));
+    if (cfg->rail_offset_mv > 5000U) cfg->rail_offset_mv = 0U;
     LOAD(nvs_read_str("dev_name", cfg->device_name, sizeof(cfg->device_name), "DECODER"));
 #undef LOAD
 
@@ -392,6 +405,7 @@ static esp_err_t settings_store_locked(const settings_config_t *cfg)
     STORE(nvs_set_u8(s_h, "fvol", cfg->effects_volume));
     STORE(nvs_set_u8(s_h, "slot", cfg->active_slot));
     STORE(nvs_set_u8(s_h, "csrc", cfg->control_source));
+    STORE(nvs_set_u16(s_h, "rail_off", cfg->rail_offset_mv));
     STORE(nvs_set_str(s_h, "dev_name", cfg->device_name));
 #undef STORE
     return nvs_commit(s_h);

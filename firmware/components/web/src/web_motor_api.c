@@ -76,30 +76,51 @@ esp_err_t motor_get(httpd_req_t *req)
     }
     motor_ui_mode_t mode = motor_ui_mode(target, target_forward, applied,
                                          applied_forward, inhibited, tick_age_ms);
+    uint16_t test_duty = 0;
+    bool test_forward = true;
+    uint32_t test_left_ms = 0;
+    bool test_active = motor_test_info(&test_duty, &test_forward, &test_left_ms);
     bool closed_loop = motor_get_bemf_enabled() && diag.cal_valid &&
                        diag.bemf_acquired && diag.bemf_valid &&
-                       !diag.open_loop_fallback;
+                       !diag.open_loop_fallback && !test_active;
+    /* Track voltage shown in the UI: the sense point is after the input bridge,
+     * so add the user-calibrated drop measured before the diodes. */
+    uint32_t rail_track_mv = diag.rail_motor_mv;
+    uint16_t rail_offset_mv = web_cfg()->rail_offset_mv;
+    if (rail_track_mv > 1000U && rail_offset_mv > 0U) {
+        rail_track_mv += rail_offset_mv;
+    }
 
-    char json[768];
+    char json[1120];
     int n = snprintf(json, sizeof(json),
         "{\"ok\":true,\"speed\":%u,\"forward\":%s,"
         "\"targetSpeed\":%u,\"targetForward\":%s,"
         "\"appliedSpeed\":%u,\"appliedForward\":%s,"
         "\"duty\":%lu,\"dutyMax\":1023,"
         "\"railMv\":%lu,\"railMotorMv\":%lu,"
+        "\"railTrackMv\":%lu,\"railOffsetMv\":%u,"
         "\"bemfMv\":%lu,\"bemfMotorMv\":%lu,\"bemfFilteredMv\":%lu,"
+        "\"bemfFilteredMotorMv\":%lu,"
+        "\"bemf1PinMv\":%lu,\"bemf2PinMv\":%lu,\"bemfDiffPinMv\":%lu,"
+        "\"bemfDiffMotorMv\":%lu,\"bemfSampleOk\":%s,"
         "\"bemfEnabled\":%s,\"bemfValid\":%s,\"bemfAcquired\":%s,"
         "\"bemfClosedLoop\":%s,\"openLoop\":%s,\"pidOk\":%s,"
         "\"corr\":%ld,\"err\":%ld,\"windowUs\":%u,"
         "\"inhibited\":%s,\"inhibit\":%lu,\"tickAgeMs\":%lld,"
-        "\"mode\":%u,\"modeName\":\"%s\"}",
+        "\"mode\":%u,\"modeName\":\"%s\","
+        "\"testActive\":%s,\"testDuty\":%u,\"testForward\":%s,\"testLeftMs\":%lu}",
         (unsigned)target, target_forward ? "true" : "false",
         (unsigned)target, target_forward ? "true" : "false",
         (unsigned)applied, applied_forward ? "true" : "false",
         (unsigned long)diag.duty,
         (unsigned long)diag.rail_mv, (unsigned long)diag.rail_motor_mv,
+        (unsigned long)rail_track_mv, (unsigned)rail_offset_mv,
         (unsigned long)diag.bemf1_mv, (unsigned long)diag.bemf1_motor_mv,
         (unsigned long)diag.bemf_filtered_mv,
+        (unsigned long)diag.bemf_filtered_motor_mv,
+        (unsigned long)diag.bemf1_mv, (unsigned long)diag.bemf2_mv,
+        (unsigned long)diag.bemf_mag_mv, (unsigned long)diag.bemf_mag_motor_mv,
+        diag.sample_ok ? "true" : "false",
         motor_get_bemf_enabled() ? "true" : "false",
         diag.bemf_valid ? "true" : "false",
         diag.bemf_acquired ? "true" : "false",
@@ -108,7 +129,9 @@ esp_err_t motor_get(httpd_req_t *req)
         diag.pid_ok ? "true" : "false",
         (long)diag.corr, (long)diag.error, (unsigned)diag.window_us,
         inhibited ? "true" : "false", (unsigned long)0,
-        (long long)tick_age_ms, (unsigned)mode, motor_ui_mode_name(mode));
+        (long long)tick_age_ms, (unsigned)mode, motor_ui_mode_name(mode),
+        test_active ? "true" : "false", (unsigned)test_duty,
+        test_forward ? "true" : "false", (unsigned long)test_left_ms);
     if (n < 0 || (size_t)n >= sizeof(json)) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "motor diag too large");
     }
@@ -158,6 +181,40 @@ esp_err_t motor_post(httpd_req_t *req)
     char json[96];
     snprintf(json, sizeof(json), "{\"ok\":true,\"speed\":%u,\"forward\":%s}",
              (unsigned)speed, forward ? "true" : "false");
+    return send_json(req, json);
+}
+
+esp_err_t motor_duty_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = { 0 };
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+
+    uint16_t duty = 0;
+    uint16_t ms = 3000;
+    if (!parse_u16(query, "duty", &duty) || duty > 1023U ||
+        (query_has_key(query, "ms") && !parse_u16(query, "ms", &ms)) ||
+        !query_bool_valid(query, "forward")) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid duty parameters");
+    }
+    bool forward = parse_bool(query, "forward", true);
+    if (ms < 100U) ms = 100U;
+    if (ms > MOTOR_TEST_MAX_MS) ms = MOTOR_TEST_MAX_MS;
+
+    if (!web_control_take(pdMS_TO_TICKS(100)))
+        return send_json(req, "{\"ok\":false,\"error\":\"control busy\"}");
+    if (!web_actuation_ready() || web_maintenance_active() || web_cfg()->control_source == 0) {
+        web_control_give();
+        return send_json(req, "{\"ok\":false,\"error\":\"control unavailable\"}");
+    }
+    esp_err_t err = motor_test_duty(duty, forward, ms);
+    web_control_give();
+    if (err != ESP_OK) return send_json(req, "{\"ok\":false,\"error\":\"motor rejected\"}");
+
+    web_log_event("Мотор", "тест ШИМ %u (%u мс)", (unsigned)duty, (unsigned)ms);
+    char json[128];
+    snprintf(json, sizeof(json),
+             "{\"ok\":true,\"duty\":%u,\"ms\":%u,\"forward\":%s}",
+             (unsigned)duty, (unsigned)ms, forward ? "true" : "false");
     return send_json(req, json);
 }
 

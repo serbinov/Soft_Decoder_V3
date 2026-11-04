@@ -293,11 +293,15 @@ static void static_error_bemf_adc(int channel)
 
 static unsigned g_check_reads;
 
+/* Each bemf_sample_window() now reads 3 ADC pairs, so the three static
+ * windows consume 9 BEMF1 reads before the spin phases start. */
+#define CHECK_STATIC_READS 9U
+
 static void spin_ceiling_adc(int channel)
 {
     if (channel == (int)(PIN_BEMF1 - 1)) {
         ++g_check_reads;
-        mock_adc_raw[channel] = g_check_reads <= 3U ? 0 : mv_to_raw(950);
+        mock_adc_raw[channel] = g_check_reads <= CHECK_STATIC_READS ? 0 : mv_to_raw(950);
     } else if (channel == (int)(PIN_BEMF2 - 1)) {
         mock_adc_raw[channel] = 0;
     }
@@ -307,7 +311,7 @@ static void spin_same_polarity_adc(int channel)
 {
     if (channel == (int)(PIN_BEMF1 - 1)) {
         ++g_check_reads;
-        mock_adc_raw[channel] = g_check_reads <= 3U ? 0 : mv_to_raw(300);
+        mock_adc_raw[channel] = g_check_reads <= CHECK_STATIC_READS ? 0 : mv_to_raw(300);
     } else if (channel == (int)(PIN_BEMF2 - 1)) {
         mock_adc_raw[channel] = 0;
     }
@@ -362,15 +366,18 @@ static void check_bemf_adc(int channel)
 {
     if (channel == (int)(PIN_BEMF1 - 1)) {
         ++g_check_reads;
-        if (g_check_reads <= 3U) {
-            mock_adc_raw[channel] = 0;
-        } else if (g_check_reads == 4U) {
-            mock_adc_raw[channel] = mv_to_raw(300);
+        if (g_check_reads <= CHECK_STATIC_READS) {
+            mock_adc_raw[channel] = 0;                       /* static */
+        } else if (g_check_reads <= CHECK_STATIC_READS + 3U) {
+            mock_adc_raw[channel] = mv_to_raw(300);          /* forward */
         } else {
-            mock_adc_raw[channel] = 0;
+            mock_adc_raw[channel] = 0;                       /* reverse */
         }
     } else if (channel == (int)(PIN_BEMF2 - 1)) {
-        mock_adc_raw[channel] = g_check_reads == 5U ? mv_to_raw(300) : 0;
+        /* Reverse window has BEMF2 high; forward and static are zero. */
+        mock_adc_raw[channel] = (g_check_reads > CHECK_STATIC_READS + 3U &&
+                                 g_check_reads <= CHECK_STATIC_READS + 6U)
+                                    ? mv_to_raw(300) : 0;
     }
 }
 
@@ -653,11 +660,15 @@ static void test_zero_bemf_is_invalid_but_motor_keeps_running(void)
     TEST_ASSERT_EQUAL_UINT8(50, applied);
 }
 
-static void test_no_curve_skips_bemf_sampling(void)
+static void test_factory_base_enables_bemf_sampling(void)
 {
+    /* With no stored curve the compiled factory base is active, so sampling
+     * must run instead of silently falling back to open loop. */
     g_adc_hook = duty_bemf_adc;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_reload());
     tick_speed(50, true, 5);
-    TEST_ASSERT_EQUAL_UINT32(0, g_coast_calls);
+    TEST_ASSERT_TRUE(g_coast_calls > 0U);
+    TEST_ASSERT_TRUE(s_cal_valid);
 }
 
 static void test_valid_bemf_acquires_and_regulates(void)
@@ -762,7 +773,7 @@ static void test_auto_calibration_pwm_sweep(void)
     TEST_ASSERT_TRUE(info.frac[1] >= 51U);
     TEST_ASSERT_TRUE(info.frac[1] > info.frac[0]);
     TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_min_pct);
-    TEST_ASSERT_EQUAL_UINT8(15, info.profile.pwm_start_pct);
+    TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_start_pct);
     TEST_ASSERT_EQUAL_UINT8(95, info.profile.pwm_max_pct);
     TEST_ASSERT_EQUAL_UINT8(0, info.profile.ceiling_speed);
     TEST_ASSERT_TRUE(g_sweep_max_duty >= 970U);
@@ -866,15 +877,17 @@ static void test_stop_cancels_calibration_and_coasts(void)
     cleanup_abandoned_calibration();
 }
 
-static void test_calibration_clear_removes_curve(void)
+static void test_calibration_clear_restores_factory_curve(void)
 {
     set_stored_curve();
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_clear());
-    TEST_ASSERT_FALSE(s_cal_valid);
+    TEST_ASSERT_TRUE(s_cal_valid);
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
-    TEST_ASSERT_FALSE(info.valid);
-    TEST_ASSERT_EQUAL_UINT8(0, info.count);
+    TEST_ASSERT_TRUE(info.valid);
+    TEST_ASSERT_EQUAL_UINT8(BEMF_CAL_BASE.count, info.count);
+    TEST_ASSERT_EQUAL_UINT8(BEMF_CAL_BASE.speed[0], info.speed[0]);
+    TEST_ASSERT_EQUAL_UINT16(BEMF_CAL_BASE.frac[0], info.frac[0]);
 }
 
 static void test_flat_stored_curve_does_not_enable_closed_loop(void)
@@ -904,10 +917,13 @@ static void test_flat_sensor_calibration_fails_without_stopping_motor(void)
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, info.result);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_CURVE, info.reason);
-    TEST_ASSERT_FALSE(s_cal_valid);
+    /* A failed run must not destroy the active (factory) curve. */
+    TEST_ASSERT_TRUE(s_cal_valid);
 
     tick_speed(50, true, 5);
-    TEST_ASSERT_EQUAL_UINT32(speed_duty(50), mock_ledc_duty[LEDC_CHANNEL_0]);
+    /* The factory curve stays active, so the PID may add a correction; the
+     * important invariant is that a failed run never coasts the motor. */
+    TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] > 0U);
     TEST_ASSERT_FALSE(motor_is_inhibited());
 }
 
@@ -1229,6 +1245,9 @@ static void test_cal_ceiling_saves_partial_curve(void)
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
     TEST_ASSERT_EQUAL_UINT8(2, info.count);
+    /* The test hook reports a ceiling-like level at every mid/high duty; the
+     * guard skips those as flyback, so the last valid pre-ceiling sample is
+     * still 25% and the real ceiling is only accepted near 90% duty. */
     TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_max_pct);
     TEST_ASSERT_TRUE(info.profile.ceiling_speed > 0U);
 }
@@ -1472,7 +1491,7 @@ int main(void)
     RUN_TEST(test_reverse_uses_other_channel);
     RUN_TEST(test_kickstart_boosts_and_releases);
     RUN_TEST(test_zero_bemf_is_invalid_but_motor_keeps_running);
-    RUN_TEST(test_no_curve_skips_bemf_sampling);
+    RUN_TEST(test_factory_base_enables_bemf_sampling);
     RUN_TEST(test_valid_bemf_acquires_and_regulates);
     RUN_TEST(test_feedback_loss_falls_back_without_stopping);
     RUN_TEST(test_bemf_above_ceiling_is_rejected);
@@ -1484,7 +1503,7 @@ int main(void)
     RUN_TEST(test_calibration_rejects_coasting_motor);
     RUN_TEST(test_calibration_admission_requires_rest);
     RUN_TEST(test_stop_cancels_calibration_and_coasts);
-    RUN_TEST(test_calibration_clear_removes_curve);
+    RUN_TEST(test_calibration_clear_restores_factory_curve);
     RUN_TEST(test_flat_stored_curve_does_not_enable_closed_loop);
     RUN_TEST(test_flat_sensor_calibration_fails_without_stopping_motor);
     RUN_TEST(test_bemf_check_static_only);

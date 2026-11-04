@@ -1,5 +1,6 @@
 #include "motor.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "esp_adc/adc_oneshot.h"
@@ -24,11 +25,23 @@
 
 static const char *TAG = "motor";
 
+/* 20 kHz: at 8% the DRV8870 sees a 4.0 us pulse, right at its input filter;
+ * 8.1% (4.05 us) just passes, which is the observed 0/on threshold. Lowering
+ * to 10 kHz makes the pulses 8 us (passes the filter) but the longer off-time
+ * makes the motor current discontinuous, so the usable crawl starts only at
+ * ~15%. 20 kHz keeps the current continuous and is the better compromise;
+ * below ~8% the driver ignores the pulses, above it the average is linear. */
 #define LEDC_FREQ_HZ 20000
 #define LEDC_MODE    LEDC_LOW_SPEED_MODE
 #define LEDC_TIMER   LEDC_TIMER_0
 #define LEDC_MAX     1023U
 #define MOTOR_TICK_MS 10
+/* BEMF is sampled once every few ticks. A long PWM-off settle (up to 5 ms)
+ * costs the same average duty loss as a 1 ms window every tick, but samples
+ * the rotor voltage after the inductive flyback has decayed. The PID keeps
+ * running every tick on the last filtered measurement. */
+#define MOTOR_SAMPLE_DIV_MIN 1U
+#define MOTOR_SAMPLE_DIV_MAX 32U
 #define KICK_TICKS   (120 / MOTOR_TICK_MS)
 #define FEEDBACK_FRESH_US 100000
 
@@ -68,7 +81,7 @@ static const char *TAG = "motor";
 #define BEMF_INTEGRAL_LIMIT    5000.0f
 #define BEMF_CORR_LIMIT_MIN    32.0f
 #define BEMF_CORR_LIMIT_MAX    260.0f
-#define BEMF_TARGET_START_FRAC 0.08f
+#define BEMF_TARGET_START_FRAC 0.09f
 #define BEMF_TARGET_FULL_FRAC  0.90f
 
 #define CAL_MAX_POINTS         MOTOR_BEMF_CAL_MAX_POINTS
@@ -79,18 +92,35 @@ static const char *TAG = "motor";
 #define CAL_DRIVE_CHUNK_MS     20U
 
 /* AUTO (web "Стандартный") uses a raw PWM sweep instead of the speed ladder:
- * +5% duty every 2 s, first visible BEMF is the closed-loop threshold, speed 1
- * starts 10 points below it in open loop, 95% duty is full speed. The stored
- * curve is a straight line between those two anchors. */
+ * +5% duty every 2 s, first visible BEMF is the closed-loop threshold, 95%
+ * duty is full speed. The low anchor is the measured BEMF at the first
+ * movement (no synthetic backoff/clamp), so the PID can run from the moment
+ * the motor starts. The stored curve is a line between those two anchors. */
 #define CAL_SWEEP_START_PCT    5U
 #define CAL_SWEEP_STEP_PCT     5U
 #define CAL_SWEEP_MAX_PCT      95U
-#define CAL_SWEEP_BACKOFF_PCT  10U
 #define CAL_SWEEP_DWELL_MS     2000U
-#define CAL_SWEEP_SAMPLE_GAP_MS 40U
+#define CAL_SWEEP_SAMPLE_GAP_MS 100U
 #define CAL_SWEEP_SAMPLES      3U
 #define CAL_SWEEP_STEPS \
     (((CAL_SWEEP_MAX_PCT - CAL_SWEEP_START_PCT) / CAL_SWEEP_STEP_PCT) + 1U)
+
+/* Adaptive settle-window probe: drive at a mid duty, then sample the same BEMF
+ * with several PWM-off delays. The smallest delay whose level is within
+ * CAL_WINDOW_STABLE_PCT of the longest delay is selected and persisted; it is
+ * used for the whole sweep and by the runtime PID. */
+#define CAL_WINDOW_PROBE_PCT      20U
+#define CAL_WINDOW_PROBE_DRIVE_MS 300U
+#define CAL_WINDOW_STABLE_PCT     5U
+/* The probe may wait longer than the runtime setting: at stall current the
+ * inductive decay dominates a 1-2 ms window, so the true plateau is only
+ * visible after ~10-20 ms. The runtime window still comes from the first four
+ * candidates (<= SETTINGS_BEMF_WINDOW_MAX_US). */
+#define CAL_PROBE_MAX_US          20000U
+#define CAL_RUNTIME_WINDOW_COUNT  4U
+/* Never let a noisy sweep cap the top speed below a usable fraction of the
+ * rail (the PID simply saturates at full duty if it cannot reach it). */
+#define CAL_MIN_FULL_FRAC         870U  /* 85% of rail */
 
 static bool s_init;
 static bool s_pwm_ready;
@@ -114,6 +144,12 @@ static volatile uint16_t s_applied_state;
 
 static uint32_t s_ramp_acc;
 static bool s_was_stopped = true;
+
+/* Bounded raw-PWM bench mode (web /api/motor/duty). */
+static bool s_test_active;
+static uint16_t s_test_duty;
+static bool s_test_forward;
+static int64_t s_test_deadline_us;
 static uint32_t s_kick_duty;
 static uint8_t s_kick_left;
 static uint32_t s_last_duty;
@@ -140,13 +176,18 @@ static uint32_t s_bemf2_motor_mv;
 static uint32_t s_bemf_mag_motor_mv;
 static float s_bemf_filtered;
 static bool s_bemf_valid;
+static bool s_bemf_sample_ok;
+static uint8_t s_bemf_sample_div;
+static uint8_t s_bemf_diag_div;
 static bool s_bemf_filter_primed;
 static bool s_bemf_acquired;
+static uint16_t s_low_speed_warmup_ticks;
 static uint8_t s_bemf_valid_ticks;
 static uint8_t s_bemf_loss_ticks;
 static volatile bool s_bemf_reset_requested;
 static bool s_open_loop_fallback = true;
 static uint16_t s_bemf_settle_us = BEMF_SETTLE_US;
+static uint16_t s_cal_prev_window_us = BEMF_SETTLE_US;
 static bool s_bemf_enabled = true;
 static esp_err_t s_bemf_sample_error;
 
@@ -185,6 +226,8 @@ static uint8_t s_cal_phase;
 static motor_bemf_cal_config_t s_cal_cfg;
 static int64_t s_cal_drive_deadline_us;
 static bool s_cal_drive_active;
+static motor_bemf_cal_step_log_t s_cal_log[MOTOR_BEMF_CAL_LOG_MAX];
+static uint8_t s_cal_log_count;
 static bool s_cal_config_busy;
 
 static void applied_publish(uint8_t speed128, bool forward)
@@ -315,8 +358,10 @@ static void IRAM_ATTR pwm_write_locked(uint32_t duty, bool forward)
 static void bemf_reset_tracking(void)
 {
     s_bemf_valid = false;
+    s_bemf_sample_div = 0;
     s_bemf_filter_primed = false;
     s_bemf_acquired = false;
+    s_low_speed_warmup_ticks = 0;
     s_bemf_valid_ticks = 0;
     s_bemf_loss_ticks = 0;
     s_bemf_filtered = 0.0f;
@@ -450,9 +495,15 @@ void motor_bemf_unlock(void)
     if (s_adc_mutex != NULL) xSemaphoreGive(s_adc_mutex);
 }
 
+/* One "window" = coast + settle + a burst of ADC pairs. Median of the pairs
+ * rejects a single flyback/ADC spike without adding lag between windows.
+ * The control loop uses 3 pairs (short coast); calibration uses 5. */
+#define BEMF_OVERSAMPLE_MAX 5U
+
 static bool bemf_sample_window(void)
 {
     s_bemf_sample_error = ESP_FAIL;
+    s_bemf_sample_ok = false;
     if (!s_bemf_adc_ready) return false;
     if (!motor_bemf_lock()) {
         s_bemf_sample_error = ESP_ERR_TIMEOUT;
@@ -464,21 +515,59 @@ static bool bemf_sample_window(void)
     portEXIT_CRITICAL(&s_output_mux);
 
     uint32_t settle_us = s_bemf_settle_us;
-    if (settle_us < SETTINGS_BEMF_WINDOW_MIN_US || settle_us > SETTINGS_BEMF_WINDOW_MAX_US) {
+    uint32_t settle_max = s_cal_active ? CAL_PROBE_MAX_US : SETTINGS_BEMF_WINDOW_MAX_US;
+    if (settle_us < SETTINGS_BEMF_WINDOW_MIN_US || settle_us > settle_max) {
         settle_us = BEMF_SETTLE_US;
     }
     esp_rom_delay_us(settle_us);
-    int raw1 = motor_adc_read_raw(PIN_BEMF1);
-    int raw2 = motor_adc_read_raw(PIN_BEMF2);
+
+    int r1[BEMF_OVERSAMPLE_MAX] = { 0 };
+    int r2[BEMF_OVERSAMPLE_MAX] = { 0 };
+    int diff[BEMF_OVERSAMPLE_MAX] = { 0 };
+    uint8_t pairs = s_cal_active ? BEMF_OVERSAMPLE_MAX : 3U;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < pairs; ++i) {
+        int a, b;
+        if ((i & 1U) != 0U) {
+            b = motor_adc_read_raw(PIN_BEMF2);
+            a = motor_adc_read_raw(PIN_BEMF1);
+        } else {
+            a = motor_adc_read_raw(PIN_BEMF1);
+            b = motor_adc_read_raw(PIN_BEMF2);
+        }
+        if (a < 0 || a >= 4095 || b < 0 || b >= 4095) continue;
+        r1[n] = a;
+        r2[n] = b;
+        diff[n] = a > b ? a - b : b - a;
+        ++n;
+    }
     motor_bemf_unlock();
 
     portENTER_CRITICAL(&s_output_mux);
     s_sample_active = false;
     portEXIT_CRITICAL(&s_output_mux);
 
-    if (raw1 < 0 || raw1 >= 4095 || raw2 < 0 || raw2 >= 4095) {
-        return false;
+    if (n < 3U) return false;
+
+    /* Insertion sort the three parallel arrays by differential, then keep the
+     * middle pair (median). */
+    for (uint8_t i = 1; i < n; ++i) {
+        int d = diff[i], a = r1[i], b = r2[i];
+        int j = (int)i - 1;
+        while (j >= 0 && diff[j] > d) {
+            diff[j + 1] = diff[j];
+            r1[j + 1] = r1[j];
+            r2[j + 1] = r2[j];
+            --j;
+        }
+        diff[j + 1] = d;
+        r1[j + 1] = a;
+        r2[j + 1] = b;
     }
+    uint8_t mid = (uint8_t)(n / 2U);
+    int raw1 = r1[mid];
+    int raw2 = r2[mid];
+
     s_bemf1_mv = (uint32_t)raw1 * MOTOR_ADC_FULL_SCALE_MV / MOTOR_ADC_MAX_RAW;
     s_bemf2_mv = (uint32_t)raw2 * MOTOR_ADC_FULL_SCALE_MV / MOTOR_ADC_MAX_RAW;
     s_bemf_mag_mv = s_bemf1_mv > s_bemf2_mv ? s_bemf1_mv - s_bemf2_mv
@@ -487,6 +576,7 @@ static bool bemf_sample_window(void)
     s_bemf2_motor_mv = pin_mv_to_motor_mv(s_bemf2_mv);
     s_bemf_mag_motor_mv = pin_mv_to_motor_mv(s_bemf_mag_mv);
     s_bemf_sample_error = ESP_OK;
+    s_bemf_sample_ok = true;
     return true;
 }
 
@@ -494,6 +584,17 @@ static uint32_t bemf_floor_mv(uint32_t rail)
 {
     uint32_t floor = rail / BEMF_MIN_DIV;
     return floor < BEMF_MIN_MV ? BEMF_MIN_MV : floor;
+}
+
+/* This front-end reads well above the applied average at low duty (inductive
+ * flyback/divider coupling), and that reading is still a repeatable speed/
+ * load signal. Allow a wide 6x envelope so the low-speed PID can use it;
+ * only gross spikes and the 90% rail ceiling are rejected. */
+static bool bemf_plausible_for_duty(uint32_t mag, uint32_t rail, uint32_t duty)
+{
+    uint32_t vmax = (uint32_t)((uint64_t)duty * rail / LEDC_MAX);
+    uint32_t allowed = vmax * 6U + 32U;
+    return mag <= allowed;
 }
 
 /* Only a signal above the noise floor and below the rail ceiling is usable.
@@ -508,7 +609,8 @@ static void bemf_update(void)
                      s_bemf1_mv > MOTOR_BEMF_PIN_MAX_MV ||
                      s_bemf2_mv > MOTOR_BEMF_PIN_MAX_MV;
     bool plausible = !saturated && rail > 300U && mag >= bemf_floor_mv(rail) &&
-                     (float)mag <= (float)rail * BEMF_CEILING;
+                     (float)mag <= (float)rail * BEMF_CEILING &&
+                     bemf_plausible_for_duty(mag, rail, s_last_duty);
     if (!plausible) {
         s_bemf_valid = false;
         s_bemf_valid_ticks = 0;
@@ -523,7 +625,11 @@ static void bemf_update(void)
         s_bemf_filtered = (float)mag;
         s_bemf_filter_primed = true;
     } else {
-        s_bemf_filtered = 0.85f * s_bemf_filtered + 0.15f * (float)mag;
+        /* At low duty the raw reading is flyback/commutation dominated; a
+         * slower IIR removes the visible jitter while the mechanical time
+         * constant is still long. Above 25% use the faster 0.15 filter. */
+        float alpha = (s_last_duty < 250U) ? 0.05f : 0.15f;
+        s_bemf_filtered = (1.0f - alpha) * s_bemf_filtered + alpha * (float)mag;
     }
     s_bemf_valid = true;
     s_bemf_loss_ticks = 0;
@@ -591,8 +697,10 @@ static void cal_reload(void)
         cal_apply(&cal);
         return;
     }
-    settings_bemf_cal_t empty = {0};
-    cal_apply(&empty);
+    /* Factory defaults: the compiled base curve is used whenever no valid
+     * calibration is stored (fresh board, after Reset). Falling back to an
+     * empty curve disabled BEMF until the next reboot. */
+    cal_apply(&BEMF_CAL_BASE);
 }
 
 static uint32_t bemf_regulate(uint32_t base, uint8_t applied, uint32_t rail, bool *closed)
@@ -609,6 +717,33 @@ static uint32_t bemf_regulate(uint32_t base, uint8_t applied, uint32_t rail, boo
 
     float target = frac * (float)rail;
     float error = target - s_bemf_filtered;
+    /* At low duty the BEMF reading is flyback/commutation dominated and its
+     * noise is comparable to the target error. Without a deadband the PID
+     * hunts (audible 83<->114 duty swing at speed 3). Hold the calibrated base
+     * duty inside 3% of rail; a real load error still exits the deadband. */
+    if (base < 250U) {
+        /* The slow 0.05 IIR needs ~3 s to settle from a cold start. Applying
+         * the PID before that hits the correction limit and overspeeds the
+         * first seconds, so hold the calibrated base duty until it is ready. */
+        if (s_low_speed_warmup_ticks < 400U) {
+            ++s_low_speed_warmup_ticks;
+            return base;
+        }
+        /* 2.5% rail covers the residual flyback/commutation noise (a 2% zone
+         * still let a 44 mV spike add 24 duty) but is small enough that a real
+         * braking load exits it and gets the full 50% correction. */
+        float deadband = (float)rail * 0.025f;
+        if (fabsf(error) < deadband) {
+            s_pid_integral *= 0.9f;
+            s_pid_prev_error = 0.0f;
+            s_last_error = 0.0f;
+            s_last_integral = s_pid_integral;
+            s_last_corr = 0.0f;
+            s_last_target = target;
+            *closed = true;
+            return base;
+        }
+    }
     int64_t now = esp_timer_get_time();
     float dt = 1.0f;
     if (s_last_pid_us > 0 && now > s_last_pid_us) {
@@ -619,7 +754,7 @@ static uint32_t bemf_regulate(uint32_t base, uint8_t applied, uint32_t rail, boo
     s_pid_prev_error = error;
 
     float corr = s_pid_kp * error + s_pid_ki * s_pid_integral + s_pid_kd * derivative;
-    float limit = (float)base * 0.30f;
+    float limit = (float)base * 0.50f;
     limit = clampf(limit, BEMF_CORR_LIMIT_MIN, BEMF_CORR_LIMIT_MAX);
     corr = clampf(corr * 0.5f, -limit, limit);
     s_pid_integral = clampf(s_pid_integral + error * dt,
@@ -669,6 +804,61 @@ static void motor_tick(void)
     }
     if (stopped) {
         target = 0;
+    }
+
+    if (s_test_active) {
+        uint16_t duty = 0;
+        bool tforward = true;
+        bool test_stop = false;
+        int64_t now = esp_timer_get_time();
+        portENTER_CRITICAL(&s_output_mux);
+        if (s_inhibited || s_stop_requested ||
+            (s_test_deadline_us != 0 && now >= s_test_deadline_us)) {
+            s_test_active = false;
+            s_test_duty = 0;
+            test_stop = true;
+        } else {
+            duty = s_test_duty;
+            tforward = s_test_forward;
+        }
+        portEXIT_CRITICAL(&s_output_mux);
+
+        if (test_stop) {
+            portENTER_CRITICAL(&s_output_mux);
+            pwm_write_locked(0, true);
+            s_last_duty = 0;
+            s_target_speed = 0;
+            s_target_forward = true;
+            s_applied_speed = 0;
+            s_applied_state = 0x100U;
+            s_stop_requested = true;
+            portEXIT_CRITICAL(&s_output_mux);
+            control_reset();
+            xSemaphoreGive(s_control_mutex);
+            return;
+        }
+
+        /* The raw-duty test is deliberately open-loop (no BEMF regulation).
+         * Sample only every ~200 ms for the UI; the 2 ms coast then costs 1%
+         * of the duty instead of biasing the crawl threshold. */
+        uint32_t sample_div = 20U;
+        bool due = (++s_bemf_sample_div % sample_div) == 0U || !s_bemf_valid;
+        s_last_duty = duty;
+        if (s_bemf_adc_ready && due) {
+            if (bemf_sample_window()) {
+                bemf_update();
+            } else {
+                s_bemf_valid = false;
+                s_bemf_valid_ticks = 0;
+            }
+            s_last_duty = duty;
+        }
+        (void)apply_pwm(duty, tforward, generation);
+        /* Keep the sound/UI in idle: the test is a bench drive, not motion. */
+        s_applied_speed = 0;
+        applied_publish(0, true);
+        xSemaphoreGive(s_control_mutex);
+        return;
     }
 
     if (settings_cv_snapshot(s_tick_cv) != ESP_OK) {
@@ -792,15 +982,29 @@ static void motor_tick(void)
         s_kick_left--;
     }
 
-    bool sampled = false;
-    if (enabled && s_cal_valid && !calibration && s_bemf_adc_ready && applied > 0U &&
-        !trim_zero) {
-        sampled = bemf_sample_window();
+    uint32_t sample_div = ((uint32_t)s_bemf_settle_us + 999U) / 1000U;
+    if (sample_div < MOTOR_SAMPLE_DIV_MIN) sample_div = MOTOR_SAMPLE_DIV_MIN;
+    if (sample_div > MOTOR_SAMPLE_DIV_MAX) sample_div = MOTOR_SAMPLE_DIV_MAX;
+    bool control_sense = enabled && s_cal_valid && applied > 0U && !trim_zero;
+    bool sample_due = (++s_bemf_sample_div % sample_div) == 0U || !s_bemf_valid;
+    /* Even when closed-loop control is off (BEMF disabled or not calibrated),
+     * keep the sensor values live for the UI at a slow cadence. The coast is
+     * short and infrequent, so the open-loop drive barely notices. */
+    bool diag_due = false;
+    if (!control_sense && !calibration && s_bemf_adc_ready) {
+        uint8_t diag_div = applied > 0U ? 20U : 50U;
+        if (++s_bemf_diag_div >= diag_div) {
+            s_bemf_diag_div = 0;
+            diag_due = true;
+        }
     }
-    if (sampled) {
-        bemf_update();
-    } else {
-        s_bemf_valid = false;
+    if (!calibration && s_bemf_adc_ready && ((control_sense && sample_due) || diag_due)) {
+        if (bemf_sample_window()) {
+            bemf_update();
+        } else {
+            s_bemf_valid = false;
+            s_bemf_valid_ticks = 0;
+        }
     }
 
     uint32_t rail = rail_snapshot();
@@ -936,11 +1140,10 @@ esp_err_t motor_init(void)
         }
     }
     cal_reload();
-    {
-        bool use_bemf = true;
-        (void)settings_bemf_use_load(&use_bemf);
-        s_bemf_enabled = use_bemf;
-    }
+    /* BEMF is always used for motor control. The legacy "bemf_use" key is kept
+     * for compatibility, but a stored "off" value must not silently disable
+     * the calibration and PID. */
+    s_bemf_enabled = true;
 
     s_target_speed = 0;
     s_target_forward = true;
@@ -991,6 +1194,10 @@ esp_err_t motor_set_speed(uint8_t speed128, bool forward)
     if (speed128 > 126U) speed128 = 126U;
 
     portENTER_CRITICAL(&s_output_mux);
+    if (s_test_active) {
+        s_test_active = false;
+        s_test_duty = 0;
+    }
     if (speed128 == 0U && s_cal_active) {
         bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_NONE, ESP_OK);
         portEXIT_CRITICAL(&s_output_mux);
@@ -1026,6 +1233,8 @@ void IRAM_ATTR motor_emergency_stop(void)
 {
     portENTER_CRITICAL(&s_output_mux);
     bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_NONE, ESP_OK);
+    s_test_active = false;
+    s_test_duty = 0;
     ++s_output_generation;
     s_stop_requested = true;
     s_cal_cancelled = true;
@@ -1057,6 +1266,8 @@ esp_err_t motor_set_inhibit_reason(motor_inhibit_reason_t reason, bool inhibited
     s_inhibited = s_inhibit_reasons != 0U;
     if (inhibited) {
         bemf_cal_stop_locked(MOTOR_BEMF_CAL_ERR_NONE, ESP_OK);
+        s_test_active = false;
+        s_test_duty = 0;
         ++s_output_generation;
         s_stop_requested = true;
         s_cal_cancelled = true;
@@ -1103,6 +1314,57 @@ void motor_get_applied_speed(uint8_t *out_speed128, bool *out_forward)
     portEXIT_CRITICAL(&s_output_mux);
     if (out_speed128 != NULL) *out_speed128 = (uint8_t)(st & 0xFFU);
     if (out_forward != NULL) *out_forward = (st & 0x100U) != 0U;
+}
+
+esp_err_t motor_test_duty(uint16_t duty, bool forward, uint32_t duration_ms)
+{
+    if (!s_init || duty > LEDC_MAX || duration_ms == 0U) return ESP_ERR_INVALID_ARG;
+    if (duration_ms > MOTOR_TEST_MAX_MS) duration_ms = MOTOR_TEST_MAX_MS;
+    if (s_control_mutex == NULL ||
+        xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = ESP_OK;
+    portENTER_CRITICAL(&s_output_mux);
+    if (s_inhibited || s_cal_active || s_bemf_check_active || s_sample_active) {
+        err = ESP_ERR_INVALID_STATE;
+    } else if (duty == 0U) {
+        s_test_active = false;
+        s_test_duty = 0;
+        s_stop_requested = true;
+        ++s_output_generation;
+    } else {
+        ++s_output_generation;
+        s_test_active = true;
+        s_test_duty = duty;
+        s_test_forward = forward;
+        s_test_deadline_us = esp_timer_get_time() + (int64_t)duration_ms * 1000;
+        s_target_speed = 0;
+        s_target_forward = forward;
+        s_stop_requested = false;
+        s_cal_cancelled = false;
+        s_bemf_reset_requested = true;
+    }
+    portEXIT_CRITICAL(&s_output_mux);
+    xSemaphoreGive(s_control_mutex);
+    return err;
+}
+
+bool motor_test_info(uint16_t *out_duty, bool *out_forward, uint32_t *out_left_ms)
+{
+    portENTER_CRITICAL(&s_output_mux);
+    bool active = s_test_active;
+    uint16_t duty = s_test_duty;
+    bool forward = s_test_forward;
+    int64_t deadline = s_test_deadline_us;
+    portEXIT_CRITICAL(&s_output_mux);
+    if (out_duty != NULL) *out_duty = active ? duty : 0U;
+    if (out_forward != NULL) *out_forward = forward;
+    if (out_left_ms != NULL) {
+        int64_t left = deadline - esp_timer_get_time();
+        *out_left_ms = active && left > 0 ? (uint32_t)(left / 1000) : 0U;
+    }
+    return active;
 }
 
 esp_err_t motor_set_rail_voltage_mv(uint32_t rail_mv)
@@ -1202,7 +1464,12 @@ static cal_sample_result_t cal_sample_limit(uint32_t generation, uint32_t duty, 
         result = CAL_SAMPLE_FAIL;
         cal_fail(generation, MOTOR_BEMF_CAL_ERR_RAIL, ESP_ERR_INVALID_STATE);
     } else if ((float)mag > (float)rail * ceiling) {
-        result = CAL_SAMPLE_CEILING;
+        /* 90% BEMF can only be real when the bridge actually applies a high
+         * duty. At low duty this is the inductive flyback/freewheel transient
+         * (same divider, different node/current), so skip it instead of ending
+         * the sweep early. */
+        uint32_t ceiling_duty = (LEDC_MAX * 90U) / 100U;
+        result = (duty >= ceiling_duty) ? CAL_SAMPLE_CEILING : CAL_SAMPLE_NO_SIGNAL;
     } else if (mag < bemf_floor_mv(rail)) {
         result = CAL_SAMPLE_NO_SIGNAL;
     } else if (frac != NULL) {
@@ -1237,10 +1504,9 @@ static uint8_t cal_speed_for_duty(uint32_t duty)
 
 /* Drive one 5% PWM step for 2 s, then take the mean BEMF level. Zero frac means
  * no usable signal; a ceiling ends the sweep because the sensor saturates. */
-static bool cal_sweep_step(uint32_t generation, uint32_t pct, uint16_t *frac,
+static bool cal_sweep_step(uint32_t generation, uint32_t duty, uint16_t *frac,
                            uint8_t *quality, bool *ceiling)
 {
-    uint32_t duty = cal_pct_duty(pct);
     *frac = 0U;
     *quality = 0U;
     *ceiling = false;
@@ -1277,6 +1543,29 @@ static bool cal_sweep_step(uint32_t generation, uint32_t pct, uint16_t *frac,
     return true;
 }
 
+/* Snapshot the measured values of one sweep step for the UI log. Called after
+ * cal_sweep_step(), so the globals hold the last sample of that step. */
+static void cal_log_step(uint16_t duty, uint16_t frac, uint8_t quality, bool ceiling)
+{
+    portENTER_CRITICAL(&s_output_mux);
+    if (s_cal_log_count < MOTOR_BEMF_CAL_LOG_MAX) {
+        motor_bemf_cal_step_log_t *e = &s_cal_log[s_cal_log_count++];
+        e->step = s_cal_step;
+        e->speed = cal_speed_for_duty(duty);
+        e->quality = quality;
+        e->state = ceiling ? MOTOR_BEMF_CAL_STEP_CEILING
+                           : (frac == 0U ? MOTOR_BEMF_CAL_STEP_NO_SIGNAL
+                                         : MOTOR_BEMF_CAL_STEP_OK);
+        e->duty = duty;
+        e->rail_mv = (uint16_t)pin_mv_to_motor_mv(s_rail_mv);
+        e->b1_mv = (uint16_t)s_bemf1_mv;
+        e->b2_mv = (uint16_t)s_bemf2_mv;
+        e->diff_mv = (uint16_t)s_bemf_mag_mv;
+        e->frac = frac;
+    }
+    portEXIT_CRITICAL(&s_output_mux);
+}
+
 static void cal_sweep_progress(uint32_t generation, uint8_t step, uint8_t total)
 {
     portENTER_CRITICAL(&s_output_mux);
@@ -1289,9 +1578,95 @@ static void cal_sweep_progress(uint32_t generation, uint8_t step, uint8_t total)
     portEXIT_CRITICAL(&s_output_mux);
 }
 
-/* AUTO: find the first PWM level that produces BEMF (closed-loop threshold),
- * back off 10 points for the open-loop speed-1 anchor, sweep to 95% for the
- * maximum, and store a straight line between speed 1 and speed 126. */
+/* Measure the same BEMF with several PWM-off delays and pick the shortest one
+ * that has settled. A too-short window samples the inductive flyback instead
+ * of the rotor voltage, which inflates the low end and trips the ceiling at
+ * mid duty. The chosen delay is persisted with the curve. */
+static bool cal_window_probe(uint32_t generation, motor_bemf_profile_t *profile)
+{
+    static const uint16_t candidates[MOTOR_BEMF_CAL_WINDOW_STEPS] = {
+        200U, 500U, 1000U, 2000U, 5000U, 10000U, 20000U,
+    };
+    uint32_t duty = cal_pct_duty(CAL_WINDOW_PROBE_PCT);
+    uint16_t frac[MOTOR_BEMF_CAL_WINDOW_STEPS] = { 0 };
+    profile->window_count = 0;
+
+    for (uint8_t i = 0; i < MOTOR_BEMF_CAL_WINDOW_STEPS; ++i) {
+        if (!cal_job_ok(generation)) return false;
+        s_bemf_settle_us = candidates[i];
+        uint32_t sum = 0U, n = 0U;
+        for (uint8_t s = 0; s < 2U; ++s) {
+            /* Re-establish the same steady speed before every sample: a long
+             * coast shortens the effective duty and would otherwise make the
+             * longer windows look slower by construction. */
+            if (!cal_drive_for(generation, duty, true, CAL_WINDOW_PROBE_DRIVE_MS)) {
+                return false;
+            }
+            if (!bemf_sample_window()) {
+                cal_fail(generation, s_bemf_sample_error == ESP_ERR_TIMEOUT
+                                           ? MOTOR_BEMF_CAL_ERR_CONTROL
+                                           : MOTOR_BEMF_CAL_ERR_ADC,
+                         s_bemf_sample_error);
+                return false;
+            }
+            uint32_t rail = rail_snapshot();
+            uint32_t mag = s_bemf_mag_mv;
+            bool saturated = rail > MOTOR_BEMF_PIN_MAX_MV ||
+                             s_bemf1_mv > MOTOR_BEMF_PIN_MAX_MV ||
+                             s_bemf2_mv > MOTOR_BEMF_PIN_MAX_MV;
+            if (rail <= 300U || saturated || mag < bemf_floor_mv(rail) ||
+                (float)mag > (float)rail * BEMF_CEILING) {
+                continue;
+            }
+            sum += (uint32_t)mag * 1024U / rail;
+            ++n;
+        }
+        if (n > 0U) frac[i] = (uint16_t)(sum / n);
+        profile->window_us[i] = candidates[i];
+        profile->window_frac[i] = frac[i];
+        ++profile->window_count;
+    }
+
+    /* Prefer the shortest window after which every longer candidate agrees:
+     * a single accidental match is not a plateau. With a noisy sensor this
+     * falls back to the longest (most settled) window. */
+    uint16_t ref = frac[CAL_RUNTIME_WINDOW_COUNT - 1U];
+    uint8_t chosen = CAL_RUNTIME_WINDOW_COUNT - 1U;
+    if (ref > 0U) {
+        uint16_t tolerance = (uint16_t)((uint32_t)ref * CAL_WINDOW_STABLE_PCT / 100U);
+        for (uint8_t i = 0; i + 1U < CAL_RUNTIME_WINDOW_COUNT; ++i) {
+            if (frac[i] == 0U) continue;
+            bool stable = true;
+            for (uint8_t j = i + 1U; j < CAL_RUNTIME_WINDOW_COUNT; ++j) {
+                if (frac[j] == 0U) continue;
+                uint16_t d = frac[i] > frac[j] ? (uint16_t)(frac[i] - frac[j])
+                                               : (uint16_t)(frac[j] - frac[i]);
+                if (d > tolerance) {
+                    stable = false;
+                    break;
+                }
+            }
+            if (stable) {
+                chosen = i;
+                break;
+            }
+        }
+    }
+    if (ref == 0U) {
+        s_bemf_settle_us = s_cal_prev_window_us;
+        profile->optimal_us = s_bemf_settle_us;
+    } else {
+        s_bemf_settle_us = candidates[chosen];
+        profile->optimal_us = s_bemf_settle_us;
+    }
+    if (!cal_drive(generation, duty, true)) return false;
+    return cal_job_ok(generation);
+}
+
+/* AUTO: start at the user's measured crawl (exact CV2 duty), find the BEMF at
+ * that point, sweep to 95% for the maximum, and store a straight line between
+ * speed 1 and speed 126. The low anchor is the measured BEMF so the PID can
+ * run from the first movement. */
 static bool cal_run_sweep(uint32_t generation, settings_bemf_cal_t *cal,
                           motor_bemf_profile_t *profile)
 {
@@ -1301,27 +1676,44 @@ static bool cal_run_sweep(uint32_t generation, settings_bemf_cal_t *cal,
     uint8_t quality_n = 0U, step = 0U;
     bool ceiling = false;
 
-    uint8_t total = CAL_SWEEP_STEPS;
+    /* The first step is the exact CV2 crawl duty, not a rounded percentage:
+     * the low anchor must match the duty the runtime uses at speed 1, so the
+     * PID holds that same BEMF from the first movement. */
+    uint8_t start_pct = CAL_SWEEP_START_PCT;
+    uint32_t start_duty = 0U;
+    uint8_t cv2 = 0;
+    if (motor_cv_read(2, &cv2) == ESP_OK && cv2 > 0U) {
+        start_duty = (uint32_t)cv2 * 4U;
+        uint8_t hint_pct = (uint8_t)((start_duty * 100U) / LEDC_MAX);
+        if (hint_pct > start_pct) start_pct = hint_pct;
+        if (start_pct > CAL_SWEEP_MAX_PCT - 10U) start_pct = CAL_SWEEP_MAX_PCT - 10U;
+    }
+    if (start_duty == 0U) start_duty = cal_pct_duty(start_pct);
+    uint8_t total = (uint8_t)(((CAL_SWEEP_MAX_PCT - start_pct) / CAL_SWEEP_STEP_PCT) + 1U);
 
     cal_set_phase(generation, MOTOR_BEMF_CAL_PHASE_CURVE);
-    for (uint32_t pct = CAL_SWEEP_START_PCT; pct <= CAL_SWEEP_MAX_PCT;
+    bool first_step = true;
+    for (uint32_t pct = start_pct; pct <= CAL_SWEEP_MAX_PCT;
          pct += CAL_SWEEP_STEP_PCT) {
         if (!cal_job_ok(generation)) return false;
+        uint32_t duty = first_step ? start_duty : cal_pct_duty(pct);
+        first_step = false;
         uint16_t frac = 0U;
         uint8_t quality = 0U;
         bool ceil_step = false;
         cal_sweep_progress(generation, (uint8_t)(++step), total);
-        if (!cal_sweep_step(generation, pct, &frac, &quality, &ceil_step)) return false;
+        if (!cal_sweep_step(generation, duty, &frac, &quality, &ceil_step)) return false;
+        cal_log_step((uint16_t)duty, frac, quality, ceil_step);
         if (ceil_step) {
             ceiling = true;
             break;
         }
         if (frac == 0U) continue;
         if (pwm_min == 0U) {
-            pwm_min = pct;
+            pwm_min = duty;
             frac_min = frac;
         }
-        pwm_max = pct;
+        pwm_max = duty;
         frac_max = frac;
         quality_sum += quality;
         ++quality_n;
@@ -1331,20 +1723,19 @@ static bool cal_run_sweep(uint32_t generation, settings_bemf_cal_t *cal,
         return false;
     }
 
-    uint32_t start = pwm_min > CAL_SWEEP_BACKOFF_PCT ? pwm_min - CAL_SWEEP_BACKOFF_PCT : 1U;
-    int32_t span = (int32_t)pwm_max - (int32_t)pwm_min;
+    /* The low anchor is the BEMF actually measured at the first movement, not
+     * a synthetic backoff: the PID can then use that same value from the
+     * moment the motor starts. Validate on the measured rise so a flat/dead
+     * sensor still fails instead of producing a curve. */
+    uint32_t start = pwm_min;
     int32_t start_frac = (int32_t)frac_min;
-    if (span > 0) {
-        start_frac += ((int32_t)frac_max - (int32_t)frac_min) *
-                      ((int32_t)start - (int32_t)pwm_min) / span;
-    }
     if (start_frac < 0) start_frac = 0;
-    if (start_frac >= (int32_t)frac_min) start_frac = (int32_t)frac_min - 1;
     if (frac_max < CAL_MIN_END_FRAC ||
         frac_max < (uint16_t)start_frac + CAL_MIN_RISE_FRAC) {
         cal_fail(generation, MOTOR_BEMF_CAL_ERR_CURVE, ESP_ERR_INVALID_STATE);
         return false;
     }
+    if (frac_max < CAL_MIN_FULL_FRAC) frac_max = CAL_MIN_FULL_FRAC;
 
     cal->count = 2U;
     cal->speed[0] = 1U;
@@ -1352,7 +1743,6 @@ static bool cal_run_sweep(uint32_t generation, settings_bemf_cal_t *cal,
     cal->speed[1] = 126U;
     cal->frac[1] = frac_max;
 
-    memset(profile, 0, sizeof(*profile));
     profile->mode = MOTOR_BEMF_MODE_AUTO;
     profile->phase = MOTOR_BEMF_CAL_PHASE_CURVE;
     profile->planned_points = total;
@@ -1363,10 +1753,10 @@ static bool cal_run_sweep(uint32_t generation, settings_bemf_cal_t *cal,
     profile->optimal_us = s_bemf_settle_us;
     profile->sensor_ok = true;
     profile->quality = quality_n > 0U ? (uint8_t)(quality_sum / quality_n) : 0U;
-    profile->pwm_min_pct = (uint8_t)pwm_min;
-    profile->pwm_start_pct = (uint8_t)start;
-    profile->pwm_max_pct = (uint8_t)pwm_max;
-    profile->ceiling_speed = ceiling ? cal_speed_for_duty(cal_pct_duty(pwm_max)) : 0U;
+    profile->pwm_min_pct = (uint8_t)((pwm_min * 100U) / LEDC_MAX);
+    profile->pwm_start_pct = (uint8_t)((start * 100U) / LEDC_MAX);
+    profile->pwm_max_pct = (uint8_t)((pwm_max * 100U) / LEDC_MAX);
+    profile->ceiling_speed = ceiling ? cal_speed_for_duty(pwm_max) : 0U;
     cal_profile_recommend(profile, cal);
     return true;
 }
@@ -1503,10 +1893,21 @@ static void cal_finish(uint32_t generation, settings_bemf_cal_t *cal, bool compl
                 s_cal_frac[i] = cal->frac[i];
             }
             memcpy(s_cal_frac_table, table, sizeof(table));
+            if (prof.optimal_us >= SETTINGS_BEMF_WINDOW_MIN_US &&
+                prof.optimal_us <= SETTINGS_BEMF_WINDOW_MAX_US) {
+                s_bemf_settle_us = prof.optimal_us;
+                if (settings_bemf_window_save != NULL) {
+                    (void)settings_bemf_window_save(prof.optimal_us);
+                }
+            }
             s_cal_valid = true;
             succeeded = true;
             portEXIT_CRITICAL(&s_output_mux);
         }
+    }
+    if (!succeeded) {
+        /* A failed/cancelled run must not leave the probing window active. */
+        s_bemf_settle_us = s_cal_prev_window_us;
     }
     if (reason == MOTOR_BEMF_CAL_ERR_NONE && !complete && current && !s_cal_cancelled) {
         reason = cal->count > 0U ? MOTOR_BEMF_CAL_ERR_CURVE : MOTOR_BEMF_CAL_ERR_NO_RISE;
@@ -1559,6 +1960,10 @@ static void bemf_cal_task(void *arg)
 
     cal_set_phase(generation, MOTOR_BEMF_CAL_PHASE_PREFLIGHT);
     if (!cal_rest_check(generation)) complete = false;
+    if (complete) {
+        cal_set_phase(generation, MOTOR_BEMF_CAL_PHASE_WINDOW);
+        complete = cal_window_probe(generation, &profile);
+    }
     if (complete) complete = cal_run_sweep(generation, &cal, &profile);
     cal_finish(generation, &cal, complete, &profile, cfg.apply_pid);
 }
@@ -1571,7 +1976,8 @@ static esp_err_t cal_admit(const motor_bemf_cal_config_t *cfg)
     }
     portENTER_CRITICAL(&s_output_mux);
     bool deny = !s_init || s_inhibited || s_stop_requested || s_cal_active ||
-                s_cal_config_busy || s_bemf_check_active || s_cal_task != NULL ||
+                s_test_active || s_cal_config_busy || s_bemf_check_active ||
+                s_cal_task != NULL ||
                 !s_bemf_adc_ready || s_adc_mutex == NULL || s_target_speed != 0U ||
                 s_applied_speed != 0U || (s_applied_state & 0xFFU) != 0U ||
                 s_last_duty != 0U;
@@ -1584,6 +1990,7 @@ static esp_err_t cal_admit(const motor_bemf_cal_config_t *cfg)
         return ESP_ERR_INVALID_STATE;
     }
     uint32_t generation = ++s_output_generation;
+    s_cal_prev_window_us = s_bemf_settle_us;
     memset(&s_cal_profile, 0, sizeof(s_cal_profile));
     s_cal_profile.mode = MOTOR_BEMF_MODE_AUTO;
     s_cal_profile.dwell_ms = CAL_SWEEP_DWELL_MS;
@@ -1593,6 +2000,7 @@ static esp_err_t cal_admit(const motor_bemf_cal_config_t *cfg)
     s_stop_requested = false;
     s_cal_phase = MOTOR_BEMF_CAL_PHASE_IDLE;
     s_cal_step = 0;
+    s_cal_log_count = 0;
     s_cal_total = CAL_SWEEP_STEPS;
     if (++s_cal_run_id == 0U) ++s_cal_run_id;
     s_cal_result = MOTOR_BEMF_CAL_RUNNING;
@@ -1670,6 +2078,16 @@ void motor_bemf_cal_info(motor_bemf_cal_info_t *info)
     }
 }
 
+size_t motor_bemf_cal_log_copy(motor_bemf_cal_step_log_t *out, size_t max)
+{
+    if (out == NULL || max == 0U) return 0U;
+    portENTER_CRITICAL(&s_output_mux);
+    size_t n = s_cal_log_count < max ? s_cal_log_count : max;
+    memcpy(out, s_cal_log, n * sizeof(*out));
+    portEXIT_CRITICAL(&s_output_mux);
+    return n;
+}
+
 static bool cal_config_begin(void)
 {
     if (s_control_mutex == NULL) return false;
@@ -1693,6 +2111,7 @@ esp_err_t motor_bemf_cal_clear(void)
         s_cal_error_code = ESP_OK;
         s_cal_step = 0;
         s_cal_total = 0;
+        s_cal_log_count = 0;
         memset(&s_cal_profile, 0, sizeof(s_cal_profile));
     }
     portEXIT_CRITICAL(&s_output_mux);
@@ -1737,11 +2156,14 @@ void motor_bemf_diag(motor_bemf_diag_t *d)
     d->rail_mv = s_rail_mv;
     d->bemf1_mv = s_bemf1_mv;
     d->bemf2_mv = s_bemf2_mv;
+    d->bemf_mag_mv = s_bemf_mag_mv;
     d->bemf_filtered_mv = (uint32_t)s_bemf_filtered;
     d->rail_motor_mv = pin_mv_to_motor_mv(s_rail_mv);
     d->bemf1_motor_mv = s_bemf1_motor_mv;
     d->bemf2_motor_mv = s_bemf2_motor_mv;
+    d->bemf_mag_motor_mv = s_bemf_mag_motor_mv;
     d->bemf_filtered_motor_mv = pin_mv_to_motor_mv((uint32_t)s_bemf_filtered);
+    d->sample_ok = s_bemf_sample_ok;
     d->bemf_valid = s_bemf_valid;
     d->cal_valid = s_cal_valid;
     d->cal_active = s_cal_active;
@@ -1875,7 +2297,7 @@ esp_err_t motor_bemf_check(motor_bemf_check_t *out, bool spin)
                    (s_applied_state & 0xFFU) == 0U && s_last_duty == 0U;
     if (!s_bemf_adc_ready || s_adc_mutex == NULL) {
         deny = MOTOR_BEMF_CHECK_ERR_ADC;
-    } else if (s_cal_active || s_bemf_check_active || s_sample_active) {
+    } else if (s_cal_active || s_bemf_check_active || s_sample_active || s_test_active) {
         deny = MOTOR_BEMF_CHECK_ERR_BUSY;
     } else if (s_inhibited) {
         deny = MOTOR_BEMF_CHECK_ERR_INHIBITED;

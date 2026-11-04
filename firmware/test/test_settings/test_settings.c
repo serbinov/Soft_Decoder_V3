@@ -196,7 +196,7 @@ static void test_crc32_differs_on_change(void)
 static void test_defaults(void)
 {
     TEST_ASSERT_EQUAL_UINT8(3, s_cv[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, s_cv[2]);           /* Vstart (slow low steps) */
+    TEST_ASSERT_EQUAL_UINT8(23, s_cv[2]);          /* Vstart (measured crawl floor) */
     TEST_ASSERT_EQUAL_UINT8(255, s_cv[5]);         /* Vhigh = full */
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[6]);         /* Vmid = half */
     TEST_ASSERT_EQUAL_UINT8(SETTINGS_CV7_VERSION, s_cv[7]);
@@ -220,7 +220,7 @@ static void test_defaults_speed_table(void)
     }
 }
 
-/* Old factory curve (Vstart=24, Vmid/Vhigh=0) is migrated to the linear curve
+/* Old factory curve (Vstart=24, Vmid/Vhigh=0) is migrated to the measured curve
  * on load, while a curve the user tuned is preserved. */
 static void test_cv_curve_migration(void)
 {
@@ -228,7 +228,7 @@ static void test_cv_curve_migration(void)
     s_cv[5] = 0;
     s_cv[6] = 0;
     cv_migrate_curve();
-    TEST_ASSERT_EQUAL_UINT8(0, s_cv[2]);
+    TEST_ASSERT_EQUAL_UINT8(23, s_cv[2]);
     TEST_ASSERT_EQUAL_UINT8(255, s_cv[5]);
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[6]);
 
@@ -304,7 +304,7 @@ static void test_cv_reset_to_factory_direct(void)
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_write(2, 99));
     TEST_ASSERT_EQUAL(ESP_OK, settings_cv_reset_to_factory());
     TEST_ASSERT_EQUAL_UINT8(3, s_cv[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, s_cv[2]);
+    TEST_ASSERT_EQUAL_UINT8(23, s_cv[2]);
     TEST_ASSERT_EQUAL_UINT8(255, s_cv[5]);
     TEST_ASSERT_EQUAL_UINT8(128, s_cv[6]);
 }

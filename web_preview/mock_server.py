@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Local preview server for the AURA-X decoder web UI.
 
@@ -648,13 +648,13 @@ def _new_graph():
     a compiled v1 behaviour layer, mirroring what the sound editor saves."""
     states = [
         {"id": "off", "name": "Выкл / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
-        _state("engine_idle", "Холостой ход ЧМЭ3", "s-loop1.1.wav", True),
-        _state("engine_run", "Тяга ЧМЭ3", "notch_4-loop1.1.wav", True),
-        _state("engine_stop", "Останов дизеля", "ms-end.wav", False),
+        _state("engine_idle", "Холостой ход ЧМЭ3", "engine_idle_loop.wav", True),
+        _state("engine_run", "Тяга ЧМЭ3", "engine_notch_4_loop.wav", True),
+        _state("engine_stop", "Останов дизеля", "engine_shutdown.wav", False),
         {"id": "horn_off", "name": "Тифон / тихий вход", "file": "", "loop": False, "volume": 100, "rate": 1000},
-        _state("horn_start", "Атака тифона", "horn-low-init.wav", False),
-        _state("horn_hold", "Удержание тифона", "horn-low-loop.wav", True),
-        _state("horn_end", "Отпускание тифона", "horn-low-exit.wav", False),
+        _state("horn_start", "Атака тифона", "horn_low_start.wav", False),
+        _state("horn_hold", "Удержание тифона", "horn_low_loop.wav", True),
+        _state("horn_end", "Отпускание тифона", "horn_low_stop.wav", False),
     ]
     transitions = [
         _edge("t1", "off", "engine_idle", 10, "immediate", {"type": "engine_on"}),
@@ -671,19 +671,19 @@ def _new_graph():
     ]
     effect_tables = [
         {"id": "horn", "name": "Тифон", "kind": "horn", "preset": "shortLong",
-         "init": "horn-low-init.wav", "loop": "horn-low-loop.wav", "end": "horn-low-exit.wav", "short": "horn-low-exit.wav",
+         "init": "horn_low_start.wav", "loop": "horn_low_loop.wav", "end": "horn_low_stop.wav", "short": "horn_low_stop.wav",
          "shortMs": 400, "volume": 80, "rate": 1000, "behavior": "horn_off"},
         {"id": "motor", "name": "Дизель ЧМЭ3", "kind": "motor", "preset": "loopHeld",
-         "init": "sm.wav", "loop": "s-loop1.1.wav", "end": "ms-end.wav", "short": "",
+         "init": "engine_crank_start.wav", "loop": "engine_idle_loop.wav", "end": "engine_shutdown.wav", "short": "",
          "shortMs": 400, "volume": 85, "rate": 1000, "behavior": ""},
         {"id": "brake", "name": "Тормоза", "kind": "brake", "preset": "state",
-         "init": "", "loop": "", "end": "bremse-anlegen_lokbremse.wav", "short": "",
+         "init": "", "loop": "", "end": "brake_apply.wav", "short": "",
          "shortMs": 400, "volume": 75, "rate": 1000, "behavior": ""},
         {"id": "bell", "name": "Радиостанция", "kind": "bell", "preset": "random",
-         "init": "piepton-rangierfunk.wav", "loop": "", "end": "", "short": "",
+         "init": "radio_channel_beep.wav", "loop": "", "end": "", "short": "",
          "shortMs": 400, "volume": 75, "rate": 1000, "behavior": ""},
         {"id": "coupler", "name": "Автосцепка", "kind": "coupler", "preset": "oneShot",
-         "init": "ankuppeln.wav", "loop": "", "end": "", "short": "",
+         "init": "coupler_attach.wav", "loop": "", "end": "", "short": "",
          "shortMs": 400, "volume": 80, "rate": 1000, "behavior": ""},
     ]
     sources = [

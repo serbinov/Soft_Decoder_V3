@@ -1,4 +1,4 @@
-const assert = require('node:assert/strict');
+﻿const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -63,7 +63,7 @@ function fixture(t) {
   }
   const requests = [], xhrs = [];
   const context = {
-    console, AbortController, Headers, URL, Date, Promise, TextDecoder, TextEncoder, Blob,
+    console, AbortController, Headers, URL, URLSearchParams, Date, Promise, TextDecoder, TextEncoder, Blob,
     crypto: { getRandomValues(bytes) { nodeCrypto.randomFillSync(bytes); return bytes; } },
     document: { hidden: false, activeElement: null,
       getElementById: element, createElement: () => element('created'),
@@ -346,9 +346,9 @@ test('BEMF phase and sensor error text are shown', async t => {
 
   context.api = async () => ({ ok: true, active: false, result: 'succeeded', valid: true,
     profile: { mode: 0, measured: 2, planned: 12, first: 66, firstFrac: 409,
-      optimalUs: 340, dwellMs: 1000, sensorOk: true } });
+      pwmMin: 40, optimalUs: 340, dwellMs: 1000, sensorOk: true } });
   await context.loadBemfCal();
-  assert.equal(element('bemf_prof_first').textContent, '66 (40%)');
+  assert.equal(element('bemf_prof_first').textContent, 'PWM 40 % · 40% rail');
   assert.equal(element('bemf_prof_sensor').textContent, 'да');
   assert.equal(element('bemf_prof_window').textContent, '340 мкс');
   assert.equal(element('bemf_prof_dwell').textContent, '1000 мс');
@@ -703,7 +703,7 @@ test('exportSoundPack builds a validated pack named after the locomotive', async
   context.log = (title, msg) => logs.push(msg);
   context.showSetting = () => {};
   context.loadLibrary = async () => {};
-  context.promptPasswordDialog = async () => '';
+  context.promptPasswordDialog = async () => 'password8';
   let exportStats = null;
   context.showSavePackDialog = async (name, size, downloadInfo, tooBig, repairs) => {
     exportStats = { name, size, download: downloadInfo, tooBig, repairs };
@@ -727,7 +727,7 @@ test('exportSoundPack builds a validated pack named after the locomotive', async
   let captured = null;
   context.Blob = class { constructor(parts) { this.bytes = Buffer.from(parts[0]); captured = this.bytes; } };
   context.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
-  context.setTimeout = () => {};
+  context.setTimeout = fn => { if (typeof fn === 'function') fn(); return 0; };
   let download = '';
   context.document.createElement = () => {
     const a = { href: '', click: () => {} };
@@ -736,7 +736,9 @@ test('exportSoundPack builds a validated pack named after the locomotive', async
   };
   await context.exportSoundPack();
   assert.ok(captured, 'a downloadable pack is produced: ' + logs.join(' | '));
-  const info = context.parseAspPack(new Uint8Array(captured));
+  const plain = await context.decryptAspBytes(new Uint8Array(captured), 'password8');
+  assert.ok(plain, 'password-protected pack decrypts');
+  const info = context.parseAspPack(new Uint8Array(plain));
   assert.equal(info.audio.length, 1);
   assert.equal(info.audio[0].name, 'Horn');
   assert.equal(info.audio[0].vol, 55);
@@ -748,6 +750,56 @@ test('exportSoundPack builds a validated pack named after the locomotive', async
   assert.match(exportStats.download.url, /^blob:/);
   assert.equal(info.audio.length, 1);
   assert.equal(info.adpcm, 1, 'PCM is compressed to ADPCM on export');
+});
+
+test('export uses an explicit project id instead of the active scheme', async t => {
+  const { context } = fixture(t);
+  context.location.search = '?id=other&revision=2';
+  context.log = () => {};
+  context.showSetting = () => {};
+  context.loadLibrary = async () => { context.libFiles = [{ name: 'Horn', size: 4, vol: 100 }]; };
+  context.promptPasswordDialog = async () => 'password8';
+  let downloadName = '';
+  context.showSavePackDialog = async name => { downloadName = name; return true; };
+  context.api = async url => {
+    if (url === '/api/device') return { ok: true, name: 'Dev' };
+    if (url.startsWith('/api/sound/graph/state')) throw new Error('active scheme must not be used');
+    if (url.startsWith('/api/sound/graph/project')) return { ok: true, project: {
+      format: 'sound-graph', schemaVersion: 1, id: 'other', name: 'Other',
+      states: [{ id: 's', file: 'Horn.wav' }], transitions: [], effects: [], editor: {} } };
+    if (url.startsWith('/api/func-map')) return { ok: true, binds: [] };
+    if (url.startsWith('/api/aux/cfg')) return { ok: true, aux: {} };
+    throw new Error('unexpected ' + url);
+  };
+  context.fetch = async () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 0, 2, 0]).buffer,
+    headers: { get: n => ({ 'X-Audio-Rate': '22050', 'X-Audio-Channels': '1', 'X-Audio-Bits': '16' })[n] } });
+  let captured = null;
+  context.Blob = class { constructor(parts) { captured = Buffer.from(parts[0]); } };
+  context.URL = { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} };
+  context.setTimeout = fn => { if (typeof fn === 'function') fn(); return 0; };
+  await context.exportSoundPack();
+  const plain = await context.decryptAspBytes(new Uint8Array(captured), 'password8');
+  const info = context.parseAspPack(new Uint8Array(plain));
+  assert.equal(info.scheme.id, 'other');
+  assert.equal(downloadName, 'Other.asp');
+});
+
+test('password dialog requires eight characters and shows the counter', async t => {
+  const { context, element } = fixture(t);
+  const pending = context.promptPasswordDialog('password', { minLen: 8, showHint: true });
+  const input = element('pw_modal_inp');
+  const ok = element('pw_modal_ok');
+  const hint = element('pw_modal_hint');
+  assert.equal(ok.disabled, true, 'OK is disabled for an empty password');
+  input.value = '1234567';
+  context.pwInput();
+  assert.equal(ok.disabled, true, 'seven characters are not enough');
+  assert.match(hint.textContent, /7\/8/);
+  input.value = '12345678';
+  context.pwInput();
+  assert.equal(ok.disabled, false, 'eight characters enable OK');
+  context.pwAnswer(true);
+  assert.equal(await pending, '12345678');
 });
 
 test('OTA timeout and abort release upload state', t => {

@@ -5,7 +5,7 @@
 периферии и памяти, список задач, компоненты и их взаимодействие, настройки,
 REST API и ресурсы.
 
-Версия прошивки: **0.17** (`version.txt` — единственный источник; попадает в
+Версия прошивки: **0.18** (`version.txt` — единственный источник; попадает в
 веб-страницу, CV7 и OTA-образ).
 Целевой чип: `esp32-s3` (плата ESP32-S3-DevKitC-1), фреймворк ESP-IDF
 `6.0`. Язык: C (C11), без C++.
@@ -998,18 +998,18 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 ## 17. Использование ресурсов
 
-### 17.1 Текущие размеры (0.17, `release/manifest.json`)
+### 17.1 Текущие размеры (0.18, `release/manifest.json`)
 
 | Параметр | Значение |
 |---|---|
 | `bootloader.bin` | 21 072 Б |
 | `partitions.bin` | 3 072 Б |
 | `ota_data_initial.bin` | 8 192 Б |
-| `firmware.bin` (`soft_decoder_v3.bin`, application) | 1 441 360 Б |
+| `firmware.bin` (`soft_decoder_v3.bin`, application) | 1 440 224 Б |
 | OTA-слот приложения | 1 966 080 Б (`0x1E0000`) |
-| Свободно в слоте | 524 720 Б (26,7 %) |
+| Свободно в слоте | 525 856 Б (26,7 %) |
 
-Источник размеров — `release/manifest.json` (schema 1, version 0.17); таблица
+Источник размеров — `release/manifest.json` (schema 1, version 0.18); таблица
 не дублирует ручные значения. Детальная разбивка по компонентам, секциям и
 стекам — в `build/soft_decoder_v3.map` после сборки и `idf.py size-components`.
 

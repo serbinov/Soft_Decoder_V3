@@ -11,6 +11,14 @@
 
 ## Релизы
 
+### 2026-11-05 — v0.18 — упрощён шаг 2 калибровки BEMF
+
+- Шаг 2: одна короткая инструкция вместо технического текста; убраны
+  дублирующая нижняя подсказка и строка «петля BEMF разомкнута».
+- Живая телеметрия сокращена до `BEMF: Δ … mV` и перенесена под слайдер.
+- Предупреждение «управление с рельс» сокращено, добавлена кнопка
+  «Переключить на «Веб»»; основная кнопка получает явный disabled-стиль.
+
 ### 2026-11-05 — v0.17 — исправления по отзыву тестера на 0.15
 
 Версия 0.16 не выпускалась: это была отменённая экспериментальная ветка
@@ -716,6 +724,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-05 (v0.18) — feat(web): simplify BEMF step 2 and release v0.18
 - 2026-11-05 (v0.17) — feat: v0.17 - calibration timeouts, first-boot outputs and wizard fixes
 - 2026-11-05 (v0.15) — feat(web): widen minimum-crawl PWM slider to 50%
 - 2026-11-05 (v0.15) — feat(firmware): adaptive BEMF calibration, live telemetry and sound refresh

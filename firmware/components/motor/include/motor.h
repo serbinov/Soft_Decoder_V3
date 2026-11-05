@@ -248,6 +248,7 @@ typedef struct {
     uint8_t cal_step;
     uint8_t applied_speed;
     uint32_t duty;
+    uint32_t duty_avg;        /* requested average before packet gating */
     int32_t error;
     int32_t integral;
     int32_t corr;
@@ -256,6 +257,7 @@ typedef struct {
     bool open_loop_fallback;  /* driving from the speed curve, not the PID */
     uint16_t window_us;       /* active PWM-off settle window */
     int32_t target;
+    bool low_packet;          /* duty below 8 % is emitted as packets */
 } motor_bemf_diag_t;
 void motor_bemf_diag(motor_bemf_diag_t *d);
 
@@ -313,6 +315,21 @@ esp_err_t motor_bemf_check(motor_bemf_check_t *out, bool spin);
 esp_err_t motor_bemf_adc_dump_checked(uint16_t *b1_raw, uint16_t *b2_raw, uint16_t *rail_raw);
 /* Force a coast window and read the BEMF terminals in mV (diagnostics). */
 void motor_bemf_coast_read(uint16_t *b1_mv, uint16_t *b2_mv);
+
+/* Diagnostic waveform: coast the running motor and sample both BEMF terminals
+ * across the whole window. Used to find the real settling/plateau moment
+ * instead of trusting one fixed settle time. */
+#define MOTOR_BEMF_WAVE_MAX 256
+typedef struct {
+    uint16_t us;
+    uint16_t b1_mv;
+    uint16_t b2_mv;
+} motor_bemf_wave_point_t;
+
+esp_err_t motor_bemf_wave_capture(uint16_t step_us, uint16_t duration_ms,
+                                  motor_bemf_wave_point_t *points,
+                                  uint16_t max_points, uint16_t *out_count,
+                                  uint32_t *duty, bool *forward);
 
 /* Firmware base (factory-default) BEMF settings. */
 #define MOTOR_BEMF_BASE_MAX_POINTS 16

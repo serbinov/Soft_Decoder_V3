@@ -1038,6 +1038,7 @@ esp_err_t adc_oneshot_del_unit(adc_oneshot_unit_handle_t handle)
 
 /* ---- LEDC ---- */
 uint32_t mock_ledc_duty[8];
+uint32_t mock_ledc_freq = 20000;
 int mock_ledc_update_count = 0;
 
 esp_err_t ledc_timer_config(const ledc_timer_config_t *timer_conf)
@@ -1058,6 +1059,14 @@ esp_err_t ledc_set_duty(ledc_mode_t speed_mode, ledc_channel_t channel, uint32_t
     if (channel >= 0 && channel < 8) {
         mock_ledc_duty[channel] = duty;
     }
+    return ESP_OK;
+}
+
+esp_err_t ledc_set_freq(ledc_mode_t speed_mode, ledc_timer_t timer_num, uint32_t freq_hz)
+{
+    (void)speed_mode;
+    (void)timer_num;
+    mock_ledc_freq = freq_hz;
     return ESP_OK;
 }
 

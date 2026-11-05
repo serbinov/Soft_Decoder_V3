@@ -96,7 +96,7 @@ esp_err_t motor_get(httpd_req_t *req)
         "{\"ok\":true,\"speed\":%u,\"forward\":%s,"
         "\"targetSpeed\":%u,\"targetForward\":%s,"
         "\"appliedSpeed\":%u,\"appliedForward\":%s,"
-        "\"duty\":%lu,\"dutyMax\":1023,"
+        "\"duty\":%lu,\"dutyAvg\":%lu,\"dutyMax\":1023,"
         "\"railMv\":%lu,\"railMotorMv\":%lu,"
         "\"railTrackMv\":%lu,\"railOffsetMv\":%u,"
         "\"bemfMv\":%lu,\"bemfMotorMv\":%lu,\"bemfFilteredMv\":%lu,"
@@ -105,14 +105,14 @@ esp_err_t motor_get(httpd_req_t *req)
         "\"bemfDiffMotorMv\":%lu,\"bemfSampleOk\":%s,"
         "\"bemfEnabled\":%s,\"bemfValid\":%s,\"bemfAcquired\":%s,"
         "\"bemfClosedLoop\":%s,\"openLoop\":%s,\"pidOk\":%s,"
-        "\"corr\":%ld,\"err\":%ld,\"windowUs\":%u,"
+        "\"corr\":%ld,\"err\":%ld,\"windowUs\":%u,\"lowPacket\":%s,"
         "\"inhibited\":%s,\"inhibit\":%lu,\"tickAgeMs\":%lld,"
         "\"mode\":%u,\"modeName\":\"%s\","
         "\"testActive\":%s,\"testDuty\":%u,\"testForward\":%s,\"testLeftMs\":%lu}",
         (unsigned)target, target_forward ? "true" : "false",
         (unsigned)target, target_forward ? "true" : "false",
         (unsigned)applied, applied_forward ? "true" : "false",
-        (unsigned long)diag.duty,
+        (unsigned long)diag.duty, (unsigned long)diag.duty_avg,
         (unsigned long)diag.rail_mv, (unsigned long)diag.rail_motor_mv,
         (unsigned long)rail_track_mv, (unsigned)rail_offset_mv,
         (unsigned long)diag.bemf1_mv, (unsigned long)diag.bemf1_motor_mv,
@@ -128,6 +128,7 @@ esp_err_t motor_get(httpd_req_t *req)
         diag.open_loop_fallback ? "true" : "false",
         diag.pid_ok ? "true" : "false",
         (long)diag.corr, (long)diag.error, (unsigned)diag.window_us,
+        diag.low_packet ? "true" : "false",
         inhibited ? "true" : "false", (unsigned long)0,
         (long long)tick_age_ms, (unsigned)mode, motor_ui_mode_name(mode),
         test_active ? "true" : "false", (unsigned)test_duty,

@@ -161,6 +161,7 @@ esp_err_t motor_duty_post(httpd_req_t *req);
 esp_err_t emergency_post(httpd_req_t *req);
 esp_err_t bemf_cal_get(httpd_req_t *req);
 esp_err_t bemf_base_get(httpd_req_t *req);
+esp_err_t bemf_window_get(httpd_req_t *req);
 esp_err_t bemf_cal_post(httpd_req_t *req);
 esp_err_t bemf_use_get(httpd_req_t *req);
 esp_err_t bemf_use_post(httpd_req_t *req);

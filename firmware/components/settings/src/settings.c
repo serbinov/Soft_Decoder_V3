@@ -111,7 +111,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
-#define SETTINGS_CV7_VERSION 18
+#define SETTINGS_CV7_VERSION 26
 #define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
@@ -1183,6 +1183,59 @@ esp_err_t settings_bemf_cal_clear(void)
     if (err == ESP_OK) {
         err = nvs_commit(s_h);
     }
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+bool settings_bemf_duty_validate(const settings_bemf_duty_t *cal)
+{
+    if (cal == NULL || cal->version != SETTINGS_BEMF_DUTY_VERSION) return false;
+    if (cal->count < 2U || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) return false;
+    for (size_t i = 0; i < cal->count; ++i) {
+        if (cal->speed[i] == 0U || cal->speed[i] > 126U) return false;
+        if (cal->duty[i] == 0U || cal->duty[i] > 1023U) return false;
+        if (i > 0U && (cal->speed[i] <= cal->speed[i - 1U] ||
+                       cal->duty[i] < cal->duty[i - 1U])) {
+            return false;
+        }
+    }
+    return cal->duty[cal->count - 1U] > cal->duty[0];
+}
+
+esp_err_t settings_bemf_duty_load(settings_bemf_duty_t *cal)
+{
+    if (cal == NULL) return ESP_ERR_INVALID_ARG;
+    memset(cal, 0, sizeof(*cal));
+    settings_bemf_duty_t candidate;
+    size_t len = sizeof(candidate);
+    esp_err_t err = nvs_get_blob(s_h, "bemf_duty", &candidate, &len);
+    if (err != ESP_OK) return err;
+    if (len != sizeof(candidate)) return ESP_ERR_INVALID_SIZE;
+    if (!settings_bemf_duty_validate(&candidate)) return ESP_ERR_INVALID_ARG;
+    *cal = candidate;
+    return ESP_OK;
+}
+
+esp_err_t settings_bemf_duty_save(const settings_bemf_duty_t *cal)
+{
+    if (!settings_bemf_duty_validate(cal)) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = nvs_set_blob(s_h, "bemf_duty", cal, sizeof(*cal));
+    if (err == ESP_OK) err = nvs_commit(s_h);
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+esp_err_t settings_bemf_duty_clear(void)
+{
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = nvs_erase_key(s_h, "bemf_duty");
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    if (err == ESP_OK) err = nvs_commit(s_h);
     xSemaphoreGive(s_lock);
     return err;
 }

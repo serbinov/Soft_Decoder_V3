@@ -335,6 +335,7 @@ static esp_err_t start_http_server(void)
         { "/api/mode", HTTP_POST, mode_post, WEB_ADMIT_PLAIN },
         { "/api/bemf/cal", HTTP_GET, bemf_cal_get, WEB_ADMIT_PLAIN },
         { "/api/bemf/base", HTTP_GET, bemf_base_get, WEB_ADMIT_PLAIN },
+        { "/api/bemf/window", HTTP_GET, bemf_window_get, WEB_ADMIT_PLAIN },
         { "/api/bemf/calibrate", HTTP_POST, bemf_cal_post, WEB_ADMIT_BEMF_CAL },
         { "/api/bemf/use", HTTP_GET, bemf_use_get, WEB_ADMIT_PLAIN },
         { "/api/bemf/use", HTTP_POST, bemf_use_post, WEB_ADMIT_BEMF_USE },

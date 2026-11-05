@@ -73,5 +73,6 @@ esp_err_t ledc_timer_config(const ledc_timer_config_t *timer_conf);
 esp_err_t ledc_channel_config(const ledc_channel_config_t *ledc_conf);
 esp_err_t ledc_set_duty(ledc_mode_t speed_mode, ledc_channel_t channel, uint32_t duty);
 esp_err_t ledc_update_duty(ledc_mode_t speed_mode, ledc_channel_t channel);
+esp_err_t ledc_set_freq(ledc_mode_t speed_mode, ledc_timer_t timer_num, uint32_t freq_hz);
 
 #endif /* MOCK_DRIVER_LEDC_H */

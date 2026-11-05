@@ -172,6 +172,48 @@ esp_err_t settings_bemf_cal_clear(void)
     return ESP_OK;
 }
 
+/* ---- calibrated feed-forward duty curve ---------------------------- */
+static settings_bemf_duty_t g_bemf_duty;
+static bool g_bemf_duty_valid;
+
+bool settings_bemf_duty_validate(const settings_bemf_duty_t *cal)
+{
+    if (cal == NULL || cal->version != SETTINGS_BEMF_DUTY_VERSION) return false;
+    if (cal->count < 2U || cal->count > SETTINGS_BEMF_CAL_MAX_POINTS) return false;
+    for (uint8_t i = 0; i < cal->count; ++i) {
+        if (cal->speed[i] == 0U || cal->speed[i] > 126U) return false;
+        if (cal->duty[i] == 0U || cal->duty[i] > 1023U) return false;
+        if (i > 0U && (cal->speed[i] <= cal->speed[i - 1U] ||
+                       cal->duty[i] < cal->duty[i - 1U])) {
+            return false;
+        }
+    }
+    return cal->duty[cal->count - 1U] > cal->duty[0];
+}
+
+esp_err_t settings_bemf_duty_load(settings_bemf_duty_t *cal)
+{
+    if (cal == NULL) return ESP_ERR_INVALID_ARG;
+    if (!g_bemf_duty_valid) return ESP_ERR_NOT_FOUND;
+    *cal = g_bemf_duty;
+    return ESP_OK;
+}
+
+esp_err_t settings_bemf_duty_save(const settings_bemf_duty_t *cal)
+{
+    if (!settings_bemf_duty_validate(cal)) return ESP_ERR_INVALID_ARG;
+    g_bemf_duty = *cal;
+    g_bemf_duty_valid = true;
+    return ESP_OK;
+}
+
+esp_err_t settings_bemf_duty_clear(void)
+{
+    g_bemf_duty_valid = false;
+    memset(&g_bemf_duty, 0, sizeof(g_bemf_duty));
+    return ESP_OK;
+}
+
 esp_err_t settings_bemf_use_load(bool *out)
 {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
@@ -458,6 +500,8 @@ void setUp(void)
     g_bemf_use = true;
     g_bemf_window = SETTINGS_BEMF_WINDOW_DEFAULT_US;
     memset(&g_cal, 0, sizeof(g_cal));
+    g_bemf_duty_valid = false;
+    memset(&g_bemf_duty, 0, sizeof(g_bemf_duty));
     mock_timer_now_us = 0;
     mock_adc_ok = 1;
     mock_task_create_ok = 1;
@@ -771,24 +815,29 @@ static void test_auto_calibration_pwm_sweep(void)
     motor_bemf_cal_info(&info);
     TEST_ASSERT_FALSE(info.active);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
-    TEST_ASSERT_EQUAL_UINT8(2, info.count);
+    TEST_ASSERT_TRUE(info.count >= 2U);
+    TEST_ASSERT_TRUE(info.count <= SETTINGS_BEMF_CAL_MAX_POINTS);
     TEST_ASSERT_EQUAL_UINT8(1, info.speed[0]);
-    TEST_ASSERT_EQUAL_UINT8(126, info.speed[1]);
-    TEST_ASSERT_TRUE(info.frac[1] >= 51U);
-    TEST_ASSERT_TRUE(info.frac[1] > info.frac[0]);
+    TEST_ASSERT_EQUAL_UINT8(126, info.speed[info.count - 1U]);
+    for (uint8_t i = 1U; i < info.count; ++i) {
+        TEST_ASSERT_TRUE(info.speed[i] > info.speed[i - 1U]);
+        TEST_ASSERT_TRUE(info.frac[i] >= info.frac[i - 1U]);
+    }
+    TEST_ASSERT_TRUE(info.frac[info.count - 1U] >= 51U);
+    TEST_ASSERT_TRUE(info.frac[info.count - 1U] > info.frac[0]);
     TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_min_pct);
     TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_start_pct);
     TEST_ASSERT_EQUAL_UINT8(95, info.profile.pwm_max_pct);
     TEST_ASSERT_EQUAL_UINT8(0, info.profile.ceiling_speed);
     TEST_ASSERT_TRUE(g_sweep_max_duty >= 970U);
 
-    TEST_ASSERT_EQUAL_UINT8(2, g_cal.count);
+    TEST_ASSERT_TRUE(g_cal.count >= 2U);
     TEST_ASSERT_EQUAL_UINT8(1, g_cal.speed[0]);
-    TEST_ASSERT_EQUAL_UINT8(126, g_cal.speed[1]);
+    TEST_ASSERT_EQUAL_UINT8(126, g_cal.speed[g_cal.count - 1U]);
     TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_reload());
     motor_bemf_cal_info(&info);
     TEST_ASSERT_TRUE(info.valid);
-    TEST_ASSERT_EQUAL_UINT8(2, info.count);
+    TEST_ASSERT_TRUE(info.count >= 2U);
 }
 
 static void test_auto_sweep_without_signal_fails(void)
@@ -1248,10 +1297,13 @@ static void test_cal_ceiling_saves_partial_curve(void)
     motor_bemf_cal_info_t info;
     motor_bemf_cal_info(&info);
     TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
-    TEST_ASSERT_EQUAL_UINT8(2, info.count);
-    /* The test hook reports a ceiling-like level at every mid/high duty; the
-     * guard skips those as flyback, so the last valid pre-ceiling sample is
-     * still 25% and the real ceiling is only accepted near 90% duty. */
+    TEST_ASSERT_TRUE(info.count >= 2U);
+    TEST_ASSERT_EQUAL_UINT8(1, info.speed[0]);
+    TEST_ASSERT_EQUAL_UINT8(126, info.speed[info.count - 1U]);
+    for (uint8_t i = 1U; i < info.count; ++i) {
+        TEST_ASSERT_TRUE(info.speed[i] > info.speed[i - 1U]);
+        TEST_ASSERT_TRUE(info.frac[i] >= info.frac[i - 1U]);
+    }
     TEST_ASSERT_EQUAL_UINT8(25, info.profile.pwm_max_pct);
     TEST_ASSERT_TRUE(info.profile.ceiling_speed > 0U);
 }
@@ -1475,6 +1527,63 @@ static void test_cal_apply_pid_write_failure_is_reported(void)
     TEST_ASSERT_FALSE(info.profile.pid_applied);
 }
 
+/* Below the 20 kHz driver floor the timer drops to 10 kHz and the calibrated
+ * duty is applied continuously (no more packets, no 8.2 % clamp). */
+/* Below the 20 kHz driver floor the tick emits 8.2 % packets; the packet
+ * density over time must match the requested average. */
+static void test_low_duty_emits_packets(void)
+{
+    g_cv[2] = 10;  /* speed 2 base duty < MOTOR_PACKET_DUTY */
+    const uint32_t base = speed_duty(2);
+    TEST_ASSERT_TRUE(base > 0U);
+    TEST_ASSERT_TRUE(base < MOTOR_PACKET_DUTY);
+    tick_speed(2, true, 1);
+
+    uint32_t sum = 0;
+    uint32_t packets = 0;
+    uint32_t other = 0;
+    for (uint32_t i = 0; i < MOTOR_PACKET_DUTY; ++i) {
+        motor_tick();
+        uint32_t d = mock_ledc_duty[LEDC_CHANNEL_0];
+        sum += d;
+        if (d == MOTOR_PACKET_DUTY) {
+            ++packets;
+        } else if (d != 0U) {
+            ++other;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, other);
+    TEST_ASSERT_EQUAL_UINT32(base * MOTOR_PACKET_DUTY, sum);
+    TEST_ASSERT_EQUAL_UINT32(base, packets);
+
+    motor_bemf_diag_t d;
+    motor_bemf_diag(&d);
+    TEST_ASSERT_TRUE(d.low_packet);
+}
+
+static void test_low_packets_reset_on_stop(void)
+{
+    g_cv[2] = 10;
+    tick_speed(2, true, 2);
+    motor_stop();
+    motor_tick();  /* applied == 0: accumulator reset */
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+
+    motor_set_speed(2, true);
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT32(MOTOR_PACKET_DUTY, mock_ledc_duty[LEDC_CHANNEL_0]);
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+
+    motor_stop();
+    motor_tick();
+    motor_bemf_diag_t d;
+    motor_bemf_diag(&d);
+    TEST_ASSERT_FALSE(d.low_packet);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1557,5 +1666,7 @@ int main(void)
     RUN_TEST(test_bemf_check_busy_during_calibration);
     RUN_TEST(test_bemf_check_spin_adc_failure);
     RUN_TEST(test_cal_apply_pid_write_failure_is_reported);
+    RUN_TEST(test_low_duty_emits_packets);
+    RUN_TEST(test_low_packets_reset_on_stop);
     return UNITY_END();
 }

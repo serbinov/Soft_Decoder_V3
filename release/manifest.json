@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "0.18",
+  "version": "0.26",
   "chip": "esp32s3",
   "flash_size": 4194304,
   "files": [
@@ -82,22 +82,22 @@
       "offset": 131072,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1440224,
-      "sha256": "33ac65416252a47d11664bd286ba021b52e9d38e8041ee39404fcfd302dc0b4e",
+      "size": 1449504,
+      "sha256": "e8ac9f51cc950565bb7159bd437a1b8398f03640cac284a2fe26afd2e44d1470",
       "image_hash_appended": true,
-      "version": "0.18",
+      "version": "0.26",
       "project": "soft_decoder_v3",
       "idf": "v6.0"
     },
     {
-      "path": "ADDITIPUS_AURA-X_v0.18.bin",
+      "path": "ADDITIPUS_AURA-X_v0.26.bin",
       "offset": null,
       "role": "application",
       "chip": "esp32s3",
-      "size": 1440224,
-      "sha256": "33ac65416252a47d11664bd286ba021b52e9d38e8041ee39404fcfd302dc0b4e",
+      "size": 1449504,
+      "sha256": "e8ac9f51cc950565bb7159bd437a1b8398f03640cac284a2fe26afd2e44d1470",
       "image_hash_appended": true,
-      "version": "0.18",
+      "version": "0.26",
       "project": "soft_decoder_v3",
       "idf": "v6.0"
     },

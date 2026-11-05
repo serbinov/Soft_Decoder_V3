@@ -1,7 +1,7 @@
 ﻿# Soft Decoder V3 — ADDITIPUS AURA-X
 
 Прошивка DCC-декодера для моделей железных дорог на ESP32-S3 (ESP-IDF 6.0).
-Версия: **0.18** (`firmware/version.txt`).
+Версия: **0.26** (`firmware/version.txt`).
 
 Полное техническое описание — [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md).
 История изменений — [`CHANGELOG.md`](CHANGELOG.md).

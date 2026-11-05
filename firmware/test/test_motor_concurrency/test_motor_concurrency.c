@@ -146,6 +146,37 @@ esp_err_t settings_bemf_cal_clear(void)
     return ESP_OK;
 }
 
+static settings_bemf_duty_t g_bemf_duty;
+static bool g_bemf_duty_valid;
+
+bool settings_bemf_duty_validate(const settings_bemf_duty_t *cal)
+{
+    return cal != NULL && cal->version == SETTINGS_BEMF_DUTY_VERSION &&
+           cal->count >= 2U && cal->count <= SETTINGS_BEMF_CAL_MAX_POINTS;
+}
+
+esp_err_t settings_bemf_duty_load(settings_bemf_duty_t *cal)
+{
+    if (cal == NULL) return ESP_ERR_INVALID_ARG;
+    if (!g_bemf_duty_valid) return ESP_ERR_NOT_FOUND;
+    *cal = g_bemf_duty;
+    return ESP_OK;
+}
+
+esp_err_t settings_bemf_duty_save(const settings_bemf_duty_t *cal)
+{
+    if (!settings_bemf_duty_validate(cal)) return ESP_ERR_INVALID_ARG;
+    g_bemf_duty = *cal;
+    g_bemf_duty_valid = true;
+    return ESP_OK;
+}
+
+esp_err_t settings_bemf_duty_clear(void)
+{
+    g_bemf_duty_valid = false;
+    return ESP_OK;
+}
+
 static bool g_bemf_use = true;
 
 esp_err_t settings_bemf_use_load(bool *out)

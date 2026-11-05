@@ -89,6 +89,7 @@ esp_err_t httpd_resp_send(httpd_req_t *req, const char *buf, size_t buf_len);
 esp_err_t httpd_resp_send_err(httpd_req_t *req, httpd_err_code_t error, const char *msg);
 
 esp_err_t httpd_req_get_url_query_str(httpd_req_t *req, char *buf, size_t buf_len);
+esp_err_t httpd_query_key_value(const char *query, const char *key, char *val, size_t val_size);
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t *req, const char *field, char *val,
                                       size_t val_size);
 int httpd_req_recv(httpd_req_t *req, char *buf, size_t buf_len);

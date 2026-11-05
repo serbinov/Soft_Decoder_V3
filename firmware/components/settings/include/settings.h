@@ -232,6 +232,25 @@ esp_err_t settings_bemf_cal_save_guarded(const settings_bemf_cal_t *cal,
                                        settings_bemf_cal_authorize_t authorize, void *context);
 esp_err_t settings_bemf_cal_clear(void);
 
+/* Calibrated feed-forward duty per speed notch. The sweep records the fixed
+ * duty at which each BEMF sample was taken; normal operation uses it as the
+ * PID base so the loop holds the calibrated BEMF instead of correcting a
+ * different speed-curve duty after the warmup. Separate NVS key; absence
+ * falls back to the CV2/CV5/CV6 speed curve. */
+#define SETTINGS_BEMF_DUTY_VERSION 1U
+typedef struct {
+    uint8_t version;
+    uint8_t count;
+    uint16_t reserved;
+    uint8_t speed[SETTINGS_BEMF_CAL_MAX_POINTS];
+    uint16_t duty[SETTINGS_BEMF_CAL_MAX_POINTS];
+} settings_bemf_duty_t;
+
+bool settings_bemf_duty_validate(const settings_bemf_duty_t *cal);
+esp_err_t settings_bemf_duty_load(settings_bemf_duty_t *cal);
+esp_err_t settings_bemf_duty_save(const settings_bemf_duty_t *cal);
+esp_err_t settings_bemf_duty_clear(void);
+
 /* Motor regulation mode: true = BEMF-PID closed loop (default), false = the
  * motor runs open-loop on the speed-curve PWM only (no coast sampling, no
  * feedback). Stored in its own NVS key so the flag survives independently of

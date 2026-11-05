@@ -232,6 +232,53 @@ esp_err_t bemf_base_get(httpd_req_t *req)
     return send_json(req, json);
 }
 
+esp_err_t bemf_window_get(httpd_req_t *req)
+{
+    uint16_t duration_ms = 20U;
+    uint16_t step_us = 100U;
+    char query[WEB_QUERY_MAX] = { 0 };
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char value[16];
+        if (httpd_query_key_value(query, "ms", value, sizeof(value)) == ESP_OK) {
+            int v = atoi(value);
+            if (v > 0 && v <= 30) duration_ms = (uint16_t)v;
+        }
+        if (httpd_query_key_value(query, "step", value, sizeof(value)) == ESP_OK) {
+            int v = atoi(value);
+            if (v >= 20 && v <= 1000) step_us = (uint16_t)v;
+        }
+    }
+    motor_bemf_wave_point_t points[MOTOR_BEMF_WAVE_MAX];
+    uint16_t count = 0U;
+    uint32_t duty = 0U;
+    bool forward = false;
+    esp_err_t err = motor_bemf_wave_capture(step_us, duration_ms, points,
+                                             MOTOR_BEMF_WAVE_MAX, &count, &duty,
+                                             &forward);
+    if (err != ESP_OK) {
+        return send_json(req, "{\"ok\":false,\"error\":\"capture failed\"}");
+    }
+    size_t cap = 4096U + (size_t)count * 40U;
+    char *json = malloc(cap);
+    if (json == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    }
+    size_t used = 0;
+    buf_appendf(json, cap, &used,
+                "{\"ok\":true,\"duty\":%lu,\"forward\":%s,\"points\":[",
+                (unsigned long)duty, forward ? "true" : "false");
+    for (uint16_t i = 0U; i < count; ++i) {
+        buf_appendf(json, cap, &used,
+                    "%s{\"us\":%u,\"b1\":%u,\"b2\":%u}",
+                    i == 0U ? "" : ",", (unsigned)points[i].us,
+                    (unsigned)points[i].b1_mv, (unsigned)points[i].b2_mv);
+    }
+    buf_appendf(json, cap, &used, "]}");
+    esp_err_t out = send_json(req, json);
+    free(json);
+    return out;
+}
+
 esp_err_t bemf_cal_post(httpd_req_t *req)
 {
     char query[WEB_QUERY_MAX] = { 0 };

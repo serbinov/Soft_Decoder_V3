@@ -114,7 +114,7 @@ httpd_config_t mock_httpd_last_cfg;
 
 /* Route table (bounded), useful for assertions and for keeping the shim
  * faithful to the real server. */
-#define MOCK_HTTPD_MAX_ROUTES 64
+#define MOCK_HTTPD_MAX_ROUTES 80
 httpd_uri_t mock_routes[MOCK_HTTPD_MAX_ROUTES];
 int mock_route_count = 0;
 httpd_err_handler_func_t mock_err_handler;
@@ -349,8 +349,7 @@ esp_err_t httpd_req_get_url_query_str(httpd_req_t *req, char *buf, size_t buf_le
     (void)req;
     if (buf == NULL || buf_len == 0) {
         return ESP_ERR_INVALID_ARG;
-    }
-    if (mock_query[0] == '\0') {
+    }    if (mock_query[0] == '\0') {
         buf[0] = '\0';
         return ESP_ERR_NOT_FOUND;
     }
@@ -2132,4 +2131,29 @@ void mock_web_reset(void)
      * usable lock by default (the NULL path is exercised explicitly). */
     s_evlog_mutex = (SemaphoreHandle_t)1;
     s_func_mutex = (SemaphoreHandle_t)1;
+}
+
+esp_err_t motor_bemf_wave_capture(uint16_t step_us, uint16_t duration_ms,
+                                  motor_bemf_wave_point_t *points,
+                                  uint16_t max_points, uint16_t *out_count,
+                                  uint32_t *duty, bool *forward)
+{
+    (void)step_us;
+    (void)duration_ms;
+    (void)points;
+    (void)max_points;
+    if (out_count != NULL) *out_count = 0U;
+    if (duty != NULL) *duty = 0U;
+    if (forward != NULL) *forward = false;
+    return ESP_OK;
+}
+
+esp_err_t httpd_query_key_value(const char *query, const char *key, char *val,
+                                size_t val_size)
+{
+    (void)query;
+    (void)key;
+    (void)val;
+    (void)val_size;
+    return ESP_ERR_NOT_FOUND;
 }

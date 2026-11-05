@@ -697,6 +697,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-05 (v0.15) — feat(web): widen minimum-crawl PWM slider to 50%
 - 2026-11-05 (v0.15) — feat(firmware): adaptive BEMF calibration, live telemetry and sound refresh
 - 2026-10-29 (v0.15) — feat(firmware): unify release image, draft saves and PWM BEMF sweep
 - 2026-10-28 (v0.15) — refactor(web): modularize HTTP API and add DCC motor diagnostics

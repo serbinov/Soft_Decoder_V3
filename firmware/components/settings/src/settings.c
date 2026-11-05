@@ -111,7 +111,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
-#define SETTINGS_CV7_VERSION 15
+#define SETTINGS_CV7_VERSION 17
 #define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
@@ -824,6 +824,23 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count)
     return err;
 }
 
+void settings_func_map_factory(settings_func_map_t *map, size_t count)
+{
+    if (map == NULL) return;
+    if (count > SETTINGS_FUNC_MAP_COUNT) count = SETTINGS_FUNC_MAP_COUNT;
+    for (size_t i = 0; i < count; ++i) {
+        /* Hobby default: F0 = head light (front forward / rear reverse),
+         * F1..F20 = the matching sound slot, everything else off. */
+        map[i].slot_a = (i >= 1U && i <= SETTINGS_MAX_TRACKS) ? (uint8_t)i : 0U;
+        map[i].slot_b = 0U;
+        map[i].aux_mask = (i == 0U)
+                              ? (uint16_t)(SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R)
+                              : 0U;
+        map[i].dir = SETTINGS_FUNC_DIR_NONE;
+        map[i].speed = SETTINGS_FUNC_SPD_NONE;
+    }
+}
+
 esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count)
 {
     if (map == NULL || count == NULL) {
@@ -835,17 +852,7 @@ esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count)
     bool unusable = err == ESP_OK &&
                     len != sizeof(settings_func_map_t) * SETTINGS_FUNC_MAP_COUNT;
     if (err != ESP_OK || unusable) {
-        for (size_t i = 0; i < SETTINGS_FUNC_MAP_COUNT; ++i) {
-            /* Hobby default: F0 = head light (front forward / rear reverse),
-             * F1..F20 = the matching sound slot, everything else off. */
-            map[i].slot_a = (i >= 1U && i <= SETTINGS_MAX_TRACKS) ? (uint8_t)i : 0U;
-            map[i].slot_b = 0U;
-            map[i].aux_mask = (i == 0U)
-                                  ? (uint16_t)(SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R)
-                                  : 0U;
-            map[i].dir = SETTINGS_FUNC_DIR_NONE;
-            map[i].speed = SETTINGS_FUNC_SPD_NONE;
-        }
+        settings_func_map_factory(map, SETTINGS_FUNC_MAP_COUNT);
         *count = SETTINGS_FUNC_MAP_COUNT;
         if (err == ESP_ERR_NVS_NOT_FOUND) {
             return ESP_ERR_NOT_FOUND;
@@ -932,6 +939,36 @@ esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count)
     if (err == ESP_OK) {
         err = settings_manifest_sync();
     }
+    return err;
+}
+
+esp_err_t settings_func_bind_version_load(uint8_t *version)
+{
+    if (version == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t value = 0;
+    esp_err_t err = nvs_get_u8(s_h, "func_bind_ver", &value);
+    if (err != ESP_OK) {
+        return err;
+    }
+    *version = value;
+    return ESP_OK;
+}
+
+esp_err_t settings_func_bind_version_save(uint8_t version)
+{
+    if (version == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t err = nvs_set_u8(s_h, "func_bind_ver", version);
+    if (err == ESP_OK) {
+        err = nvs_commit(s_h);
+    }
+    xSemaphoreGive(s_lock);
     return err;
 }
 

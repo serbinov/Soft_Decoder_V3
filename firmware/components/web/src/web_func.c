@@ -175,6 +175,27 @@ static esp_err_t func_bind_migrate_from_map(void)
     return err;
 }
 
+/* Seed the factory F0/AUX outputs when the store predates the schema marker.
+ * Persisting first keeps RAM and NVS consistent; a failed write leaves the
+ * empty list untouched so the next boot can retry. */
+static bool func_bind_seed_factory(void)
+{
+    settings_func_map_t factory[SETTINGS_FUNC_MAP_COUNT];
+    settings_func_map_factory(factory, SETTINGS_FUNC_MAP_COUNT);
+    func_binding_t seed[FUNC_BIND_MAX];
+    size_t seed_count = 0;
+    if (settings_func_bind_legacy_convert(factory, SETTINGS_FUNC_MAP_COUNT, seed,
+                                          &seed_count) != ESP_OK ||
+        seed_count == 0U ||
+        settings_func_bind_save(seed, seed_count) != ESP_OK) {
+        return false;
+    }
+    memcpy(s_func_bind, seed, sizeof(seed));
+    s_func_bind_count = seed_count;
+    s_func_bind_present = true;
+    return true;
+}
+
 /* Load the canonical bindings, migrating the legacy map when the store is
  * empty. Safe to call once at init. */
 static esp_err_t func_bind_load(void)
@@ -711,6 +732,31 @@ esp_err_t web_func_init(void)
     s_func_bind_count = 0;
     err = func_bind_load();
     if (err != ESP_OK) return err;
+
+    /* A decoder that was flashed over an older build can carry an empty
+     * binding store: sounds keep working from the graph while F0/AUX stay
+     * silent until the editor writes outputs. Seed the factory outputs once
+     * after the update; a later intentionally empty list is preserved by the
+     * schema marker. */
+    uint8_t bind_version = 0;
+    bool bind_versioned =
+        settings_func_bind_version_load(&bind_version) == ESP_OK &&
+        bind_version >= SETTINGS_FUNC_BIND_VERSION;
+    if (s_func_bind_count == 0U && !bind_versioned) {
+        if (func_bind_seed_factory()) {
+            ESP_LOGW(TAG_FUNC, "empty bindings after update: restored factory F0/AUX outputs");
+        }
+    }
+    if (!bind_versioned && s_func_bind_count > 0U) {
+        (void)settings_func_bind_version_save(SETTINGS_FUNC_BIND_VERSION);
+    }
+    if (s_func_bind_count == 0U) {
+        /* A stored empty binding list is a valid "no outputs" state, but it is
+         * also what an older editor could leave behind. Sounds keep working
+         * from the graph while F0/AUX stay silent, so make the cause visible. */
+        ESP_LOGW(TAG_FUNC, "no function bindings: AUX/light outputs stay off "
+                 "until the editor writes its outputs");
+    }
     func_tracks_cache_refresh();
 
     /* Bring up the AUX outputs before restoring the saved per-channel level/

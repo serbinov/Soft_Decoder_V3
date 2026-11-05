@@ -162,12 +162,22 @@ esp_err_t settings_track_cats_save(const uint8_t *cats, size_t count);
  * defaults are returned (F0 = head light, F1..F20 = matching sound slot). */
 esp_err_t settings_func_map_load(settings_func_map_t *map, size_t *count);
 esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count);
+/* Factory F-key map: F0 = directional head light, F1..F20 = matching sound
+ * slot. Shared by the first-boot fallback and the legacy-binding migration so
+ * a freshly flashed decoder always has working F0/AUX outputs. */
+void settings_func_map_factory(settings_func_map_t *map, size_t count);
 
 /* Canonical function bindings (many-to-many). Missing returns NOT_FOUND; a
  * valid empty store returns OK and
  * count = 0. Migrate the legacy map only on NOT_FOUND, never on count alone. */
 esp_err_t settings_func_bind_load(func_binding_t *bind, size_t *count);
 esp_err_t settings_func_bind_save(const func_binding_t *bind, size_t count);
+/* Schema marker for the canonical binding store. Absence means the bindings
+ * were written by a firmware that did not manage the empty state explicitly;
+ * the first boot of this version then seeds the factory F0/AUX outputs. */
+#define SETTINGS_FUNC_BIND_VERSION 1U
+esp_err_t settings_func_bind_version_load(uint8_t *version);
+esp_err_t settings_func_bind_version_save(uint8_t version);
 /* Convert a legacy settings_func_map_t[] into function bindings. */
 esp_err_t settings_func_bind_legacy_convert(const settings_func_map_t *map, size_t map_count,
                                             func_binding_t *out, size_t *out_count);

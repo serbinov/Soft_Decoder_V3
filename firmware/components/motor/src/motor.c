@@ -1513,8 +1513,12 @@ static bool cal_sweep_step(uint32_t generation, uint32_t duty, uint16_t *frac,
     if (!cal_drive_for(generation, duty, true, CAL_SWEEP_DWELL_MS)) return false;
     uint32_t sum = 0U, minimum = 0U, maximum = 0U, n = 0U;
     for (uint8_t i = 0; i < CAL_SWEEP_SAMPLES; ++i) {
-        vTaskDelay(pdMS_TO_TICKS(CAL_SWEEP_SAMPLE_GAP_MS));
-        if (!cal_drive(generation, duty, true)) return false;
+        /* Keep the 100 ms drive lease alive across the sample gap. A plain
+         * vTaskDelay() here let the watchdog coast the bridge exactly at the
+         * lease boundary, which surfaced as a random "timeout" after two or
+         * three steps (and at the final step) even though the sweep was
+         * healthy. */
+        if (!cal_drive_for(generation, duty, true, CAL_SWEEP_SAMPLE_GAP_MS)) return false;
         uint16_t sample = 0U;
         cal_sample_result_t res = cal_sample_limit(generation, duty, true, BEMF_CEILING,
                                                    &sample);

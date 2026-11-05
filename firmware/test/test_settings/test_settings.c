@@ -1206,6 +1206,27 @@ static void test_func_bind_roundtrip(void)
     mock_sem_take_fail = 0;
 }
 
+static void test_func_map_factory_and_bind_version(void)
+{
+    settings_func_map_t m[SETTINGS_FUNC_MAP_COUNT];
+    memset(m, 0xFF, sizeof(m));
+    settings_func_map_factory(m, SETTINGS_FUNC_MAP_COUNT);
+    TEST_ASSERT_EQUAL_UINT16(SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R, m[0].aux_mask);
+    TEST_ASSERT_EQUAL_UINT8(0, m[0].slot_a);
+    TEST_ASSERT_EQUAL_UINT8(1, m[1].slot_a);
+    TEST_ASSERT_EQUAL_UINT16(0, m[1].aux_mask);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_MAX_TRACKS, m[SETTINGS_MAX_TRACKS].slot_a);
+    TEST_ASSERT_EQUAL_UINT8(0, m[SETTINGS_FUNC_MAP_COUNT - 1U].slot_a);
+
+    uint8_t v = 0;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, settings_func_bind_version_load(&v));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_version_save(SETTINGS_FUNC_BIND_VERSION));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_func_bind_version_load(&v));
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_FUNC_BIND_VERSION, v);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_version_load(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_func_bind_version_save(0));
+}
+
 static void test_func_bind_legacy_convert(void)
 {
     settings_func_map_t m[SETTINGS_FUNC_MAP_COUNT];
@@ -1724,6 +1745,7 @@ int main(void)
     RUN_TEST(test_stale_config_cache_cannot_revert_cv63);
     RUN_TEST(test_cv7_migrated_from_old_blob);
     RUN_TEST(test_func_bind_roundtrip);
+    RUN_TEST(test_func_map_factory_and_bind_version);
     RUN_TEST(test_func_bind_legacy_convert);
     RUN_TEST(test_func_bind_add_remove);
     RUN_TEST(test_rev_s20_deferred_is_ram_only);

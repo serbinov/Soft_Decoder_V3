@@ -939,6 +939,42 @@ esp_err_t settings_func_map_save(const settings_func_map_t *map, size_t count)
     return (esp_err_t)mock_map_save_ret;
 }
 
+void settings_func_map_factory(settings_func_map_t *map, size_t count)
+{
+    if (map == NULL) return;
+    if (count > SETTINGS_FUNC_MAP_COUNT) count = SETTINGS_FUNC_MAP_COUNT;
+    for (size_t i = 0; i < count; ++i) {
+        map[i].slot_a = (i >= 1U && i <= SETTINGS_MAX_TRACKS) ? (uint8_t)i : 0U;
+        map[i].slot_b = 0U;
+        map[i].aux_mask = (i == 0U)
+                              ? (uint16_t)(SETTINGS_FUNC_OUT_F0F | SETTINGS_FUNC_OUT_F0R)
+                              : 0U;
+        map[i].dir = SETTINGS_FUNC_DIR_NONE;
+        map[i].speed = SETTINGS_FUNC_SPD_NONE;
+    }
+}
+
+/* Default: the binding schema marker exists, so web_func_init never seeds on
+ * its own. Tests that exercise the first-boot migration clear the error. */
+uint8_t mock_bind_version = SETTINGS_FUNC_BIND_VERSION;
+int mock_bind_version_ret = ESP_OK;
+
+esp_err_t settings_func_bind_version_load(uint8_t *version)
+{
+    if (version == NULL) return ESP_ERR_INVALID_ARG;
+    if (mock_bind_version_ret != ESP_OK) return (esp_err_t)mock_bind_version_ret;
+    *version = mock_bind_version;
+    return ESP_OK;
+}
+
+esp_err_t settings_func_bind_version_save(uint8_t version)
+{
+    if (version == 0U) return ESP_ERR_INVALID_ARG;
+    mock_bind_version = version;
+    mock_bind_version_ret = ESP_OK;
+    return ESP_OK;
+}
+
 /* ---- canonical function bindings (test doubles) ---- */
 
 func_binding_t mock_binds[FUNC_BIND_MAX];

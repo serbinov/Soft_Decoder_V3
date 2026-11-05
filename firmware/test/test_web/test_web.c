@@ -2947,6 +2947,33 @@ static void test_func_bind_load_and_desired(void)
     TEST_ASSERT_EQUAL_UINT16(0, func_desired_locked(0, true));
 }
 
+static void test_func_bind_seed_factory_outputs(void)
+{
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
+    s_func_bind_present = true;
+    memset(mock_binds, 0, sizeof(mock_binds));
+    mock_binds_count = 0;
+    mock_bind_save_calls = 0;
+
+    TEST_ASSERT_TRUE(func_bind_seed_factory());
+    TEST_ASSERT_TRUE(s_func_bind_count >= 2U);
+    TEST_ASSERT_TRUE(s_func_bind_present);
+    TEST_ASSERT_EQUAL_UINT32(s_func_bind_count, mock_binds_count);
+    TEST_ASSERT_EQUAL_INT(1, mock_bind_save_calls);
+
+    bool f0f = false, f0r = false;
+    for (size_t i = 0; i < s_func_bind_count; ++i) {
+        if (s_func_bind[i].used == 0U || s_func_bind[i].target_type != FUNC_TARGET_OUTPUT) {
+            continue;
+        }
+        if (s_func_bind[i].target_id == AUXIO_CH_F0F) f0f = true;
+        if (s_func_bind[i].target_id == AUXIO_CH_F0R) f0r = true;
+    }
+    TEST_ASSERT_TRUE(f0f);
+    TEST_ASSERT_TRUE(f0r);
+}
+
 static void test_func_bind_get_view(void)
 {
     httpd_req_t req = make_req(0);
@@ -5933,6 +5960,7 @@ int main(void)
     RUN_TEST(test_dcc_status_get);
     RUN_TEST(test_func_map_get_post);
     RUN_TEST(test_func_bind_load_and_desired);
+    RUN_TEST(test_func_bind_seed_factory_outputs);
     RUN_TEST(test_func_bind_get_view);
     RUN_TEST(test_logic_bindings_apply_runtime_actions);
     RUN_TEST(test_func_map_post_binding);

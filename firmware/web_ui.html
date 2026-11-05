@@ -497,6 +497,7 @@ label{color:var(--text);font-weight:600}
           <button class="btn danger" id="wiz_cancel_low" onclick="wizBack()" data-i18n="wiz_cancel">Отмена</button>
         </div>
         <div class="hint" id="bemf_low_live" style="margin-top:6px;font-family:ui-monospace,Consolas,monospace">Датчик: —</div>
+        <div class="hint" id="bemf_low_rails" style="display:none;margin-top:6px;color:#ffb020"></div>
         <div class="hint" id="bemf_low_hint" data-i18n="bemf_low_hint">Диапазон 0…50 % ШИМ, шаг 0.1 %. Петля BEMF разомкнута (без PID); пуск держится до 5 с. На 20 кГц ниже ~8 % импульс короче 4 мкс и входной фильтр DRV8870 его не пропускает — это не нелинейность, а нижняя граница драйвера.</div>
       </div>
 
@@ -510,6 +511,7 @@ label{color:var(--text);font-weight:600}
           <button class="btn primary" id="bemf_cal_btn" onclick="startBemfCal()" style="display:none" data-i18n="wiz_auto_retry">Повторить авто-калибровку</button>
           <button class="btn" id="bemf_clear_btn" onclick="clearBemfCal()" style="display:none" data-i18n="wiz_factory">Заводские</button>
           <button class="btn danger" id="bemf_cancel_btn" onclick="cancelBemfCal()" disabled data-i18n="bemf_cancel">Отменить</button>
+          <button class="btn" id="wiz_back3" onclick="wizBackFromCal()" data-i18n="wiz_back">Назад</button>
         </div>
         <div class="muted" id="bemf_status" data-i18n="bemf_status_idle">Статус: —</div>
         <div class="up-bar" id="bemf_bar" style="margin-top:6px"><i id="bemfbar"></i></div>
@@ -800,7 +802,7 @@ info_fw:'Версия прошивки',info_addr:'Адрес',info_state:'Со�
 set_nav_aria:'Разделы настроек',grp_motion:'Движение',grp_sound:'Конфигурация',grp_settings:'Настройки',grp_service:'Сервис',
 nav_bemf:'Калибровка BEMF',nav_mode:'Режим управления',nav_snd:'Звуки',nav_mixes:'Миксы',nav_schemes:'Конструктор Блок Схем',nav_pack_import:'Импорт звуков и схемы',nav_pack_export:'Экспорт звуков и схемы',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Обновление',nav_bemf_base:'Базовые настройки',nav_log:'Журнал',
 uptime_label:'Устройство работает:',
-bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode_auto:'Стандартный (AUTO, ШИМ-свип)',bemf_apply_pid:'Применить рекомендованные PID',bemf_profile_points:'Точки кривой',bemf_profile_sweep:'Шаги свипа',bemf_profile_points_auto:'AUTO',bemf_profile_hint:'AUTO хранит 2 опорные точки (speed 1 и 126). Нижняя — измеренный BEMF на первом движении, верхняя — измеренный максимум (не ниже 85 %). Свип останавливается на потолке BEMF (90 % rail); PID работает с самого начала вращения.',bemf_log_wait:'Лог шагов появится во время свипа.',md_bemf_sensor:'Датчик BEMF',bemf_low_title:'Минимальный устойчивый ход',bemf_low_run:'Пуск ШИМ',bemf_low_stop:'Стоп',bemf_low_save:'Сохранить старт и калибровать',bemf_low_hint:'Найдите минимальный процент, при котором двигатель устойчиво вращается, затем сохраните: CV2 станет стартовым ШИМ (duty/4), и запустится AUTO-калибровка с этим порогом. Пуск держится до 5 с и продлевается, пока страница открыта.',bemf_low_saved:'Минимальный ход сохранён',bemf_low_run_on:'Тест ШИМ включён',bemf_low_run_off:'Тест ШИМ остановлен',wiz_step1:'Старт',wiz_step2:'Минимальный ход',wiz_step3:'Авто-калибровка',wiz_step4:'Результат',wiz_start:'Начать калибровку',wiz_factory:'Заводские',wiz_start_hint:'Новая калибровка затирает сохранённые значения. «Заводские» возвращают встроенную кривую BEMF (CV2 не меняется).',wiz_low_hint:'Шаг 2 (0…50 % ШИМ, шаг 0.1 %). Петля BEMF разомкнута: ШИМ задаётся напрямую, без PID. На 20 кГц ниже ~8 % импульс короче 4 мкс и входной фильтр DRV8870 его не пропускает — это нижняя граница драйвера, а не нелинейность. Поднимите ШИМ до минимального устойчивого вращения и нажмите «Далее».',wiz_loop_open:'петля BEMF разомкнута',wiz_low_save:'Далее',wiz_cancel:'Отмена',wiz_auto_hint:'Шаг 3. Авто-калибровка запускается автоматически: свип ШИМ, поиск окна замера, PID и сохранение результата.',wiz_auto_start:'Запустить авто-калибровку',wiz_auto_retry:'Повторить авто-калибровку',wiz_auto_starting:'Запуск авто-калибровки…',wiz_saved_note:'Готово. Результаты сохранены автоматически; новая калибровка затрёт их.',wiz_res_low_lbl:'Минимальный ход',wiz_res_curve_lbl:'Кривая BEMF',wiz_new:'Новая калибровка',wiz_done:'Готово',wiz_confirm_new:'Начать новую калибровку? Сохранённая кривая будет удалена.',wiz_confirm_factory:'Вернуть заводские параметры? Сохранённая кривая BEMF будет удалена; CV2 не изменится.',wiz_current_stored:'Сохранённая',wiz_current_factory:'Заводская (встроенная кривая)',wiz_saved_low:'Старт',wiz_sensor:'Датчик',wiz_started:'Калибровка начата',wiz_reset_done:'Заводские параметры восстановлены',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки кривой',bemf_profile_stalled:'Пропущено',bemf_profile_ceiling:'Потолок BEMF',bemf_profile_first:'Первый сигнал BEMF',bemf_profile_pwm:'ШИМ BEMF (первый/последний)',bemf_profile_sensor:'Датчик BEMF',bemf_profile_window:'Окно BEMF',bemf_profile_dwell:'Выдержка',bemf_profile_unit_us:'мкс',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID в CV54..56',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
+bemf_use:'Использовать BEMF для двигателя',bemf_calibrate:'Калибровать',bemf_reset:'Сброс',bemf_cancel:'Отменить',bemf_mode_auto:'Стандартный (AUTO, ШИМ-свип)',bemf_apply_pid:'Применить рекомендованные PID',bemf_profile_points:'Точки кривой',bemf_profile_sweep:'Шаги свипа',bemf_profile_points_auto:'AUTO',bemf_profile_hint:'AUTO хранит 2 опорные точки (speed 1 и 126). Нижняя — измеренный BEMF на первом движении, верхняя — измеренный максимум (не ниже 85 %). Свип останавливается на потолке BEMF (90 % rail); PID работает с самого начала вращения.',bemf_log_wait:'Лог шагов появится во время свипа.',md_bemf_sensor:'Датчик BEMF',bemf_low_title:'Минимальный устойчивый ход',bemf_low_run:'Пуск ШИМ',bemf_low_stop:'Стоп',bemf_low_save:'Сохранить старт и калибровать',bemf_low_hint:'Найдите минимальный процент, при котором двигатель устойчиво вращается, затем сохраните: CV2 станет стартовым ШИМ (duty/4), и запустится AUTO-калибровка с этим порогом. Пуск держится до 5 с и продлевается, пока страница открыта.',bemf_low_saved:'Минимальный ход сохранён',bemf_low_run_on:'Тест ШИМ включён',bemf_low_run_off:'Тест ШИМ остановлен',wiz_step1:'Старт',wiz_step2:'Минимальный ход',wiz_step3:'Авто-калибровка',wiz_step4:'Результат',wiz_start:'Начать калибровку',wiz_factory:'Заводские',wiz_start_hint:'Новая калибровка затирает сохранённые значения. «Заводские» возвращают встроенную кривую BEMF (CV2 не меняется).',wiz_low_hint:'Шаг 2 (0…50 % ШИМ, шаг 0.1 %). Петля BEMF разомкнута: ШИМ задаётся напрямую, без PID. На 20 кГц ниже ~8 % импульс короче 4 мкс и входной фильтр DRV8870 его не пропускает — это нижняя граница драйвера, а не нелинейность. Поднимите ШИМ до минимального устойчивого вращения и нажмите «Далее».',wiz_loop_open:'петля BEMF разомкнута',wiz_low_save:'Далее',wiz_cancel:'Отмена',wiz_back:'Назад',wiz_low_rails:'Тест ШИМ доступен только при источнике управления «Веб». Переключите «Управление через» на «Веб» и вернитесь на шаг 2.',wiz_auto_hint:'Шаг 3. Авто-калибровка запускается автоматически: свип ШИМ, поиск окна замера, PID и сохранение результата.',wiz_auto_start:'Запустить авто-калибровку',wiz_auto_retry:'Повторить авто-калибровку',wiz_auto_starting:'Запуск авто-калибровки…',wiz_saved_note:'Готово. Результаты сохранены автоматически; новая калибровка затрёт их.',wiz_res_low_lbl:'Минимальный ход',wiz_res_curve_lbl:'Кривая BEMF',wiz_new:'Новая калибровка',wiz_done:'Готово',wiz_confirm_new:'Начать новую калибровку? Сохранённая кривая будет удалена.',wiz_confirm_factory:'Вернуть заводские параметры? Сохранённая кривая BEMF будет удалена; CV2 не изменится.',wiz_current_stored:'Сохранённая',wiz_current_factory:'Заводская (встроенная кривая)',wiz_saved_low:'Старт',wiz_sensor:'Датчик',wiz_started:'Калибровка начата',wiz_reset_done:'Заводские параметры восстановлены',bemf_mode_stored:'Текущая кривая',bemf_profile_title:'Параметры калибровки BEMF',bemf_profile_mode:'Режим',bemf_profile_points:'Точки кривой',bemf_profile_stalled:'Пропущено',bemf_profile_ceiling:'Потолок BEMF',bemf_profile_first:'Первый сигнал BEMF',bemf_profile_pwm:'ШИМ BEMF (первый/последний)',bemf_profile_sensor:'Датчик BEMF',bemf_profile_window:'Окно BEMF',bemf_profile_dwell:'Выдержка',bemf_profile_unit_us:'мкс',bemf_profile_settle:'Средний settle',bemf_profile_gain:'Наклон BEMF',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Качество',bemf_profile_applied:'PID в CV54..56',bemf_profile_yes:'да',bemf_profile_no:'нет',bemf_profile_unit_ms:'мс',bemf_profile_unit_gain:'мВ/duty',
 bemf_status_idle:'Статус: —',
 bemf_lbl_idle:'Калибровка не выполнялась',bemf_lbl_running:'Калибровка идёт, не трогайте мотор...',bemf_lbl_saving:'Сохранение калибровки...',bemf_lbl_succeeded:'Новая калибровка завершена и сохранена',bemf_lbl_cancelled:'Калибровка отменена',bemf_lbl_failed:'Калибровка не удалась',
 bemf_phase_preflight:'проверка покоя и датчика BEMF...',bemf_phase_window:'подбор окна замера...',bemf_phase_curve:'измерение кривой...',bemf_phase_saving:'сохранение...',
@@ -867,7 +869,7 @@ info_fw:'Firmware version',info_addr:'Address',info_state:'State',
 set_nav_aria:'Settings sections',grp_motion:'Motion',grp_sound:'Configuration',grp_settings:'Settings',grp_service:'Service',
 nav_bemf:'BEMF calibration',nav_mode:'Control mode',nav_snd:'Sounds',nav_mixes:'Mixes',nav_schemes:'Block Scheme Constructor',nav_pack_import:'Import sounds & scheme',nav_pack_export:'Export sounds & scheme',nav_cv:'CV',nav_wifi:'Wi-Fi',nav_ota:'Update',nav_bemf_base:'Basic settings',nav_log:'Log',
 uptime_label:'Uptime:',
-bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode_auto:'Standard (AUTO, PWM sweep)',bemf_apply_pid:'Apply recommended PID',bemf_profile_points:'Curve points',bemf_profile_sweep:'Sweep steps',bemf_profile_points_auto:'AUTO',bemf_profile_hint:'AUTO stores 2 anchors (speed 1 and 126). The low anchor is the measured BEMF at the first movement, the top anchor is the measured maximum (at least 85 %). The sweep stops at the BEMF ceiling (90 % rail); the PID runs from the first movement.',bemf_log_wait:'The step log appears during the sweep.',md_bemf_sensor:'BEMF sensor',bemf_low_title:'Minimum stable crawl',bemf_low_run:'Run PWM',bemf_low_stop:'Stop',bemf_low_save:'Save start and calibrate',bemf_low_hint:'Find the lowest percentage where the motor rotates steadily, then save: CV2 becomes the start PWM (duty/4) and AUTO calibration starts from that threshold. The run is held for up to 5 s and refreshed while this page is open.',bemf_low_saved:'Crawl threshold saved',bemf_low_run_on:'PWM test on',bemf_low_run_off:'PWM test stopped',wiz_step1:'Start',wiz_step2:'Minimum crawl',wiz_step3:'Auto calibration',wiz_step4:'Result',wiz_start:'Start calibration',wiz_factory:'Factory',wiz_start_hint:'A new calibration overwrites the stored values. Factory restores the built-in BEMF curve (CV2 is unchanged).',wiz_low_hint:'Step 2 (0…50 % PWM, 0.1 % steps). The BEMF loop is open: PWM is commanded directly, without the PID. At 20 kHz below ~8 % the pulse is shorter than 4 us and the DRV8870 input filter drops it — this is the driver floor, not a nonlinearity. Raise PWM to the lowest steady rotation and press Next.',wiz_loop_open:'BEMF loop open',wiz_low_save:'Next',wiz_cancel:'Cancel',wiz_auto_hint:'Step 3. Auto calibration starts automatically: PWM sweep, settle-window search, PID and result storage.',wiz_auto_start:'Run auto calibration',wiz_auto_retry:'Retry auto calibration',wiz_auto_starting:'Starting auto calibration…',wiz_saved_note:'Done. Results were saved automatically; a new calibration overwrites them.',wiz_res_low_lbl:'Minimum crawl',wiz_res_curve_lbl:'BEMF curve',wiz_new:'New calibration',wiz_done:'Done',wiz_confirm_new:'Start a new calibration? The stored curve will be deleted.',wiz_confirm_factory:'Restore factory settings? The stored BEMF curve will be deleted; CV2 is unchanged.',wiz_current_stored:'Stored',wiz_current_factory:'Factory (built-in curve)',wiz_saved_low:'Start',wiz_sensor:'Sensor',wiz_started:'Calibration started',wiz_reset_done:'Factory settings restored',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Curve points',bemf_profile_stalled:'Skipped',bemf_profile_ceiling:'BEMF ceiling',bemf_profile_first:'First BEMF signal',bemf_profile_pwm:'BEMF PWM (first/last)',bemf_profile_sensor:'BEMF sensor',bemf_profile_window:'BEMF window',bemf_profile_dwell:'Dwell',bemf_profile_unit_us:'µs',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID in CV54..56',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
+bemf_use:'Use BEMF for the motor',bemf_calibrate:'Calibrate',bemf_reset:'Reset',bemf_cancel:'Cancel',bemf_mode_auto:'Standard (AUTO, PWM sweep)',bemf_apply_pid:'Apply recommended PID',bemf_profile_points:'Curve points',bemf_profile_sweep:'Sweep steps',bemf_profile_points_auto:'AUTO',bemf_profile_hint:'AUTO stores 2 anchors (speed 1 and 126). The low anchor is the measured BEMF at the first movement, the top anchor is the measured maximum (at least 85 %). The sweep stops at the BEMF ceiling (90 % rail); the PID runs from the first movement.',bemf_log_wait:'The step log appears during the sweep.',md_bemf_sensor:'BEMF sensor',bemf_low_title:'Minimum stable crawl',bemf_low_run:'Run PWM',bemf_low_stop:'Stop',bemf_low_save:'Save start and calibrate',bemf_low_hint:'Find the lowest percentage where the motor rotates steadily, then save: CV2 becomes the start PWM (duty/4) and AUTO calibration starts from that threshold. The run is held for up to 5 s and refreshed while this page is open.',bemf_low_saved:'Crawl threshold saved',bemf_low_run_on:'PWM test on',bemf_low_run_off:'PWM test stopped',wiz_step1:'Start',wiz_step2:'Minimum crawl',wiz_step3:'Auto calibration',wiz_step4:'Result',wiz_start:'Start calibration',wiz_factory:'Factory',wiz_start_hint:'A new calibration overwrites the stored values. Factory restores the built-in BEMF curve (CV2 is unchanged).',wiz_low_hint:'Step 2 (0…50 % PWM, 0.1 % steps). The BEMF loop is open: PWM is commanded directly, without the PID. At 20 kHz below ~8 % the pulse is shorter than 4 us and the DRV8870 input filter drops it — this is the driver floor, not a nonlinearity. Raise PWM to the lowest steady rotation and press Next.',wiz_loop_open:'BEMF loop open',wiz_low_save:'Next',wiz_cancel:'Cancel',wiz_back:'Back',wiz_low_rails:'The PWM test only works with the “Web” control source. Switch “Control via” to “Web” and return to step 2.',wiz_auto_hint:'Step 3. Auto calibration starts automatically: PWM sweep, settle-window search, PID and result storage.',wiz_auto_start:'Run auto calibration',wiz_auto_retry:'Retry auto calibration',wiz_auto_starting:'Starting auto calibration…',wiz_saved_note:'Done. Results were saved automatically; a new calibration overwrites them.',wiz_res_low_lbl:'Minimum crawl',wiz_res_curve_lbl:'BEMF curve',wiz_new:'New calibration',wiz_done:'Done',wiz_confirm_new:'Start a new calibration? The stored curve will be deleted.',wiz_confirm_factory:'Restore factory settings? The stored BEMF curve will be deleted; CV2 is unchanged.',wiz_current_stored:'Stored',wiz_current_factory:'Factory (built-in curve)',wiz_saved_low:'Start',wiz_sensor:'Sensor',wiz_started:'Calibration started',wiz_reset_done:'Factory settings restored',bemf_mode_stored:'Current curve',bemf_profile_title:'BEMF calibration parameters',bemf_profile_mode:'Mode',bemf_profile_points:'Curve points',bemf_profile_stalled:'Skipped',bemf_profile_ceiling:'BEMF ceiling',bemf_profile_first:'First BEMF signal',bemf_profile_pwm:'BEMF PWM (first/last)',bemf_profile_sensor:'BEMF sensor',bemf_profile_window:'BEMF window',bemf_profile_dwell:'Dwell',bemf_profile_unit_us:'µs',bemf_profile_settle:'Average settle',bemf_profile_gain:'BEMF slope',bemf_profile_pid:'PID (Kp/Ki/Kd)',bemf_profile_quality:'Quality',bemf_profile_applied:'PID in CV54..56',bemf_profile_yes:'yes',bemf_profile_no:'no',bemf_profile_unit_ms:'ms',bemf_profile_unit_gain:'mV/duty',
 bemf_status_idle:'Status: —',
 bemf_lbl_idle:'Calibration has not been run',bemf_lbl_running:'Calibration in progress, do not touch the motor...',bemf_lbl_saving:'Saving calibration...',bemf_lbl_succeeded:'New calibration completed and stored',bemf_lbl_cancelled:'Calibration cancelled',bemf_lbl_failed:'Calibration failed',
 bemf_phase_preflight:'rest and BEMF sensor check...',bemf_phase_window:'selecting the sample window...',bemf_phase_curve:'measuring the curve...',bemf_phase_saving:'saving...',
@@ -1203,6 +1205,7 @@ async function setControlSource(src){
     log(t('tag_control'),t('msg_source')+(state.control_source==='web'?t('src_web'):t('src_rails'))+(state.motor.speed>0?t('motor_stopped'):''));
   }catch(e){log(t('tag_control'),t('err_prefix')+e.message);}
   renderControlSource();
+  if(wizStep===2)refreshBemfLowSource();
 }
 function renderControlSource(){
   var web=state.control_source==='web';
@@ -1246,6 +1249,7 @@ function renderBemfButtons(){
   byId('bemf_clear_btn').disabled=busy;
   var p=byId('bemf_cal_apply_pid');if(p)p.disabled=busy;
   byId('bemf_cancel_btn').disabled=(!bemfActive&&!bemfUnknown)||bemfCancelBusy||bemfCommandBusy;
+  var back=byId('wiz_back3');if(back)back.disabled=bemfCommandBusy||bemfCancelBusy;
 }
 async function startBemfCal(){
   if(bemfActive||bemfCommandBusy||bemfDiscoverTries>0||bemfUnknown)return;
@@ -1359,6 +1363,7 @@ async function loadBemfCal(){
     bemfActive=active||result==='running'||result==='saving';
     bemfUnknown=false;
     bemfDiscoverTries=0;
+    if(wizBackPending&&!bemfActive){wizBackPending=false;wizGo(1);return;}
     var bar=byId('bemf_bar'),barIn=byId('bemfbar');
     if(result==='running'&&Number(d.total)>0){
       bar.style.display='block';
@@ -1416,7 +1421,7 @@ async function setBemfUse(){
 /* Interactive low-speed setup: drive a raw duty with the same 5 s lease as the
  * bench API, find the lowest stable crawl, then persist CV2 and calibrate. */
 var bemfLowTimer=null,bemfLowActive=false,bemfLowBusy=false,bemfLowDuty=92,bemfLowInit=false;
-var wizStep=1,wizBusy=false,wizSavedLow=null,wizLowPollTimer=null;
+var bemfLowRails=false,wizStep=1,wizBusy=false,wizSavedLow=null,wizLowPollTimer=null,wizBackPending=false;
 
 function wizGo(n){
   wizStep=n;
@@ -1428,6 +1433,7 @@ function wizGo(n){
     s.classList.toggle('done',j<n);
   }
   if(n===2){
+    refreshBemfLowSource();
     renderBemfLow();initBemfLow();
     if(!wizLowPollTimer)wizLowPollTimer=setInterval(wizLowPoll,700);
     wizLowPoll();
@@ -1520,6 +1526,20 @@ async function wizFactory(){
 }
 
 function wizBack(){stopBemfLow();wizGo(1);}
+/* Step 3 exit: after a failed/timeout run the calibration is already inactive
+ * and the old Cancel button is (correctly) disabled, so the user needs a plain
+ * way back. While a run is still active, ask for cancellation and leave once
+ * the poll sees it stopped. */
+async function wizBackFromCal(){
+  if(wizBusy)return;
+  if(bemfActive||bemfUnknown){
+    wizBackPending=true;
+    await cancelBemfCal();
+    return;
+  }
+  wizBackPending=false;
+  wizGo(1);
+}
 
 function bemfLowDutyFromSlider(){
   var pct=clamp(byId('bemf_low_slider').value,0,50);
@@ -1548,6 +1568,7 @@ async function sendBemfLowDuty(duty){
 }
 function bemfLowTick(){if(bemfLowActive&&!bemfLowBusy)sendBemfLowDuty(bemfLowDuty);}
 function toggleBemfLowRun(){
+  if(bemfLowRails){log(t('tag_bemf'),t('wiz_low_rails'));return;}
   if(bemfLowActive){stopBemfLow();return;}
   bemfLowActive=true;renderBemfLow();
   var b=byId('bemf_low_run');if(b)b.textContent=t('bemf_low_stop');
@@ -1563,9 +1584,27 @@ function stopBemfLow(){
   log(t('tag_bemf'),t('bemf_low_run_off'));
   api('/api/motor/duty?duty=0&ms=100',{method:'POST',timeout:3000}).catch(function(){});
 }
+async function refreshBemfLowSource(){
+  try{
+    var d=await api('/api/control/source',{timeout:3000});
+    bemfLowRails=!!(d&&d.source==='rails');
+  }catch(e){bemfLowRails=false;}
+  var b=byId('bemf_low_run');
+  if(b){
+    b.disabled=bemfLowRails;
+    b.title=bemfLowRails?t('wiz_low_rails'):'';
+  }
+  var n=byId('bemf_low_rails');
+  if(n){
+    n.textContent=bemfLowRails?t('wiz_low_rails'):'';
+    n.style.display=bemfLowRails?'block':'none';
+  }
+  if(bemfLowRails&&bemfLowActive)stopBemfLow();
+}
 async function initBemfLow(force){
   if(bemfLowInit&&!force)return;
   bemfLowInit=true;
+  refreshBemfLowSource();
   try{
     var d=await api('/api/cv/read?index=2',{timeout:3000});
     if(d&&d.ok&&typeof d.value==='number'){

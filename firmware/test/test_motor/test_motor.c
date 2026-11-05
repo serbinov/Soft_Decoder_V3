@@ -249,6 +249,10 @@ static void sweep_rail_refresh(TickType_t ticks)
 {
     (void)ticks;
     motor_set_rail_voltage_mv(2500);
+    /* The real motor task calls the watchdog every 10 ms. Driving it from the
+     * delay hook reproduces the sample-gap lease check that used to cancel a
+     * healthy sweep (the old code slept 100 ms with a 100 ms lease). */
+    motor_bemf_cal_watchdog();
 }
 
 static void sweep_bemf_adc(int channel)

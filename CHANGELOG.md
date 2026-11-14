@@ -20,6 +20,10 @@
   BEMF»); настройка сохраняется и учитывается при загрузке.
 - Автоматический пересчёт CV2 убран: CV2 остаётся значением шага 2, поэтому
   калибровочная и рабочая скоростные кривые совпадают.
+- Шаг 2 калибровки BEMF: ползунок минимального хода расширен с 0…50 % до
+  0…100 % ШИМ (duty 0…1023).
+- Селектор «DCC шаги» перенесён из панели «Управление» в «Настройки →
+  Режим управления».
 
 ### 2026-11-05 — v0.25 — возврат пачек на 20 кГц
 
@@ -816,6 +820,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-14 (v0.26) — feat(web): extend BEMF crawl PWM to 100% and move DCC steps to settings
 - 2026-11-05 (v0.26) — feat(motor): stabilize BEMF loop and calibrate over the coast ripple
 - 2026-11-05 (v0.18) — feat(web): simplify BEMF step 2 and release v0.18
 - 2026-11-05 (v0.17) — feat: v0.17 - calibration timeouts, first-boot outputs and wizard fixes

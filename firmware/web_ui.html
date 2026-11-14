@@ -378,14 +378,6 @@ label{color:var(--text);font-weight:600}
           <input type="range" id="speed" min="0" max="126" value="0" oninput="onSpeedInput()">
           <span class="val" id="speed_v">0</span>
         </div>
-        <div class="speed-mode-row">
-          <label for="speed_mode" data-i18n="dcc_step_mode">DCC шаги</label>
-          <select id="speed_mode" onchange="onSpeedModeChange()">
-            <option value="14" data-i18n="dcc_step_14">14 шагов</option>
-            <option value="28" data-i18n="dcc_step_28">28 шагов</option>
-            <option value="128" selected data-i18n="dcc_step_128">128 шагов</option>
-          </select>
-        </div>
         <div class="dir-row">
           <button class="btn" id="btn_rev" onclick="setDir(false)" data-i18n="ctrl_back">◀ Назад</button>
           <button class="btn danger" id="btn_stop" onclick="setStop()" data-i18n="ctrl_stop">■ Стоп</button>
@@ -489,7 +481,7 @@ label{color:var(--text);font-weight:600}
       <div class="wiz-pane" id="wiz_p2" style="display:none">
         <div class="hint" style="margin-bottom:8px" data-i18n="wiz_low_hint">Поднимите ШИМ до минимального устойчивого вращения и нажмите «Далее» — порог сохранится в CV2 и запустится авто-калибровка. Ниже 8 % ШИМ идёт пачками импульсов.</div>
         <div style="display:flex;align-items:center;gap:10px">
-          <input type="range" id="bemf_low_slider" min="0" max="50" step="0.1" value="9" style="flex:1" oninput="onBemfLowSlider()">
+          <input type="range" id="bemf_low_slider" min="0" max="100" step="0.1" value="9" style="flex:1" oninput="onBemfLowSlider()">
           <b id="bemf_low_value" style="min-width:120px;text-align:right">9.0% · 92/1023</b>
         </div>
         <div class="hint" id="bemf_low_live" style="margin-top:6px;font-family:ui-monospace,Consolas,monospace">BEMF: —</div>
@@ -572,6 +564,14 @@ label{color:var(--text);font-weight:600}
         <button class="btn" id="mode_dc" onclick="setMode('dc')">DC</button>
       </div>
       <div class="hint" data-i18n="mode_hint">DCC — цифровое управление с рельс. DC — управление от напряжения на рельсах.</div>
+      <div class="speed-mode-row" style="margin-top:12px">
+        <label for="speed_mode" data-i18n="dcc_step_mode">DCC шаги</label>
+        <select id="speed_mode" onchange="onSpeedModeChange()">
+          <option value="14" data-i18n="dcc_step_14">14 шагов</option>
+          <option value="28" data-i18n="dcc_step_28">28 шагов</option>
+          <option value="128" selected data-i18n="dcc_step_128">128 шагов</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -1572,7 +1572,7 @@ async function wizBackFromCal(){
 }
 
 function bemfLowDutyFromSlider(){
-  var pct=clamp(byId('bemf_low_slider').value,0,50);
+  var pct=clamp(byId('bemf_low_slider').value,0,100);
   return Math.round(Number(pct)*1023/100);
 }
 function renderBemfLow(){
@@ -1640,7 +1640,7 @@ async function initBemfLow(force){
     var d=await api('/api/cv/read?index=2',{timeout:3000});
     if(d&&d.ok&&typeof d.value==='number'){
       var duty=clamp(Number(d.value)*4,0,1023);
-      byId('bemf_low_slider').value=clamp(duty*100/1023,0,50).toFixed(1);
+      byId('bemf_low_slider').value=clamp(duty*100/1023,0,100).toFixed(1);
       renderBemfLow();
     }
   }catch(e){}

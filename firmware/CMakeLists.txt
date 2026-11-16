@@ -50,7 +50,7 @@ soft_decoder_require_task("${SD_AUDIO}" "xTaskCreatePinnedToCore(mixer_task, \"a
 # The mixer cadence is MIX_BLOCK / MIX_RATE = 256 / 22050 ~= 11.6 ms; pinning
 # both macros above keeps that period (and its priority/stack) under test.
 
-soft_decoder_require_task("${SD_PROV}" "#define PROV_LISTENER_STACK  8192U" "provision listener stack")
+soft_decoder_require_task("${SD_PROV}" "#define PROV_LISTENER_STACK  24576U" "provision listener stack")
 soft_decoder_require_task("${SD_PROV}" "#define PROV_LISTENER_PRIO   4U" "provision listener priority")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

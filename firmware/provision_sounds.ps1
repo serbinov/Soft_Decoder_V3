@@ -62,6 +62,21 @@ try { $sp.Open() } catch {
 $sp.DiscardInBuffer()
 $sp.DiscardOutBuffer()
 
+# After a full internal erase the chip can remain in ROM download mode and
+# never run the app. Pulse the normal-boot reset (DTR low = GPIO0 high,
+# RTS low->high->low = EN) before asking for PROV.
+function Reset-NormalBoot {
+    try {
+        $sp.DtrEnable = $false
+        $sp.RtsEnable = $true
+        Start-Sleep -Milliseconds 150
+        $sp.RtsEnable = $false
+    } catch { }
+}
+Reset-NormalBoot
+Start-Sleep -Milliseconds 150
+$sp.DiscardInBuffer()
+
 function ReadUntil([string[]]$markers, [int]$timeoutMs) {
     $deadline = [Environment]::TickCount + $timeoutMs
     $buf = ""
@@ -85,6 +100,49 @@ function Format-Rx {
     return $t
 }
 
+# Wait for the DONE acknowledgement while echoing the device's own progress.
+# Validation/publication/metadata can take longer than the old 8 s window on a
+# slow or previously unseen external NOR; a ROM boot banner means the app
+# restarted before the commit and the upload must be reported as failed.
+function Wait-Done([int]$timeoutMs = 180000) {
+    $deadline = [Environment]::TickCount + $timeoutMs
+    $buf = ""
+    $pending = ""
+    while ([Environment]::TickCount -lt $deadline) {
+        try { $text = $sp.ReadExisting() } catch { $text = "" }
+        if ($text) {
+            $buf += $text
+            $pending += $text
+            while (($idx = $pending.IndexOf("`n")) -ge 0) {
+                $line = $pending.Substring(0, $idx).TrimEnd("`r")
+                $pending = $pending.Substring($idx + 1)
+                if ($line.StartsWith("DONE-PROGRESS")) {
+                    Write-Host ("[INFO] " + $line) -ForegroundColor Cyan
+                } elseif ($line.Length -gt 0 -and $line -notmatch "^(PROV|FW|PACK|PUT|FILE|CHUNK)-") {
+                    Write-Host ("[DEV]  " + $line) -ForegroundColor DarkGray
+                }
+            }
+        }
+        if ($buf.IndexOf("DONE-OK", [StringComparison]::Ordinal) -ge 0) {
+            $script:lastText = $buf
+            return "DONE-OK"
+        }
+        foreach ($m in @("PROV-ERR", "FW-ERR")) {
+            if ($buf.IndexOf($m, [StringComparison]::Ordinal) -ge 0) {
+                $script:lastText = $buf
+                return $m
+            }
+        }
+        if ($buf -match "ESP-ROM:esp32s3|Soft Decoder V3 boot|rst:0x") {
+            $script:lastText = $buf
+            return "REBOOT"
+        }
+        Start-Sleep -Milliseconds 2
+    }
+    $script:lastText = $buf
+    return $null
+}
+
 # 1. Send "PROV" to start provisioning in-place. The firmware's background
 #    listener accepts the command over UART0 or the native USB-Serial-JTAG
 #    port and runs the erase + format + upload flow without a reboot, so the
@@ -93,20 +151,31 @@ function Format-Rx {
 #    explicit "PROV-CONFIRM" line; "PROV-OK" follows only after that.
 Write-Host "[INFO] Asking the app to enter provisioning (PROV)..."
 $started = $false
-for ($i = 0; $i -lt 30 -and -not $started; $i++) {
+for ($i = 0; $i -lt 4 -and -not $started; $i++) {
+    if ($i -gt 0) {
+        Write-Host ("[INFO]   attempt {0}: resetting the board and retrying..." -f ($i + 1))
+        Reset-NormalBoot
+    }
+    # One PROV per boot: repeated PROV lines queued during startup are read as
+    # the confirmation and make the firmware abort before erasing anything.
+    Start-Sleep -Milliseconds 3500
     try { $sp.DiscardInBuffer(); $sp.Write("PROV`n") } catch { }
-    $r = ReadUntil @("PROV-CONFIRM?", "PROV-ERR", "FW-ERR", "PROV-ABORT") 1200
+    $r = ReadUntil @("PROV-CONFIRM?", "PROV-ERR", "FW-ERR", "PROV-ABORT") 8000
     if ($r -eq "PROV-CONFIRM?") {
         Write-Host "[INFO]   app requires confirmation -> sending PROV-CONFIRM"
         try { $sp.Write("PROV-CONFIRM`n") } catch { }
-        $r = ReadUntil @("PROV-OK", "PROV-ERR", "FW-ERR", "PROV-ABORT") 4000
+        $r = ReadUntil @("PROV-OK", "PROV-ERR", "FW-ERR", "PROV-ABORT") 6000
         if ($r -eq "PROV-OK") { $started = $true }
-        elseif ($r) {
+        elseif ($r -eq "PROV-ABORT") {
+            Write-Host ("[WARN]   attempt {0}: firmware aborted before confirmation; retrying." -f ($i + 1)) -ForegroundColor Yellow
+        } elseif ($r) {
             Write-Host ("[ERROR] Firmware rejected provisioning ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
             $sp.Close(); exit 1
         } else {
             Write-Host ("[WARN]   attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) -ForegroundColor Yellow
         }
+    } elseif ($r -eq "PROV-ABORT") {
+        Write-Host ("[WARN]   attempt {0}: unexpected PROV-ABORT; retrying." -f ($i + 1)) -ForegroundColor Yellow
     } elseif ($r) {
         Write-Host ("[ERROR] Firmware rejected provisioning ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
         $sp.Close(); exit 1
@@ -177,13 +246,18 @@ foreach ($file in $files) {
 # 4. Done. The firmware must acknowledge the finalize step; a missing ack is a
 #    failure even if every slot was already FILE-OK'd.
 try { $sp.Write("DONE`n") } catch { }
-$r = ReadUntil @("DONE-OK", "PROV-ERR", "FW-ERR") 8000
+$r = Wait-Done 180000
 if ($r -eq "DONE-OK") {
     Write-Host "[OK] Sounds uploaded, device restarting." -ForegroundColor Green
     $sp.Close()
     exit 0
 }
-if ($r) { Write-Host ("[ERROR] Firmware rejected DONE ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red }
-else { Write-Host "[ERROR] no DONE-OK acknowledgement; sound upload is not confirmed." -ForegroundColor Red }
+if ($r -eq "REBOOT") {
+    Write-Host "[ERROR] device rebooted before confirming DONE; upload is not confirmed (see [DEV] log above)." -ForegroundColor Red
+} elseif ($r) {
+    Write-Host ("[ERROR] Firmware rejected DONE ({0}): {1}" -f $r, (Format-Rx)) -ForegroundColor Red
+} else {
+    Write-Host "[ERROR] no DONE-OK acknowledgement; sound upload is not confirmed." -ForegroundColor Red
+}
 $sp.Close()
 exit 1

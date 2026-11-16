@@ -198,6 +198,46 @@ static void test_storage_format_remount_fail(void)
     TEST_ASSERT_EQUAL(ESP_FAIL, storage_format());
 }
 
+static uint32_t g_erase_done, g_erase_total;
+static void erase_progress_cb(uint32_t done, uint32_t total)
+{
+    g_erase_done = done;
+    g_erase_total = total;
+}
+
+static void test_storage_erase_chip_ok(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+    g_erase_done = g_erase_total = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, storage_erase_chip(erase_progress_cb));
+    TEST_ASSERT_EQUAL_UINT32(16u * 1024u * 1024u, g_erase_done);
+    TEST_ASSERT_EQUAL_UINT32(16u * 1024u * 1024u, g_erase_total);
+    TEST_ASSERT_FALSE(storage_is_mounted());
+    TEST_ASSERT_TRUE(mock_lfs_unregister_calls >= 1);
+    /* The chip is blank: a second erase is still allowed and idempotent. */
+    TEST_ASSERT_EQUAL(ESP_OK, storage_erase_chip(NULL));
+}
+
+static void test_storage_erase_chip_requires_maintenance(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_erase_chip(NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, storage_erase_chip(NULL));
+}
+
+static void test_storage_erase_chip_fail(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+    mock_flash_erase_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, storage_erase_chip(NULL));
+    TEST_ASSERT_FALSE(storage_is_mounted());
+}
+
 /* ---- free bytes ---- */
 
 static void test_storage_free_bytes(void)
@@ -263,6 +303,9 @@ int main(void)
     RUN_TEST(test_storage_format_ok);
     RUN_TEST(test_storage_format_lfs_fail);
     RUN_TEST(test_storage_format_remount_fail);
+    RUN_TEST(test_storage_erase_chip_ok);
+    RUN_TEST(test_storage_erase_chip_requires_maintenance);
+    RUN_TEST(test_storage_erase_chip_fail);
     RUN_TEST(test_storage_free_bytes);
     RUN_TEST(test_format_requires_drained_maintenance);
     return UNITY_END();

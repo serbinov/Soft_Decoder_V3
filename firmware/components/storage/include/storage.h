@@ -11,9 +11,16 @@ typedef enum {
     STORAGE_BACKEND_EXTERNAL_NOR = 1,
 } storage_backend_t;
 
+/* Called once per erased 64 KiB block of the external NOR. */
+typedef void (*storage_progress_cb_t)(uint32_t done, uint32_t total);
+
 esp_err_t storage_init(void);
 esp_err_t storage_mount(void);
 esp_err_t storage_format(void);
+/* Erase the entire physical external NOR (all blocks, not just the LittleFS
+ * partition) and leave it unmounted. Owner must hold maintenance and no
+ * leases. progress may be NULL. Destructive: provisioning-only. */
+esp_err_t storage_erase_chip(storage_progress_cb_t progress);
 /* Nonblocking admission leases. Hold one for the entire lifetime of every open
  * FILE or filesystem operation; never hold a mutex while waiting for audio. */
 esp_err_t storage_access_begin(void);

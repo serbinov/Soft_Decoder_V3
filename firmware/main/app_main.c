@@ -273,6 +273,9 @@ static void persistence_task(void *arg)
     if (!wdt) {
         ESP_LOGD(TAG, "Persistence worker not subscribed to TWDT");
     }
+    /* Maintenance/provisioning blocks storage for seconds or minutes. Report
+     * the first deferral (and the recovery), not one warning per 2 s tick. */
+    esp_err_t last_flush_err = ESP_OK;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(PERSISTENCE_PERIOD_MS));
         if (wdt) (void)esp_task_wdt_reset();
@@ -286,7 +289,13 @@ static void persistence_task(void *arg)
         }
         esp_err_t err = settings_pending_flush();
         if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
-            ESP_LOGW(TAG, "Settings flush deferred: %s", esp_err_to_name(err));
+            if (err != last_flush_err) {
+                ESP_LOGW(TAG, "Settings flush deferred: %s", esp_err_to_name(err));
+                last_flush_err = err;
+            }
+        } else if (last_flush_err != ESP_OK) {
+            ESP_LOGI(TAG, "Settings flush resumed");
+            last_flush_err = ESP_OK;
         }
     }
 }

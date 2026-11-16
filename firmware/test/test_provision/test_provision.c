@@ -101,6 +101,8 @@ static esp_err_t g_cal_clear_err = ESP_OK;
 static esp_err_t g_cal_save_err = ESP_OK;
 static esp_err_t g_storage_format_err = ESP_OK;
 static int g_storage_format_calls;
+static esp_err_t g_storage_erase_err = ESP_OK;
+static int g_storage_erase_calls;
 static int g_tracks_save_calls;
 static int g_cv_write_calls;
 static int g_web_busy;
@@ -384,6 +386,18 @@ esp_err_t storage_format(void)
     return g_storage_format_err;
 }
 
+esp_err_t storage_erase_chip(storage_progress_cb_t progress)
+{
+    TEST_ASSERT_EQUAL_INT(1, g_storage_maint_depth);
+    TEST_ASSERT_TRUE(g_fs_closed);
+    ++g_storage_erase_calls;
+    if (progress != NULL) {
+        progress(1U * 1024U * 1024U, 2U * 1024U * 1024U);
+        progress(2U * 1024U * 1024U, 2U * 1024U * 1024U);
+    }
+    return g_storage_erase_err;
+}
+
 /* Self-test collaborators: the listener prints the report produced here. */
 uint8_t selftest_run(selftest_report_t *report)
 {
@@ -517,6 +531,8 @@ void setUp(void)
     g_cal_save_err = ESP_OK;
     g_storage_format_err = ESP_OK;
     g_storage_format_calls = 0;
+    g_storage_erase_err = ESP_OK;
+    g_storage_erase_calls = 0;
     g_tracks_save_calls = 0;
     g_cv_write_calls = 0;
     g_adc_err = g_maintenance_err = g_wav_err = g_tracks_save_err = ESP_OK;
@@ -990,7 +1006,31 @@ static void test_provision_run_wipe_failure(void)
     TEST_ASSERT_FALSE(provision_run());
     TEST_ASSERT_TRUE(tx_has("WIPE-ERR storage"));
     TEST_ASSERT_FALSE(tx_has("DONE-OK"));
-    TEST_ASSERT_EQUAL_INT(0, mock_esp_restart_calls);
+}
+
+static void test_provision_run_wipechip(void)
+{
+    /* Full external-NOR erase: no format, no sound library, blank chip. */
+    feed("PROV-CONFIRM\nWIPECHIP\n");
+    TEST_ASSERT_TRUE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("WIPECHIP-OK"));
+    TEST_ASSERT_TRUE(tx_has("ERASE-PROGRESS 2048/2048"));
+    TEST_ASSERT_EQUAL_INT(1, g_storage_erase_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_tracks_save_calls);
+    TEST_ASSERT_TRUE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(1, mock_esp_restart_calls);
+}
+
+static void test_provision_run_wipechip_failure(void)
+{
+    g_storage_erase_err = ESP_FAIL;
+    feed("PROV-CONFIRM\nWIPECHIP\n");
+    TEST_ASSERT_FALSE(provision_run());
+    TEST_ASSERT_TRUE(tx_has("WIPECHIP-ERR storage"));
+    TEST_ASSERT_FALSE(tx_has("WIPECHIP-OK"));
+    TEST_ASSERT_FALSE(tx_has("DONE-OK"));
+    TEST_ASSERT_EQUAL_INT(0, g_storage_format_calls);
 }
 
 /* ---- provision_try / listener ---- */
@@ -1026,7 +1066,7 @@ static void test_provision_listener_start(void)
  * lease held forever. */
 static void test_provision_listener_subscribes_to_twdt(void)
 {
-    TEST_ASSERT_EQUAL_UINT32(8192U, PROV_LISTENER_STACK);
+    TEST_ASSERT_EQUAL_UINT32(24576U, PROV_LISTENER_STACK);
     TEST_ASSERT_EQUAL_UINT32(4U, PROV_LISTENER_PRIO);
 
     s_listener_wdt = false;
@@ -1656,6 +1696,8 @@ int main(void)
     RUN_TEST(test_provision_run_fw_path);
     RUN_TEST(test_provision_run_wipe);
     RUN_TEST(test_provision_run_wipe_failure);
+    RUN_TEST(test_provision_run_wipechip);
+    RUN_TEST(test_provision_run_wipechip_failure);
     RUN_TEST(test_provision_try_paths);
     RUN_TEST(test_provision_listener_start);
     RUN_TEST(test_provision_listener_subscribes_to_twdt);

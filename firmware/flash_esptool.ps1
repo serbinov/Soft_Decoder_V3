@@ -13,10 +13,12 @@
 #   flash_esptool.ps1 -Sounds         # firmware + sounds
 #   flash_esptool.ps1 -Port COM13
 #   flash_esptool.ps1 -Erase          # full chip erase first (wipes NVS)
+#   flash_esptool.ps1 -EraseOnly      # erase the whole internal flash, do not flash
 
 param(
     [switch]$Sounds,
     [switch]$Erase,
+    [switch]$EraseOnly,
     [string]$Port = "",
     [int]$Baud = 921600
 )
@@ -155,6 +157,21 @@ if ($esptool.kind -eq "exe") {
     Write-Info "esptool : $($esptool.py) -m esptool (ESP-IDF python env)"
 }
 Write-Info "Port    : $Port"
+
+if ($EraseOnly) {
+    # Production "leave both chips blank": erase bootloader, partitions, NVS and
+    # the application, then reset. No release images are needed or written.
+    $eargs = @("--chip", "esp32s3", "--port", $Port, "--baud", $Baud,
+               "--before", "default-reset", "--after", "hard-reset", "erase-flash")
+    Write-Info "Erasing the entire internal flash (no firmware will be written)..."
+    if ($esptool.kind -eq "exe") { & $esptool.path @eargs } else { & $esptool.py @("-m", "esptool") @eargs }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "internal flash erase failed (code $LASTEXITCODE)"
+        exit $LASTEXITCODE
+    }
+    Write-Ok "internal flash erased; the chip is blank"
+    exit 0
+}
 
 $files = @{
     "0x0"     = (Join-Path $fwDir "bootloader.bin")

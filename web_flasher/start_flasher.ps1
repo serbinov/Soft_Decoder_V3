@@ -107,7 +107,7 @@ function Get-RunDetails([string]$action = "") {
     if (Test-Path -LiteralPath $fwb) { $fwBytes = (Get-Item -LiteralPath $fwb).Length }
     $snd = 0; $sndBytes = 0; $wavs = @()
     $isScheme = ($action -eq "flash_scheme")
-    $isFactory = ($action -eq "factory")
+    $isFactory = ($action -eq "factory" -or $action -eq "wipe_chips")
     if ($isFactory) {
         # Factory wipe leaves no sound library.
     } elseif ($isScheme) {
@@ -169,6 +169,11 @@ function Get-ActionSpec([string]$action) {
         # Full internal-flash erase + release firmware + external NOR format.
         # Destructive: requires a confirmed action and a ready release.
         return @{ script = (Join-Path $web "factory_reset.ps1"); args = @() }
+    }
+    if ($action -eq "wipe_chips") {
+        # MAXIMUM destruction: erase the external NOR, then erase the whole
+        # internal flash and leave the board without firmware.
+        return @{ script = (Join-Path $web "wipe_chips.ps1"); args = @() }
     }
     if ($action -eq "flash_sounds" -or $action -eq "flash_scheme") {
         # Build .asp from SOUND\ (full or default-scheme only), flash firmware,
@@ -250,7 +255,7 @@ $releaseFull = [IO.Path]::GetFullPath((Join-Path $repo "release"))
 $sndFull     = if ($sndDir) { [IO.Path]::GetFullPath($sndDir) } else { $null }
 $utf8NoBom   = New-Object System.Text.UTF8Encoding($false)
 $expectedOrigin = $prefix.TrimEnd("/")
-$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "factory")
+$destructiveActions = @("flash", "flash_sounds", "flash_scheme", "factory", "wipe_chips")
 
 function Get-FormBody($ctx) {
     if (-not $ctx.Request.HasEntityBody) { return "" }

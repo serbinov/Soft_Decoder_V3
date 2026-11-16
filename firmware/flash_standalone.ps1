@@ -9,12 +9,14 @@
 #    .\flash_standalone.ps1 -FwDir "..\release\flash_download_tool" -SoundDir "..\..\SOUND"
 #    .\flash_standalone.ps1 -NoSounds
 #    .\flash_standalone.ps1 -Erase       (opt-in full internal-flash erase)
+#    .\flash_standalone.ps1 -EraseOnly   (erase internal flash, write nothing)
 # =============================================================
 param(
     [string]$FwDir = (Join-Path $PSScriptRoot "..\release\flash_download_tool"),
     [string]$SoundDir = (Join-Path $PSScriptRoot "..\..\SOUND"),
     [switch]$NoSounds,
     [switch]$Erase,
+    [switch]$EraseOnly,
     [switch]$NoErase,   # accepted for compatibility; erase is off unless -Erase
     [string]$Port = ""
 )
@@ -291,13 +293,27 @@ function Upload-Sounds($sp, [string]$dir) {
     # The firmware erases the external NOR after PROV, so it first asks for a
     # confirmation (PROV-CONFIRM?) that we must answer with PROV-CONFIRM.
     Write-Info "asking the app to enter provisioning (PROV)..."
+    # After ROM-mode flashing the chip may still be strapped into download
+    # mode, and repeated PROV lines during boot would be read as the
+    # confirmation. Reset once, wait for the listener, send one PROV per try.
+    $reset = {
+        try {
+            $sp.DtrEnable = $false
+            $sp.RtsEnable = $true
+            Start-Sleep -Milliseconds 150
+            $sp.RtsEnable = $false
+        } catch { }
+    }
+    & $reset
+    Start-Sleep -Milliseconds 3500
     $started = $false
-    for ($i = 0; $i -lt 30 -and -not $started; $i++) {
+    for ($i = 0; $i -lt 4 -and -not $started; $i++) {
+        if ($i -gt 0) { & $reset; Start-Sleep -Milliseconds 3500 }
         try { $sp.DiscardInBuffer(); $sp.Write("PROV`n") } catch { }
-        if (Read-Text-Until $sp "PROV-CONFIRM?" 1200) {
+        if (Read-Text-Until $sp "PROV-CONFIRM?" 8000) {
             Write-Info "  app requires confirmation -> sending PROV-CONFIRM"
             try { $sp.Write("PROV-CONFIRM`n") } catch { }
-            if (Read-Text-Until $sp "PROV-OK" 4000) { $started = $true }
+            if (Read-Text-Until $sp "PROV-OK" 6000) { $started = $true }
             else { Write-Warn ("  attempt {0}: no PROV-OK (got: {1})" -f ($i + 1), (Format-Rx)) }
         } else {
             Write-Info ("  attempt {0}: no answer yet (got: {1})" -f ($i + 1), (Format-Rx))
@@ -355,8 +371,10 @@ function Upload-Sounds($sp, [string]$dir) {
     Write-Info "finalizing (DONE)..."
     try { $sp.Write("DONE`n") } catch { }
     # On DONE the firmware acks and immediately restarts; the ack can be lost to
-    # the USB re-enumeration, which is not an error (every slot was already acked).
-    if (Read-Text-Until $sp "DONE-OK" 8000) { Write-Ok "sounds uploaded, device restarting" }
+    # the USB re-enumeration. Validation/metadata on a slow external NOR can
+    # exceed the old 8 s window, so wait long enough and keep the older
+    # "not seen is not fatal" behaviour of this ROM-flasher fallback.
+    if (Read-Text-Until $sp "DONE-OK" 180000) { Write-Ok "sounds uploaded, device restarting" }
     else { Write-Info "sounds uploaded; device is restarting (DONE-OK not seen)" }
 }
 
@@ -405,17 +423,19 @@ if (-not $Port) { $Port = Find-EspPort }
 if (-not $Port) { Write-Err "ESP32-S3 (VID_303A) not found. Specify -Port COMx or check USB."; exit 1 }
 Write-Info ("Port: {0}" -f $Port)
 
-if (-not (Test-Path $FwDir)) { Write-Err "firmware folder not found: $FwDir"; exit 1 }
-$bootloader = Join-Path $FwDir "bootloader.bin"
-$partitions = Join-Path $FwDir "partitions.bin"
-$ota        = Join-Path $FwDir "ota_data_initial.bin"
-$firmware   = Join-Path $FwDir "firmware.bin"
-foreach ($f in @($bootloader, $partitions, $ota, $firmware)) {
-    if (-not (Test-Path $f)) { Write-Err "missing file: $f"; exit 1 }
-}
-try { Test-ReleaseImages $FwDir } catch {
-    Write-Err $_.Exception.Message
-    exit 1
+if (-not $EraseOnly) {
+    if (-not (Test-Path $FwDir)) { Write-Err "firmware folder not found: $FwDir"; exit 1 }
+    $bootloader = Join-Path $FwDir "bootloader.bin"
+    $partitions = Join-Path $FwDir "partitions.bin"
+    $ota        = Join-Path $FwDir "ota_data_initial.bin"
+    $firmware   = Join-Path $FwDir "firmware.bin"
+    foreach ($f in @($bootloader, $partitions, $ota, $firmware)) {
+        if (-not (Test-Path $f)) { Write-Err "missing file: $f"; exit 1 }
+    }
+    try { Test-ReleaseImages $FwDir } catch {
+        Write-Err $_.Exception.Message
+        exit 1
+    }
 }
 
 $sp = Open-Serial $Port 115200
@@ -458,9 +478,16 @@ try {
     Attach-Spi $sp
     Write-Ok "SPI flash attached"
 
-    if ($Erase) {
+    if ($Erase -or $EraseOnly) {
         # Explicitly requested: a failed erase must stop the flash, not be hidden.
         Erase-Chip $sp
+    }
+    if ($EraseOnly) {
+        # Leave the chip blank: reset out of the ROM download mode, write nothing.
+        Send-Cmd $sp 0x04 ([byte[]](0,0,0,0)) 0 5000 "FLASH_END" | Out-Null
+        Write-Ok "internal flash erased; the chip is blank"
+        try { $sp.Close() } catch { }
+        exit 0
     }
 
     # bootloader/partitions offsets are fixed by ESP-IDF; the ota_data and app

@@ -1337,6 +1337,21 @@ esp_err_t esp_flash_init(esp_flash_t *chip)
     return (esp_err_t)mock_flash_init_err;
 }
 
+esp_err_t esp_flash_read_id(esp_flash_t *chip, uint32_t *out_id)
+{
+    (void)chip;
+    if (out_id != NULL) {
+        *out_id = 0xBA4018u;
+    }
+    return ESP_OK;
+}
+
+esp_err_t spi_bus_remove_flash_device(esp_flash_t *chip)
+{
+    (void)chip;
+    return ESP_OK;
+}
+
 esp_err_t esp_flash_get_size(esp_flash_t *chip, uint32_t *out_size)
 {
     (void)chip;

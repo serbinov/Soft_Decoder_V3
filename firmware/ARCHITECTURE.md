@@ -107,7 +107,7 @@ DCC-декодер для модели железной дороги с:
 | MCPWM unit 0, timer 1 (op A) | AUX7 | 20 кГц |
 | I2S0 (TX, master) | Аудио → MAX98357A | 16 бит, моно, 22050 Гц |
 | ADC1 | BEMF1/BEMF2/RAIL_SENSE | 12 бит, atten 12 дБ (0…~3.1 В) |
-| SPI2_HOST | Внешняя NOR W25Q128 | 40 МГц, Fast Read |
+| SPI2_HOST | Внешняя NOR (W25Q128, ZD25Q128C и др.) | 40 МГц Fast Read, авто-fallback |
 | Wi-Fi radio | SoftAP | канал 1/6/11, WPA2/Open |
 | GPIO ISR (level 3) | DCC-вход (GPIO9) | ANYEDGE, сервис ставится на CPU1 |
 
@@ -137,7 +137,12 @@ DCC-декодер для модели железной дороги с:
 
 ### 3.2 Внешняя NOR 16 МБ
 
-- Микросхема W25Q128 (16 МБ) на SPI2 (GPIO13/16/15/14), 40 МГц.
+- Микросхема на SPI2 (GPIO13/16/15/14), обычно W25Q128 или ZD25Q128C
+  (16 МБ, взаимозаменяемые SPI-NOR). Драйвер определяет JEDEC ID; для
+  неизвестных производителей ESP-IDF использует generic-драйвер.
+- Запуск перебирает профили 40 МГц Fast Read → 40/20 МГц Slow Read →
+  10 МГц Slow Read: если конкретный чип не держит быстрый режим, шина
+  понижается, а не отключает звук. JEDEC ID и объём пишутся в лог.
 - Регистрируется как раздел с меткой `ext_userdata` на весь объём
   (`components/storage/src/storage.c`, `EXT_PARTITION_SIZE = 16 МБ`).
 - Форматируется в **LittleFS** и монтируется в `/userdata`.
@@ -409,7 +414,7 @@ firmware/
   `/userdata`, форматирование, бенчмарк, `storage_get_free_bytes()`. Внутреннего
   fallback нет: без внешней NOR `storage_mount()` возвращает ошибку, но не
   фатален (`STORAGE_BACKEND_NONE`), звук просто отключён.
-- API: `storage_init/mount/format`, `storage_get_backend`, `storage_get_free_bytes`.
+- API: `storage_init/mount/format`, `storage_erase_chip`, `storage_get_backend`, `storage_get_free_bytes`.
 - Зависимости: `spi_flash esp_partition esp_littlefs vfs esp_driver_spi nvs_flash pinmap esp_timer`.
 - Задачи: нет.
 
@@ -943,6 +948,14 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
   только после `DONE`, WAV validation и успешной записи metadata.
   Скрипты: `provision_sounds.ps1` (PUT, до 20 слотов), `provision_pack.ps1`
   (PACK, полный `.asp`), обёртка `flash_firmware_and_sounds.bat`.
+- **Полное стирание чипов**: команда `WIPECHIP` (перед проверкой `WIPE`, у них
+  общий префикс) вызывает `storage_erase_chip()` и стирает **все** блоки
+  физической внешней NOR по 64 КиБ с `ERASE-PROGRESS` и кормлением task
+  watchdog, затем LittleFS остаётся unmounted. Хост после `WIPECHIP-OK`
+  стирает внутреннюю flash (`flash_esptool.ps1 -EraseOnly` /
+  `flash_standalone.ps1 -EraseOnly`) и ничего не прошивает: на плате не
+  остаётся ни загрузчика, ни NVS, ни приложения. Скрипт панели —
+  `web_flasher\wipe_chips.ps1`.
 - **OTA**: `POST /api/ota/update`. Поддерживается составной контейнер
   (`AURAOTA2`: заголовок + прошивка + список файлов) — прошивка и звуки одним
   файлом (`build_ota_with_sounds.ps1`). Размер одного аплоада ≤ 8 МБ.

@@ -21,6 +21,8 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
+static void send_line(const char *line);
+
 #include "settings.h"
 #include "storage.h"
 #include "motor.h"
@@ -68,10 +70,14 @@ static const esp_partition_t *s_pending_boot;
 
 /* Task budget contract (G-RTOS-8). The listener also owns the provisioning
  * session; it is subscribed to the task watchdog so a hung transfer reaches a
- * controlled panic/reset instead of holding the maintenance lock forever. */
-#define PROV_LISTENER_STACK  8192U
+ * controlled panic/reset instead of holding the maintenance lock forever.
+ * The session keeps a settings_track_t[SETTINGS_MAX_TRACKS] (about 4 KiB) and
+ * then writes the manifest through LittleFS/NVS; 8 KiB overflowed during the
+ * metadata phase of a 303-file pack (observed on hardware, stack overflow in
+ * acquire_spi_bus_lock). Keep enough headroom for the whole commit path. */
+#define PROV_LISTENER_STACK  24576U
 #define PROV_LISTENER_PRIO   4U
-_Static_assert(PROV_LISTENER_STACK >= 8192U, "provision listener stack regression");
+_Static_assert(PROV_LISTENER_STACK >= 24576U, "provision listener stack regression");
 _Static_assert(PROV_LISTENER_PRIO == 4U, "provision listener priority drift");
 
 #ifdef _WIN32
@@ -301,10 +307,19 @@ static bool install_publish(void)
             break;
         }
         ++published;
+        /* Renames commit LittleFS metadata one file at a time; on a slow NOR
+         * this is the longest silent part of DONE. Report it as it happens. */
+        if (((published % 16U) == 0U) || published == s_stage_count) {
+            char progress[48];
+            snprintf(progress, sizeof(progress), "DONE-PROGRESS publish %u/%u",
+                     (unsigned)published, (unsigned)s_stage_count);
+            send_line(progress);
+        }
     }
     if (published != s_stage_count) {
         /* Restore the pre-publication state: the caller rolls back staging. */
         for (size_t i = 0; i < published; ++i) {
+            prov_wdt_feed();
             install_file_path(dst, sizeof(dst), PROV_AUDIO_DIR, s_stage_names[i]);
             (void)install_remove_file(dst);
         }
@@ -1333,6 +1348,19 @@ static esp_err_t provision_pack(const char *cmd)
     return err;
 }
 
+/* Progress tick for the full external-NOR erase: keep the provisioning task
+ * watchdog alive and tell the host how much of the chip is already blank. */
+static void erase_progress(uint32_t done, uint32_t total)
+{
+    prov_wdt_feed();
+    if (done == total || (done % (2U * 1024U * 1024U)) == 0U) {
+        char line[48];
+        snprintf(line, sizeof(line), "ERASE-PROGRESS %lu/%lu",
+                 (unsigned long)(done / 1024U), (unsigned long)(total / 1024U));
+        send_line(line);
+    }
+}
+
 /* Returns true only when the session completed and the restart was issued. */
 static bool provision_transfer(bool *maintenance_started)
 {
@@ -1388,7 +1416,9 @@ static bool provision_transfer(bool *maintenance_started)
     uart_flush_input(UART_NUM_0);
     (void)uart_set_baudrate(UART_NUM_0, PROV_BAUD);
 
-    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    /* Single provisioning session at a time: keep the ~4 KiB track table out of
+     * the task stack, which also has to host the manifest/LittleFS commit. */
+    static settings_track_t tracks[SETTINGS_MAX_TRACKS];
     memset(tracks, 0, sizeof(tracks));
     size_t tcount = 0;
 
@@ -1417,6 +1447,23 @@ static bool provision_transfer(bool *maintenance_started)
             }
             send_line("FW-DONE");
             continue;
+        }
+        if (strncmp(cmd, "WIPECHIP", 8) == 0) {
+            /* Production "erase both chips": all external NOR blocks become
+             * blank and stay unmounted. The host erases the internal flash
+             * immediately afterwards, so the decoder ends with no firmware,
+             * NVS or sound library at all. Checked before WIPE because both
+             * commands share the "WIPE" prefix. */
+            esp_err_t cerr = storage_erase_chip(erase_progress);
+            if (cerr != ESP_OK) {
+                ESP_LOGE(TAG, "provision: chip erase failed (%s)", esp_err_to_name(cerr));
+                send_line("WIPECHIP-ERR storage");
+                return false;
+            }
+            send_line("WIPECHIP-OK");
+            /* Leave the loop: the common tail clears the install marker,
+             * sends DONE-OK and restarts. The external FS stays unmounted. */
+            break;
         }
         if (strncmp(cmd, "WIPE", 4) == 0) {
             /* Factory wipe over the already-confirmed provisioning session:
@@ -1538,8 +1585,12 @@ static bool provision_transfer(bool *maintenance_started)
     storage_maintenance_end();
     s_install_storage_held = false;
 
+    if (s_stage_count > 0U) {
+        send_line("DONE-PROGRESS validate");
+    }
     for (size_t i = 0; i < s_stage_count; ++i) {
         char path[192];
+        prov_wdt_feed();
         snprintf(path, sizeof(path), "%s/%s", PROV_STAGE_DIR, s_stage_names[i]);
         /* The listener runs in-place, so web maintenance has already inhibited
          * playback. Inspection is read-only and allowed while inhibited;
@@ -1548,10 +1599,22 @@ static bool provision_transfer(bool *maintenance_started)
             send_line("PROV-ERR wav");
             return false;
         }
+        /* Long packs on a slow NOR used to keep the device silent for the whole
+         * validation phase; a periodic line keeps the host from treating a
+         * live device as hung (and it feeds the task watchdog as well). */
+        if (((i + 1U) % 16U) == 0U || (i + 1U) == s_stage_count) {
+            char progress[48];
+            snprintf(progress, sizeof(progress), "DONE-PROGRESS wav %u/%u",
+                     (unsigned)(i + 1U), (unsigned)s_stage_count);
+            send_line(progress);
+        }
     }
 
     /* Publish only after every payload validated. An interruption here leaves
      * the marker set, so the next boot/formats the partial library away. */
+    if (s_stage_count > 0U) {
+        send_line("DONE-PROGRESS publish");
+    }
     if (s_stage_count > 0U && !install_publish()) {
         send_line("PROV-ERR publish");
         return false;
@@ -1559,6 +1622,7 @@ static bool provision_transfer(bool *maintenance_started)
 
     if (s_install_formatted) {
         prov_wdt_feed();
+        send_line("DONE-PROGRESS metadata");
         err = settings_tracks_save(tracks, tcount);
         prov_wdt_feed();
         if (err != ESP_OK) {

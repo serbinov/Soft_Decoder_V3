@@ -10,6 +10,9 @@
 #include <unistd.h>
 
 #include "audio.h"
+#if defined(ESP_PLATFORM)
+#include "esp_app_desc.h"
+#endif
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
@@ -209,6 +212,19 @@ esp_err_t ota_update_post(httpd_req_t *req)
         free(buf);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota end failed");
     }
+
+    esp_app_desc_t app_desc;
+    err = esp_ota_get_partition_description(update, &app_desc);
+    if (err != ESP_OK || strcmp(app_desc.project_name, "soft_decoder_v3") != 0) {
+        ESP_LOGE(TAG_OTA, "OTA: wrong application project '%s' (%s); boot unchanged",
+                 err == ESP_OK ? app_desc.project_name : "?", esp_err_to_name(err));
+        web_transfer_progress_end();
+        free(st);
+        free(buf);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "wrong application project; boot unchanged");
+    }
+
     uint32_t files_ok = 0;
     wav_tx_t *tx = n_files > 0U ? calloc(1, sizeof(*tx)) : NULL;
     if (n_files > 0U && tx == NULL) {

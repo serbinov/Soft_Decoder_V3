@@ -11,6 +11,14 @@
 
 ## Релизы
 
+### 2026-11-24 — v0.30 — Защита OTA от платформенных изменений
+
+- `main/platform_compat.h` (layout v1) + boot-time проверка `otadata/ota_0/ota_1`; при несовпадении мотор inhibited, OTA не подтверждается, веб доступен для диагностики, требуется USB.
+- `tools/ota_compat.json` + `tools/check_ota_compat.py` + `test/test_ota_compat.py`; CI печатает `USB-REQUIRED:` при дрейфе partitions/sdkconfig/security/flash.
+- OTA-образ проверяется по `esp_app_desc_t.project_name == soft_decoder_v3`; чужой образ отвергается, boot не меняется.
+- `release_artifacts` manifest: `layout_version`, `slot_size`, `bootloader_max`, `usb_required`; verify проверяет размеры app/bootloader.
+- Документ `docs/OTA_COMPATIBILITY.md` с политикой USB-required и чек-листом.
+
 ### 2026-11-24 — v0.29 — Безопасность приводов, boot-safe и web dead-man
 
 - Boot-safe: hook 2-й ступени загрузчика (`bootloader_components/board_boot_safe`) и `board_boot_safe()` первым действием `app_main` прижимают IN1/IN2, AUX, SD_MODE, I2S и ACK к 0 сразу после ROM; пины flash/PSRAM, USB, UART0 и внешней NOR не затрагиваются. Соответствие маске и `pinmap.h` проверяет `test/test_boot_safe_pins.py`.
@@ -924,6 +932,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.30) — feat(ota): platform compatibility guard, image validation and layout contract
 - 2026-11-24 (v0.29) — ci: suppress cppcheck false positives and update artifact action
 - 2026-11-24 (v0.29) — docs(release): finalize 0.29 sizes, notes and rebuilt artifacts
 - 2026-11-24 (v0.29) — fix: close remaining review items (cppcheck, S30 API, pre-init logs, CI actions)

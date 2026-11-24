@@ -293,8 +293,12 @@ def publish(args):
     expected = {offset: source for offset, source, _ in FLASH_FILES.values()}
     actual = {int(offset, 0): source.replace("\\", "/") for offset, source in plan["flash_files"].items()}
     require(actual == expected, "Generated offsets/files differ from web_flasher")
+    compat = json.loads(Path(__file__).with_name("ota_compat.json").read_text(encoding="utf-8"))
     payloads, manifest = {}, {"schema": 1, "version": version, "chip": "esp32s3",
-                              "flash_size": FLASH_SIZE, "files": []}
+                              "flash_size": FLASH_SIZE,
+                              "layout_version": compat["layout_version"],
+                              "slot_size": SLOT_SIZE, "bootloader_max": 0x8000,
+                              "usb_required": False, "files": []}
     for name, (offset, source, role) in FLASH_FILES.items():
         info = inspect(build / source)
         require(info["role"] == role, f"Wrong role for {source}")
@@ -384,6 +388,8 @@ def verify(args):
     manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
     require(manifest["schema"] == 1, "Unsupported release manifest")
     require(manifest["chip"] == "esp32s3" and manifest["flash_size"] == FLASH_SIZE, "Wrong release target")
+    for key in ("layout_version", "slot_size", "bootloader_max", "usb_required"):
+        require(key in manifest, f"Release manifest is missing {key}")
     errors, seen = [], set()
     expected = {record["path"]: record for record in manifest["files"]}
     require(len(expected) == len(manifest["files"]), "Duplicate manifest paths")
@@ -417,6 +423,10 @@ def verify(args):
             info = parse(path)
             if info is not None:
                 require(info["role"] == record["role"], "manifest role mismatch")
+                if info["role"] == "application":
+                    require(info["size"] <= manifest["slot_size"], "Application exceeds the OTA slot")
+                elif info["role"] == "bootloader":
+                    require(info["size"] <= manifest["bootloader_max"], "Bootloader exceeds bootloader_max")
                 if info.get("legacy"):
                     print(f"WARNING: {relative} uses legacy AURAPW01 encryption", file=sys.stderr)
                 if info["role"] in ("application", "AURAOTA2"):

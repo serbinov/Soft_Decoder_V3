@@ -5,6 +5,9 @@
 #include <sys/stat.h>
 
 #include "driver/gpio.h"
+#if defined(ESP_PLATFORM)
+#include "esp_partition.h"
+#endif
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -22,6 +25,7 @@
 #include "default_scheme_data.h"
 #include "motor.h"
 #include "pinmap.h"
+#include "platform_compat.h"
 #include "provision.h"
 #include "settings.h"
 #include "sound.h"
@@ -56,6 +60,32 @@ static bool s_function_cleanup_requested;
  * Motion stays inhibited until a clean stop (DCC speed 0) or a power cycle. */
 static bool s_brownout_latched;
 static bool s_brownout_block_logged;
+static bool s_layout_ok = true;
+
+static bool platform_layout_ok(void)
+{
+#if defined(ESP_PLATFORM)
+    const esp_partition_t *od = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, NULL);
+    const esp_partition_t *a0 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
+    const esp_partition_t *a1 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
+    bool ok = od != NULL && a0 != NULL && a1 != NULL &&
+              od->address == PLATFORM_OTADATA_OFFSET && od->size == PLATFORM_OTADATA_SIZE &&
+              a0->address == PLATFORM_OTA_0_OFFSET && a0->size == PLATFORM_OTA_SLOT_SIZE &&
+              a1->address == PLATFORM_OTA_1_OFFSET && a1->size == PLATFORM_OTA_SLOT_SIZE;
+    if (!ok) {
+        ESP_LOGE("ota_compat", "platform layout mismatch: expected otadata=0x%lx/0x%lx ota0=0x%lx/0x%lx ota1=0x%lx/0x%lx",
+                 (unsigned long)PLATFORM_OTADATA_OFFSET, (unsigned long)PLATFORM_OTADATA_SIZE,
+                 (unsigned long)PLATFORM_OTA_0_OFFSET, (unsigned long)PLATFORM_OTA_SLOT_SIZE,
+                 (unsigned long)PLATFORM_OTA_1_OFFSET, (unsigned long)PLATFORM_OTA_SLOT_SIZE);
+    }
+    return ok;
+#else
+    return true;  /* host tests use stubs */
+#endif
+}
 
 static void update_decoder_address(void)
 {
@@ -612,6 +642,10 @@ void app_main(void)
         ESP_LOGE(TAG, "Pin map validation failed: motion inhibited");
         (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
     }
+    s_layout_ok = platform_layout_ok();
+    if (!s_layout_ok) {
+        ESP_LOGE(TAG, "OTA platform mismatch: motion inhibited, OTA will not be confirmed; USB update required");
+    }
     ESP_ERROR_CHECK(storage_init());
     /* Storage is optional: without the external W25Q128 (or if its LittleFS
      * fails to mount) the decoder must keep running with sound disabled, so a
@@ -641,6 +675,9 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(motor_init());
+    if (!s_layout_ok) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+    }
     if (s_brownout_latched) {
         (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
     }
@@ -731,11 +768,16 @@ void app_main(void)
      * watchdog reboots it), the previous image is restored automatically. On a
      * plain USB flash the state is not PENDING_VERIFY and the call is a no-op. */
     {
-        esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
-        if (ota_err == ESP_OK) {
-            ESP_LOGI(TAG, "OTA image confirmed");
-        } else if (ota_err != ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
-            ESP_LOGW(TAG, "OTA confirm failed: %s", esp_err_to_name(ota_err));
+        if (!s_layout_ok) {
+            ESP_LOGE(TAG, "OTA not confirmed: platform layout mismatch (USB update required)");
+            web_log_event("OTA", "layout mismatch: USB update required");
+        } else {
+            esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
+            if (ota_err == ESP_OK) {
+                ESP_LOGI(TAG, "OTA image confirmed");
+            } else if (ota_err != ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+                ESP_LOGW(TAG, "OTA confirm failed: %s", esp_err_to_name(ota_err));
+            }
         }
     }
 

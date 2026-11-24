@@ -95,6 +95,24 @@ int web_mock_fclose(FILE *f)
     return mock_ota_fclose_fail ? -1 : rc;
 }
 
+/* OTA application descriptor: report the expected project by default. Tests
+ * can overwrite mock_ota_project_name to simulate an image built for another
+ * application. */
+char mock_ota_project_name[32] = "soft_decoder_v3";
+
+esp_err_t esp_ota_get_partition_description(const esp_partition_t *partition,
+                                            esp_app_desc_t *app_desc)
+{
+    (void)partition;
+    if (app_desc == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(app_desc, 0, sizeof(*app_desc));
+    snprintf(app_desc->project_name, sizeof(app_desc->project_name), "%s",
+             mock_ota_project_name);
+    return ESP_OK;
+}
+
 /* ====================================================================== */
 /* esp_http_server                                                         */
 /* ====================================================================== */
@@ -1907,6 +1925,8 @@ void mock_web_reset(void)
     mock_ota_fwrite_fail = 0;
     mock_ota_fflush_fail = 0;
     mock_ota_fclose_fail = 0;
+    snprintf(mock_ota_project_name, sizeof(mock_ota_project_name), "%s",
+             "soft_decoder_v3");
     mock_queue_send_fail = 0;
     mock_queue_send_fail_after = -1;
     mock_queue_send_calls = 0;

@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "layout_version": 1,
+  "flash": {
+    "size": "4MB",
+    "mode": "dio",
+    "freq": "80m"
+  },
+  "spiram_mode": "quad",
+  "secure_boot": false,
+  "flash_encryption": false,
+  "bootloader_offset": "0x0",
+  "bootloader_max": "0x8000",
+  "partition_table_offset": "0x8000",
+  "rollback_enable": true,
+  "app_min_free_percent": 15,
+  "partitions": [
+    {
+      "name": "nvs",
+      "type": 1,
+      "subtype": 2,
+      "offset": "0x9000",
+      "size": "0x10000"
+    },
+    {
+      "name": "phy_init",
+      "type": 1,
+      "subtype": 1,
+      "offset": "0x19000",
+      "size": "0x1000"
+    },
+    {
+      "name": "otadata",
+      "type": 1,
+      "subtype": 0,
+      "offset": "0x1a000",
+      "size": "0x2000"
+    },
+    {
+      "name": "ota_0",
+      "type": 0,
+      "subtype": 16,
+      "offset": "0x20000",
+      "size": "0x1e0000"
+    },
+    {
+      "name": "ota_1",
+      "type": 0,
+      "subtype": 17,
+      "offset": "0x200000",
+      "size": "0x1e0000"
+    },
+    {
+      "name": "coredump",
+      "type": 1,
+      "subtype": 3,
+      "offset": "0x3e0000",
+      "size": "0x20000"
+    }
+  ]
+}

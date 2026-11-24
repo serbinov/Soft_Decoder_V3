@@ -37,6 +37,14 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 
+/* Host stand-in for ESP-IDF's esp_app_desc.h, which the stub headers do not
+ * provide; web_stubs.c fills in the descriptor from mock_ota_project_name. */
+typedef struct {
+    char project_name[32];
+} esp_app_desc_t;
+esp_err_t esp_ota_get_partition_description(const esp_partition_t *partition,
+                                            esp_app_desc_t *app_desc);
+
 /* SDK 6 values used by the DHCP fault scripts when host headers omit them. */
 #ifndef ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED
 #define ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED 0x5004
@@ -4018,6 +4026,26 @@ static void test_ota_plain_success_and_failures(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"boot_selection_uncertain\":true"));
 }
 
+/* A structurally valid image whose application descriptor names another
+ * project must be rejected after esp_ota_end without touching the boot
+ * partition. */
+static void test_ota_wrong_project_rejected(void)
+{
+    uint8_t body[64];
+    memset(body, 0x42, sizeof(body));
+    body[0] = 0xE9;
+    httpd_req_t req = make_req(sizeof(body));
+    set_body(body, sizeof(body));
+    snprintf(mock_ota_project_name, sizeof(mock_ota_project_name), "other_app");
+    unsigned boot_calls = test_boot_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, ota_update_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_STRING("wrong application project; boot unchanged",
+                             mock_resp_send_err_msg);
+    TEST_ASSERT_EQUAL_UINT(boot_calls, test_boot_calls);
+    TEST_ASSERT_FALSE(s_transfer_reboot);
+}
+
 static uint8_t ota_combined[4096];
 
 static void test_ota_combined_success(void)
@@ -6316,6 +6344,7 @@ int main(void)
     RUN_TEST(test_ota_stream_read);
     RUN_TEST(test_ota_guards);
     RUN_TEST(test_ota_plain_success_and_failures);
+    RUN_TEST(test_ota_wrong_project_rejected);
     RUN_TEST(test_ota_combined_success);
     RUN_TEST(test_ota_combined_invalid_wav);
     RUN_TEST(test_ota_combined_auto_slot_and_label);

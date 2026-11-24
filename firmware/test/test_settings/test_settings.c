@@ -929,8 +929,9 @@ static void test_settings_load_error_paths(void)
 
     mock_nvs_get_u8_err = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, settings_load(&cfg));
-    mock_nvs_get_u8_err = ESP_ERR_NVS_INVALID_LENGTH;
-    TEST_ASSERT_EQUAL(ESP_ERR_NVS_INVALID_LENGTH, settings_load(&cfg));
+    mock_nvs_get_u8_err = ESP_ERR_NVS_INVALID_LENGTH; /* unusable key -> default */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(1, cfg.wifi_mode);
     mock_nvs_get_u8_err = ESP_ERR_NVS_NOT_FOUND; /* defaults are valid */
     TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
     TEST_ASSERT_EQUAL_UINT8(1, cfg.wifi_mode);
@@ -1440,10 +1441,10 @@ static void test_rev_s22_power_cut_during_legacy_migration(void)
     uint32_t crc = cv_crc32(legacy, sizeof(legacy));
     TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u32(s_h, "cv_crc", crc));
     g_set_error = ESP_FAIL;
-    TEST_ASSERT_EQUAL(ESP_FAIL, settings_init());
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init()); /* REV-S29: init continues in RAM mode */
     settings_flush_status_t state;
     settings_flush_status(&state);
-    TEST_ASSERT_FALSE(state.ready);
+    TEST_ASSERT_TRUE(state.ready); /* usable from RAM though the blob was not committed */
     TEST_ASSERT_TRUE(state.cv_pending);
     uint8_t unchanged[sizeof(legacy)];
     size_t len = sizeof(unchanged);

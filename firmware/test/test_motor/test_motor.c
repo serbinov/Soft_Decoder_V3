@@ -678,7 +678,11 @@ static void test_reverse_uses_other_channel(void)
     g_cv[4] = 0;
     tick_speed(50, true, 1);
     TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_0] > 0U);
+    /* The bridge coasts for MOTOR_REVERSE_DEAD_TICKS before reversing. */
     tick_speed(50, false, 2);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_1]);
+    tick_speed(50, false, 10);
     TEST_ASSERT_EQUAL_UINT32(0, mock_ledc_duty[LEDC_CHANNEL_0]);
     TEST_ASSERT_TRUE(mock_ledc_duty[LEDC_CHANNEL_1] > 0U);
 }
@@ -1047,14 +1051,16 @@ static void test_adc_dump_failure_is_reported(void)
     TEST_ASSERT_EQUAL_UINT16(0, b1);
 }
 
-static void test_heartbeat_updates_before_control_mutex(void)
+static void test_heartbeat_not_updated_when_control_mutex_busy(void)
 {
     int64_t before = motor_last_tick_us();
     mock_timer_now_us += 50000;
     mock_sem_take_fail = 1;
     motor_tick();
     mock_sem_take_fail = 0;
-    TEST_ASSERT_TRUE(motor_last_tick_us() > before);
+    /* A failed control-mutex take must leave the watchdog timestamp stale
+     * so the safety task can still detect a stalled motor loop. */
+    TEST_ASSERT_EQUAL_INT64(before, motor_last_tick_us());
 }
 
 static void test_bemf_toggle_resets_tracking(void)
@@ -1625,7 +1631,7 @@ int main(void)
     RUN_TEST(test_bemf_check_inhibited);
     RUN_TEST(test_bemf_diagnostics_and_base_info);
     RUN_TEST(test_adc_dump_failure_is_reported);
-    RUN_TEST(test_heartbeat_updates_before_control_mutex);
+    RUN_TEST(test_heartbeat_not_updated_when_control_mutex_busy);
     RUN_TEST(test_bemf_toggle_resets_tracking);
     RUN_TEST(test_motor_task_runs_one_iteration);
     RUN_TEST(test_motor_stop_helper);

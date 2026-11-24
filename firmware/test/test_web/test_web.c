@@ -1610,6 +1610,57 @@ static void test_control_source_post_errors(void)
     mock_cv_write_ret = 0;
 }
 
+static void test_web_deadman_stops_motor_without_heartbeat(void)
+{
+    s_cfg.control_source = 1;            /* web owns control */
+    mock_timer_now_us = 1000000;
+    mock_motor_set_speed_calls = 0;
+    web_control_motion_note(50, true);
+
+    mock_timer_now_us += 5000000;        /* 6 s: inside the 10 s grace */
+    TEST_ASSERT_FALSE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(0, mock_motor_set_speed_calls);
+
+    mock_timer_now_us += 6000000;        /* 12 s since the last motion note */
+    TEST_ASSERT_TRUE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(0, mock_motor_set_speed_value);
+
+    /* One-shot: a second tick must not issue another stop. */
+    TEST_ASSERT_FALSE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
+}
+
+static void test_web_deadman_heartbeat_postpones_stop(void)
+{
+    s_cfg.control_source = 1;
+    mock_timer_now_us = 1000000;
+    mock_motor_set_speed_calls = 0;
+    web_control_motion_note(50, true);
+
+    mock_timer_now_us += 9000000;        /* 9 s */
+    web_control_heartbeat();             /* /api/status poll */
+    mock_timer_now_us += 9000000;        /* 9 s since heartbeat */
+    TEST_ASSERT_FALSE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(0, mock_motor_set_speed_calls);
+
+    mock_timer_now_us += 2000000;        /* 11 s since heartbeat */
+    TEST_ASSERT_TRUE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
+}
+
+static void test_web_deadman_inactive_in_rails_mode(void)
+{
+    s_cfg.control_source = 0;            /* DCC owns control */
+    mock_timer_now_us = 1000000;
+    mock_motor_set_speed_calls = 0;
+    web_control_motion_note(50, true);
+
+    mock_timer_now_us += 20000000;       /* 20 s */
+    TEST_ASSERT_FALSE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(0, mock_motor_set_speed_calls);
+}
+
 static void test_mode_get(void)
 {
     httpd_req_t req = make_req(0);
@@ -6159,6 +6210,9 @@ int main(void)
     RUN_TEST(test_control_source_get);
     RUN_TEST(test_control_source_post);
     RUN_TEST(test_control_source_post_errors);
+    RUN_TEST(test_web_deadman_stops_motor_without_heartbeat);
+    RUN_TEST(test_web_deadman_heartbeat_postpones_stop);
+    RUN_TEST(test_web_deadman_inactive_in_rails_mode);
     RUN_TEST(test_mode_get);
     RUN_TEST(test_mode_post);
     RUN_TEST(test_bemf_cal_get);

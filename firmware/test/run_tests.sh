@@ -117,6 +117,56 @@ for suite in "${SUITES[@]}"; do
     fi
 done
 
+# --- non-C suites: discover Node and Python independently ------------------
+# Missing tools always make the run incomplete: never print "ALL TEST SUITES
+# PASSED" after silently skipping a language. PYTHON_BIN was resolved above
+# (it is required to generate web_html.h); Node is optional and detected here.
+NODE_BIN=""
+if command -v node >/dev/null 2>&1; then
+    NODE_BIN="node"
+fi
+MISSING_TOOLS=()
+if [ -z "$NODE_BIN" ]; then
+    MISSING_TOOLS+=("Node.js")
+fi
+if [ -z "${PYTHON_BIN:-}" ]; then
+    MISSING_TOOLS+=("Python")
+fi
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    for tool in "${MISSING_TOOLS[@]}"; do
+        echo "INCOMPLETE: missing $tool" >&2
+        failed=$((failed + 1))
+    done
+fi
+
+if [ -n "$NODE_BIN" ]; then
+    echo "=== test_web_ui (Node.js) ==="
+    if ! "$NODE_BIN" --test "$ROOT/test/test_web_ui.js"; then
+        failed=$((failed + 1))
+    fi
+    echo "=== test_blocks_editor (Node.js) ==="
+    if ! "$NODE_BIN" --test "$ROOT/test/test_blocks_editor.js"; then
+        failed=$((failed + 1))
+    fi
+fi
+if [ -n "${PYTHON_BIN:-}" ]; then
+    for py_test in test_sound_editor_assets test_release_artifacts test_pack_crypto \
+                   test_dcc28_sound_parity test_boot_safe_pins; do
+        echo "=== $py_test (Python) ==="
+        if ! "$PYTHON_BIN" "$ROOT/test/$py_test.py"; then
+            failed=$((failed + 1))
+        fi
+    done
+fi
+if [ -n "$NODE_BIN" ] && [ -n "${PYTHON_BIN:-}" ]; then
+    echo "=== test_pack_integration (Node.js + Python) ==="
+    if ! "$NODE_BIN" --test "$ROOT/test/test_pack_integration.js"; then
+        failed=$((failed + 1))
+    fi
+else
+    echo "SKIP test_pack_integration (requires both Node.js and Python)"
+fi
+
 echo
 if [ "$failed" -eq 0 ]; then
     echo "ALL TEST SUITES PASSED"

@@ -87,6 +87,8 @@ bool motor_bemf_cal_active(void) { return g_cal_active; }
 bool motor_is_inhibited(void) { return (g_mask & MOTOR_INHIBIT_CONTROL) != 0; }
 esp_err_t settings_init(void) { return ESP_OK; }
 esp_err_t audio_init(void) { return ESP_OK; }
+esp_err_t auxio_boot_safe(void) { return ESP_OK; }
+esp_err_t audio_boot_safe(void) { return ESP_OK; }
 esp_err_t sound_init(void) { return g_sound_init_err; }
 esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision, bool *selected)
 {
@@ -212,6 +214,10 @@ void web_control_rails_end(void)
     --g_lease_depth;
     ++g_lease_ends;
 }
+static void (*g_clean_stop_cb)(void);
+void web_control_set_clean_stop_cb(void (*cb)(void)) { g_clean_stop_cb = cb; }
+void web_control_notify_clean_stop(void) { if (g_clean_stop_cb != NULL) g_clean_stop_cb(); }
+bool web_control_deadman_tick(void) { return false; }
 esp_err_t motor_set_speed(uint8_t speed, bool forward)
 {
     (void)speed;
@@ -782,6 +788,21 @@ static void test_brownout_reset_latches_until_clean_stop(void)
     TEST_ASSERT_EQUAL_INT(motor_calls + 2, g_motor_calls);
 }
 
+/* An explicit web stop is a clean stop and must release the brown-out
+ * motion latch even though no DCC stop arrived. */
+static void test_brownout_clears_on_web_clean_stop(void)
+{
+    g_reset_reason = ESP_RST_BROWNOUT;
+    app_main();
+    TEST_ASSERT_TRUE(s_brownout_latched);
+    TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
+
+    g_rails = false;                 /* web owns control */
+    web_control_notify_clean_stop();
+    TEST_ASSERT_FALSE(s_brownout_latched);
+    TEST_ASSERT_BITS_LOW(MOTOR_INHIBIT_SAFETY, g_mask);
+}
+
 static void run_one_persistence_iteration(void)
 {
     g_worker_delays = 0;
@@ -987,6 +1008,7 @@ int main(void)
     RUN_TEST(test_hard_reset_safety_runs_in_web_mode);
     RUN_TEST(test_task_budget_contract);
     RUN_TEST(test_brownout_reset_latches_until_clean_stop);
+    RUN_TEST(test_brownout_clears_on_web_clean_stop);
     RUN_TEST(test_persistence_worker_owns_flush_and_deferred_cleanup);
     RUN_TEST(test_persistence_worker_skips_recovered_timeout_cleanup);
     return UNITY_END();

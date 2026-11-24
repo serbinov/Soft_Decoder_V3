@@ -216,7 +216,7 @@ static esp_err_t mutation_dispatch(httpd_req_t *req)
 {
     if (!request_same_origin(req)) {
         return close_rejected_body(req,
-            httpd_resp_send_err(req, (httpd_err_code_t)403, "cross-origin request"));
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "cross-origin request"));
     }
     char query[WEB_QUERY_MAX] = { 0 };
     esp_err_t query_err = httpd_req_get_url_query_str(req, query, sizeof(query));

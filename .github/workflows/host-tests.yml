@@ -34,6 +34,7 @@ jobs:
           node --test test/test_pack_integration.js
       - name: Python tests
         run: |
+          python test/test_no_sync_conflicts.py
           python test/test_sound_editor_assets.py
           python test/test_release_artifacts.py
           python test/test_pack_crypto.py

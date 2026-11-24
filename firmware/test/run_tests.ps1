@@ -184,6 +184,7 @@ if ($node) {
     if ((Invoke-TestProcess $node.Source @("--test", "$root\test\test_blocks_editor.js") "test_blocks_editor (Node.js)") -ne 0) { $failed++ }
 }
 if ($python) {
+    if ((Invoke-TestProcess $python.Source @("$root\test\test_no_sync_conflicts.py") "test_no_sync_conflicts (Python)") -ne 0) { $failed++ }
     if ((Invoke-TestProcess $python.Source @("$root\test\test_sound_editor_assets.py") "test_sound_editor_assets (Python)") -ne 0) { $failed++ }
     if ((Invoke-TestProcess $python.Source @("$root\test\test_release_artifacts.py") "test_release_artifacts (Python)") -ne 0) { $failed++ }
     if ((Invoke-TestProcess $python.Source @("$root\test\test_pack_crypto.py") "test_pack_crypto (Python)") -ne 0) { $failed++ }

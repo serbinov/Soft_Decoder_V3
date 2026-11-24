@@ -41,6 +41,7 @@ typedef struct {
 typedef enum {
     HTTPD_404_NOT_FOUND = 104,
     HTTPD_400_BAD_REQUEST = 400,
+    HTTPD_403_FORBIDDEN = 403,
     HTTPD_500_INTERNAL_SERVER_ERROR = 500,
     HTTPD_503_SERVICE_UNAVAILABLE = 503,
 } httpd_err_code_t;

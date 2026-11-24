@@ -11,6 +11,15 @@
 
 ## Релизы
 
+### 2026-11-24 — v0.32 — HIL-находки: CSRF 403 и COM-HIL sound SKIP
+
+- CSRF/Host-валидация теперь возвращает корректный **403 Forbidden** (было 500 из-за неверного числового приведения `httpd_err_code_t`).
+- COM HIL: проверка `HIL-SOUND` при отсутствии назначенных legacy-слотов (no-track) помечается **SKIP**, а не FAIL; AUX/F-sweep без изменений.
+- Проверено на устройстве (HIL v0.32): COM `SELFTEST` — **6/9** (audio/auxio/dcc — SKIP без рельсового питания); прогон F0–F28 и AUX-sweep — OK; телеметрия BEMF — OK.
+- Web HIL — **45 проверок / 1 SKIP** (legacy func-map).
+- OTA **v0.31 → ota_1** подтверждена; персистентность CV3 — запись 7 → перезагрузка → 7; dead-man — **5/11 с**; стабильность 60 с — **20/20 без сбросов**.
+- Добавлен CI-тест `test_no_sync_conflicts.py`; OneDrive/OwnCloud conflicted copies теперь валят сборку. В ходе HIL обнаружен и устранён откат `web_func.c`/`app_main.c` синхронизацией — исходники восстановлены из git, релиз пересобран.
+
 ### 2026-11-24 — v0.31 — TWDT-фикс после HIL
 
 - `track_adc_task` подписывается на TWDT и сбрасывает watchdog только после успешной подписки; самовосстановление при `ESP_ERR_NOT_FOUND` после re-init. Устранён спам `task_wdt: esp_task_wdt_reset: task not found` каждые 50 мс.
@@ -939,6 +948,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-25 (v0.32) — fix(release): HIL findings (CSRF 403, COM HIL sound skip) and sync-conflict guard
 - 2026-11-25 (v0.31) — test(hil): play a library file when no legacy track slots are assigned
 - 2026-11-24 (v0.31) — release: rebuild v0.31 and document TWDT fix
 - 2026-11-24 (v0.30) — fix(track): subscribe ADC task to TWDT; skip empty-library HIL checks

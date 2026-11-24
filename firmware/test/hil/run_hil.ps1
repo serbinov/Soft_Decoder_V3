@@ -197,6 +197,7 @@ try {
             @{ Text = "HIL-SOUND $SoundSlot 1500"; Ok = "HIL-SOUND-OK"; Desc = "sound slot $SoundSlot" }
         )
         foreach ($a in $acts) {
+            $skipped = $false
             try { $sp.Write($a.Text + "`n") } catch { }
             $r = ""
             $d = $clock.ElapsedMilliseconds + 6000
@@ -205,6 +206,9 @@ try {
             }
             if ($r -match [regex]::Escape($a.Ok)) {
                 Write-Host "  [ OK ] $($a.Desc)" -ForegroundColor Green
+            } elseif ($a.Text -like "HIL-SOUND*" -and $r -match "no-track") {
+                Write-Host "  [SKIP] $($a.Desc): no track slots assigned" -ForegroundColor Yellow
+                $skipped = $true
             } else {
                 Write-Host "  [FAIL] $($a.Desc): $($r.Trim())" -ForegroundColor Red
                 $failed = $true

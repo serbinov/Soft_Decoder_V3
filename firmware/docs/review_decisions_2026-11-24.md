@@ -38,6 +38,13 @@
 - Release: версия и артефакты пересобираются через `build_firmware.bat` / `firmware/idf_build.ps1 -Release`.
 - Коммиты разбиты по группам.
 
+## HIL 0.32 findings
+- **CSRF/Host → 403.** Валидация Origin/Referer для изменяющих запросов теперь возвращает корректный **403 Forbidden** вместо 500 (ошибка была в числовом приведении `httpd_err_code_t`).
+- **COM HIL `HIL-SOUND` no-track → SKIP.** При отсутствии назначенных legacy-слотов проверка звука помечается SKIP, а не FAIL.
+- **Проверено на устройстве (v0.32):** COM `SELFTEST` — **6/9** (audio/auxio/dcc — SKIP без рельсового питания); F0–F28 + AUX sweep — OK; телеметрия BEMF — OK; web HIL — **45 проверок / 1 SKIP** (legacy func-map); OTA **v0.31 → ota_1** подтверждена; CV3 персистентность 7 → reboot → 7; dead-man **5/11 с**; стабильность 60 с — **20/20 без сбросов**.
+- **CSRF no-Origin путь (curl).** Запрос без `Origin`/`Referer` по-прежнему принимается по дизайну; Host allowlist применяется к браузерным запросам с `Origin`/`Referer`.
+- **Sync conflict detection/restore.** В ходе HIL обнаружен откат `web_func.c`/`app_main.c` синхронизацией OneDrive/OwnCloud: исходники восстановлены из git, релиз пересобран. Добавлен CI-тест `test_no_sync_conflicts.py` (падает на `*conflicted copy*`, `~$*`, `*.orig`, `*.rej`, `*.sync-conflict`; пропускает `.git`, `firmware/build`, `node_modules`), включён в `.github/workflows/host-tests.yml`, `run_tests.ps1` и `run_tests.sh`.
+
 ## Аппаратные требования (не закрываются прошивкой)
 - Внешние pull-down на IN1/IN2, SD_MODE и затворы AUX.
 - Остаточное high-Z окно ~20–40 мс ROM; hook работает только после ROM.

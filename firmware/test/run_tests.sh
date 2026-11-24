@@ -150,8 +150,8 @@ if [ -n "$NODE_BIN" ]; then
     fi
 fi
 if [ -n "${PYTHON_BIN:-}" ]; then
-    for py_test in test_sound_editor_assets test_release_artifacts test_pack_crypto \
-                   test_dcc28_sound_parity test_boot_safe_pins test_ota_compat; do
+    for py_test in test_no_sync_conflicts test_sound_editor_assets test_release_artifacts \
+                   test_pack_crypto test_dcc28_sound_parity test_boot_safe_pins test_ota_compat; do
         echo "=== $py_test (Python) ==="
         if ! "$PYTHON_BIN" "$ROOT/test/$py_test.py"; then
             failed=$((failed + 1))

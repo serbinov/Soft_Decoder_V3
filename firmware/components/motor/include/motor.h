@@ -49,6 +49,10 @@ void motor_get_status(uint8_t *out_speed128, bool *out_forward);
 /* Actual ramped output (not the target): what the motor is doing right now.
  * The sound engine follows this so transitions match the real motion. */
 void motor_get_applied_speed(uint8_t *out_speed128, bool *out_forward);
+/* True when the motor is commanded to move (target) or still moving
+ * (applied). Used by web write gates so a decelerating loco is not
+ * reconfigured. */
+bool motor_is_moving(void);
 
 /* Rail sense voltage (divider mV) fed by the track task; used for the BEMF
  * speed target and freewheel-clamp rejection. Closed-loop/calibration accepts

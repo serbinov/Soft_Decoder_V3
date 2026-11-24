@@ -60,7 +60,7 @@ static motor_ui_mode_t motor_ui_mode(uint8_t target, bool target_forward,
 
 esp_err_t motor_get(httpd_req_t *req)
 {
-    web_control_heartbeat();
+    web_control_heartbeat_ip(web_util_client_ipv4(req));
     uint8_t target = 0, applied = 0;
     bool target_forward = true, applied_forward = true;
     motor_get_status(&target, &target_forward);
@@ -178,7 +178,7 @@ esp_err_t motor_post(httpd_req_t *req)
     esp_err_t err = motor_set_speed(speed, forward);
     if (err == ESP_OK) {
         web_motion_changed(speed, forward);
-        web_control_motion_note(speed, forward);
+        web_control_motion_note_ip(web_util_client_ipv4(req), speed, forward);
         if (speed == 0U) web_control_notify_clean_stop();
     }
     web_control_give();
@@ -212,11 +212,7 @@ esp_err_t motor_duty_post(httpd_req_t *req)
         web_control_give();
         return send_json(req, "{\"ok\":false,\"error\":\"control unavailable\"}");
     }
-    uint8_t applied = 0U;
-    bool applied_forward = false;
-    motor_get_applied_speed(&applied, &applied_forward);
-    (void)applied_forward;
-    if (applied != 0U) {
+    if (motor_is_moving()) {
         web_control_give();
         return send_json(req, "{\"ok\":false,\"error\":\"motor moving\"}");
     }

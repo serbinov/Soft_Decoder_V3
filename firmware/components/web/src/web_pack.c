@@ -180,7 +180,7 @@ static esp_err_t pack_journal_write(pack_tx_t *tx, uint32_t phase)
         ok = fwrite(tx->old_names, sizeof(tx->old_names[0]), tx->old_count, f) == tx->old_count;
     }
     if (ok && tx->new_count != 0U) {
-        ok = fwrite(tx->new_names, sizeof(tx->new_names[0]), tx->new_count, f) == tx->new_count;
+        ok = fwrite(tx->new_names, sizeof(*tx->new_names), tx->new_count, f) == tx->new_count;
     }
     if (fflush(f) != 0) ok = false;
     if (fsync(fileno(f)) != 0) ok = false;
@@ -446,7 +446,7 @@ esp_err_t audio_pack_upload_post(httpd_req_t *req)
         snprintf(ptx->files[i].canonical, sizeof(ptx->files[i].canonical),
                  WEB_AUDIO_DIR "/%s.wav", idx[i].name);
         if (ptx->new_count < ph.count) {
-            snprintf(ptx->new_names[ptx->new_count], sizeof(ptx->new_names[0]),
+            snprintf(ptx->new_names[ptx->new_count], sizeof(*ptx->new_names),
                      "%s.wav", idx[i].name);
             ++ptx->new_count;
         }

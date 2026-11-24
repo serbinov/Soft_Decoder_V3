@@ -1,5 +1,11 @@
 #include "web_util.h"
 
+#if defined(ESP_PLATFORM)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
+
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -431,6 +437,79 @@ static bool web_util_parse_host_header(const char *value, web_util_authority_t *
     return web_util_parse_authority(p, (size_t)(end - p), out);
 }
 
+/* Accept only device-reachable authorities: an IPv4 literal, `localhost`, or
+ * a name below `.local`. This blocks DNS-rebinding origins that pass the
+ * same-origin comparison while pointing the browser at an attacker name. A
+ * trailing `:port` is tolerated so callers may pass a raw Host value. */
+bool web_util_host_allowed(const char *host)
+{
+    if (host == NULL || host[0] == '\0') {
+        return false;
+    }
+    size_t len = strlen(host);
+    size_t colon = len;
+    for (size_t i = 0; i < len; ++i) {
+        if (host[i] == ':') {
+            colon = i;
+            break;
+        }
+    }
+    if (colon != len) {
+        if (colon == 0U || len - colon - 1U == 0U || len - colon - 1U > 5U) {
+            return false;
+        }
+        for (size_t i = colon + 1U; i < len; ++i) {
+            if (host[i] < '0' || host[i] > '9') {
+                return false;
+            }
+        }
+        len = colon;
+    }
+    if (len == 0U) {
+        return false;
+    }
+    bool ipv4 = true;
+    for (size_t i = 0; i < len; ++i) {
+        if (!((host[i] >= '0' && host[i] <= '9') || host[i] == '.')) {
+            ipv4 = false;
+            break;
+        }
+    }
+    if (ipv4) {
+        return true;
+    }
+    if (web_util_ascii_ieq(host, len, "localhost", 9U)) {
+        return true;
+    }
+    const char suffix[] = ".local";
+    if (len > 6U && web_util_ascii_ieq(host + len - 6U, 6U, suffix, 6U)) {
+        return true;
+    }
+    return false;
+}
+
+uint32_t web_util_client_ipv4(httpd_req_t *req)
+{
+#if defined(ESP_PLATFORM)
+    if (req == NULL) {
+        return 0;
+    }
+    int fd = httpd_req_to_sockfd(req);
+    if (fd < 0) {
+        return 0;
+    }
+    struct sockaddr_in peer;
+    socklen_t peer_len = (socklen_t)sizeof(peer);
+    if (getpeername(fd, (struct sockaddr *)&peer, &peer_len) != 0) {
+        return 0;
+    }
+    return (uint32_t)ntohl(peer.sin_addr.s_addr);
+#else
+    (void)req;
+    return 0;
+#endif
+}
+
 bool web_util_same_origin(const char *origin, const char *referer, const char *host)
 {
     const char *source = NULL;
@@ -483,9 +562,14 @@ bool web_util_same_origin(const char *origin, const char *referer, const char *h
     }
     unsigned source_port = source_authority.has_port ? source_authority.port : 80U;
     unsigned host_port = host_authority.has_port ? host_authority.port : 80U;
-    return source_port == 80U && host_port == 80U &&
-           web_util_ascii_ieq(source_authority.host, source_authority.host_len,
-                              host_authority.host, host_authority.host_len);
+    if (source_port != 80U || host_port != 80U ||
+        !web_util_ascii_ieq(source_authority.host, source_authority.host_len,
+                            host_authority.host, host_authority.host_len)) {
+        return false;
+    }
+    /* Even a matching pair is refused when the Host names something other
+     * than the device (DNS rebinding to an attacker-controlled name). */
+    return web_util_host_allowed(host);
 }
 
 /* Direction / speed gates: a function only drives its output while its

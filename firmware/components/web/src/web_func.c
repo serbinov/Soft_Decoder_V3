@@ -711,19 +711,25 @@ static esp_err_t outputs_init(void)
 
 
 
-/* Persist a candidate binding list and adopt it under the apply lock. */
+/* Persist a candidate binding list and adopt it under the apply lock. The NVS
+ * write runs outside s_func_mutex so a slow flash commit cannot stall DCC, and
+ * a failed write rolls the RAM state back to the previous bindings. */
 static bool web_func_bind_commit(func_binding_t *tmp, size_t n)
 {
-    if (settings_func_bind_save(tmp, n) != ESP_OK) {
-        return false;
-    }
+    func_binding_t old[FUNC_BIND_MAX];
+    size_t old_n;
+    bool old_present;
+
     if (s_func_mutex != NULL &&
         xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
-        /* Abort without adopting the candidate: the RAM list and the outputs
-         * stay exactly as they were. */
+        /* Abort without persisting: the RAM list and the outputs stay exactly
+         * as they were, so NVS keeps matching the previous bindings. */
         ESP_LOGW(TAG_FUNC, "web_func_bind_commit: function lock busy, not committed");
         return false;
     }
+    memcpy(old, s_func_bind, sizeof(old));
+    old_n = s_func_bind_count;
+    old_present = s_func_bind_present;
     memcpy(s_func_bind, tmp, sizeof(s_func_bind));
     s_func_bind_count = n;
     s_func_bind_present = true;
@@ -737,6 +743,25 @@ static bool web_func_bind_commit(func_binding_t *tmp, size_t n)
     }
     if (s_func_mutex != NULL) {
         xSemaphoreGive(s_func_mutex);
+    }
+
+    if (settings_func_bind_save(tmp, n) != ESP_OK) {
+        ESP_LOGW(TAG_FUNC, "web_func_bind_commit: NVS save failed, rolling back");
+        if (s_func_mutex == NULL) {
+            memcpy(s_func_bind, old, sizeof(old));
+            s_func_bind_count = old_n;
+            s_func_bind_present = old_present;
+            return false;
+        }
+        if (xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) == pdTRUE) {
+            memcpy(s_func_bind, old, sizeof(old));
+            s_func_bind_count = old_n;
+            s_func_bind_present = old_present;
+            xSemaphoreGive(s_func_mutex);
+        } else {
+            ESP_LOGW(TAG_FUNC, "web_func_bind_commit: rollback lock busy");
+        }
+        return false;
     }
     return true;
 }
@@ -891,8 +916,16 @@ void web_func_track_cat_set(size_t index, uint8_t cat)
 
 esp_err_t web_func_reconcile_slots(const bool *slots)
 {
-    esp_err_t result = ESP_OK;
+    settings_func_map_t old_map[SETTINGS_FUNC_MAP_COUNT];
+    settings_func_map_t new_map[SETTINGS_FUNC_MAP_COUNT];
+    func_binding_t old_bind[FUNC_BIND_MAX];
+    func_binding_t new_bind[FUNC_BIND_MAX];
+    size_t old_bind_count;
+    size_t new_bind_count;
     bool func_locked = false;
+    bool map_changed = false;
+    bool bind_changed = false;
+
     if (s_func_mutex != NULL) {
         if (xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
             /* Abort without pruning: an unlocked edit could race the apply path. */
@@ -901,45 +934,78 @@ esp_err_t web_func_reconcile_slots(const bool *slots)
         }
         func_locked = true;
     }
-    bool map_changed = false;
+
+    /* Snapshot first: the copy below is pruned on stack and then published, so
+     * the NVS write can run outside s_func_mutex with a rollback snapshot. */
+    memcpy(old_map, s_func_map, sizeof(old_map));
+    memcpy(new_map, s_func_map, sizeof(new_map));
+    memcpy(old_bind, s_func_bind, sizeof(old_bind));
+    old_bind_count = s_func_bind_count;
+    new_bind_count = s_func_bind_count;
+
     for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
-        if (s_func_map[fn].slot_a != 0U &&
-            (s_func_map[fn].slot_a > SETTINGS_MAX_TRACKS ||
-             !slots[s_func_map[fn].slot_a])) {
-            s_func_map[fn].slot_a = 0;
+        if (new_map[fn].slot_a != 0U &&
+            (new_map[fn].slot_a > SETTINGS_MAX_TRACKS ||
+             !slots[new_map[fn].slot_a])) {
+            new_map[fn].slot_a = 0;
             map_changed = true;
         }
-        if (s_func_map[fn].slot_b != 0U &&
-            (s_func_map[fn].slot_b > SETTINGS_MAX_TRACKS ||
-             !slots[s_func_map[fn].slot_b])) {
-            s_func_map[fn].slot_b = 0;
+        if (new_map[fn].slot_b != 0U &&
+            (new_map[fn].slot_b > SETTINGS_MAX_TRACKS ||
+             !slots[new_map[fn].slot_b])) {
+            new_map[fn].slot_b = 0;
             map_changed = true;
         }
-    }
-    if (map_changed) {
-        esp_err_t save = settings_func_map_save(s_func_map, SETTINGS_FUNC_MAP_COUNT);
-        if (result == ESP_OK) result = save;
     }
 
-    bool bind_changed = false;
     size_t kept_bind = 0;
-    for (size_t i = 0; i < s_func_bind_count; ++i) {
-        const func_binding_t *b = &s_func_bind[i];
+    for (size_t i = 0; i < old_bind_count; ++i) {
+        const func_binding_t *b = &old_bind[i];
         if (b->used && b->target_type == FUNC_TARGET_SLOT &&
             (b->target_id == 0U || b->target_id > SETTINGS_MAX_TRACKS ||
              !slots[b->target_id])) {
             bind_changed = true;
             continue;
         }
-        if (kept_bind != i) s_func_bind[kept_bind] = *b;
+        if (kept_bind != i) new_bind[kept_bind] = *b;
         ++kept_bind;
     }
     if (bind_changed) {
-        s_func_bind_count = kept_bind;
-        esp_err_t save = settings_func_bind_save(s_func_bind, s_func_bind_count);
-        if (result == ESP_OK) result = save;
+        new_bind_count = kept_bind;
+    }
+
+    if (map_changed) memcpy(s_func_map, new_map, sizeof(new_map));
+    if (bind_changed) {
+        memcpy(s_func_bind, new_bind, sizeof(new_bind));
+        s_func_bind_count = new_bind_count;
     }
     if (func_locked) xSemaphoreGive(s_func_mutex);
+
+    esp_err_t result = ESP_OK;
+    if (map_changed) {
+        esp_err_t save = settings_func_map_save(new_map, SETTINGS_FUNC_MAP_COUNT);
+        if (result == ESP_OK) result = save;
+    }
+    if (bind_changed) {
+        esp_err_t save = settings_func_bind_save(new_bind, new_bind_count);
+        if (result == ESP_OK) result = save;
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGW(TAG_FUNC, "web_func_reconcile_slots: NVS save failed, rolling back");
+        if (s_func_mutex == NULL) {
+            memcpy(s_func_map, old_map, sizeof(old_map));
+            memcpy(s_func_bind, old_bind, sizeof(old_bind));
+            s_func_bind_count = old_bind_count;
+        } else if (xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) == pdTRUE) {
+            memcpy(s_func_map, old_map, sizeof(old_map));
+            memcpy(s_func_bind, old_bind, sizeof(old_bind));
+            s_func_bind_count = old_bind_count;
+            xSemaphoreGive(s_func_mutex);
+        } else {
+            ESP_LOGW(TAG_FUNC, "web_func_reconcile_slots: rollback lock busy");
+        }
+    }
     func_tracks_cache_refresh();
     return result;
 }

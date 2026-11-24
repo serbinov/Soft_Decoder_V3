@@ -20,6 +20,15 @@
 - Хранение: загрузка настроек больше не уходит в boot-loop при TYPE_MISMATCH или ошибке записи CV (работа из RAM + retry); проверка blob’ов manifest/category/track; discard NVS-ключей под lock; busy-storage factory reset не стирает NVS.
 - Build/CI: `esp_driver_gpio` добавлен в зависимости auxio/main; `run_tests.sh` получил паритет с PowerShell-раннером; `test_boot_safe_pins.py` добавлен в CI.
 - Прочее: CV11 по умолчанию 20 (10 с), pinmap отвергает GPIO26–32, preview-состояние web под мьютексом, emergency reset повторно применяется после освобождения lock.
+- DCC: service-режим требует два идентичных пакета (NMRA); ops/POM без изменений; для одноразовых программаторов — сборка с `-DDCC_SERVICE_DOUBLE_PACKET=0`.
+- AUX: `auxio_init()` больше не аварийно завершается — при ошибке откатывает уже настроенные каналы и безопасен для повторной инициализации.
+- Аудио: peak-лимитер по блокам в микшере; блоки на полной шкале и ниже проходят бит-в-бит.
+- Хранение: журнал пакетов v2 (`AURAPKJ3`, `PACK_JOURNAL_FILE_MAX`); журналы старого формата отбрасываются, файлы восстанавливаются orphan-backup сканом.
+- Web: allowlist Host для изменяющих запросов (IPv4, `localhost`, `*.local`) блокирует DNS-rebinding.
+- Web: commit/reconcile привязок F применяются в RAM, NVS сохраняется вне lock, при ошибке сохранения — откат.
+- Хранение: sync manifest не пишет пустой manifest, если NVS пуст и явный clear не запрошен.
+- Web: гейты записи используют `motor_is_moving()` (целевая ИЛИ применённая скорость), а не только применённую.
+- Web: dead-man heartbeat привязан к IP клиента, последним скомандовавшего движение; `stop`/рельсы снимают привязку, второй клиент не продлевает чужой heartbeat.
 
 ### 2026-11-23 — v0.28 — Wi-Fi: сканирование сетей в режиме точки доступа
 
@@ -910,6 +919,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — feat(safety): complete remaining hardening across DCC, AUX, audio, pack and web
 - 2026-11-24 (v0.29) — ci: link libm for host tests and set realistic coverage floor
 - 2026-11-24 (v0.29) — docs(release): add v0.29 changelog and drop stale v0.28 image
 - 2026-11-24 (v0.29) — fix(web,settings): address self-review findings

@@ -197,7 +197,7 @@ esp_err_t cv_read_get(httpd_req_t *req)
 
 esp_err_t dcc_status_get(httpd_req_t *req)
 {
-    web_control_heartbeat();
+    web_control_heartbeat_ip(web_util_client_ipv4(req));
     int64_t last = dcc_last_packet_us();
     int64_t age = -1;
     if (last > 0) {
@@ -259,11 +259,7 @@ esp_err_t cv_write_post(httpd_req_t *req)
     }
     if (idx == 1U || idx == 8U || idx == 17U || idx == 18U || idx == 19U ||
         idx == 21U || idx == 22U || idx == 29U) {
-        uint8_t applied = 0U;
-        bool applied_forward = false;
-        motor_get_applied_speed(&applied, &applied_forward);
-        (void)applied_forward;
-        if (applied != 0U) {
+        if (motor_is_moving()) {
             return send_json(req, "{\"ok\":false,\"error\":\"motor moving\"}");
         }
     }

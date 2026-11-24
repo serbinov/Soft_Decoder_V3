@@ -1509,6 +1509,15 @@ void motor_get_applied_speed(uint8_t *out_speed128, bool *out_forward)
     if (out_forward != NULL) *out_forward = (st & 0x100U) != 0U;
 }
 
+bool motor_is_moving(void)
+{
+    portENTER_CRITICAL(&s_output_mux);
+    uint8_t target = s_target_speed;
+    uint8_t applied = s_applied_speed;
+    portEXIT_CRITICAL(&s_output_mux);
+    return target != 0U || applied != 0U;
+}
+
 esp_err_t motor_test_duty(uint16_t duty, bool forward, uint32_t duration_ms)
 {
     if (!s_init || duty > LEDC_MAX || duration_ms == 0U) return ESP_ERR_INVALID_ARG;

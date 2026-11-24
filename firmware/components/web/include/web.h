@@ -37,7 +37,11 @@ bool web_maintenance_active(void);
  * (/api/status) or sending motor commands. If no heartbeat arrives for
  * WEB_DEADMAN_TIMEOUT_US, the safety task stops the motor. */
 void web_control_heartbeat(void);
+void web_control_heartbeat_ip(uint32_t client_ip);
 void web_control_motion_note(uint8_t speed, bool forward);
+void web_control_motion_note_ip(uint32_t client_ip, uint8_t speed, bool forward);
+/* Drop the per-client heartbeat binding (0 = unbound / accept any client). */
+void web_control_deadman_clear_client(void);
 bool web_control_deadman_tick(void);
 
 /* An explicit web stop (speed 0) is a clean stop and may clear the

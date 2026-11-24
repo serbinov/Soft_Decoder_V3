@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_http_server.h"
 #include "settings.h"
 
 /* Pure request-parsing / JSON / DNS / function-mapping helpers used by the web
@@ -48,6 +49,16 @@ void sanitize_name(const char *in, char *out, size_t out_len);
  * matching bare Host header) and any non-80 explicit port are rejected: the
  * client Host header alone must not be allowed to imply TLS. */
 bool web_util_same_origin(const char *origin, const char *referer, const char *host);
+
+/* Peer IPv4 address of `req` in host byte order, or 0 when it cannot be
+ * determined (host build, closed socket, non-INET peer). */
+uint32_t web_util_client_ipv4(httpd_req_t *req);
+
+/* True when `host` names a device-reachable authority: an IPv4 literal,
+ * `localhost`, or a name ending in `.local` (case-insensitive). A trailing
+ * `:port` is tolerated. NULL/empty and all other names are rejected. This
+ * blocks DNS-rebinding CSRF while keeping IP and mDNS access working. */
+bool web_util_host_allowed(const char *host);
 
 /* Output mask (SETTINGS_FUNC_OUT_*) a function must drive given its mapping,
  * its on/off state and the current motion. F0F+F0R together mean the

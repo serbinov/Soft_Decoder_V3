@@ -144,6 +144,7 @@ void setUp(void)
     }
     s_ack_worker = false;
     s_ack_iter_cap = 0;
+    s_parser_running = false;
     s_initialized = false;
     s_last_packet_us = s_last_signal_packet_us = s_last_edge_us = 0;
     s_last_input_edge_us = s_init_us = 0;
@@ -428,17 +429,61 @@ static void test_dcc_function_f13_group(void)
 }
 
 /* Service Mode Direct Write Byte (S-9.2.3): instr, CvLow, data, checksum.
- * There is no address byte: 0x7C 0x02 0x64 -> CV3 = 100. */
+ * There is no address byte: 0x7C 0x02 0x64 -> CV3 = 100. The write executes
+ * only after two identical packets (REV-D2). */
 static void test_dcc_service_write_direct(void)
 {
     const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
     s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
     TEST_ASSERT_EQUAL_UINT8(100, g_cv_value);
     TEST_ASSERT_TRUE(g_cv_service);
+}
+
+/* One service write packet alone must not change the CV or ACK. */
+static void test_dcc_service_single_packet_no_effect(void)
+{
+    const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
+
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
+}
+
+/* The second identical service packet applies the write and ACKs. */
+static void test_dcc_service_second_packet_applies(void)
+{
+    const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+    feed_packet(packet, sizeof(packet), 22);
+
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
+    TEST_ASSERT_EQUAL_UINT8(100, g_cv_value);
+    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
+}
+
+/* A different packet between two identical ones restarts the confirmation. */
+static void test_dcc_service_different_packet_resets_count(void)
+{
+    const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    const uint8_t other[] = {0x7C, 0x02, 0x65, 0x7C ^ 0x02 ^ 0x65};
+    s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
+    feed_packet(other, sizeof(other), 22);
+    feed_packet(packet, sizeof(packet), 22);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+
+    feed_packet(packet, sizeof(packet), 22);
+    TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
+    TEST_ASSERT_EQUAL_UINT8(100, g_cv_value);
 }
 
 /* Service Mode Direct Verify Byte: match -> ACK pulse (2 gpio_set_level). */
@@ -448,6 +493,7 @@ static void test_dcc_service_verify_match(void)
     g_read_ok = true;
     g_read_returns = 100;
     s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
@@ -460,6 +506,7 @@ static void test_dcc_service_verify_no_match(void)
     g_read_ok = true;
     g_read_returns = 50;
     s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
@@ -474,6 +521,7 @@ static void test_dcc_service_bit_write(void)
     g_read_ok = true;
     g_read_returns = 0x00;
     s_service_mode = true;
+    feed_packet(packet, sizeof(packet), 22);
     feed_packet(packet, sizeof(packet), 22);
 
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
@@ -494,6 +542,7 @@ static void test_dcc_service_mode_entered_by_reset(void)
     TEST_ASSERT_FALSE(s_service_mode);
 
     const uint8_t packet[] = {0x7C, 0x02, 0x64, 0x7C ^ 0x02 ^ 0x64};
+    feed_packet(packet, sizeof(packet), 22);
     feed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(3, g_cv_index);
@@ -994,12 +1043,16 @@ static void test_dcc_service_bit_verify(void)
     const uint8_t packet[] = {0x78, 0x03, 0xEA, 0x78 ^ 0x03 ^ 0xEA};
     s_service_mode = true;
     feed_packet(packet, sizeof(packet), 22);
+    feed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
 
-    /* Mismatch -> no ACK. */
+    /* Mismatch -> no ACK. Start a fresh confirmation run. */
     mock_gpio_set_level_count = 0;
     g_cv_table[4] = 0x00;
+    s_service_pending.len = 0;
+    s_service_pending.count = 0;
+    feed_packet(packet, sizeof(packet), 22);
     feed_packet(packet, sizeof(packet), 22);
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
 }
@@ -1101,6 +1154,23 @@ static void test_dcc_service_ack_queue_full(void)
     s_ack_queue = NULL;
 }
 
+/* While the parser task is live and no worker exists, the fallback must not
+ * block on the inline pulse: it reports invalid state and toggles no GPIO. */
+static void test_dcc_service_ack_parser_running_no_worker(void)
+{
+    s_parser_running = true;
+    s_ack_worker = false;
+    s_ack_queue = NULL;
+    mock_gpio_set_level_count = 0;
+    mock_vtask_delay_count = 0;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, dcc_service_ack());
+    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
+    TEST_ASSERT_EQUAL_INT(0, mock_vtask_delay_count);
+
+    s_parser_running = false;
+}
+
 /* The worker turns a queued token into the 6 ms high/low pulse. */
 static void test_dcc_ack_task_pulse(void)
 {
@@ -1148,6 +1218,7 @@ static void test_dcc_service_bit_manip_clear(void)
     /* Service bit manipulation: write 0 to bit 0 of CV4 -> clear the bit. */
     const uint8_t pkt[] = { 0x78, 0x03, 0xF0, 0x78 ^ 0x03 ^ 0xF0 };
     s_service_mode = true;
+    feed_packet(pkt, sizeof(pkt), 20);
     feed_packet(pkt, sizeof(pkt), 20);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_UINT16(4, g_cv_index);
@@ -1463,6 +1534,7 @@ static void test_service_entry_deadline_and_other_address_exit(void)
     const uint8_t other[] = {0x04,0x60,0x64};
     feed_packet(reset, sizeof(reset), 22);
     feed_packet(write, sizeof(write), 22);
+    feed_packet(write, sizeof(write), 22);
     TEST_ASSERT_TRUE(s_service_mode);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(other, sizeof(other), 12);
@@ -1475,12 +1547,13 @@ static void test_service_entry_deadline_and_other_address_exit(void)
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     feed_packet(reset, sizeof(reset), 22);
     feed_packet(write, sizeof(write), 22);
+    feed_packet(write, sizeof(write), 22);
     TEST_ASSERT_EQUAL_INT(2, g_cv_write_calls);
 }
 
-/* The first checksum-valid verify (and write) must ACK; an immediate retrans-
- * mission is ignored, preserving idempotence. */
-static void test_service_failure_and_verify_first_packet(void)
+/* A failed write still needs two identical packets; a repeated verify ACKs
+ * only after the same packet is seen twice (REV-D2). */
+static void test_service_write_failure_and_verify_double_packet(void)
 {
     const uint8_t reset[] = {0,0,0};
     const uint8_t write[] = {0x7C,0x02,0x64,0x1A};
@@ -1488,12 +1561,13 @@ static void test_service_failure_and_verify_first_packet(void)
     feed_packet(reset, sizeof(reset), 22);
     g_write_result = ESP_FAIL;
     feed_packet(write, sizeof(write), 22);
+    feed_packet(write, sizeof(write), 22);
     TEST_ASSERT_EQUAL_INT(1, g_cv_write_calls);
     TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
     g_read_ok = true;
     g_read_returns = 100;
     feed_packet(verify, sizeof(verify), 22);
-    TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
+    TEST_ASSERT_EQUAL_INT(0, mock_gpio_set_level_count);
     feed_packet(verify, sizeof(verify), 22);
     TEST_ASSERT_EQUAL_INT(2, mock_gpio_set_level_count);
 }
@@ -1706,8 +1780,12 @@ RUN_TEST(test_dcc_28step_sound_scale);
     RUN_TEST(test_dcc_service_ack_pulses_gpio);
     RUN_TEST(test_dcc_service_ack_queued);
     RUN_TEST(test_dcc_service_ack_queue_full);
+    RUN_TEST(test_dcc_service_ack_parser_running_no_worker);
     RUN_TEST(test_dcc_ack_task_pulse);
     RUN_TEST(test_dcc_service_write_direct);
+    RUN_TEST(test_dcc_service_single_packet_no_effect);
+    RUN_TEST(test_dcc_service_second_packet_applies);
+    RUN_TEST(test_dcc_service_different_packet_resets_count);
     RUN_TEST(test_dcc_service_verify_match);
     RUN_TEST(test_dcc_service_verify_no_match);
     RUN_TEST(test_dcc_service_bit_write);
@@ -1744,7 +1822,7 @@ RUN_TEST(test_dcc_28step_sound_scale);
     RUN_TEST(test_function_group2_f5_f8);
     RUN_TEST(test_ops_write_first_packet_and_idempotent_repeat);
     RUN_TEST(test_service_entry_deadline_and_other_address_exit);
-    RUN_TEST(test_service_failure_and_verify_first_packet);
+    RUN_TEST(test_service_write_failure_and_verify_double_packet);
     RUN_TEST(test_unsupported_xpom_and_service_lengths);
     RUN_TEST(test_consist_speed_functions_and_cv_routing);
     RUN_TEST(test_direction_inversion_and_control_gate);

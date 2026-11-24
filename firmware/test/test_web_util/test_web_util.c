@@ -706,56 +706,75 @@ static void test_same_origin_accepts_missing_and_matching(void)
     TEST_ASSERT_TRUE(web_util_same_origin("", "", "unused"));
 
     TEST_ASSERT_TRUE(web_util_same_origin("http://192.168.4.1", NULL, "192.168.4.1"));
-    TEST_ASSERT_TRUE(web_util_same_origin("http://EXAMPLE.com:80", NULL, "example.com"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://DECODER.local:80", NULL, "decoder.local"));
     TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://192.168.4.1/index.html?x=1", "192.168.4.1"));
 
     /* Authority only: paths/queries/fragments and default ports are ignored. */
-    TEST_ASSERT_TRUE(web_util_same_origin("http://host:80/some/path?q=1#frag", NULL, "host"));
-    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://host:80/some/path", "HOST"));
-    TEST_ASSERT_TRUE(web_util_same_origin("http://host", NULL, "host:80"));
-    TEST_ASSERT_TRUE(web_util_same_origin("http://[::1]:80", NULL, "[::1]"));
-    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://[::1]/x", "[::1]:80"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://decoder.local:80/some/path?q=1#frag", NULL, "decoder.local"));
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://decoder.local:80/some/path", "DECODER.LOCAL"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://decoder.local", NULL, "decoder.local:80"));
+    TEST_ASSERT_TRUE(web_util_same_origin("http://localhost:80", NULL, "localhost"));
+    TEST_ASSERT_TRUE(web_util_same_origin(NULL, "http://localhost/x", "localhost:80"));
 }
 
 static void test_same_origin_rejects_tls_and_wrong_device_port(void)
 {
     /* The device only ever serves HTTP/80. A matching client Host header must
      * not make an https:// Origin look same-origin. */
-    TEST_ASSERT_FALSE(web_util_same_origin("https://host", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("https://host:443/a", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin(NULL, "HTTPS://Example.COM/path", "example.com"));
+    TEST_ASSERT_FALSE(web_util_same_origin("https://decoder.local", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("https://decoder.local:443/a", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin(NULL, "HTTPS://Decoder.LOCAL/path", "decoder.local"));
     /* An explicit non-device port on both sides is still not the device
      * origin, even though client and Host agree with each other. */
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host:8080", NULL, "host:8080"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host:8080", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, "host:8080"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local:8080", NULL, "decoder.local:8080"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local:8080", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local", NULL, "decoder.local:8080"));
 }
 
 static void test_same_origin_rejects_mismatch_and_malformed(void)
 {
     TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example", NULL, "192.168.4.1"));
     TEST_ASSERT_FALSE(web_util_same_origin("http://192.168.4.1:8080", NULL, "192.168.4.1"));
-    TEST_ASSERT_FALSE(web_util_same_origin("https://host", NULL, "host:80"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, "host:443"));
+    TEST_ASSERT_FALSE(web_util_same_origin("https://decoder.local", NULL, "decoder.local:80"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local", NULL, "decoder.local:443"));
     TEST_ASSERT_FALSE(web_util_same_origin(NULL, "http://evil.example/", "192.168.4.1"));
 
-    /* Origin, when present, wins over a matching Referer. */
-    TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example", "http://good.example", "good.example"));
+    /* DNS rebinding: a matching attacker name must still be refused. */
+    TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example.com", NULL, "evil.example.com"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example.com:80", NULL, "evil.example.com"));
 
-    TEST_ASSERT_FALSE(web_util_same_origin("null", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("NULL", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, NULL));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host", NULL, ""));
+    /* Origin, when present, wins over a matching Referer. */
+    TEST_ASSERT_FALSE(web_util_same_origin("http://evil.example", "http://decoder.local", "decoder.local"));
+
+    TEST_ASSERT_FALSE(web_util_same_origin("null", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("NULL", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local", NULL, NULL));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local", NULL, ""));
 
     /* Malformed schemes/authorities must fail closed. */
-    TEST_ASSERT_FALSE(web_util_same_origin("http://", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host:abc", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://host:80:90", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("ftp://host", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http://user@host", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("host", NULL, "host"));
-    TEST_ASSERT_FALSE(web_util_same_origin("http:/host", NULL, "host"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local:abc", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://decoder.local:80:90", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("ftp://decoder.local", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http://user@decoder.local", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("decoder.local", NULL, "decoder.local"));
+    TEST_ASSERT_FALSE(web_util_same_origin("http:/decoder.local", NULL, "decoder.local"));
     TEST_ASSERT_FALSE(web_util_same_origin("http://ho st", NULL, "ho st"));
+}
+
+/* ---- web_util_host_allowed ---- */
+
+static void test_host_allowed_policy(void)
+{
+    TEST_ASSERT_TRUE(web_util_host_allowed("192.168.4.1"));
+    TEST_ASSERT_TRUE(web_util_host_allowed("192.168.4.1:80"));
+    TEST_ASSERT_TRUE(web_util_host_allowed("localhost"));
+    TEST_ASSERT_TRUE(web_util_host_allowed("LocalHost"));
+    TEST_ASSERT_TRUE(web_util_host_allowed("foo.local"));
+    TEST_ASSERT_TRUE(web_util_host_allowed("Foo.Local:8080"));
+    TEST_ASSERT_FALSE(web_util_host_allowed("evil.example.com"));
+    TEST_ASSERT_FALSE(web_util_host_allowed(""));
+    TEST_ASSERT_FALSE(web_util_host_allowed(NULL));
 }
 
 int main(void)
@@ -795,6 +814,7 @@ int main(void)
     RUN_TEST(test_same_origin_accepts_missing_and_matching);
     RUN_TEST(test_same_origin_rejects_mismatch_and_malformed);
     RUN_TEST(test_same_origin_rejects_tls_and_wrong_device_port);
+    RUN_TEST(test_host_allowed_policy);
     RUN_TEST(test_fuzz_random_inputs);
     return UNITY_END();
 }

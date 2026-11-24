@@ -20,7 +20,7 @@ typedef struct {
     char (*old_names)[WEB_LIB_NAME_MAX];
     bool *old_moved;
     size_t old_count;
-    char (*new_names)[WEB_LIB_NAME_MAX];
+    char (*new_names)[PACK_JOURNAL_FILE_MAX];
     size_t new_count;
     pack_file_t *files;
     size_t file_count;
@@ -33,8 +33,7 @@ typedef struct {
     bool new_selection_valid;
 } pack_tx_t;
 
-#define PACK_JOURNAL_MAGIC "AURAPKJ2"
-#define PACK_JOURNAL_MAGIC_OLD "AURAPKJ1"
+#define PACK_JOURNAL_MAGIC "AURAPKJ3"
 #define PACK_JOURNAL_PREPARED 1U
 #define PACK_JOURNAL_COMMITTED 2U
 #define PACK_JOURNAL_MAX_NAMES 600U

@@ -5764,11 +5764,11 @@ static void test_library_delete_refuses_track_and_binding(void)
 static void test_pack_journal_prepared_rolls_back_at_boot(void)
 {
     char old_names[1][WEB_LIB_NAME_MAX];
-    char new_names[1][WEB_LIB_NAME_MAX];
+    char new_names[1][PACK_JOURNAL_FILE_MAX];
     memset(old_names, 0, sizeof(old_names));
     memset(new_names, 0, sizeof(new_names));
     snprintf(old_names[0], sizeof(old_names[0]), "old.wav");
-    snprintf(new_names[0], sizeof(new_names[0]), "new.wav");
+    snprintf(new_names[0], sizeof(*new_names), "new.wav");
     MKDIR("web_tmp/audio/.pbtest");
     FILE *f = fopen("web_tmp/audio/.pbtest/old.wav", "wb");
     TEST_ASSERT_NOT_NULL(f);
@@ -5800,9 +5800,12 @@ static void test_pack_journal_prepared_rolls_back_at_boot(void)
 
 static void test_pack_journal_retry_preserves_restored_overlap(void)
 {
-    char names[1][WEB_LIB_NAME_MAX];
-    memset(names, 0, sizeof(names));
-    snprintf(names[0], sizeof(names[0]), "same.wav");
+    char old_names[1][WEB_LIB_NAME_MAX];
+    char new_names[1][PACK_JOURNAL_FILE_MAX];
+    memset(old_names, 0, sizeof(old_names));
+    memset(new_names, 0, sizeof(new_names));
+    snprintf(old_names[0], sizeof(old_names[0]), "same.wav");
+    snprintf(new_names[0], sizeof(*new_names), "same.wav");
     MKDIR("web_tmp/audio/.pbretry");
     FILE *f = fopen("web_tmp/audio/same.wav", "wb");
     TEST_ASSERT_NOT_NULL(f);
@@ -5813,9 +5816,9 @@ static void test_pack_journal_retry_preserves_restored_overlap(void)
     memset(&tx, 0, sizeof(tx));
     snprintf(tx.backup_dir, sizeof(tx.backup_dir), "%s", "web_tmp/audio/.pbretry");
     snprintf(tx.journal, sizeof(tx.journal), "%s", PACK_JOURNAL_PATH);
-    tx.old_names = names;
+    tx.old_names = old_names;
     tx.old_count = 1;
-    tx.new_names = names;
+    tx.new_names = new_names;
     tx.new_count = 1; /* same name in both lists: previous attempt restored it */
     TEST_ASSERT_EQUAL(ESP_OK, pack_journal_write(&tx, PACK_JOURNAL_PREPARED));
 

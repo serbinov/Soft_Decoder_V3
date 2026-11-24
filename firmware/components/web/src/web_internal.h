@@ -25,6 +25,8 @@
 #define UPLOAD_MAX (2 * 1024 * 1024)
 #define WEB_PATH_MAX 640
 #define WEB_LIB_NAME_MAX (AUDIO_PACK_NAME_MAX + 1)
+/* Journal entries store the final "<name>.wav" (base name + 4 chars). */
+#define PACK_JOURNAL_FILE_MAX (WEB_LIB_NAME_MAX + 4)
 #define WEB_LIB_JSON_MAX (96U * 1024U)
 #define AUDIO_VOL_FILE WEB_AUDIO_DIR "/volumes.txt"
 #define AUDIO_PACK_MAX_BYTES (15U * 1024U * 1024U)

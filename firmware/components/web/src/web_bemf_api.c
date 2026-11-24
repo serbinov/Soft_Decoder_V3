@@ -237,11 +237,7 @@ esp_err_t bemf_window_get(httpd_req_t *req)
     if (!web_actuation_ready() || web_maintenance_active()) {
         return send_json(req, "{\"ok\":false,\"error\":\"control unavailable\"}");
     }
-    uint8_t applied = 0U;
-    bool applied_forward = false;
-    motor_get_applied_speed(&applied, &applied_forward);
-    (void)applied_forward;
-    if (applied != 0U) {
+    if (motor_is_moving()) {
         return send_json(req, "{\"ok\":false,\"error\":\"motor moving\"}");
     }
     uint16_t duration_ms = 20U;

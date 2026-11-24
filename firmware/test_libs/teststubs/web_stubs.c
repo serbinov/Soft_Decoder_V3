@@ -1372,6 +1372,11 @@ void motor_get_applied_speed(uint8_t *speed, bool *forward)
     if (speed) *speed = mock_motor_applied_speed;
     if (forward) *forward = mock_motor_forward;
 }
+
+bool motor_is_moving(void)
+{
+    return mock_motor_applied_speed != 0U;
+}
 int mock_motor_stop_calls = 0;
 int mock_motor_set_speed_calls = 0;
 uint8_t mock_motor_set_speed_value = 0;

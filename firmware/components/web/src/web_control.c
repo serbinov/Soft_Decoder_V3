@@ -357,21 +357,52 @@ static portMUX_TYPE s_deadman_mux = portMUX_INITIALIZER_UNLOCKED;
 static int64_t s_deadman_hb_us;
 static uint8_t s_deadman_speed;
 static bool s_deadman_forward = true;
+static uint32_t s_deadman_client_ip;
 static void (*s_clean_stop_cb)(void);
+
+void web_control_heartbeat_ip(uint32_t client_ip)
+{
+    portENTER_CRITICAL(&s_deadman_mux);
+    if (s_deadman_client_ip == 0U || client_ip == 0U ||
+        client_ip == s_deadman_client_ip) {
+        s_deadman_hb_us = esp_timer_get_time();
+        if (client_ip != 0U) {
+            s_deadman_client_ip = client_ip;
+        }
+    }
+    portEXIT_CRITICAL(&s_deadman_mux);
+}
 
 void web_control_heartbeat(void)
 {
+    web_control_heartbeat_ip(0);
+}
+
+void web_control_motion_note_ip(uint32_t client_ip, uint8_t speed, bool forward)
+{
+    int64_t now = esp_timer_get_time();
     portENTER_CRITICAL(&s_deadman_mux);
-    s_deadman_hb_us = esp_timer_get_time();
+    if (client_ip != 0U) {
+        s_deadman_client_ip = client_ip;
+    }
+    if (speed == 0U) {
+        s_deadman_client_ip = 0U;
+    }
+    s_deadman_hb_us = now;
+    s_deadman_speed = speed;
+    s_deadman_forward = forward;
     portEXIT_CRITICAL(&s_deadman_mux);
 }
 
 void web_control_motion_note(uint8_t speed, bool forward)
 {
+    web_control_motion_note_ip(0, speed, forward);
+}
+
+void web_control_deadman_clear_client(void)
+{
     portENTER_CRITICAL(&s_deadman_mux);
-    s_deadman_hb_us = esp_timer_get_time();
-    s_deadman_speed = (speed > 0U) ? speed : 0U;
-    s_deadman_forward = forward;
+    s_deadman_client_ip = 0U;
     portEXIT_CRITICAL(&s_deadman_mux);
 }
 
@@ -380,6 +411,7 @@ bool web_control_deadman_tick(void)
     if (web_cfg()->control_source == 0U) {        /* rails/DCC owns control */
         portENTER_CRITICAL(&s_deadman_mux);
         s_deadman_speed = 0U;
+        s_deadman_client_ip = 0U;
         portEXIT_CRITICAL(&s_deadman_mux);
         return false;
     }

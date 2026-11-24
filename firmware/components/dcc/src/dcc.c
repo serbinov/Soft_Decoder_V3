@@ -54,6 +54,13 @@ _Static_assert(DCC_ACK_TASK_STACK >= 2048U, "DCC ACK stack regression");
 #define DCC_ACK_PULSE_MS   6
 #define DCC_ACK_QUEUE_LEN  8
 
+/* Service-mode direct CV writes are executed only after two identical packets
+ * (REV-D2). Ops-mode (POM) writes remain single-packet. When disabled, the old
+ * first-packet-with-idempotent-repeat behaviour is restored. */
+#ifndef DCC_SERVICE_DOUBLE_PACKET
+#define DCC_SERVICE_DOUBLE_PACKET 1
+#endif
+
 typedef struct {
     uint16_t dt_us;
 } dcc_half_t;
@@ -76,6 +83,9 @@ static DRAM_ATTR QueueHandle_t s_queue;
  * task is actually draining it. */
 static QueueHandle_t s_ack_queue;
 static bool s_ack_worker;
+/* True while the DCC receive/parser task is running. The ACK fallback must not
+ * emit a blocking inline pulse while the parser is live (REV-D3). */
+static volatile bool s_parser_running;
 static DRAM_ATTR volatile int64_t s_last_edge_us;
 static DRAM_ATTR int64_t s_last_input_edge_us;
 static volatile int64_t s_last_packet_us;
@@ -133,8 +143,9 @@ static bool s_service_mode;
 static bool s_service_candidate;
 static int64_t s_service_deadline_us;
 typedef struct {
-    uint8_t bytes[DCC_PACKET_MAX];
+    uint8_t packet[DCC_PACKET_MAX];
     uint8_t len;
+    uint8_t count;
 } dcc_confirmation_t;
 static dcc_confirmation_t s_service_pending, s_ops_pending;
 static portMUX_TYPE s_cfg_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -198,12 +209,32 @@ static bool read_cv(uint16_t cv, uint8_t *out_value)
  * repeat and must not write/ACK again. */
 static bool repeated(dcc_confirmation_t *pending, const uint8_t *packet, uint8_t len)
 {
-    if (pending->len == len && memcmp(pending->bytes, packet, len) == 0) {
+    if (pending->len == len && memcmp(pending->packet, packet, len) == 0) {
         return true;
     }
-    memcpy(pending->bytes, packet, len);
+    memcpy(pending->packet, packet, len);
     pending->len = len;
     return false;
+}
+
+/* Service-mode confirmation: true only once the same packet has been received
+ * twice in a row. A different packet starts a new run. With
+ * DCC_SERVICE_DOUBLE_PACKET=0 this degrades to the old behaviour where a new
+ * packet applies immediately and an identical retransmission is ignored. */
+static bool confirmed_twice(dcc_confirmation_t *pending, const uint8_t *packet, size_t len)
+{
+#if DCC_SERVICE_DOUBLE_PACKET
+    if (pending->len == len && len > 0 && memcmp(pending->packet, packet, len) == 0) {
+        if (pending->count < 2U) pending->count++;
+        return pending->count >= 2U;
+    }
+    memcpy(pending->packet, packet, len);
+    pending->len = len;
+    pending->count = 1U;
+    return false;
+#else
+    return !repeated(pending, packet, (uint8_t)len);
+#endif
 }
 
 static void emit_function(uint8_t fn, bool state, bool via_consist, bool forward,
@@ -262,15 +293,18 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         s_seen_control_generation = control_generation;
         s_service_mode = s_service_candidate = false;
         s_service_pending.len = s_ops_pending.len = 0;
+        s_service_pending.count = 0;
     }
     if (!enabled) {
         s_service_mode = s_service_candidate = false;
         s_service_pending.len = s_ops_pending.len = 0;
+        s_service_pending.count = 0;
         return;
     }
     if (now >= s_service_deadline_us) {
         s_service_mode = s_service_candidate = false;
         s_service_pending.len = 0;
+        s_service_pending.count = 0;
     }
 
     /* A reset arms entry; only the immediately following service instruction
@@ -281,6 +315,7 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         s_service_candidate = true;
         s_service_deadline_us = now + DCC_SERVICE_TIMEOUT_US;
         s_service_pending.len = 0;
+        s_service_pending.count = 0;
     }
 
     bool service_shape = (len == 4U) &&
@@ -300,6 +335,7 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     if (speed_over_service) {
         s_service_candidate = false;
         s_service_pending.len = 0;
+        s_service_pending.count = 0;
     }
     bool service_mode = (s_service_mode || s_service_candidate) &&
                         s_last_preamble_count >= 20U && service_shape;
@@ -323,7 +359,7 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         s_service_deadline_us = now + DCC_SERVICE_TIMEOUT_US;
         mark_packet();
         s_ops_pending.len = 0;
-        if (repeated(&s_service_pending, packet, len)) {
+        if (!confirmed_twice(&s_service_pending, packet, len)) {
             return;
         }
         uint8_t instr = packet[0];
@@ -369,6 +405,7 @@ static void dispatch(const uint8_t *packet, uint8_t len)
     if (!service_reset) {
         s_service_mode = s_service_candidate = false;
         s_service_pending.len = 0;
+        s_service_pending.count = 0;
     }
     /* Locomotive partitions only: accessory 80..BF and reserved E8..FF
      * never alias a long locomotive address. Their signal clock still counts. */
@@ -757,12 +794,14 @@ static esp_err_t dcc_receiver_start(void)
 
 static void dcc_task(void *arg)
 {
+    s_parser_running = true;
     QueueHandle_t startup = (QueueHandle_t)arg;
     esp_err_t err = dcc_receiver_start();
     if (startup != NULL) {
         (void)xQueueSend(startup, &err, portMAX_DELAY);
     }
     if (err != ESP_OK) {
+        s_parser_running = false;
         vTaskDelete(NULL);
         return;
     }
@@ -776,6 +815,7 @@ static void dcc_task(void *arg)
         }
         iters++;
     }
+    s_parser_running = false;
 }
 
 /* Configure the ACK pin as an output. Idempotent; safe to call again if the
@@ -1045,6 +1085,12 @@ esp_err_t dcc_service_ack(void)
             return ESP_ERR_NO_MEM; /* queue full: a redundant ACK is dropped */
         }
         return ESP_OK;
+    }
+
+    /* The parser task is live and no worker exists: never block it on the
+     * inline pulse. The ACK is dropped; the caller keeps parsing half-periods. */
+    if (s_parser_running) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     /* Fallback for host tests / an early call before dcc_init(): configure the

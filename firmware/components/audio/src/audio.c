@@ -709,6 +709,21 @@ static void mixer_task(void *arg)
         if (s_req_mutex != NULL) { xSemaphoreTake(s_req_mutex, portMAX_DELAY); }
         s_mixer_work = false;
         if (s_req_mutex != NULL) { xSemaphoreGive(s_req_mutex); }
+        /* Peak limiter: summed voices can exceed int16 full scale. Only a
+         * clipping block is scaled by 32767/peak (Q15); normal blocks pass
+         * through bit-exact, so ordinary loudness is unchanged. */
+        int32_t peak = 0;
+        for (int i = 0; i < MIX_BLOCK; ++i) {
+            int32_t s = mix[i];
+            int32_t a = s < 0 ? -s : s; /* int32 avoids -32768 abs overflow */
+            if (a > peak) { peak = a; }
+        }
+        if (peak > 32767) {
+            int32_t gain_q15 = (int32_t)((32767LL << 15) / peak);
+            for (int i = 0; i < MIX_BLOCK; ++i) {
+                mix[i] = (int16_t)(((int32_t)mix[i] * gain_q15) >> 15);
+            }
+        }
         size_t written = 0;
         esp_err_t werr = i2s_channel_write(s_tx, mix, sizeof(mix), &written,
                                            pdMS_TO_TICKS(1000));

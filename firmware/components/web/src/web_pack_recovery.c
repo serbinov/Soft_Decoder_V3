@@ -60,7 +60,7 @@ static bool pack_name_in_names(const char *name,
 
 static bool pack_backup_restore(const char *backup_dir,
                                 char (*old_names)[WEB_LIB_NAME_MAX], size_t old_count,
-                                char (*new_names)[WEB_LIB_NAME_MAX], size_t new_count)
+                                char (*new_names)[PACK_JOURNAL_FILE_MAX], size_t new_count)
 {
     if (backup_dir == NULL || backup_dir[0] == '\0') return true;
     char path[224], backup_path[224];
@@ -170,20 +170,17 @@ static esp_err_t web_recover_pack_journal(void)
     const size_t prefix = offsetof(pack_journal_hdr_t, old_selection);
     bool ok = fread(&hdr, 1, prefix, f) == prefix;
     bool selection_known = ok && memcmp(hdr.magic, PACK_JOURNAL_MAGIC, 8) == 0;
-    bool legacy = ok && memcmp(hdr.magic, PACK_JOURNAL_MAGIC_OLD, 8) == 0;
     if (selection_known) {
         ok = fread(&hdr.old_selection, 1, sizeof(hdr) - prefix, f) == sizeof(hdr) - prefix;
-    } else if (legacy) {
-        memset(&hdr.old_selection, 0, sizeof(hdr) - prefix);
     } else {
         ok = false;
     }
-    ok = ok && (selection_known || legacy) &&
+    ok = ok && selection_known &&
          (hdr.phase == PACK_JOURNAL_PREPARED || hdr.phase == PACK_JOURNAL_COMMITTED) &&
          hdr.old_count <= PACK_JOURNAL_MAX_NAMES &&
          hdr.new_count <= PACK_JOURNAL_MAX_NAMES;
     char (*old_names)[WEB_LIB_NAME_MAX] = NULL;
-    char (*new_names)[WEB_LIB_NAME_MAX] = NULL;
+    char (*new_names)[PACK_JOURNAL_FILE_MAX] = NULL;
     if (ok && hdr.old_count != 0U) {
         old_names = malloc((size_t)hdr.old_count * sizeof(*old_names));
         ok = old_names != NULL &&
@@ -198,7 +195,8 @@ static esp_err_t web_recover_pack_journal(void)
     if (!ok) {
         free(old_names);
         free(new_names);
-        /* Corrupt journal: drop it and fall back to the orphan scan. */
+        /* Corrupt or old-format journal: drop it and fall back to the orphan
+         * scan. */
         (void)remove(PACK_JOURNAL_PATH);
         pack_recover_orphan_backups();
         return ESP_ERR_INVALID_STATE;
@@ -219,8 +217,7 @@ static esp_err_t web_recover_pack_journal(void)
         }
         /* Roll the graph selection back only if it still points at the scheme
          * this failed transaction installed. A factory reset or a newer user
-         * selection must not be overwritten by an old journal. J1 journals
-         * carry no selection information at all. */
+         * selection must not be overwritten by an old journal. */
         if (cleaned && selection_known && hdr.new_selection_valid != 0U &&
             sg_id_valid(hdr.new_selection)) {
             char current[SG_ID_CAP] = {0};

@@ -28,6 +28,7 @@ typedef struct {
     bool ledc;
     ledc_channel_t ledc_ch;
     mcpwm_cmpr_handle_t mcpwm_cmpr;
+    mcpwm_gen_handle_t mcpwm_gen;
 } auxio_ch_t;
 
 static auxio_ch_t s_ch[AUXIO_CH_COUNT];
@@ -234,12 +235,70 @@ esp_err_t auxio_boot_safe(void)
     return ESP_OK;
 }
 
+/* Release the first `count` channels plus the shared MCPWM resources. The
+ * caller must serialise channel access (s_lock). The host test stubs do not
+ * model driver teardown, so the real stop/delete calls are compiled only for
+ * the firmware; the bookkeeping (handles cleared) still runs everywhere. */
+static void auxio_deinit_channels_locked(size_t count)
+{
+    if (count > AUXIO_CH_COUNT) {
+        count = AUXIO_CH_COUNT;
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        auxio_ch_t *ch = &s_ch[i];
+        if (ch->ledc) {
+#if defined(ESP_PLATFORM)
+            (void)ledc_stop(LEDC_LOW_SPEED_MODE, ch->ledc_ch, 0);
+#endif
+        } else {
+#if defined(ESP_PLATFORM)
+            if (ch->mcpwm_gen != NULL) {
+                (void)mcpwm_del_generator(ch->mcpwm_gen);
+            }
+            if (ch->mcpwm_cmpr != NULL) {
+                (void)mcpwm_del_comparator(ch->mcpwm_cmpr);
+            }
+#endif
+        }
+        ch->ledc = false;
+        ch->mcpwm_gen = NULL;
+        ch->mcpwm_cmpr = NULL;
+    }
+
+#if defined(ESP_PLATFORM)
+    for (size_t i = 0; i < 2; ++i) {
+        if (s_mcpwm_oper[i] != NULL) {
+            (void)mcpwm_del_operator(s_mcpwm_oper[i]);
+        }
+    }
+    if (s_mcpwm_timer != NULL) {
+        (void)mcpwm_timer_start_stop(s_mcpwm_timer, MCPWM_TIMER_STOP_EMPTY);
+        (void)mcpwm_timer_disable(s_mcpwm_timer);
+        (void)mcpwm_del_timer(s_mcpwm_timer);
+    }
+    for (int i = 0; i < AUXIO_CH_COUNT; ++i) {
+        (void)gpio_reset_pin((gpio_num_t)s_gpios[i]);
+    }
+#endif
+    for (size_t i = 0; i < 2; ++i) {
+        s_mcpwm_oper[i] = NULL;
+    }
+    s_mcpwm_timer = NULL;
+}
+
 esp_err_t auxio_init(void)
 {
+    esp_err_t err;
+
     s_lock = xSemaphoreCreateMutex();
     if (s_lock == NULL) {
         return ESP_ERR_NO_MEM;
     }
+
+    /* Repeated init: drop the channels of the previous successful call first,
+     * so the driver state is rebuilt from scratch without stale handles. */
+    auxio_deinit_channels_locked(AUXIO_CH_COUNT);
 
     /* LEDC timer 1 (8-bit) shared by the first six outputs; the motor keeps
      * timer 0 / channels 0-1 at 10-bit. */
@@ -250,7 +309,11 @@ esp_err_t auxio_init(void)
         .freq_hz = AUXIO_PWM_FREQ_HZ,
         .clk_cfg = LEDC_AUTO_CLK,
     };
-    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+    err = ledc_timer_config(&ledc_timer);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(0);
+        return err;
+    }
 
     /* MCPWM: one 20 kHz timer, two operators (AUX5/AUX6 on operator 0,
      * AUX7 on operator 1). */
@@ -261,12 +324,32 @@ esp_err_t auxio_init(void)
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
         .period_ticks = AUXIO_MCPWM_PERIOD_TICKS,
     };
-    ESP_ERROR_CHECK(mcpwm_new_timer(&mcpwm_timer, &s_mcpwm_timer));
+    err = mcpwm_new_timer(&mcpwm_timer, &s_mcpwm_timer);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(0);
+        return err;
+    }
     mcpwm_operator_config_t mcpwm_oper = { .group_id = 0 };
-    ESP_ERROR_CHECK(mcpwm_new_operator(&mcpwm_oper, &s_mcpwm_oper[0]));
-    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(s_mcpwm_oper[0], s_mcpwm_timer));
-    ESP_ERROR_CHECK(mcpwm_new_operator(&mcpwm_oper, &s_mcpwm_oper[1]));
-    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(s_mcpwm_oper[1], s_mcpwm_timer));
+    err = mcpwm_new_operator(&mcpwm_oper, &s_mcpwm_oper[0]);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(0);
+        return err;
+    }
+    err = mcpwm_operator_connect_timer(s_mcpwm_oper[0], s_mcpwm_timer);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(0);
+        return err;
+    }
+    err = mcpwm_new_operator(&mcpwm_oper, &s_mcpwm_oper[1]);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(0);
+        return err;
+    }
+    err = mcpwm_operator_connect_timer(s_mcpwm_oper[1], s_mcpwm_timer);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(0);
+        return err;
+    }
 
     for (int i = 0; i < AUXIO_CH_COUNT; ++i) {
         auxio_ch_t *ch = &s_ch[i];
@@ -287,7 +370,11 @@ esp_err_t auxio_init(void)
                 .duty = 0,
                 .hpoint = 0,
             };
-            ESP_ERROR_CHECK(ledc_channel_config(&c));
+            err = ledc_channel_config(&c);
+            if (err != ESP_OK) {
+                auxio_deinit_channels_locked((size_t)i + 1U);
+                return err;
+            }
             ch->ledc = true;
             ch->ledc_ch = (ledc_channel_t)(LEDC_CHANNEL_2 + i);
         } else {
@@ -296,27 +383,53 @@ esp_err_t auxio_init(void)
             mcpwm_comparator_config_t cmp_cfg = {
                 .flags.update_cmp_on_tez = true,
             };
-            ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &cmp_cfg, &ch->mcpwm_cmpr));
+            err = mcpwm_new_comparator(oper, &cmp_cfg, &ch->mcpwm_cmpr);
+            if (err != ESP_OK) {
+                auxio_deinit_channels_locked((size_t)i + 1U);
+                return err;
+            }
             mcpwm_generator_config_t gen_cfg = {
                 .gen_gpio_num = s_gpios[i],
             };
             mcpwm_gen_handle_t gen = NULL;
-            ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_cfg, &gen));
-            ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(gen,
+            err = mcpwm_new_generator(oper, &gen_cfg, &gen);
+            if (err != ESP_OK) {
+                auxio_deinit_channels_locked((size_t)i + 1U);
+                return err;
+            }
+            ch->mcpwm_gen = gen;
+            err = mcpwm_generator_set_action_on_timer_event(gen,
                 MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP,
                                              MCPWM_TIMER_EVENT_EMPTY,
-                                             MCPWM_GEN_ACTION_HIGH)));
-            ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(gen,
+                                             MCPWM_GEN_ACTION_HIGH));
+            if (err != ESP_OK) {
+                auxio_deinit_channels_locked((size_t)i + 1U);
+                return err;
+            }
+            err = mcpwm_generator_set_action_on_compare_event(gen,
                 MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP,
                                                ch->mcpwm_cmpr,
-                                               MCPWM_GEN_ACTION_LOW)));
+                                               MCPWM_GEN_ACTION_LOW));
+            if (err != ESP_OK) {
+                auxio_deinit_channels_locked((size_t)i + 1U);
+                return err;
+            }
         }
     }
 
-    ESP_ERROR_CHECK(mcpwm_timer_enable(s_mcpwm_timer));
-    ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_mcpwm_timer, MCPWM_TIMER_START_NO_STOP));
+    err = mcpwm_timer_enable(s_mcpwm_timer);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(AUXIO_CH_COUNT);
+        return err;
+    }
+    err = mcpwm_timer_start_stop(s_mcpwm_timer, MCPWM_TIMER_START_NO_STOP);
+    if (err != ESP_OK) {
+        auxio_deinit_channels_locked(AUXIO_CH_COUNT);
+        return err;
+    }
 
     if (xTaskCreate(effect_task, "aux_fx", 3072, NULL, 6, NULL) != pdPASS) {
+        auxio_deinit_channels_locked(AUXIO_CH_COUNT);
         return ESP_ERR_NO_MEM;
     }
 

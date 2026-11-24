@@ -910,6 +910,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — docs(release): add v0.29 changelog and drop stale v0.28 image
 - 2026-11-24 (v0.29) — fix(web,settings): address self-review findings
 - 2026-11-24 (v0.29) — docs(release): record review decisions, HIL and ship v0.29
 - 2026-11-24 (v0.29) — test: cover safety fixes, dead-man and boot-safe pin mask

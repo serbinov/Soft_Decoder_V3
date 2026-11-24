@@ -27,6 +27,11 @@ if (-not $gcov) { Write-Host "ERROR: gcov not found (needs gcc)" -ForegroundColo
 $gcov = $gcov.Source
 Write-Host "Compiler: $cc"
 
+# Motor math (fminf/fmaxf) needs libm on gcc/clang; portable TCC links its own
+# runtime and has no separate -lm.
+$libFlags = @()
+if ((Split-Path -Leaf $cc) -notlike "*tcc*") { $libFlags += "-lm" }
+
 # web.c includes the generated web_html.h; generate it in clean checkouts.
 $py = Get-Command python -ErrorAction SilentlyContinue
 if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue }
@@ -84,7 +89,7 @@ foreach ($suite in $suites) {
     Push-Location $work
     $extra = @()
     if ($Sanitize) { $extra = @("-fsanitize=address", "-fsanitize=undefined", "-g") }
-    & $cc $inc $names "$unitySrc\unity.c" $extra --coverage -w -o $exe *> $null
+    & $cc $inc $names "$unitySrc\unity.c" $extra $libFlags --coverage -w -o $exe *> $null
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) {
         Pop-Location; Write-Host "BUILD FAILED: $suite"; $failed++; continue
     }

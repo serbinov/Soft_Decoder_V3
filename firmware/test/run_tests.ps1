@@ -44,6 +44,11 @@ if (-not $cc) {
 }
 Write-Host "Compiler: $cc"
 
+# Motor math (fminf/fmaxf) needs libm on gcc/clang; portable TCC links its own
+# runtime and has no separate -lm.
+$libFlags = @()
+if ((Split-Path -Leaf $cc) -notlike "*tcc*") { $libFlags += "-lm" }
+
 # Native stderr (Python unittest writes its report there) must be shown instead
 # of being turned into a terminating PowerShell error by $ErrorActionPreference.
 function Invoke-TestProcess {
@@ -148,7 +153,7 @@ foreach ($suite in $suites) {
             # Reuse the host LEDC register shim used by test_motor.
             $suiteFlags += "-I$root\test\test_motor"
         }
-& $cc $inc $names "$unitySrc\unity.c" $suiteFlags $extra -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
+& $cc $inc $names "$unitySrc\unity.c" $suiteFlags $extra $libFlags -o $exe 2>&1 | ForEach-Object { Write-Host $_ }
         $buildExit = $LASTEXITCODE
     } catch {
         Write-Host "BUILD FAILED: $_"

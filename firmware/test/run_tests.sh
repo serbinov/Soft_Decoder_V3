@@ -107,7 +107,7 @@ for suite in "${SUITES[@]}"; do
     if [ "$suite" = "test_motor_concurrency" ]; then
         SUITE_EXTRA+=("-I$ROOT/test/test_motor")
     fi
-    if ! "$CC" "${INC[@]}" "${srcs[@]}" "$UNITY_SRC/unity.c" "${EXTRA[@]}" "${SUITE_EXTRA[@]}" -o "$exe"; then
+    if ! "$CC" "${INC[@]}" "${srcs[@]}" "$UNITY_SRC/unity.c" "${EXTRA[@]}" "${SUITE_EXTRA[@]}" -lm -o "$exe"; then
         echo "BUILD FAILED: $suite" >&2
         failed=$((failed + 1))
         continue

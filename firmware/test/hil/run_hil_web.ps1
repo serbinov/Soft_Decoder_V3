@@ -89,8 +89,8 @@ if (-not $SkipConnect) {
 
 $script:results = @()
 function Add-Result {
-    param([string]$Name, [bool]$Ok, [string]$Info = "")
-    $script:results += [pscustomobject]@{ Name = $Name; Ok = $Ok; Info = $Info }
+    param([string]$Name, [bool]$Ok, [string]$Info = "", [switch]$Skip)
+    $script:results += [pscustomobject]@{ Name = $Name; Ok = $Ok; Info = $Info; Skip = [bool]$Skip }
 }
 function Get-Ep {
     param([string]$Name, [string]$Path)
@@ -158,6 +158,7 @@ try {
     $storage  = Get-Ep "storage"        "/api/storage"
     $aStatus  = Get-Ep "audio/status"   "/api/audio/status"
     $tracks   = Get-Ep "audio/tracks"   "/api/audio/tracks"
+    $hasTracks = ($tracks -and $tracks.tracks -and @($tracks.tracks).Count -gt 0)
     $cv1      = Get-Ep "cv/read"        "/api/cv/read?index=1"
     $cvAll    = Get-Ep "cv/all"         "/api/cv/all"
     $auxCfg   = Get-Ep "aux/cfg"        "/api/aux/cfg"
@@ -210,7 +211,11 @@ try {
     if ($aStatus) {
         $vol = Post-Ep "audio/volume" "/api/audio/volume?master=$($aStatus.master_volume)&engine=$($aStatus.engine_volume)&effects=$($aStatus.effects_volume)"
     } else { $vol = Post-Ep "audio/volume" "/api/audio/volume?master=80&engine=80&effects=80" }
-    Post-Ep "audio/play?slot=1" "/api/audio/play?slot=1" | Out-Null
+    if ($hasTracks) {
+        Post-Ep "audio/play?slot=1" "/api/audio/play?slot=1" | Out-Null
+    } else {
+        Add-Result "POST audio/play?slot=1" $true "SKIP: empty sound library (0 tracks)" -Skip
+    }
     Post-Ep "audio/stop"        "/api/audio/stop" | Out-Null
 
     # Track category: re-apply the current value for slot 1.
@@ -225,9 +230,11 @@ try {
     }
 
     # Function map: re-apply F0 current mapping.
-    if ($funcMap -and $funcMap.map) {
+    if ($hasTracks -and $funcMap -and $funcMap.map -and @($funcMap.map).Count -gt 0) {
         $m = $funcMap.map[0]
         Post-Ep "func-map" "/api/func-map?fn=0&a=$($m.a)&b=$($m.b)&aux=$($m.aux)&dir=$($m.dir)&speed=$($m.speed)" | Out-Null
+    } else {
+        Add-Result "POST func-map" $true "SKIP: no tracks/function map" -Skip
     }
 
     # Motor (stop, no movement), device name, mode, BEMF use, control source restore.
@@ -312,17 +319,22 @@ Write-Host ""
 Write-Host "Web/REST HIL results:" -ForegroundColor Cyan
 $failed = 0
 foreach ($r in $script:results) {
+    if ($r.Skip) {
+        Write-Host ("  {0,-30} SKIP" -f $r.Name) -ForegroundColor Yellow
+        continue
+    }
     if (-not $r.Ok) { $failed++ }
     $color = if ($r.Ok) { "Green" } else { "Red" }
     Write-Host ("  {0,-30} {1}" -f $r.Name, $(if ($r.Ok) { "OK" } else { "FAIL" })) -ForegroundColor $color
 }
+$skipped = @($script:results | Where-Object { $_.Skip }).Count
 Write-Host ""
 if (-not $CalibrateBemf) {
     Write-Host "HIL coverage gap: BEMF calibration was NOT exercised (opt-in -CalibrateBemf)." -ForegroundColor Yellow
 }
 if ($failed -gt 0) {
-    Write-Host "WEB HIL: FAILED ($failed of $($script:results.Count))" -ForegroundColor Red
+    Write-Host "WEB HIL: FAILED ($failed of $($script:results.Count) checks failed, $skipped skipped)" -ForegroundColor Red
     exit 1
 }
-Write-Host "WEB HIL: PASSED ($($script:results.Count) checks)" -ForegroundColor Green
+Write-Host "WEB HIL: PASSED ($($script:results.Count) checks, $skipped skipped)" -ForegroundColor Green
 exit 0

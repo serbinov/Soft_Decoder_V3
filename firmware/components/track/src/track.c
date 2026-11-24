@@ -182,9 +182,17 @@ static void track_adc_task(void *arg)
     (void)arg;
     bool was_driving = false;
     uint32_t iters = 0;
+    bool wdt_added = false;
     while (s_iter_cap == 0U || iters < s_iter_cap) {
+        if (!wdt_added) {
+            if (esp_task_wdt_add(NULL) == ESP_OK) {
+                wdt_added = true;
+            }
+        }
         track_adc_step(&was_driving);
-        (void)esp_task_wdt_reset();
+        if (wdt_added && esp_task_wdt_reset() == ESP_ERR_NOT_FOUND) {
+            wdt_added = false;
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
         iters++;
     }

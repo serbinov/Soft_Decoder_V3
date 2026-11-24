@@ -214,7 +214,16 @@ try {
     if ($hasTracks) {
         Post-Ep "audio/play?slot=1" "/api/audio/play?slot=1" | Out-Null
     } else {
-        Add-Result "POST audio/play?slot=1" $true "SKIP: empty sound library (0 tracks)" -Skip
+        # No legacy track slots assigned: exercise decoder-side preview by
+        # library file name (the Sounds page uses the same endpoint).
+        $lib = Get-Raw "/api/audio/library"
+        $libName = $null
+        if ($lib -and $lib.files -and @($lib.files).Count -gt 0) { $libName = $lib.files[0].name }
+        if ($libName) {
+            Post-Ep "audio/play (library)" "/api/audio/play?name=$libName" | Out-Null
+        } else {
+            Add-Result "POST audio/play" $true "SKIP: no track slots and no library files" -Skip
+        }
     }
     Post-Ep "audio/stop"        "/api/audio/stop" | Out-Null
 
@@ -234,7 +243,7 @@ try {
         $m = $funcMap.map[0]
         Post-Ep "func-map" "/api/func-map?fn=0&a=$($m.a)&b=$($m.b)&aux=$($m.aux)&dir=$($m.dir)&speed=$($m.speed)" | Out-Null
     } else {
-        Add-Result "POST func-map" $true "SKIP: no tracks/function map" -Skip
+        Add-Result "POST func-map" $true "SKIP: no track slots/function map" -Skip
     }
 
     # Motor (stop, no movement), device name, mode, BEMF use, control source restore.

@@ -381,7 +381,7 @@ static void reset_resp(void)
     mock_resp_type[0] = '\0';
     mock_resp_status[0] = '\0';
     mock_resp_hdr[0] = '\0';
-    mock_resp_send_err_code = 0;
+    mock_resp_send_err_code = -1;
     mock_resp_send_err_msg[0] = '\0';
     mock_resp_send_calls = 0;
 }
@@ -1669,6 +1669,36 @@ static void test_web_deadman_inactive_in_rails_mode(void)
     TEST_ASSERT_EQUAL_INT(0, mock_motor_set_speed_calls);
 }
 
+static void test_web_deadman_other_client_cannot_keep_alive(void)
+{
+    s_cfg.control_source = 1;
+    mock_timer_now_us = 1000000;
+    mock_motor_set_speed_calls = 0;
+    web_control_motion_note_ip(0x0A000001u, 50, true);   /* 10.0.0.1 */
+    mock_timer_now_us += 5000000;
+    web_control_heartbeat_ip(0x0A000002u);               /* different client */
+    mock_timer_now_us += 6000000;                        /* 11 s since motion */
+    TEST_ASSERT_TRUE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
+    TEST_ASSERT_EQUAL_UINT8(0, mock_motor_set_speed_value);
+}
+
+static void test_web_deadman_same_client_heartbeat_keeps_alive(void)
+{
+    s_cfg.control_source = 1;
+    mock_timer_now_us = 1000000;
+    mock_motor_set_speed_calls = 0;
+    web_control_motion_note_ip(0x0A000001u, 50, true);
+    mock_timer_now_us += 9000000;
+    web_control_heartbeat_ip(0x0A000001u);               /* same client */
+    mock_timer_now_us += 9000000;
+    TEST_ASSERT_FALSE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(0, mock_motor_set_speed_calls);
+    mock_timer_now_us += 2000000;                        /* 11 s since heartbeat */
+    TEST_ASSERT_TRUE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
+}
+
 static void test_mode_get(void)
 {
     httpd_req_t req = make_req(0);
@@ -1784,6 +1814,20 @@ static void test_bemf_base_get(void)
     TEST_ASSERT_EQUAL(ESP_OK, bemf_base_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"start\":0"));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"speed\":3"));
+}
+
+static void test_bemf_window_rejected_while_moving(void)
+{
+    httpd_req_t req = make_req(0);
+    s_actuation_ready = true;
+    mock_motor_applied_speed = 10;
+    set_query("");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "motor moving"));
+    mock_motor_applied_speed = 0;
+    s_actuation_ready = true;
+    reset_resp();
 }
 
 static void test_bemf_cal_post_paths(void)
@@ -2040,6 +2084,30 @@ static void test_motor_get_post(void)
     set_query("speed=127");
     TEST_ASSERT_EQUAL(ESP_OK, motor_post(&req));
     TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+}
+
+static void test_motor_duty_rejected_while_moving(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.control_source = 1;
+    s_actuation_ready = true;
+    mock_motor_applied_speed = 10;
+    mock_motor_test_duty = 0;
+    set_query("duty=500&ms=1000&forward=1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_duty_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "motor moving"));
+    TEST_ASSERT_EQUAL_UINT16(0, mock_motor_test_duty);
+
+    mock_motor_applied_speed = 0;
+    set_query("duty=500&ms=1000&forward=1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_duty_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":true"));
+    TEST_ASSERT_EQUAL_UINT16(500, mock_motor_test_duty);
+    mock_motor_applied_speed = 0;
+    s_actuation_ready = true;
+    reset_resp();
 }
 
 static void test_functions_get(void)
@@ -2943,6 +3011,22 @@ static void test_cv_write_post(void)
     web_master_volume_changed(200);
     TEST_ASSERT_EQUAL_UINT8(100, s_cfg.master_volume);
     TEST_ASSERT_EQUAL_UINT8(100, mock_audio_last_volume);
+}
+
+static void test_cv_write_rejected_while_moving(void)
+{
+    httpd_req_t req = make_req(0);
+    s_actuation_ready = true;
+    mock_motor_applied_speed = 10;
+    mock_cv[29] = 0x02;
+    set_query("index=29&value=0");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, cv_write_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "motor moving"));
+    TEST_ASSERT_EQUAL_UINT8(0x02, mock_cv[29]);
+    mock_motor_applied_speed = 0;
+    s_actuation_ready = true;
+    reset_resp();
 }
 
 /* ---------- AUX config ---------- */
@@ -5166,7 +5250,7 @@ static void test_mutation_dispatch_csrf_guard(void)
     set_csrf_headers("http://evil.example", NULL, "192.168.4.1");
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
-    TEST_ASSERT_EQUAL_INT(403, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(HTTPD_403_FORBIDDEN, mock_resp_send_err_code);
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_send_err_msg, "cross-origin"));
     TEST_ASSERT_EQUAL_INT(0, test_mutation_calls);
     TEST_ASSERT_EQUAL_UINT32(0, s_mutation_count);
@@ -5177,7 +5261,7 @@ static void test_mutation_dispatch_csrf_guard(void)
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
     TEST_ASSERT_EQUAL_INT(1, test_mutation_calls);
     TEST_ASSERT_EQUAL_UINT32(0, s_mutation_count);
-    TEST_ASSERT_EQUAL_INT(0, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(-1, mock_resp_send_err_code);
 
     /* A matching Referer is also accepted. */
     set_csrf_headers(NULL, "http://192.168.4.1/index.html", "192.168.4.1");
@@ -5195,7 +5279,7 @@ static void test_mutation_dispatch_csrf_guard(void)
     set_csrf_headers("null", NULL, "192.168.4.1");
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
-    TEST_ASSERT_EQUAL_INT(403, mock_resp_send_err_code);
+    TEST_ASSERT_EQUAL_INT(HTTPD_403_FORBIDDEN, mock_resp_send_err_code);
     TEST_ASSERT_EQUAL_INT(3, test_mutation_calls);
 }
 
@@ -5826,6 +5910,51 @@ static void test_pack_journal_prepared_rolls_back_at_boot(void)
     TEST_ASSERT_EQUAL_UINT32(1, test_manifest_load_calls);
 }
 
+static void test_pack_journal_long_name_rolls_back(void)
+{
+    char old_names[1][WEB_LIB_NAME_MAX];
+    char new_names[1][PACK_JOURNAL_FILE_MAX];
+    char long_name[PACK_JOURNAL_FILE_MAX];
+    char long_path[160];
+    memset(old_names, 0, sizeof(old_names));
+    memset(new_names, 0, sizeof(new_names));
+    memset(long_name, 'a', WEB_LIB_NAME_MAX - 1U);
+    long_name[WEB_LIB_NAME_MAX - 1U] = '\0';
+    snprintf(long_name + (WEB_LIB_NAME_MAX - 1U),
+             sizeof(long_name) - (WEB_LIB_NAME_MAX - 1U), ".wav");
+    TEST_ASSERT_EQUAL_UINT32(WEB_LIB_NAME_MAX + 3U, (uint32_t)strlen(long_name));
+    snprintf(old_names[0], sizeof(old_names[0]), "old.wav");
+    snprintf(new_names[0], sizeof(*new_names), "%s", long_name);
+    snprintf(long_path, sizeof(long_path), "web_tmp/audio/%s", long_name);
+
+    MKDIR("web_tmp/audio/.pblong");
+    FILE *f = fopen("web_tmp/audio/.pblong/old.wav", "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("OLD", f);
+    fclose(f);
+    f = fopen(long_path, "wb");
+    TEST_ASSERT_NOT_NULL(f);
+    fputs("NEW", f);
+    fclose(f);
+
+    pack_tx_t tx;
+    memset(&tx, 0, sizeof(tx));
+    snprintf(tx.backup_dir, sizeof(tx.backup_dir), "%s", "web_tmp/audio/.pblong");
+    snprintf(tx.journal, sizeof(tx.journal), "%s", PACK_JOURNAL_PATH);
+    tx.old_names = old_names;
+    tx.old_count = 1;
+    tx.new_names = new_names;
+    tx.new_count = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, pack_journal_write(&tx, PACK_JOURNAL_PREPARED));
+
+    TEST_ASSERT_EQUAL(ESP_OK, web_recover_pack_journal());
+    TEST_ASSERT_TRUE(file_exists("web_tmp/audio/old.wav"));
+    TEST_ASSERT_FALSE(file_exists(long_path));
+    TEST_ASSERT_FALSE(file_exists(PACK_JOURNAL_PATH));
+    TEST_ASSERT_FALSE(dir_exists("web_tmp/audio/.pblong"));
+    TEST_ASSERT_EQUAL_UINT32(WEB_LIB_NAME_MAX + 3U, (uint32_t)strlen(new_names[0]));
+}
+
 static void test_pack_journal_retry_preserves_restored_overlap(void)
 {
     char old_names[1][WEB_LIB_NAME_MAX];
@@ -6244,11 +6373,14 @@ int main(void)
     RUN_TEST(test_web_deadman_stops_motor_without_heartbeat);
     RUN_TEST(test_web_deadman_heartbeat_postpones_stop);
     RUN_TEST(test_web_deadman_inactive_in_rails_mode);
+    RUN_TEST(test_web_deadman_other_client_cannot_keep_alive);
+    RUN_TEST(test_web_deadman_same_client_heartbeat_keeps_alive);
     RUN_TEST(test_mode_get);
     RUN_TEST(test_mode_post);
     RUN_TEST(test_bemf_cal_get);
     RUN_TEST(test_bemf_phase_names);
     RUN_TEST(test_bemf_base_get);
+    RUN_TEST(test_bemf_window_rejected_while_moving);
     RUN_TEST(test_bemf_cal_post_paths);
     RUN_TEST(test_bemf_use_get_post);
     RUN_TEST(test_bemf_status_names_and_previous_curve);
@@ -6258,6 +6390,7 @@ int main(void)
     RUN_TEST(test_bemf_mode_durable_before_runtime);
     RUN_TEST(test_bemf_mode_queries_and_actuation_gates);
     RUN_TEST(test_motor_get_post);
+    RUN_TEST(test_motor_duty_rejected_while_moving);
     RUN_TEST(test_functions_get);
     RUN_TEST(test_function_post);
     RUN_TEST(test_function_post_all_f_to_all_aux);
@@ -6302,6 +6435,7 @@ int main(void)
     RUN_TEST(test_track_category_post);
     RUN_TEST(test_cv_read_and_all);
     RUN_TEST(test_cv_write_post);
+    RUN_TEST(test_cv_write_rejected_while_moving);
     RUN_TEST(test_aux_cfg_get_post);
     RUN_TEST(test_aux_cfg_effect_periods);
     RUN_TEST(test_aux_cfg_all_channels);
@@ -6364,6 +6498,7 @@ int main(void)
     RUN_TEST(test_upload_name_validation_and_lowercase);
     RUN_TEST(test_library_delete_refuses_track_and_binding);
     RUN_TEST(test_pack_journal_prepared_rolls_back_at_boot);
+    RUN_TEST(test_pack_journal_long_name_rolls_back);
     RUN_TEST(test_pack_journal_retry_preserves_restored_overlap);
     RUN_TEST(test_pack_rollback_respects_newer_selection);
     RUN_TEST(test_pack_journal_committed_cleans_backups);

@@ -214,7 +214,7 @@ size_t mock_resp_body_len = 0;
 char mock_resp_type[96] = { 0 };
 char mock_resp_status[48] = { 0 };
 char mock_resp_hdr[512] = { 0 };
-int mock_resp_send_err_code = 0;
+int mock_resp_send_err_code = -1;
 char mock_resp_send_err_msg[96] = { 0 };
 int mock_resp_send_calls = 0;
 
@@ -236,7 +236,7 @@ void mock_httpd_reset(void)
     mock_resp_type[0] = '\0';
     mock_resp_status[0] = '\0';
     mock_resp_hdr[0] = '\0';
-    mock_resp_send_err_code = 0;
+    mock_resp_send_err_code = -1;
     mock_resp_send_err_msg[0] = '\0';
     mock_resp_send_calls = 0;
 }

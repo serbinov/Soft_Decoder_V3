@@ -161,8 +161,14 @@ foreach ($suite in $suites) {
         $ErrorActionPreference = $prevEAP
     }
     if ($buildExit -ne 0 -or -not (Test-Path $exe)) { Write-Host "BUILD FAILED"; $failed++; continue }
-    & $exe 2>&1 | ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) { $failed++ }
+    Push-Location $root
+    try {
+        & $exe 2>&1 | ForEach-Object { Write-Host $_ }
+        $runExit = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($runExit -ne 0) { $failed++ }
 }
 
 # --- non-C suites: discover Node and Python independently ------------------

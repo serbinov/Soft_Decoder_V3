@@ -5,7 +5,7 @@
 периферии и памяти, список задач, компоненты и их взаимодействие, настройки,
 REST API и ресурсы.
 
-Версия прошивки: **0.29** (`version.txt` — единственный источник; попадает в
+Версия прошивки: **0.30** (`version.txt` — единственный источник; попадает в
 веб-страницу, CV7 и OTA-образ).
 Целевой чип: `esp32-s3` (плата ESP32-S3-DevKitC-1), фреймворк ESP-IDF
 `6.0`. Язык: C (C11), без C++.
@@ -997,6 +997,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 > Таблицу разделов по OTA обновить нельзя — она прошивается только по USB
 > (`idf_build.ps1 -Flash`); см. §18.
 
+Контракт OTA/платформы: docs/OTA_COMPATIBILITY.md (layout v1, USB-required policy).
+
 ---
 
 ## 16. Диагностика
@@ -1023,18 +1025,18 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 ## 17. Использование ресурсов
 
-### 17.1 Текущие размеры (0.29, `release/manifest.json`)
+### 17.1 Текущие размеры (0.30, `release/manifest.json`)
 
 | Параметр | Значение |
 |---|---|
 | `bootloader.bin` | 21 200 Б |
 | `partitions.bin` | 3 072 Б |
 | `ota_data_initial.bin` | 8 192 Б |
-| `firmware.bin` (`soft_decoder_v3.bin`, application) | 1 483 248 Б |
+| `firmware.bin` (`soft_decoder_v3.bin`, application) | 1 484 784 Б |
 | OTA-слот приложения | 1 966 080 Б (`0x1E0000`) |
-| Свободно в слоте | 482 832 Б (24,6 %) |
+| Свободно в слоте | 481 296 Б (24,5 %) |
 
-Источник размеров — `release/manifest.json` (schema 1, version 0.29); таблица
+Источник размеров — `release/manifest.json` (schema 1, version 0.30); таблица
 не дублирует ручные значения. Детальная разбивка по компонентам, секциям и
 стекам — в `build/soft_decoder_v3.map` после сборки и `idf.py size-components`.
 
@@ -1065,8 +1067,8 @@ corr, pid_ok, target), `BEMF-ADC`, `BEMF-COAST`, `BEMF-TEST <spd> [rev]`.
 
 **Ограничения/риски:**
 
-- Текущая сборка v0.29 — 1 483 248 Б (75,4 % OTA-слота `0x1e0000`, свободно
-  482 832 Б / 24,6 %). Рост кода и рабочих буферов требует повторного size/heap
+- Текущая сборка v0.30 — 1 484 784 Б (75,5 % OTA-слота `0x1e0000`, свободно
+  481 296 Б / 24,5 %). Рост кода и рабочих буферов требует повторного size/heap
   контроля; release-артефакты нужно пересобрать после изменений.
 - **PSRAM включена** (2 МБ heap); крупные буферы могут уходить в неё, но не все
   (DMA-совместимость, `SPIRAM_MALLOC_ALWAYSINTERNAL`).

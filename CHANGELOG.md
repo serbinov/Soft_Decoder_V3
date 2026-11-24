@@ -932,6 +932,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.30) — docs(release): publish v0.30 OTA contract and artifacts
 - 2026-11-24 (v0.30) — feat(ota): platform compatibility guard, image validation and layout contract
 - 2026-11-24 (v0.29) — ci: suppress cppcheck false positives and update artifact action
 - 2026-11-24 (v0.29) — docs(release): finalize 0.29 sizes, notes and rebuilt artifacts

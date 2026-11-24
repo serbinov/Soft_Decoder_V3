@@ -63,6 +63,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.cv-list,
   .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.log,
   .page[data-page=settings].md-on .set-body>.panel.active.split>.bd>#cv_active_name{grid-column:1/-1}
+/* Wi-Fi is a vertical stack of named sections even when the panel is split. */
+.page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.wifi-status,
+.page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.wifi-block,
+.page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.wifi-layout,
+.page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.seg,
+.page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.hint,
+.page[data-page=settings].md-on .set-body>.panel.active.split>.bd>.wifi-actions{grid-column:1/-1}
   .page[data-page=settings].md-on .set-body>.panel.active.split .lib{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:column;grid-template-rows:repeat(var(--lib-rows,1),auto);gap:2px 18px;align-content:start}
   .page[data-page=settings].md-on .set-body>.panel.active.split .lib>.lib-head{display:grid}
   .page[data-page=settings].md-on .set-body>.panel.active.split .lib>.lib-head+.lib-head{display:grid}
@@ -112,6 +119,31 @@ select{cursor:pointer}
 .muted{color:var(--muted)}
 label{color:var(--text);font-weight:600}
 .hint{font-size:12px;color:var(--muted);font-weight:600}
+.wifi-status{display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.4;margin:0 0 10px}
+.wifi-dot{width:8px;height:8px;border-radius:50%;background:var(--line);flex:0 0 auto}
+.wifi-dot.on{background:var(--good);box-shadow:0 0 0 3px rgba(76,175,114,.16)}
+.wifi-dot.wait{background:var(--warn);box-shadow:0 0 0 3px rgba(224,162,74,.16)}
+.wifi-sec{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.wifi-sec h3{margin:0 0 8px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text);font-weight:600}
+.wifi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px;align-items:end}
+.wifi-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.wifi-block{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:12px 0 0;min-width:0}
+.wifi-block>legend{padding:0 4px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text);font-weight:600}
+.wifi-block[disabled]{opacity:.55}
+.wifi-stack{display:flex;flex-direction:column;gap:10px}
+.wifi-form{display:grid;grid-template-columns:1fr;gap:10px;align-items:end}
+.wifi-form .field.wide,.wifi-form .wifi-row,.wifi-form>select,.wifi-form .wifi-power{grid-column:1/-1}
+.wifi-power{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.wifi-row{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+.wifi-row .field{flex:1;min-width:180px}
+.pw-row{display:flex;gap:6px;align-items:stretch}
+.pw-row input{flex:1;min-width:0}
+.pw-row .btn{flex:0 0 auto;padding-left:10px;padding-right:10px}
+.wifi-sep{border-top:1px solid var(--line);margin:10px 0}
+/* The Wi-Fi panel uses the same full working width as tall settings panels. */
+/* Keep the Wi-Fi panel at the normal settings-column width (not full-width). */
+.page[data-page=settings].md-on .set-body>.panel.active#panel_wifi{grid-column:auto;min-width:0;max-width:760px}
+.page[data-page=settings].md-on .set-body>.panel.active#panel_wifi>.bd{display:block}
 ::placeholder{color:var(--muted);opacity:1}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .offline-banner{display:none;align-items:center;gap:8px;padding:9px 12px;margin-bottom:10px;border:1px solid var(--bad);border-radius:var(--radius);background:var(--panel);color:var(--bad);font-size:13px;font-weight:600}
@@ -119,6 +151,7 @@ label{color:var(--text);font-weight:600}
 
 .seg{display:flex;gap:6px;margin-bottom:8px}
 .seg .btn{flex:1}
+#wifi_role_seg{max-width:360px}
 
 .speed-row{display:grid;grid-template-columns:70px 1fr 4.5em;gap:10px;align-items:center;margin-bottom:10px}
 .speed-row label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--text);font-weight:600}
@@ -656,12 +689,50 @@ label{color:var(--text);font-weight:600}
       <span class="chev" id="chev_wifi">▸</span>
     </div>
     <div class="bd" id="bd_wifi" style="display:none">
-      <div class="field"><label data-i18n="wifi_ip">IP-адрес точки доступа</label><input id="wifi_ap_ip" type="text" inputmode="decimal" maxlength="15" placeholder="192.168.100.1"></div>
-      <div class="field"><label data-i18n="wifi_ssid">Имя точки доступа (SSID)</label><input id="wifi_ap_ssid" type="text" maxlength="32"></div>
-      <div class="field"><label data-i18n="wifi_pw">Новый пароль точки доступа (≥8 символов)</label><input id="wifi_ap_password" type="password" placeholder="пусто = оставить текущий пароль" data-i18n-ph="wifi_pw_ph"></div>
-      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_clear_password" style="width:auto"><span data-i18n="wifi_clear_pw">Удалить пароль и открыть сеть</span></label></div>
-      <div class="row"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="wifi_auto_off" style="width:auto"><span data-i18n="wifi_auto_off">Автовыключение WiFi через 3 минуты без подключения</span></label></div>
-      <div class="row" style="margin-top:10px;grid-column:1/-1">
+      <fieldset class="wifi-block" style="margin-top:0">
+        <legend data-i18n="wifi_status_sec">Состояние и режим</legend>
+        <div class="wifi-status"><span class="wifi-dot" id="wifi_ap_dot"></span><span id="wifi_ap_state">Состояние точки доступа</span></div>
+        <div class="wifi-status"><span class="wifi-dot" id="wifi_sta_dot"></span><span id="wifi_sta_status">Внешняя сеть не подключена</span></div>
+        <div class="field" style="margin-top:6px"><label data-i18n="wifi_role_label">Режим Wi-Fi</label></div>
+        <div class="seg" id="wifi_role_seg">
+          <button class="btn active" id="wifi_role_ap" onclick="setWifiRole(0)" data-i18n="wifi_role_ap">Точка доступа</button>
+          <button class="btn" id="wifi_role_sta" onclick="setWifiRole(1)" data-i18n="wifi_role_sta">Клиент</button>
+        </div>
+        <p class="hint" data-i18n="wifi_role_hint">Режим и настройки точки доступа применяются после сохранения.</p>
+      </fieldset>
+
+      <fieldset class="wifi-block" id="wifi_ap_block">
+        <legend data-i18n="wifi_ap_sec">Точка доступа</legend>
+        <div class="wifi-stack wifi-form" id="wifi_ap_form">
+          <div class="field"><label data-i18n="wifi_ssid">Имя точки доступа (SSID)</label><input id="wifi_ap_ssid" type="text" maxlength="32"></div>
+          <div class="field"><label data-i18n="wifi_pw">Новый пароль точки доступа</label><div class="pw-row"><input id="wifi_ap_password" type="password" placeholder="пусто = без пароля" data-i18n-ph="wifi_pw_ph"><button type="button" class="btn ghost" id="wifi_ap_password_btn" onclick="togglePassword('wifi_ap_password','wifi_ap_password_btn')" data-i18n="pw_show">Показать</button></div></div>
+          <div class="field"><label data-i18n="wifi_ip">IP-адрес точки доступа</label><input id="wifi_ap_ip" type="text" inputmode="decimal" maxlength="15" placeholder="192.168.100.1"></div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400"><input type="checkbox" id="wifi_auto_off" style="width:auto"><span data-i18n="wifi_auto_off">Автовыключение через 3 минуты без подключения</span></label>
+          <div class="wifi-power" id="wifi_power_row">
+            <div class="field"><label data-i18n="wifi_tx">Мощность передатчика WiFi</label><select id="wifi_tx_dbm" onchange="applyWifiTx()"><option value="5">5 dBm</option><option value="8">8 dBm</option><option value="10" selected>10 dBm</option><option value="12">12 dBm</option><option value="15">15 dBm</option><option value="17">17 dBm</option><option value="20">20 dBm (макс.)</option></select></div>
+            <p class="hint" data-i18n="wifi_tx_hint">Ниже мощность — меньше нагрев, но меньше дальность. По умолчанию 10 dBm. Применяется сразу.</p>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="wifi-block" id="wifi_sta_block">
+        <legend data-i18n="wifi_sta_sec">Клиент (STA)</legend>
+        <div class="wifi-stack wifi-form" id="wifi_sta_form">
+          <div class="field"><label data-i18n="wifi_sta_ssid">SSID внешней сети</label><input id="wifi_sta_ssid" type="text" maxlength="32"></div>
+          <div class="field"><label data-i18n="wifi_sta_pw">Пароль внешней сети</label><div class="pw-row"><input id="wifi_sta_password" type="password" placeholder="пусто = открытая сеть" data-i18n-ph="wifi_sta_pw_ph"><button type="button" class="btn ghost" id="wifi_sta_password_btn" onclick="togglePassword('wifi_sta_password','wifi_sta_password_btn')" data-i18n="pw_show">Показать</button></div></div>
+          <div class="wifi-row">
+            <button class="btn ghost" onclick="scanWifi()" data-i18n="wifi_scan">Найти сети</button>
+            <button class="btn primary" onclick="connectWifiSta()" data-i18n="wifi_sta_connect">Подключиться</button>
+            <button class="btn" onclick="disconnectWifiSta()" data-i18n="wifi_sta_disconnect">Отключиться</button>
+          </div>
+          <select id="wifi_sta_scan_list" style="display:none" onchange="pickWifiSsid()"></select>
+          <div class="hint" id="wifi_scan_status" style="display:none"></div>
+          <div class="wifi-sep"></div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400"><input type="checkbox" id="wifi_sta_fallback" style="width:auto"><span data-i18n="wifi_sta_fallback">Если не удалось подключиться, автоматически включить точку доступа</span></label>
+        </div>
+      </fieldset>
+
+      <div class="wifi-actions">
         <button class="btn primary" onclick="saveWifi()" data-i18n="wifi_save">Сохранить и перезагрузить</button>
         <button class="btn danger" onclick="resetWifi()" data-i18n="wifi_reset">Сброс настроек</button>
       </div>
@@ -830,9 +901,24 @@ pw_export_msg:'Пароль для экспорта (минимум 8 симво
 cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',cv_search_ph:'Поиск CV...',cv_show_table:'Таблица CV67..94',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
-wifi_pw:'Новый пароль точки доступа (≥8 символов)',wifi_pw_ph:'пусто = оставить текущий пароль',
+wifi_pw:'Новый пароль точки доступа',wifi_pw_ph:'≥8 символов; пусто = без пароля',pw_show:'Показать',pw_hide:'Скрыть',
 wifi_clear_pw:'Удалить пароль и открыть сеть',wifi_auto_off:'Автовыключение WiFi через 3 минуты без подключения',
 wifi_save:'Сохранить и перезагрузить',wifi_reset:'Сброс настроек',
+wifi_tx:'Мощность передатчика WiFi',wifi_tx_hint:'Ниже мощность — меньше нагрев, но меньше дальность. По умолчанию 10 dBm. Применяется сразу.',
+wifi_ap_sec:'Точка доступа',wifi_tx_sec:'Мощность и нагрев',wifi_sta_sec:'Клиент (STA)',
+wifi_status_sec:'Состояние и режим',
+wifi_role_label:'Режим Wi-Fi',wifi_role_ap:'Точка доступа',wifi_role_sta:'Клиент',
+wifi_role_hint:'Режим и настройки точки доступа применяются после сохранения.',
+wifi_ap_backup:'Точка доступа (резерв) работает',
+wifi_ap_running:'Точка доступа работает',wifi_ap_off:'Точка доступа выключена',
+wifi_ap_hint:'IP, SSID и пароль применяются после «Сохранить и перезагрузить».',
+wifi_sta_hint:'Подключение к домашней сети применяется сразу, точка доступа продолжает работать.',
+wifi_sta_pw_ph:'пусто = открытая сеть',
+wifi_sta_title:'Подключение к внешней точке доступа (STA)',wifi_sta_ssid:'SSID внешней сети',wifi_sta_pw:'Пароль внешней сети',wifi_scan:'Найти сети',wifi_sta_connect:'Подключиться',wifi_sta_disconnect:'Отключиться',
+wifi_sta_off:'Внешняя сеть не подключена',wifi_sta_waiting:'Ожидание подключения к',wifi_sta_connected:'Подключено:',
+wifi_sta_fallback:'Если не удалось подключиться, автоматически включить точку доступа',
+wifi_scanning:'сканирование сетей...',wifi_scan_empty:'сети не найдены',wifi_scan_done:'найдено сетей:',
+wifi_sta_connecting:'подключение к внешней сети...',wifi_sta_connect_sent:'запрос на подключение отправлен',wifi_sta_ssid_required:'укажите SSID внешней сети',wifi_sta_disconnected:'внешняя сеть отключена',wifi_tx_applied:'мощность WiFi:',
 ota_title:'Обновление',ota_pick:'Выбрать bin файл и прошить',ota_hint:'Прошивка или комбинированный файл «прошивка + звуки»',
 base_title:'Базовые настройки',base_reset:'Сброс к заводским',
 base_hint:'Сбрасывает ВСЁ: CV, Wi-Fi, громкости, имя, источник управления, звуковые слоты и калибровку BEMF. Звуковые файлы на хранилище сохраняются. Устройство перезагрузится.',
@@ -897,9 +983,25 @@ pw_export_msg:'Password for export (at least 8 characters):',pw_import_msg:'This
 cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',cv_search_ph:'Search CV...',cv_show_table:'Table CV67..94',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
-wifi_pw:'New access point password (≥8 characters)',wifi_pw_ph:'empty = keep the current password',
+wifi_pw:'New access point password',wifi_pw_ph:'≥8 characters; empty = no password',pw_show:'Show',pw_hide:'Hide',
 wifi_clear_pw:'Remove password and open the network',wifi_auto_off:'Turn WiFi off after 3 minutes without a connection',
 wifi_save:'Save and reboot',wifi_reset:'Reset settings',
+wifi_tx:'WiFi transmitter power',wifi_tx_hint:'Lower power means less heat but shorter range. Default is 10 dBm. Applied immediately.',
+wifi_ap_sec:'Access point',wifi_tx_sec:'Power and heat',wifi_sta_sec:'Client (STA)',
+wifi_status_sec:'Status and mode',
+wifi_role_label:'Wi-Fi mode',wifi_role_ap:'Access point',wifi_role_sta:'Client',
+wifi_role_hint:'The mode and access point settings are applied after saving.',
+wifi_ap_backup:'Access point (backup) is running',
+wifi_ap_running:'Access point is running',wifi_ap_off:'Access point is off',
+wifi_ap_hint:'IP, SSID and password are applied after “Save and reboot”.',
+wifi_sta_hint:'The home network connection is applied immediately; the access point keeps running.',
+wifi_sta_pw_ph:'empty = open network',
+wifi_sta_title:'Join an upstream access point (STA)',wifi_sta_ssid:'Upstream network SSID',wifi_sta_pw:'Upstream password',
+wifi_scan:'Scan networks',wifi_sta_connect:'Connect',wifi_sta_disconnect:'Disconnect',
+wifi_sta_off:'Upstream network is not connected',wifi_sta_waiting:'Waiting for connection to',wifi_sta_connected:'Connected:',
+wifi_sta_fallback:'If the connection fails, turn the access point on automatically',
+wifi_scanning:'scanning networks...',wifi_scan_empty:'no networks found',wifi_scan_done:'networks found:',
+wifi_sta_connecting:'connecting to the upstream network...',wifi_sta_connect_sent:'connection request sent',wifi_sta_ssid_required:'enter the upstream SSID',wifi_sta_disconnected:'upstream network disconnected',wifi_tx_applied:'WiFi power:',
 ota_title:'Update',ota_pick:'Choose a .bin file and flash',ota_hint:'Firmware or combined «firmware + sounds» file',
 base_title:'Basic settings',base_reset:'Factory reset',
 base_hint:'Resets EVERYTHING: CVs, Wi-Fi, volumes, name, control source, sound slots and BEMF calibration. Sound files on the storage are kept. The device will reboot.',
@@ -3360,17 +3462,74 @@ async function cvFactoryReset(){
 
 /* wifi settings */
 var wifiLoaded=false;
+var wifiRole=0;
+function setWifiRole(role){
+  wifiRole=role?1:0;
+  var apBtn=byId('wifi_role_ap'),staBtn=byId('wifi_role_sta');
+  if(apBtn)apBtn.classList.toggle('active',wifiRole===0);
+  if(staBtn)staBtn.classList.toggle('active',wifiRole===1);
+  var ap=byId('wifi_ap_block'),sta=byId('wifi_sta_block');
+  if(ap){ap.disabled=wifiRole!==0;ap.style.display=wifiRole===0?'':'none';}
+  if(sta){sta.disabled=wifiRole!==1;sta.style.display=wifiRole===1?'':'none';}
+  var pow=byId('wifi_power_row'),form=byId(wifiRole===0?'wifi_ap_form':'wifi_sta_form');
+  if(pow&&form&&pow.parentNode!==form)form.appendChild(pow);
+}
+function initWifiTxOptions(){
+  var s=byId('wifi_tx_dbm');
+  if(!s||s.options.length>=16)return;
+  var v=s.value;
+  s.innerHTML='';
+  for(var i=5;i<=20;i++){
+    var o=document.createElement('option');
+    o.value=String(i);o.textContent=i+' dBm';
+    s.appendChild(o);
+  }
+  s.value=(v&&Number(v)>=5&&Number(v)<=20)?v:'10';
+}
 async function loadWifi(){
+  initWifiTxOptions();
   try{
     var d=await api('/api/wifi');
     if(!d||!d.ok){log(t('tag_wifi'),t('wifi_load_failed'));return;}
     byId('wifi_ap_ip').value=(d.ap_ip&&d.ap_ip!=='0.0.0.0')?d.ap_ip:'192.168.100.1';
     if(d.ap_ssid)byId('wifi_ap_ssid').value=d.ap_ssid;
+    byId('wifi_tx_dbm').value=String(Number(d.tx_dbm)||10);
     byId('wifi_auto_off').checked=(Number(d.auto_off_min)||0)>0;
+    byId('wifi_sta_fallback').checked=(Number(d.sta_fallback)||0)>0;
+    if(d.sta_ssid)byId('wifi_sta_ssid').value=d.sta_ssid;
+    byId('wifi_sta_password').value='';
+    byId('wifi_sta_password').type='password';
+    byId('wifi_ap_password').type='password';
+    if(byId('wifi_ap_password_btn'))byId('wifi_ap_password_btn').textContent=t('pw_show');
+    if(byId('wifi_sta_password_btn'))byId('wifi_sta_password_btn').textContent=t('pw_show');
+    byId('wifi_sta_scan_list').style.display='none';
+    setWifiScanStatus('',false);
+    setWifiRole(Number(d.role)||0);
+    renderWifiAp(d);
+    renderWifiSta(d);
     byId('wifi_ap_password').value='';
-    byId('wifi_clear_password').checked=false;
     wifiLoaded=true;
   }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
+}
+function renderWifiAp(d){
+  var dot=byId('wifi_ap_dot'),el=byId('wifi_ap_state');
+  if(!dot||!el)return;
+  var on=!!d.ap_active;
+  dot.className='wifi-dot'+(on?' on':'');
+  el.textContent=on?((d.role===1?t('wifi_ap_backup'):t('wifi_ap_running'))+' · '+(d.ap_ssid||'')+' · '+(d.ap_ip||'')):t('wifi_ap_off');
+}
+function renderWifiSta(d){
+  var el=byId('wifi_sta_status');
+  var dot=byId('wifi_sta_dot');
+  if(dot)dot.className='wifi-dot'+(d.sta_connected?' on':(d.sta_enabled?' wait':''));
+  if(!el)return;
+  if(d.sta_connected){
+    el.textContent=t('wifi_sta_connected')+' '+(d.sta_ssid||'')+' · '+(d.sta_ip||'0.0.0.0')+' · '+(d.sta_rssi||-127)+' dBm';
+  }else if(d.sta_enabled){
+    el.textContent=t('wifi_sta_waiting')+' '+(d.sta_ssid||'');
+  }else{
+    el.textContent=t('wifi_sta_off');
+  }
 }
 function wifiQuery(){
   var p='mode=1&port=80';
@@ -3380,12 +3539,15 @@ function wifiQuery(){
   if(ip)p+='&ap_ip='+encodeURIComponent(ip);
   var apPw=byId('wifi_ap_password').value;
   if(apPw)p+='&ap_password='+encodeURIComponent(apPw);
-  else if(byId('wifi_clear_password').checked)p+='&ap_password_clear=1';
+  else p+='&ap_password_clear=1';
   p+='&auto_off_min='+(byId('wifi_auto_off').checked?3:0);
+  p+='&sta_fallback='+(byId('wifi_sta_fallback').checked?1:0);
+  p+='&role='+wifiRole;
+  var tx=parseInt(byId('wifi_tx_dbm').value,10);
+  if(tx>=5&&tx<=20)p+='&tx_dbm='+tx;
   return p;
 }
 async function saveWifi(){
-  if(byId('wifi_clear_password').checked&&byId('wifi_ap_password').value){log(t('tag_wifi'),t('wifi_pw_conflict'));return;}
   if(byId('wifi_ap_password').value&&byId('wifi_ap_password').value.length<8){log(t('tag_wifi'),t('wifi_pw_short'));return;}
   try{
     var p=wifiQuery();
@@ -3404,6 +3566,89 @@ async function resetWifi(){
     if(!d||!d.ok)throw new Error(t('not_reset'));
     log(t('tag_wifi'),t('wifi_reset_reboot'));
     reloadAfterReboot(2000,(d&&d.ap_ip)||'192.168.100.1');
+  }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
+}
+function togglePassword(inputId, btnId){
+  var input=byId(inputId),btn=byId(btnId);
+  if(!input)return;
+  var show=input.type==='password';
+  input.type=show?'text':'password';
+  if(btn)btn.textContent=t(show?'pw_hide':'pw_show');
+}
+async function applyWifiTx(){
+  var v=byId('wifi_tx_dbm').value;
+  try{
+    var d=await api('/api/wifi/tx?dbm='+encodeURIComponent(v),{method:'POST',timeout:10000});
+    if(!d||!d.ok)throw new Error(t('not_saved'));
+    log(t('tag_wifi'),t('wifi_tx_applied')+' '+v+' dBm');
+  }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
+}
+function pickWifiSsid(){
+  var s=byId('wifi_sta_scan_list');
+  if(s&&s.value)byId('wifi_sta_ssid').value=s.value;
+}
+function setWifiScanStatus(msg,show){
+  var el=byId('wifi_scan_status');
+  if(!el)return;
+  el.textContent=msg||'';
+  el.style.display=show?'':'none';
+}
+async function scanWifi(){
+  var status=byId('wifi_scan_status');
+  if(status){status.style.display='block';status.textContent=t('wifi_scanning');}
+  try{
+    log(t('tag_wifi'),t('wifi_scanning'));
+    var d=await api('/api/wifi/scan',{timeout:20000});
+    if(!d||!d.ok)throw new Error(t('failed'));
+    var sel=byId('wifi_sta_scan_list');
+    sel.innerHTML='';
+    (d.aps||[]).forEach(function(a){
+      var o=document.createElement('option');
+      o.value=a.ssid;
+      o.textContent=a.ssid+'  ('+a.rssi+' dBm)';
+      sel.appendChild(o);
+    });
+    if(!sel.options.length){
+      sel.style.display='none';
+      setWifiScanStatus(t('wifi_scan_empty'),true);
+      log(t('tag_wifi'),t('wifi_scan_empty'));
+      return;
+    }
+    sel.style.display='';
+    byId('wifi_sta_ssid').value=sel.options[0].value;
+    setWifiScanStatus(t('wifi_scan_done')+' '+sel.options.length,true);
+    log(t('tag_wifi'),t('wifi_scan_done')+' '+sel.options.length);
+  }catch(e){
+    setWifiScanStatus(t('err_prefix')+e.message,true);
+    log(t('tag_wifi'),t('err_prefix')+e.message);
+  }
+}
+async function connectWifiSta(){
+  var ssid=byId('wifi_sta_ssid').value.trim();
+  if(!ssid){log(t('tag_wifi'),t('wifi_sta_ssid_required'));return;}
+  var pw=byId('wifi_sta_password').value;
+  if(pw&&pw.length<8){log(t('tag_wifi'),t('wifi_pw_short'));return;}
+  try{
+    log(t('tag_wifi'),t('wifi_sta_connecting'));
+    var p='connect=1&ssid='+encodeURIComponent(ssid);
+    if(pw)p+='&password='+encodeURIComponent(pw);
+    p+='&fallback='+(byId('wifi_sta_fallback').checked?1:0);
+    var d=await api('/api/wifi/sta?'+p,{method:'POST',timeout:15000});
+    if(!d||!d.ok)throw new Error(t('failed'));
+    log(t('tag_wifi'),t('wifi_sta_connect_sent'));
+    byId('wifi_sta_password').value='';
+    byId('wifi_sta_password').type='password';
+    if(byId('wifi_sta_password_btn'))byId('wifi_sta_password_btn').textContent=t('pw_show');
+    setTimeout(loadWifi,2500);
+    setTimeout(loadWifi,7000);
+  }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
+}
+async function disconnectWifiSta(){
+  try{
+    var d=await api('/api/wifi/sta?connect=0',{method:'POST',timeout:15000});
+    if(!d||!d.ok)throw new Error(t('failed'));
+    log(t('tag_wifi'),t('wifi_sta_disconnected'));
+    setTimeout(loadWifi,800);
   }catch(e){log(t('tag_wifi'),t('err_prefix')+e.message);}
 }
 

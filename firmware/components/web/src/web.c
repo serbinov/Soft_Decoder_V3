@@ -17,6 +17,10 @@ static const char *TAG = "web";
 
 static httpd_handle_t s_server;
 static size_t s_route_count;
+/* The route table has 68 entries; keep headroom so late routes (notably
+ * /api/ota/update) are never silently dropped by the handler limit. */
+#define WEB_MAX_URI_HANDLERS 96U
+_Static_assert(WEB_MAX_URI_HANDLERS >= 68U, "HTTP route handler budget too small");
 
 static esp_err_t root_handler(httpd_req_t *req)
 {
@@ -297,7 +301,9 @@ static esp_err_t start_http_server(void)
     cfg.server_port = 80;
     cfg.ctrl_port = 32768;
     cfg.stack_size = 16384;
-    cfg.max_uri_handlers = 64;
+    /* The route table has 68 entries: keep headroom so late routes (notably
+     * /api/ota/update) are never silently dropped by the handler limit. */
+    cfg.max_uri_handlers = WEB_MAX_URI_HANDLERS;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.lru_purge_enable = true;
     /* More sockets so the 3 s status poll + a transfer + the port-81 progress
@@ -317,6 +323,9 @@ static esp_err_t start_http_server(void)
 
     static const web_route_t routes[] = {
         { "/", HTTP_GET, root_handler, WEB_ADMIT_PLAIN },
+        /* Keep OTA first among the API routes: even if a future route count
+         * exceeds the handler budget, the recovery channel stays registered. */
+        { "/api/ota/update", HTTP_POST, ota_update_post, WEB_ADMIT_TRANSFER },
         { "/sound-editor", HTTP_GET, sound_editor_get, WEB_ADMIT_PLAIN },
         { "/sound-editor/*", HTTP_GET, sound_editor_get, WEB_ADMIT_PLAIN },
         { "/api/sound/graph/capabilities", HTTP_GET, graph_capabilities_get, WEB_ADMIT_PLAIN },
@@ -372,12 +381,14 @@ static esp_err_t start_http_server(void)
         { "/api/cv/write", HTTP_POST, cv_write_post, WEB_ADMIT_PLAIN },
         { "/api/wifi", HTTP_GET, wifi_get, WEB_ADMIT_PLAIN },
         { "/api/wifi", HTTP_POST, wifi_post, WEB_ADMIT_PLAIN },
+        { "/api/wifi/tx", HTTP_POST, wifi_tx_post, WEB_ADMIT_PLAIN },
+        { "/api/wifi/sta", HTTP_POST, wifi_sta_post, WEB_ADMIT_PLAIN },
+        { "/api/wifi/scan", HTTP_GET, wifi_scan_get, WEB_ADMIT_PLAIN },
         { "/api/wifi/reset", HTTP_POST, wifi_reset_post, WEB_ADMIT_PLAIN },
         { "/api/reset", HTTP_POST, factory_reset_post, WEB_ADMIT_PLAIN },
         { "/api/device", HTTP_GET, device_get, WEB_ADMIT_PLAIN },
         { "/api/device", HTTP_POST, device_post, WEB_ADMIT_PLAIN },
         { "/api/storage", HTTP_GET, storage_get, WEB_ADMIT_PLAIN },
-        { "/api/ota/update", HTTP_POST, ota_update_post, WEB_ADMIT_TRANSFER },
         { "/api/task-inputs", HTTP_GET, task_inputs_get, WEB_ADMIT_PLAIN },
         { "/api/log", HTTP_GET, log_get, WEB_ADMIT_PLAIN },
         { "/api/clientlog", HTTP_GET, clientlog_get, WEB_ADMIT_PLAIN },
@@ -416,9 +427,6 @@ esp_err_t web_init(void)
         esp_err_t err = start_http_server();
         if (err == ESP_OK) {
             (void)web_transfer_start_progress_server();
-        }
-        if (web_cfg()->auto_off_min != 0U) {
-            wifi_start_auto_off();
         }
         return err;
     }

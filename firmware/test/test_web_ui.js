@@ -189,13 +189,13 @@ test('commands are serialized and stale replies do not restore stopped speed', a
   assert.equal(context.motorPending, 0);
 });
 
-test('Wi-Fi save preserves the password unless removal is explicit', t => {
+test('Wi-Fi save requests an open network when the password field is empty', t => {
   const { context, element } = fixture(t);
   element('wifi_ap_ssid').value = 'Decoder';
   element('wifi_ap_ip').value = '192.168.100.1';
-  assert.doesNotMatch(context.wifiQuery(), /ap_password/);
-  element('wifi_clear_password').checked = true;
+  assert.doesNotMatch(context.wifiQuery(), /ap_password=/);
   assert.match(context.wifiQuery(), /ap_password_clear=1/);
+  assert.match(context.wifiQuery(), /role=0/);
 });
 
 test('destructive action waits for confirmation and cancellation sends nothing', async t => {

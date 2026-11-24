@@ -69,11 +69,21 @@ typedef struct {
 } settings_func_map_t;
 
 typedef struct {
-    uint8_t wifi_mode;          /* 0=off, nonzero=AP (AP-only firmware) */
+    uint8_t wifi_mode;          /* 0=off, nonzero=Wi-Fi on (SoftAP always) */
+    uint8_t wifi_role;          /* 0=access point, 1=client (STA + AP backup) */
     char ap_ssid[SETTINGS_SSID_MAX];
     char ap_password[SETTINGS_PASS_MAX];
     char ap_ip[SETTINGS_IP_MAX]; /* access point address, default 192.168.100.1 */
     uint8_t auto_off_min;       /* wifi auto-off timeout (0=off) */
+    /* RF/thermal knobs. The radio is the biggest heat source on the board;
+     * 10 dBm is plenty for a layout room and cuts PA dissipation. */
+    uint8_t wifi_tx_dbm;        /* 5..20 dBm, default 10 */
+    /* Optional upstream network: when enabled and ssid is set the board also
+     * joins this AP (APSTA), so the web UI stays reachable from both sides. */
+    uint8_t sta_enabled;
+    uint8_t sta_fallback;       /* AP fallback if the client cannot connect */
+    char sta_ssid[SETTINGS_SSID_MAX];
+    char sta_password[SETTINGS_PASS_MAX];
     uint8_t master_volume;
     uint8_t cv63_exact;         /* exact 0..255 CV63 value behind master_volume */
     uint8_t engine_volume;

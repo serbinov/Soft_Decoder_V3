@@ -535,6 +535,7 @@ int mock_wifi_init_ret = 0;
 int mock_wifi_init_calls = 0;
 int mock_wifi_mode_sta_ret = 0;
 int mock_wifi_mode_ap_ret = 0;
+int mock_wifi_last_mode = -1;
 int mock_wifi_set_config_ret = 0;
 int mock_wifi_start_first_ret = 0;
 int mock_wifi_start_calls = 0;
@@ -548,6 +549,12 @@ int mock_wifi_set_max_tx_power_ret = 0;
 int mock_wifi_set_inactive_time_calls = 0;
 uint16_t mock_wifi_inactive_time_sec = 0;
 int mock_wifi_set_inactive_time_ret = 0;
+int mock_wifi_connect_calls = 0;
+int mock_wifi_connect_ret = 0;
+int mock_wifi_disconnect_calls = 0;
+int mock_wifi_disconnect_ret = 0;
+int mock_wifi_sta_get_ap_info_ret = 0;
+wifi_ap_record_t mock_sta_ap_info;
 
 int mock_scan_start_ret = 0;
 int mock_scan_num_ret = 0;
@@ -573,6 +580,7 @@ esp_err_t esp_wifi_set_storage(wifi_storage_t storage)
 
 esp_err_t esp_wifi_set_mode(wifi_mode_t mode)
 {
+    mock_wifi_last_mode = (int)mode;
     if (mode == WIFI_MODE_STA) {
         return (esp_err_t)mock_wifi_mode_sta_ret;
     }
@@ -665,6 +673,29 @@ esp_err_t esp_wifi_set_inactive_time(wifi_interface_t ifx, uint16_t sec)
     mock_wifi_set_inactive_time_calls++;
     mock_wifi_inactive_time_sec = sec;
     return (esp_err_t)mock_wifi_set_inactive_time_ret;
+}
+
+esp_err_t esp_wifi_connect(void)
+{
+    mock_wifi_connect_calls++;
+    return (esp_err_t)mock_wifi_connect_ret;
+}
+
+esp_err_t esp_wifi_disconnect(void)
+{
+    mock_wifi_disconnect_calls++;
+    return (esp_err_t)mock_wifi_disconnect_ret;
+}
+
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info)
+{
+    if (mock_wifi_sta_get_ap_info_ret) {
+        return (esp_err_t)mock_wifi_sta_get_ap_info_ret;
+    }
+    if (ap_info != NULL) {
+        *ap_info = mock_sta_ap_info;
+    }
+    return ESP_OK;
 }
 
 /* ====================================================================== */
@@ -1931,6 +1962,7 @@ void mock_web_reset(void)
     mock_wifi_init_calls = 0;
     mock_wifi_mode_sta_ret = 0;
     mock_wifi_mode_ap_ret = 0;
+    mock_wifi_last_mode = -1;
     mock_wifi_set_config_ret = 0;
     mock_wifi_start_first_ret = 0;
     mock_wifi_start_calls = 0;
@@ -1944,6 +1976,12 @@ void mock_web_reset(void)
     mock_wifi_set_inactive_time_calls = 0;
     mock_wifi_inactive_time_sec = 0;
     mock_wifi_set_inactive_time_ret = 0;
+    mock_wifi_connect_calls = 0;
+    mock_wifi_connect_ret = 0;
+    mock_wifi_disconnect_calls = 0;
+    mock_wifi_disconnect_ret = 0;
+    mock_wifi_sta_get_ap_info_ret = 0;
+    memset(&mock_sta_ap_info, 0, sizeof(mock_sta_ap_info));
 
     mock_scan_start_ret = 0;
     mock_scan_num_ret = 0;

@@ -12,17 +12,21 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef TAG
 #undef TAG
 #endif
 #define TAG "web_wifi"
-/* Radio at full 20 dBm (unit: 0.25 dBm). The built-in antenna has little
- * margin, so a lower PA setting shows up as retries and stalled transfers. */
-#define WIFI_MAX_TX_POWER_QDBM 80
+/* Radio power. The ESP32-S3 PA runs hot; 10 dBm covers a layout room and is
+ * the default. 20 dBm is the chip maximum; 5 dBm is useful for a workbench. */
+#define WIFI_TX_MIN_DBM       5U
+#define WIFI_TX_MAX_DBM       20U
+#define WIFI_TX_DEFAULT_DBM   10U
 /* Free the single-client slot after this many idle seconds (default 300). */
 #define WIFI_AP_INACTIVE_SEC 120
+#define WIFI_STA_RETRY_US     (15LL * 1000000LL)
 /* ---------- WiFi ---------- */
 
 static bool s_wifi_started;
@@ -37,6 +41,23 @@ static volatile bool s_dns_run;
 static volatile uint8_t s_ap_sta_count;
 static int64_t s_ap_started_us;
 static int64_t s_last_client_us; /* last connect/disconnect; auto-off base */
+/* Optional upstream station (APSTA). The AP stays up, so losing the home
+ * network never locks the user out of the decoder. */
+static esp_netif_t *s_sta_netif;
+static volatile bool s_sta_enabled;
+static bool s_client_role;
+static bool s_sta_fallback;
+static bool s_ap_active;
+static bool s_ap_fallback;
+static esp_netif_t *s_ap_netif;
+static wifi_config_t s_ap_cfg;
+static char s_ap_ip_cfg[16];
+static int64_t s_client_start_us;
+static volatile bool s_sta_connected;
+static volatile int s_sta_rssi = -127;
+static char s_sta_ip[16];
+static int64_t s_sta_last_try_us;
+static bool s_autooff_started;
 /* 64-bit timestamps are not atomic on the 32-bit target: guard the event-task
  * writes and auto-off reads with one spinlock. */
 static portMUX_TYPE s_wifi_time_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -54,6 +75,35 @@ static int64_t wifi_last_client_us(void)
     int64_t value = s_last_client_us;
     portEXIT_CRITICAL(&s_wifi_time_mux);
     return value;
+}
+
+static void wifi_note_sta_try_now(void)
+{
+    portENTER_CRITICAL(&s_wifi_time_mux);
+    s_sta_last_try_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_wifi_time_mux);
+}
+
+static int64_t wifi_sta_last_try_us(void)
+{
+    portENTER_CRITICAL(&s_wifi_time_mux);
+    int64_t value = s_sta_last_try_us;
+    portEXIT_CRITICAL(&s_wifi_time_mux);
+    return value;
+}
+
+/* qdBm is 0.25 dBm units. The driver accepts 8..84 (2..21 dBm); our UI range
+ * is deliberately narrower and equals the persisted value. */
+static esp_err_t wifi_apply_tx_power(uint8_t dbm)
+{
+    if (dbm < WIFI_TX_MIN_DBM || dbm > WIFI_TX_MAX_DBM) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = esp_wifi_set_max_tx_power((int8_t)((unsigned)dbm * 4U));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "TX power %u dBm not applied: %s", (unsigned)dbm, esp_err_to_name(err));
+    }
+    return err;
 }
 
 /* Parse a dotted-quad IPv4 address. 0.0.0.0 is rejected (not usable as an AP
@@ -116,12 +166,53 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
                          (int)e->aid, (int)e->reason, (unsigned)s_ap_sta_count);
                 break;
             }
+            case WIFI_EVENT_STA_START:
+                ESP_LOGI(TAG, "station started");
+                break;
+            case WIFI_EVENT_STA_CONNECTED: {
+                const wifi_event_sta_connected_t *e = data;
+                s_sta_connected = true;
+                ESP_LOGI(TAG, "station connected to %.*s (channel %u)",
+                         (int)e->ssid_len, (const char *)e->ssid, (unsigned)e->channel);
+                break;
+            }
+            case WIFI_EVENT_STA_DISCONNECTED: {
+                const wifi_event_sta_disconnected_t *e = data;
+                s_sta_connected = false;
+                s_sta_rssi = -127;
+                s_sta_ip[0] = '\0';
+                ESP_LOGW(TAG, "station disconnected (reason=%d)", (int)e->reason);
+                /* The supervisor task retries when sta_enabled is set; doing it
+                 * here would spin on a wrong password. */
+                break;
+            }
             default:
                 break;
         }
-    } else if (base == IP_EVENT && id == IP_EVENT_ASSIGNED_IP_TO_CLIENT) {
-        const ip_event_assigned_ip_to_client_t *e = data;
-        ESP_LOGI(TAG, "Client got IP " IPSTR, IP2STR(&e->ip));
+    } else if (base == IP_EVENT) {
+        switch (id) {
+            case IP_EVENT_STA_GOT_IP: {
+                const ip_event_got_ip_t *e = data;
+                snprintf(s_sta_ip, sizeof(s_sta_ip), IPSTR, IP2STR(&e->ip_info.ip));
+                s_sta_connected = true;
+                wifi_ap_record_t ap = { 0 };
+                if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+                    s_sta_rssi = ap.rssi;
+                }
+                ESP_LOGI(TAG, "station got IP %s", s_sta_ip);
+                break;
+            }
+            case IP_EVENT_STA_LOST_IP:
+                s_sta_ip[0] = '\0';
+                break;
+            case IP_EVENT_ASSIGNED_IP_TO_CLIENT: {
+                const ip_event_assigned_ip_to_client_t *e = data;
+                ESP_LOGI(TAG, "Client got IP " IPSTR, IP2STR(&e->ip));
+                break;
+            }
+            default:
+                break;
+        }
     }
 }
 
@@ -231,7 +322,10 @@ static uint8_t wifi_pick_channel(void)
 }
 
 /* Power save: stop the AP when no client has been connected for the configured
- * time (auto_off_min, 0 = disabled). */
+ * time (auto_off_min, 0 = disabled). The same task supervises the optional
+ * upstream station link: reconnects after the home AP reboots and refreshes
+ * RSSI for the UI. Auto-off is skipped while STA mode is enabled, otherwise
+ * the decoder would lose its home-network link. */
 static void wifi_auto_off_task(void *arg)
 {
     (void)arg;
@@ -239,8 +333,34 @@ static void wifi_auto_off_task(void *arg)
     while (s_autooff_iter_cap == 0U || iters < s_autooff_iter_cap) {
         iters++;
         vTaskDelay(pdMS_TO_TICKS(10000));
+        if (!s_wifi_started) {
+            continue;
+        }
+        if (s_sta_enabled) {
+            if (s_sta_connected) {
+                wifi_ap_record_t ap = { 0 };
+                if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+                    s_sta_rssi = ap.rssi;
+                }
+            } else if (esp_timer_get_time() - wifi_sta_last_try_us() >=
+                       WIFI_STA_RETRY_US) {
+                wifi_note_sta_try_now();
+                ESP_LOGI(TAG, "station reconnect attempt");
+                (void)esp_wifi_connect();
+            }
+        }
+        if (s_client_role) {
+            if (!s_sta_connected && s_sta_fallback && !s_ap_active &&
+                esp_timer_get_time() - s_client_start_us >= 30LL * 1000000LL) {
+                esp_err_t ferr = web_wifi_enable_ap_fallback();
+                if (ferr != ESP_OK) {
+                    ESP_LOGW(TAG, "client fallback failed: %s", esp_err_to_name(ferr));
+                }
+            }
+            continue; /* no AP auto-off while in client mode */
+        }
         uint8_t minutes = s_auto_off_min;
-        if (!s_wifi_started || minutes == 0U || s_ap_sta_count != 0U) {
+        if (s_sta_enabled || minutes == 0U || s_ap_sta_count != 0U) {
             continue;
         }
         /* Time since the last client was seen (or since AP start when no one
@@ -254,9 +374,108 @@ static void wifi_auto_off_task(void *arg)
                  (unsigned)minutes);
         (void)esp_wifi_stop();
         s_wifi_started = false;
+        s_sta_connected = false;
+        s_ap_active = false;
+        s_ap_fallback = false;
         s_dns_run = false; /* let the DNS hijack task exit and free its socket */
+        s_autooff_started = false;
         vTaskDelete(NULL);
     }
+    s_autooff_started = false;
+}
+
+/* Configure the AP address/DNS/captive portal. Called before the AP radio is
+ * started, and again when a client-mode boot falls back to the access point. */
+static esp_err_t wifi_ap_netif_prepare(void)
+{
+    if (s_ap_netif == NULL) {
+        return ESP_OK;
+    }
+    esp_ip4_addr_t ap_addr = { 0 };
+    if (!parse_ip4(s_ap_ip_cfg, &ap_addr)) {
+        (void)esp_netif_str_to_ip4(AP_IP_DEFAULT, &ap_addr);
+    }
+    memcpy(s_ap_ip_bytes, &ap_addr.addr, sizeof(s_ap_ip_bytes));
+    esp_netif_ip_info_t ip = { 0 };
+    ip.ip.addr = ap_addr.addr;
+    ip.gw.addr = ap_addr.addr;
+    ip.netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0);
+    esp_err_t err = esp_netif_dhcps_stop(s_ap_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) return err;
+    err = esp_netif_set_ip_info(s_ap_netif, &ip);
+    if (err != ESP_OK) return err;
+
+    esp_netif_dns_info_t dns = { 0 };
+    dns.ip.type = ESP_IPADDR_TYPE_V4;
+    dns.ip.u_addr.ip4.addr = ap_addr.addr;
+    err = esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns);
+    if (err != ESP_OK) return err;
+
+    snprintf(s_captive_uri, sizeof(s_captive_uri), "http://" IPSTR "/",
+             IP2STR(&ap_addr));
+    err = esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
+                                 ESP_NETIF_CAPTIVEPORTAL_URI,
+                                 s_captive_uri, (uint32_t)strlen(s_captive_uri));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "DHCP captive portal URI option failed: %s", esp_err_to_name(err));
+    }
+    snprintf(s_ap_ip, sizeof(s_ap_ip), "%s", s_ap_ip_cfg);
+    return ESP_OK;
+}
+
+static esp_err_t wifi_ap_netif_start(void)
+{
+    if (s_ap_netif == NULL) {
+        return ESP_OK;
+    }
+    esp_err_t err = esp_netif_dhcps_start(s_ap_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+        return err;
+    }
+    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
+    err = esp_wifi_set_inactive_time(WIFI_IF_AP, WIFI_AP_INACTIVE_SEC);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "inactive time not applied: %s", esp_err_to_name(err));
+    }
+    esp_netif_ip_info_t actual = { 0 };
+    if (esp_netif_get_ip_info(s_ap_netif, &actual) == ESP_OK) {
+        snprintf(s_ap_ip, sizeof(s_ap_ip), IPSTR, IP2STR(&actual.ip));
+        memcpy(s_ap_ip_bytes, &actual.ip.addr, sizeof(s_ap_ip_bytes));
+    }
+    return ESP_OK;
+}
+
+/* Client mode starts with the AP radio off. If the upstream station cannot
+ * connect and the user enabled the fallback, turn the AP on so the panel is
+ * still reachable. */
+esp_err_t web_wifi_enable_ap_fallback(void)
+{
+    if (!s_wifi_started || s_ap_active) {
+        return ESP_OK;
+    }
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (err != ESP_OK) return err;
+    err = esp_wifi_set_config(WIFI_IF_AP, &s_ap_cfg);
+    if (err != ESP_OK) return err;
+    err = wifi_ap_netif_prepare();
+    if (err != ESP_OK) return err;
+    err = wifi_ap_netif_start();
+    if (err != ESP_OK) return err;
+    s_ap_active = true;
+    s_ap_fallback = true;
+    s_ap_started_us = esp_timer_get_time();
+    ESP_LOGW(TAG, "client fallback: access point enabled at %s", s_ap_ip);
+    return ESP_OK;
+}
+
+bool web_wifi_ap_active(void)
+{
+    return s_ap_active;
+}
+
+void web_wifi_set_sta_fallback(bool enabled)
+{
+    s_sta_fallback = enabled;
 }
 
 esp_err_t wifi_start(const settings_config_t *cfg)
@@ -266,15 +485,29 @@ esp_err_t wifi_start(const settings_config_t *cfg)
     }
 
     s_auto_off_min = cfg->auto_off_min;
+    s_client_role = cfg->wifi_role == 1U;
+    s_sta_fallback = cfg->sta_fallback != 0U;
+    s_ap_active = false;
+    s_ap_fallback = false;
+    s_client_start_us = esp_timer_get_time();
+    /* Role AP: the upstream station stays disconnected even if credentials are
+     * stored. Role client: join the home network; the AP is started only as an
+     * explicit fallback when the user enables it. */
+    s_sta_enabled = s_client_role && cfg->sta_enabled != 0U &&
+                    cfg->sta_ssid[0] != '\0';
+    s_sta_connected = false;
+    s_sta_ip[0] = '\0';
+    s_sta_rssi = -127;
     (void)nvs_flash_init();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
-    /* Temporary station interface: used only to scan for the quietest channel
-     * at boot. It stays unused afterwards (AP-only design). */
+    /* The station interface is always created: the boot scan uses it, and the
+     * optional upstream link (APSTA) needs it at runtime. */
     esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
     if (ap_netif == NULL) return ESP_ERR_NO_MEM;
+    s_sta_netif = sta_netif;
 
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t err = esp_wifi_init(&wcfg);
@@ -286,7 +519,7 @@ esp_err_t wifi_start(const settings_config_t *cfg)
 
     (void)esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                               &wifi_event_handler, NULL, NULL);
-    (void)esp_event_handler_instance_register(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT,
+    (void)esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID,
                                               &wifi_event_handler, NULL, NULL);
 
     wifi_config_t ap = { 0 };
@@ -332,98 +565,100 @@ esp_err_t wifi_start(const settings_config_t *cfg)
         }
     }
 
-    /* AP-only: a stored STA/APSTA mode is ignored. */
-    err = esp_wifi_set_mode(WIFI_MODE_AP);
+    /* Role AP: start the access point. Role client: start only the station;
+     * the AP is enabled later only if the fallback checkbox is set and the
+     * upstream link does not come up. */
+    /* AP role uses APSTA even without an upstream connection: the idle STA
+     * interface is what makes network scanning work while the access point
+     * stays up. Client role starts as STA-only (AP is a fallback). */
+    err = esp_wifi_set_mode(s_client_role ? WIFI_MODE_STA : WIFI_MODE_APSTA);
     if (err != ESP_OK) return err;
-    err = esp_wifi_set_config(WIFI_IF_AP, &ap);
-    if (err != ESP_OK) return err;
-
-    /* Access point address: configurable (default 192.168.100.1). */
-    esp_ip4_addr_t ap_addr = { 0 };
-    if (!parse_ip4(cfg->ap_ip, &ap_addr)) {
-        (void)esp_netif_str_to_ip4(AP_IP_DEFAULT, &ap_addr);
+    s_ap_cfg = ap;
+    s_ap_netif = ap_netif;
+    snprintf(s_ap_ip_cfg, sizeof(s_ap_ip_cfg), "%s",
+             cfg->ap_ip[0] ? cfg->ap_ip : AP_IP_DEFAULT);
+    if (!s_client_role) {
+        err = esp_wifi_set_config(WIFI_IF_AP, &ap);
+        if (err != ESP_OK) return err;
+        err = wifi_ap_netif_prepare();
+        if (err != ESP_OK) return err;
     }
-    memcpy(s_ap_ip_bytes, &ap_addr.addr, sizeof(s_ap_ip_bytes));
 
-    if (ap_netif != NULL) {
-        esp_netif_ip_info_t ip = { 0 };
-        ip.ip.addr = ap_addr.addr;
-        ip.gw.addr = ap_addr.addr;
-        ip.netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0);
-        err = esp_netif_dhcps_stop(ap_netif);
-        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) return err;
-        err = esp_netif_set_ip_info(ap_netif, &ip);
-        if (err != ESP_OK) return err;
-
-        /* Hand the AP IP to DHCP clients as their DNS server: every name
-         * resolves to the board so connectivity probes land on the HTTP
-         * server (captive portal opens the page automatically). */
-        esp_netif_dns_info_t dns = { 0 };
-        dns.ip.type = ESP_IPADDR_TYPE_V4;
-        dns.ip.u_addr.ip4.addr = ap_addr.addr;
-        err = esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns);
-        if (err != ESP_OK) return err;
-
-        /* DHCP option 114 (RFC 8910): Windows 10/11 and Android use this URI
-         * for the "Sign in to network" / captive portal page. This makes the
-         * decoder page open instead of the NCSI msftconnecttest redirect. */
-        snprintf(s_captive_uri, sizeof(s_captive_uri), "http://" IPSTR "/",
-                 IP2STR(&ap_addr));
-        err = esp_netif_dhcps_option(ap_netif, ESP_NETIF_OP_SET,
-                                     ESP_NETIF_CAPTIVEPORTAL_URI,
-                                     s_captive_uri, (uint32_t)strlen(s_captive_uri));
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "DHCP captive portal URI option failed: %s", esp_err_to_name(err));
+    if (s_sta_enabled) {
+        wifi_config_t sta = { 0 };
+        size_t sta_ssid_len = strlen(cfg->sta_ssid);
+        size_t sta_pass_len = strlen(cfg->sta_password);
+        if (sta_ssid_len == 0U || sta_ssid_len > sizeof(sta.sta.ssid) ||
+            sta_pass_len > sizeof(sta.sta.password)) {
+            ESP_LOGW(TAG, "stored station credentials are invalid: STA disabled");
+            s_sta_enabled = false;
+        } else {
+            memcpy(sta.sta.ssid, cfg->sta_ssid, sta_ssid_len);
+            memcpy(sta.sta.password, cfg->sta_password, sta_pass_len);
+            /* Accept an open upstream network; WPA2/3 still negotiates. */
+            sta.sta.threshold.authmode = WIFI_AUTH_OPEN;
+            esp_err_t serr = esp_wifi_set_config(WIFI_IF_STA, &sta);
+            if (serr != ESP_OK) {
+                ESP_LOGW(TAG, "station config failed (%s): STA disabled",
+                         esp_err_to_name(serr));
+                s_sta_enabled = false;
+            }
         }
     }
 
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
 
-    /* Never let a reduced PHY setting shrink the link budget: this is the
-     * single biggest software knob for range and packet loss. */
-    err = esp_wifi_set_max_tx_power(WIFI_MAX_TX_POWER_QDBM);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "max TX power not applied: %s", esp_err_to_name(err));
-    }
+    /* TX power is the main thermal knob for the radio. The persisted value is
+     * clamped by settings_load(), but stay defensive here. */
+    uint8_t tx_dbm = cfg->wifi_tx_dbm;
+    if (tx_dbm < WIFI_TX_MIN_DBM) tx_dbm = WIFI_TX_MIN_DBM;
+    if (tx_dbm > WIFI_TX_MAX_DBM) tx_dbm = WIFI_TX_MAX_DBM;
+    (void)wifi_apply_tx_power(tx_dbm);
 
-    err = esp_netif_dhcps_start(ap_netif);
-    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-        (void)esp_wifi_stop();
-        return err;
+    if (!s_client_role) {
+        err = wifi_ap_netif_start();
+        if (err != ESP_OK) {
+            (void)esp_wifi_stop();
+            return err;
+        }
+        s_ap_active = true;
+        s_ap_sta_count = 0;
+        portENTER_CRITICAL(&s_wifi_time_mux);
+        s_ap_started_us = esp_timer_get_time();
+        s_last_client_us = s_ap_started_us;
+        portEXIT_CRITICAL(&s_wifi_time_mux);
+    } else {
+        s_ap_active = false;
     }
-
-    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20);
 
     /* No radio power-save: a sleeping AP radio throttles uploads to ~2 KB/s. */
     esp_wifi_set_ps(WIFI_PS_NONE);
 
-    /* The AP holds exactly one client. If a phone vanishes without sending a
-     * deauth (out of range, Wi-Fi toggled off), the default 300 s timeout
-     * keeps the slot busy and blocks a reconnect. 120 s still gives an idle
-     * but alive client plenty of margin (phones send null frames). */
-    err = esp_wifi_set_inactive_time(WIFI_IF_AP, WIFI_AP_INACTIVE_SEC);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "inactive time not applied: %s", esp_err_to_name(err));
-    }
-
-    s_ap_sta_count = 0;
-    portENTER_CRITICAL(&s_wifi_time_mux);
-    s_ap_started_us = esp_timer_get_time();
-    s_last_client_us = s_ap_started_us;
-    portEXIT_CRITICAL(&s_wifi_time_mux);
     s_wifi_started = true;
-
-    snprintf(s_ap_ip, sizeof(s_ap_ip), IPSTR, IP2STR(&ap_addr));
-    if (ap_netif != NULL) {
-        esp_netif_ip_info_t actual = { 0 };
-        if (esp_netif_get_ip_info(ap_netif, &actual) == ESP_OK) {
-            snprintf(s_ap_ip, sizeof(s_ap_ip), IPSTR, IP2STR(&actual.ip));
-            memcpy(s_ap_ip_bytes, &actual.ip.addr, sizeof(s_ap_ip_bytes));
+    if (s_sta_enabled) {
+        wifi_note_sta_try_now();
+        esp_err_t serr = esp_wifi_connect();
+        if (serr != ESP_OK) {
+            ESP_LOGW(TAG, "station connect failed: %s", esp_err_to_name(serr));
         }
     }
-    ESP_LOGI(TAG, "Wi-Fi started (AP-only, channel %u, ip=%s)",
-             (unsigned)ap.ap.channel, s_ap_ip);
+    if (s_client_role && s_sta_fallback && !s_sta_enabled) {
+        /* No credentials: the user asked for the AP fallback, so bring it up. */
+        esp_err_t ferr = web_wifi_enable_ap_fallback();
+        if (ferr != ESP_OK) {
+            ESP_LOGW(TAG, "client fallback failed: %s", esp_err_to_name(ferr));
+        }
+    }
+
+    ESP_LOGI(TAG, "Wi-Fi started (%s, tx=%u dBm, role=%s, sta=%s, ap=%s)",
+             s_client_role ? "client" : "AP", (unsigned)tx_dbm,
+             cfg->wifi_role == 1U ? "client" : "ap",
+             s_sta_enabled ? cfg->sta_ssid : "off",
+             s_ap_active ? s_ap_ip : "off");
+    /* The supervisor also handles the optional station reconnect and the AP
+     * fallback, so it is needed even when AP auto-off is disabled. */
+    wifi_start_auto_off();
     return ESP_OK;
 }
 
@@ -504,9 +739,160 @@ void start_dns_hijack(void)
 
 void wifi_start_auto_off(void)
 {
+    if (s_autooff_started) {
+        return;
+    }
     if (xTaskCreate(wifi_auto_off_task, "wifi_off", 3072, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "wifi auto-off task create failed");
+        return;
     }
+    s_autooff_started = true;
+}
+
+esp_err_t web_wifi_set_tx_power(uint8_t dbm)
+{
+    if (dbm < WIFI_TX_MIN_DBM || dbm > WIFI_TX_MAX_DBM) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* Before Wi-Fi is up the value is only persisted; wifi_start() applies it
+     * after the radio starts. */
+    return s_wifi_started ? wifi_apply_tx_power(dbm) : ESP_OK;
+}
+
+esp_err_t web_wifi_apply_sta(const char *ssid, const char *password, bool enable)
+{
+    if (ssid == NULL || password == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!enable) {
+        s_sta_enabled = false;
+        s_sta_connected = false;
+        s_sta_ip[0] = '\0';
+        s_sta_rssi = -127;
+        if (s_wifi_started) {
+            (void)esp_wifi_disconnect();
+        }
+        return ESP_OK;
+    }
+    if (!s_wifi_started) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    size_t ssid_len = strlen(ssid);
+    size_t pass_len = strlen(password);
+    if (ssid_len == 0U || ssid_len > 32U || pass_len > 64U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    wifi_config_t sta = { 0 };
+    memcpy(sta.sta.ssid, ssid, ssid_len);
+    memcpy(sta.sta.password, password, pass_len);
+    sta.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    if (!s_client_role) {
+        /* The user pressed Connect without saving the mode first. Keep the AP
+         * up for this session (so the page is not lost) and switch to APSTA;
+         * the saved client role takes effect after the reboot. */
+        s_client_role = true;
+        (void)esp_wifi_set_mode(WIFI_MODE_APSTA);
+        s_ap_active = true;
+    }
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &sta);
+    if (err != ESP_OK) {
+        return err;
+    }
+    s_sta_enabled = true;
+    s_sta_connected = false;
+    s_sta_ip[0] = '\0';
+    s_sta_rssi = -127;
+    wifi_note_sta_try_now();
+    if (!s_autooff_started) {
+        wifi_start_auto_off(); /* reconnect supervisor */
+    }
+    err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "station connect failed: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+void web_wifi_sta_status(char *ip, size_t ip_len, int *rssi, bool *connected,
+                         bool *enabled)
+{
+    if (ip != NULL && ip_len > 0U) {
+        snprintf(ip, ip_len, "%s", s_sta_ip[0] ? s_sta_ip : "0.0.0.0");
+    }
+    if (rssi != NULL) {
+        *rssi = s_sta_connected ? (int)s_sta_rssi : -127;
+    }
+    if (connected != NULL) {
+        *connected = s_sta_connected;
+    }
+    if (enabled != NULL) {
+        *enabled = s_sta_enabled;
+    }
+}
+
+esp_err_t wifi_scan_get(httpd_req_t *req)
+{
+    if (!s_wifi_started) {
+        return send_json(req, "{\"ok\":false,\"error\":\"wifi off\"}");
+    }
+    wifi_scan_config_t sc = { 0 };
+    sc.show_hidden = false;
+    sc.scan_time.active.min = 40;
+    sc.scan_time.active.max = 100;
+    esp_err_t err = esp_wifi_scan_start(&sc, true);
+    if (err != ESP_OK) {
+        (void)esp_wifi_clear_ap_list();
+        return send_json(req, "{\"ok\":false,\"error\":\"scan failed\"}");
+    }
+    uint16_t num = 0;
+    err = esp_wifi_scan_get_ap_num(&num);
+    if (err != ESP_OK) {
+        (void)esp_wifi_clear_ap_list();
+        return send_json(req, "{\"ok\":false,\"error\":\"scan failed\"}");
+    }
+    if (num == 0U) {
+        (void)esp_wifi_clear_ap_list();
+        return send_json(req, "{\"ok\":true,\"aps\":[]}");
+    }
+    if (num > 20U) {
+        num = 20U;
+    }
+    wifi_ap_record_t *recs = calloc(num, sizeof(*recs));
+    char *out = malloc(4096);
+    if (recs == NULL || out == NULL) {
+        free(recs);
+        free(out);
+        (void)esp_wifi_clear_ap_list();
+        return send_json(req, "{\"ok\":false,\"error\":\"no memory\"}");
+    }
+    uint16_t got = num;
+    err = esp_wifi_scan_get_ap_records(&got, recs);
+    if (err != ESP_OK) {
+        free(recs);
+        free(out);
+        (void)esp_wifi_clear_ap_list();
+        return send_json(req, "{\"ok\":false,\"error\":\"scan failed\"}");
+    }
+    size_t used = (size_t)snprintf(out, 4096, "{\"ok\":true,\"aps\":[");
+    bool first = true;
+    for (uint16_t i = 0; i < got && used < 3800U; ++i) {
+        if (recs[i].ssid[0] == '\0') {
+            continue;
+        }
+        char ssid[SETTINGS_SSID_MAX * 6];
+        json_escape((const char *)recs[i].ssid, ssid, sizeof(ssid));
+        used += (size_t)snprintf(out + used, 4096U - used,
+                                 "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%d,\"ch\":%u}",
+                                 first ? "" : ",", ssid, (int)recs[i].rssi,
+                                 (int)recs[i].authmode, (unsigned)recs[i].primary);
+        first = false;
+    }
+    snprintf(out + used, 4096U - used, "]}");
+    err = send_json(req, out);
+    free(recs);
+    free(out);
+    (void)esp_wifi_clear_ap_list();
+    return err;
 }
 
 bool web_wifi_is_started(void)

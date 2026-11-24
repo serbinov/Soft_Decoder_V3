@@ -178,6 +178,7 @@ static int test_sound_inhibit_calls;
 static bool test_sound_inhibit_last;
 static char test_origin_hdr[256], test_referer_hdr[512], test_host_hdr[256];
 static wifi_config_t test_ap_config;
+static wifi_config_t test_sta_config;
 static esp_err_t test_ip_err, test_dhcp_stop_err, test_dhcp_start_err, test_dns_err;
 static esp_err_t test_manifest_err;
 static unsigned test_manifest_calls, test_rename_calls;
@@ -255,6 +256,7 @@ esp_err_t test_progress_transfer_handler(httpd_req_t *req)
 esp_err_t test_wifi_config(wifi_interface_t interface, wifi_config_t *config)
 {
     if (interface == WIFI_IF_AP) test_ap_config = *config;
+    else test_sta_config = *config;
     return esp_wifi_set_config(interface, config);
 }
 esp_err_t test_netif_set_ip(esp_netif_t *netif, const esp_netif_ip_info_t *ip)
@@ -448,6 +450,23 @@ void setUp(void)
     mock_timer_now_us = 0;
     mock_motor_emergency_stop_calls = 0;
     memset(&test_ap_config, 0, sizeof(test_ap_config));
+    memset(&test_sta_config, 0, sizeof(test_sta_config));
+    s_wifi_started = false;
+    s_sta_enabled = false;
+    s_client_role = false;
+    s_sta_fallback = false;
+    s_ap_active = false;
+    s_ap_fallback = false;
+    s_sta_connected = false;
+    s_sta_ip[0] = '\0';
+    s_sta_rssi = -127;
+    s_auto_off_min = 0;
+    s_ap_sta_count = 0;
+    s_sta_netif = NULL;
+    s_ap_netif = NULL;
+    s_ap_ip_cfg[0] = '\0';
+    s_client_start_us = 0;
+    memset(&s_ap_cfg, 0, sizeof(s_ap_cfg));
     test_ip_err = test_dhcp_stop_err = test_dhcp_start_err = test_dns_err = ESP_OK;
     test_manifest_err = ESP_OK;
     test_manifest_calls = test_rename_calls = 0;
@@ -1245,6 +1264,8 @@ static settings_config_t make_wifi_cfg(void)
     settings_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.wifi_mode = 1;
+    cfg.wifi_tx_dbm = 10;
+    cfg.sta_fallback = 1;
     snprintf(cfg.ap_ssid, sizeof(cfg.ap_ssid), "AP");
     snprintf(cfg.ap_ip, sizeof(cfg.ap_ip), "10.0.0.1");
     return cfg;
@@ -1345,12 +1366,40 @@ static void test_wifi_start_max_tx_power(void)
     settings_config_t cfg = make_wifi_cfg();
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
     TEST_ASSERT_EQUAL_INT(1, mock_wifi_set_max_tx_power_calls);
+    TEST_ASSERT_EQUAL_INT8(40, mock_wifi_last_tx_power); /* default 10 dBm */
+
+    cfg.wifi_tx_dbm = 20;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
     TEST_ASSERT_EQUAL_INT8(80, mock_wifi_last_tx_power);
+
+    cfg.wifi_tx_dbm = 5;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_INT8(20, mock_wifi_last_tx_power);
 
     /* A rejected TX power must not keep the access point from starting. */
     mock_wifi_set_max_tx_power_ret = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
-    TEST_ASSERT_EQUAL_INT(2, mock_wifi_set_max_tx_power_calls);
+    TEST_ASSERT_EQUAL_INT(4, mock_wifi_set_max_tx_power_calls);
+}
+
+static void test_wifi_start_sta_connect(void)
+{
+    settings_config_t cfg = make_wifi_cfg();
+    cfg.wifi_role = 1;
+    snprintf(cfg.sta_ssid, sizeof(cfg.sta_ssid), "HomeNet");
+    snprintf(cfg.sta_password, sizeof(cfg.sta_password), "homepass1");
+    cfg.sta_enabled = 1;
+    s_autooff_iter_cap = 1; /* let the supervisor task exit after one tick */
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL(WIFI_MODE_STA, mock_wifi_last_mode);
+    TEST_ASSERT_EQUAL_STRING("HomeNet", (const char *)test_sta_config.sta.ssid);
+    TEST_ASSERT_EQUAL_STRING("homepass1", (const char *)test_sta_config.sta.password);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_connect_calls);
+
+    mock_wifi_connect_ret = ESP_FAIL;
+    snprintf(cfg.sta_ssid, sizeof(cfg.sta_ssid), "HomeNet");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL_INT(2, mock_wifi_connect_calls);
 }
 
 static void test_wifi_start_client_timeout(void)
@@ -3260,23 +3309,84 @@ static void test_aux_effect_valid_mode(void)
 
 /* ---------- wifi / device / storage ---------- */
 
+static void test_wifi_start_ap_role_keeps_sta_off(void)
+{
+    settings_config_t cfg = make_wifi_cfg();
+    cfg.sta_enabled = 1;
+    cfg.wifi_role = 0;
+    snprintf(cfg.sta_ssid, sizeof(cfg.sta_ssid), "HomeNet");
+    snprintf(cfg.sta_password, sizeof(cfg.sta_password), "homepass1");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_EQUAL(WIFI_MODE_APSTA, mock_wifi_last_mode);
+    TEST_ASSERT_EQUAL_INT(0, mock_wifi_connect_calls);
+    TEST_ASSERT_EQUAL_INT(40, mock_wifi_last_tx_power);
+}
+
+static void test_wifi_start_client_fallback(void)
+{
+    settings_config_t cfg = make_wifi_cfg();
+    cfg.wifi_role = 1;
+    cfg.sta_fallback = 1;
+    s_autooff_iter_cap = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_TRUE(web_wifi_ap_active());
+    TEST_ASSERT_EQUAL(WIFI_MODE_APSTA, mock_wifi_last_mode);
+    TEST_ASSERT_EQUAL_INT(0, mock_wifi_connect_calls);
+}
+
+static void test_wifi_start_client_no_fallback(void)
+{
+    settings_config_t cfg = make_wifi_cfg();
+    cfg.wifi_role = 1;
+    cfg.sta_fallback = 0;
+    cfg.sta_enabled = 1;
+    snprintf(cfg.sta_ssid, sizeof(cfg.sta_ssid), "HomeNet");
+    s_autooff_iter_cap = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_start(&cfg));
+    TEST_ASSERT_FALSE(web_wifi_ap_active());
+    TEST_ASSERT_EQUAL(WIFI_MODE_STA, mock_wifi_last_mode);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_connect_calls);
+}
+
 static void test_wifi_get(void)
 {
     httpd_req_t req = make_req(0);
     s_cfg.wifi_mode = 1;
+    s_cfg.wifi_tx_dbm = 15;
+    s_cfg.wifi_role = 1;
     snprintf(s_cfg.ap_ssid, sizeof(s_cfg.ap_ssid), "AP");
     snprintf(s_cfg.ap_password, sizeof(s_cfg.ap_password), "secret123");
+    snprintf(s_cfg.sta_ssid, sizeof(s_cfg.sta_ssid), "Home");
     s_cfg.auto_off_min = 5;
     snprintf(s_cfg.ap_ip, sizeof(s_cfg.ap_ip), "10.0.0.1");
     s_wifi_started = true;
+    s_sta_enabled = true;
+    s_sta_connected = true;
+    s_ap_active = true;
+    s_cfg.sta_fallback = 1;
+    snprintf(s_sta_ip, sizeof(s_sta_ip), "192.168.1.50");
+    s_sta_rssi = -55;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ap_password\":\"********\""));
-    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"ap_running\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"ap_sta_running\""));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ap_ip\":\"10.0.0.1\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"tx_dbm\":15"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"role\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"tx_min\":5"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"tx_max\":20"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_enabled\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_fallback\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ap_active\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_connected\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_ssid\":\"Home\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_ip\":\"192.168.1.50\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_rssi\":-55"));
 
     reset_resp();
     s_cfg.ap_password[0] = '\0';
     s_wifi_started = false;
+    s_sta_connected = false;
+    s_ap_active = false;
     TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"off\""));
 }
@@ -3284,12 +3394,15 @@ static void test_wifi_get(void)
 static void test_wifi_post(void)
 {
     httpd_req_t req = make_req(0);
-    set_query("ap_ssid=NewAP&ap_password=longenough&auto_off_min=7&ap_ip=10.5.5.5");
+    set_query("ap_ssid=NewAP&ap_password=longenough&auto_off_min=7&ap_ip=10.5.5.5&tx_dbm=15&role=1&sta_fallback=0");
     TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
     TEST_ASSERT_EQUAL_STRING("NewAP", s_cfg.ap_ssid);
     TEST_ASSERT_EQUAL_STRING("longenough", s_cfg.ap_password);
     TEST_ASSERT_EQUAL_STRING("10.5.5.5", s_cfg.ap_ip);
     TEST_ASSERT_EQUAL_UINT8(7, s_cfg.auto_off_min);
+    TEST_ASSERT_EQUAL_UINT8(15, s_cfg.wifi_tx_dbm);
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.wifi_role);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.sta_fallback);
     TEST_ASSERT_EQUAL_INT(1, mock_esp_restart_calls);
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "reboot"));
     web_maintenance_end(); /* esp_restart does not return on the target. */
@@ -3305,10 +3418,144 @@ static void test_wifi_post(void)
     TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "invalid ap ip"));
 
     reset_resp();
+    set_query("tx_dbm=21");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "tx power must be 5..20 dBm"));
+    TEST_ASSERT_EQUAL_UINT8(15, s_cfg.wifi_tx_dbm);
+
+    reset_resp();
+    set_query("role=2");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "role must be 0 or 1"));
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.wifi_role);
+
+    reset_resp();
     set_query("ap_ssid=&ap_password_clear=1");
     TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
     TEST_ASSERT_EQUAL_STRING("", s_cfg.ap_password);
     TEST_ASSERT_EQUAL_STRING("NewAP", s_cfg.ap_ssid); /* empty value ignored */
+}
+
+static void test_wifi_tx_post(void)
+{
+    httpd_req_t req = make_req(0);
+    s_wifi_started = true;
+    s_cfg.wifi_tx_dbm = 10;
+    set_query("dbm=5");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(5, s_cfg.wifi_tx_dbm);
+    TEST_ASSERT_EQUAL_INT(1, mock_settings_save_deferred_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_set_max_tx_power_calls);
+    TEST_ASSERT_EQUAL_INT8(20, mock_wifi_last_tx_power);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"tx_dbm\":5"));
+
+    reset_resp();
+    set_query("dbm=20");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_EQUAL_INT8(80, mock_wifi_last_tx_power);
+
+    reset_resp();
+    set_query("dbm=4");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "tx power must be 5..20 dBm"));
+    TEST_ASSERT_EQUAL_UINT8(20, s_cfg.wifi_tx_dbm);
+
+    reset_resp();
+    set_query("dbm=21");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "tx power must be 5..20 dBm"));
+}
+
+static void test_wifi_sta_post(void)
+{
+    httpd_req_t req = make_req(0);
+    s_wifi_started = true;
+    set_query("connect=1&ssid=Home&password=homepass1&fallback=0");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.sta_enabled);
+    TEST_ASSERT_EQUAL_STRING("Home", s_cfg.sta_ssid);
+    TEST_ASSERT_EQUAL_STRING("homepass1", s_cfg.sta_password);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_connect_calls);
+    TEST_ASSERT_EQUAL_INT(1, mock_settings_save_calls);
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.wifi_role);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.sta_fallback);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"sta_enabled\":1"));
+
+    /* Empty password means the upstream network is open. */
+    reset_resp();
+    set_query("connect=1&ssid=Home&password=");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_STRING("", s_cfg.sta_password);
+    TEST_ASSERT_EQUAL_INT(2, mock_wifi_connect_calls);
+
+    /* A different SSID with an empty password is an open network. */
+    reset_resp();
+    set_query("connect=1&ssid=OpenNet&password=");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_STRING("", s_cfg.sta_password);
+
+    reset_resp();
+    set_query("connect=1&ssid=Home&password=short");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "sta password must be >=8 chars or empty"));
+
+    reset_resp();
+    set_query("connect=1&password=x");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "ssid required"));
+
+    reset_resp();
+    set_query("connect=0");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.sta_enabled);
+    TEST_ASSERT_EQUAL_INT(1, mock_wifi_disconnect_calls);
+
+    /* Apply failure is reported, but the credentials are already durable. */
+    reset_resp();
+    s_cfg.sta_enabled = 0;
+    mock_wifi_connect_ret = ESP_FAIL;
+    set_query("connect=1&ssid=Home&password=homepass1");
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.sta_enabled);
+}
+
+static void test_wifi_scan_get(void)
+{
+    httpd_req_t req = make_req(0);
+    s_wifi_started = false;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_scan_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "wifi off"));
+
+    reset_resp();
+    s_wifi_started = true;
+    mock_scan_num = 2;
+    mock_scan_records_n = 2;
+    memcpy(mock_scan_records[0].ssid, "Home", 5);
+    mock_scan_records[0].rssi = -50;
+    mock_scan_records[0].authmode = WIFI_AUTH_WPA2_PSK;
+    mock_scan_records[0].primary = 6;
+    memcpy(mock_scan_records[1].ssid, "Open", 5);
+    mock_scan_records[1].rssi = -70;
+    mock_scan_records[1].authmode = WIFI_AUTH_OPEN;
+    mock_scan_records[1].primary = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_scan_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ssid\":\"Home\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"rssi\":-50"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"auth\":4"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ch\":6"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ssid\":\"Open\""));
+
+    reset_resp();
+    mock_scan_start_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_scan_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "scan failed"));
+
+    reset_resp();
+    mock_scan_start_ret = 0;
+    mock_scan_num = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_scan_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"aps\":[]"));
 }
 
 static void test_wifi_and_factory_reset(void)
@@ -5230,8 +5477,9 @@ static void test_graph_get_roundtrip_assets_and_routes(void)
     TEST_ASSERT_EQUAL_INT(HTTPD_404_NOT_FOUND, mock_resp_send_err_code);
     TEST_ASSERT_NULL(strstr(mock_resp_hdr, "Location:"));
     reset_resp(); TEST_ASSERT_EQUAL(ESP_OK, start_http_server());
-    TEST_ASSERT_EQUAL_UINT32(65, s_route_count);
-    TEST_ASSERT_EQUAL_UINT32(65, mock_route_count);
+    TEST_ASSERT_EQUAL_UINT32(68, s_route_count);
+    TEST_ASSERT_EQUAL_UINT32(68, mock_route_count);
+    TEST_ASSERT_TRUE(WEB_MAX_URI_HANDLERS >= s_route_count);
 }
 
 static void test_graph_referenced_uploads_fail_closed(void)
@@ -5695,6 +5943,12 @@ static void test_wifi_reset_preserves_non_wifi_settings(void)
     s_cfg.active_slot = 3;
     s_cfg.ap_ssid[0] = '\0';
     snprintf(s_cfg.ap_ip, sizeof(s_cfg.ap_ip), "10.9.9.9");
+    s_cfg.wifi_tx_dbm = 20;
+    s_cfg.wifi_role = 1;
+    s_cfg.sta_enabled = 1;
+    s_cfg.sta_fallback = 0;
+    snprintf(s_cfg.sta_ssid, sizeof(s_cfg.sta_ssid), "Home");
+    snprintf(s_cfg.sta_password, sizeof(s_cfg.sta_password), "homepass1");
     mock_settings_save_calls = 0;
     mock_esp_restart_calls = 0;
     httpd_req_t req = make_req(0);
@@ -5710,6 +5964,12 @@ static void test_wifi_reset_preserves_non_wifi_settings(void)
     TEST_ASSERT_EQUAL_UINT8(1, s_cfg.wifi_mode);
     TEST_ASSERT_EQUAL_STRING("ADDITIPUS AURA-X", s_cfg.ap_ssid);
     TEST_ASSERT_EQUAL_STRING(AP_IP_DEFAULT, s_cfg.ap_ip);
+    TEST_ASSERT_EQUAL_UINT8(10, s_cfg.wifi_tx_dbm);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.wifi_role);
+    TEST_ASSERT_EQUAL_UINT8(0, s_cfg.sta_enabled);
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.sta_fallback);
+    TEST_ASSERT_EQUAL_STRING("", s_cfg.sta_ssid);
+    TEST_ASSERT_EQUAL_STRING("", s_cfg.sta_password);
     TEST_ASSERT_EQUAL_INT(1, mock_settings_save_calls);
     TEST_ASSERT_EQUAL_INT(1, mock_esp_restart_calls);
     web_maintenance_end(); /* esp_restart does not return on the target. */
@@ -5883,6 +6143,10 @@ int main(void)
     RUN_TEST(test_wifi_start_sta_start_fail);
     RUN_TEST(test_wifi_start_channel_chosen);
     RUN_TEST(test_wifi_start_max_tx_power);
+    RUN_TEST(test_wifi_start_sta_connect);
+    RUN_TEST(test_wifi_start_ap_role_keeps_sta_off);
+    RUN_TEST(test_wifi_start_client_fallback);
+    RUN_TEST(test_wifi_start_client_no_fallback);
     RUN_TEST(test_wifi_start_client_timeout);
     RUN_TEST(test_wifi_start_ap_netif_null);
     RUN_TEST(test_wifi_start_get_ip_fail);
@@ -5976,6 +6240,9 @@ int main(void)
     RUN_TEST(test_aux_effect_valid_mode);
     RUN_TEST(test_wifi_get);
     RUN_TEST(test_wifi_post);
+    RUN_TEST(test_wifi_tx_post);
+    RUN_TEST(test_wifi_sta_post);
+    RUN_TEST(test_wifi_scan_get);
     RUN_TEST(test_wifi_and_factory_reset);
     RUN_TEST(test_device_get_post);
     RUN_TEST(test_storage_get);

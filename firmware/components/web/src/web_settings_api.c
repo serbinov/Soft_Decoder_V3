@@ -296,16 +296,43 @@ esp_err_t wifi_get(httpd_req_t *req)
         return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
     }
     char ap_ssid[SETTINGS_SSID_MAX * 2];
+    char sta_ssid[SETTINGS_SSID_MAX * 2];
     json_escape(cfg.ap_ssid, ap_ssid, sizeof(ap_ssid));
+    json_escape(cfg.sta_ssid, sta_ssid, sizeof(sta_ssid));
+    char sta_ip[16];
+    int sta_rssi = -127;
+    bool sta_connected = false, sta_enabled = false;
+    web_wifi_sta_status(sta_ip, sizeof(sta_ip), &sta_rssi, &sta_connected, &sta_enabled);
+    bool ap_active = web_wifi_ap_active();
+    const char *status = "off";
+    if (web_wifi_is_started()) {
+        if (cfg.wifi_role != 1U) {
+            status = "ap_running";
+        } else if (sta_connected && ap_active) {
+            status = "ap_sta_running";
+        } else if (sta_connected) {
+            status = "sta_running";
+        } else if (ap_active) {
+            status = "ap_fallback";
+        } else {
+            status = "sta_waiting";
+        }
+    }
 
-    char json[384];
+    char json[768];
     snprintf(json, sizeof(json),
-             "{\"ok\":true,\"mode\":%u,\"ap_ssid\":\"%s\",\"ap_password\":\"%s\","
-             "\"auto_off_min\":%u,\"status\":\"%s\",\"ap_ip\":\"%s\"}",
-             (unsigned)cfg.wifi_mode, ap_ssid,
+             "{\"ok\":true,\"mode\":%u,\"role\":%u,\"ap_ssid\":\"%s\",\"ap_password\":\"%s\","
+             "\"auto_off_min\":%u,\"status\":\"%s\",\"ap_ip\":\"%s\",\"ap_active\":%u,"
+             "\"tx_dbm\":%u,\"tx_min\":%u,\"tx_max\":%u,"
+             "\"sta_enabled\":%u,\"sta_fallback\":%u,\"sta_connected\":%u,\"sta_ssid\":\"%s\","
+             "\"sta_ip\":\"%s\",\"sta_rssi\":%d}",
+             (unsigned)cfg.wifi_mode, (unsigned)cfg.wifi_role, ap_ssid,
              cfg.ap_password[0] ? "********" : "",
-             (unsigned)cfg.auto_off_min,
-             web_wifi_is_started() ? "ap_running" : "off", cfg.ap_ip);
+             (unsigned)cfg.auto_off_min, status, cfg.ap_ip, ap_active ? 1U : 0U,
+             (unsigned)cfg.wifi_tx_dbm, 5U, 20U,
+             sta_enabled ? 1U : 0U, cfg.sta_fallback ? 1U : 0U,
+             sta_connected ? 1U : 0U, sta_ssid,
+             sta_ip, sta_rssi);
     return send_json(req, json);
 }
 
@@ -365,6 +392,24 @@ esp_err_t wifi_post(httpd_req_t *req)
     }
     /* AP-only: the HTTP port is fixed at 80 and the captive portal is always on. */
     parse_u8(query, "auto_off_min", &next.auto_off_min);
+    uint8_t fallback = 0;
+    if (parse_u8(query, "sta_fallback", &fallback)) {
+        next.sta_fallback = fallback ? 1U : 0U;
+    }
+    uint8_t role = 0;
+    if (parse_u8(query, "role", &role)) {
+        if (role > 1U) {
+            return send_json(req, "{\"ok\":false,\"error\":\"role must be 0 or 1\"}");
+        }
+        next.wifi_role = role;
+    }
+    uint8_t tx_dbm = 0;
+    if (parse_u8(query, "tx_dbm", &tx_dbm)) {
+        if (tx_dbm < 5U || tx_dbm > 20U) {
+            return send_json(req, "{\"ok\":false,\"error\":\"tx power must be 5..20 dBm\"}");
+        }
+        next.wifi_tx_dbm = tx_dbm;
+    }
 
     if (web_maintenance_begin(false) != ESP_OK)
         return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
@@ -382,6 +427,115 @@ esp_err_t wifi_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t wifi_tx_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = { 0 };
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query");
+    if (!query_encoding_valid(query))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query encoding");
+    uint8_t dbm = 0;
+    if (!parse_u8(query, "dbm", &dbm) || dbm < 5U || dbm > 20U) {
+        return send_json(req, "{\"ok\":false,\"error\":\"tx power must be 5..20 dBm\"}");
+    }
+    settings_config_t next;
+    if (!web_cfg_read(&next)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
+    next.wifi_tx_dbm = dbm;
+    /* A slider-like control: persist lazily so it does not stop audio, and
+     * apply to the radio immediately. */
+    if (web_cfg_save(&next, true) != ESP_OK) {
+        return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+    }
+    esp_err_t err = web_wifi_set_tx_power(dbm);
+    if (err != ESP_OK) {
+        return send_json(req, "{\"ok\":false,\"error\":\"tx power not applied\"}");
+    }
+    web_log_event("Wi-Fi", "мощность передатчика %u dBm", (unsigned)dbm);
+    char json[64];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"tx_dbm\":%u}", (unsigned)dbm);
+    return send_json(req, json);
+}
+
+esp_err_t wifi_sta_post(httpd_req_t *req)
+{
+    char query[WEB_QUERY_MAX] = { 0 };
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query");
+    if (!query_encoding_valid(query))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid query encoding");
+
+    settings_config_t next;
+    if (!web_cfg_read(&next)) {
+        return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
+    }
+    bool connect = parse_bool(query, "connect", false);
+    char ssid[SETTINGS_SSID_MAX] = { 0 };
+    char password[SETTINGS_PASS_MAX] = { 0 };
+    bool has_ssid = parse_query(query, "ssid", ssid, sizeof(ssid));
+    bool has_password = parse_query(query, "password", password, sizeof(password));
+
+    if (connect) {
+        if (!has_ssid || ssid[0] == '\0') {
+            return send_json(req, "{\"ok\":false,\"error\":\"ssid required\"}");
+        }
+        if (strlen(ssid) > 32U) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID exceeds 32 bytes");
+        }
+        if (has_password && password[0] != '\0' && strlen(password) < 8U) {
+            return send_json(req, "{\"ok\":false,\"error\":\"sta password must be >=8 chars or empty\"}");
+        }
+        if (strlen(password) == 64U) {
+            for (size_t i = 0; i < 64U; ++i) {
+                if (!isxdigit((unsigned char)password[i])) {
+                    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                               "64 byte PSK must be hex");
+                }
+            }
+        }
+        /* An empty password means an open upstream network. */
+        strncpy(next.sta_ssid, ssid, sizeof(next.sta_ssid) - 1);
+        next.sta_ssid[sizeof(next.sta_ssid) - 1] = '\0';
+        strncpy(next.sta_password, password, sizeof(next.sta_password) - 1);
+        next.sta_password[sizeof(next.sta_password) - 1] = '\0';
+        next.sta_enabled = 1;
+        /* Pressing Connect is an explicit request to be a client, even if the
+         * mode radio was not saved yet. */
+        next.wifi_role = 1;
+        if (query_has_key(query, "fallback")) {
+            next.sta_fallback = parse_bool(query, "fallback", true) ? 1U : 0U;
+        }
+    } else {
+        next.sta_enabled = 0;
+    }
+
+    if (web_maintenance_begin(false) != ESP_OK) {
+        return send_json(req, "{\"ok\":false,\"error\":\"maintenance busy\"}");
+    }
+    if (web_cfg_save(&next, false) != ESP_OK) {
+        web_maintenance_end();
+        return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
+    }
+    esp_err_t err = web_wifi_apply_sta(next.sta_ssid, next.sta_password, connect);
+    web_wifi_set_sta_fallback(next.sta_fallback != 0U);
+    web_maintenance_end();
+    if (err != ESP_OK) {
+        char json[96];
+        snprintf(json, sizeof(json),
+                 "{\"ok\":false,\"error\":\"apply failed\",\"sta_enabled\":%u}",
+                 next.sta_enabled ? 1U : 0U);
+        return send_json(req, json);
+    }
+    web_log_event("Wi-Fi", connect ? "подключение к %s" : "STA отключён",
+                  connect ? next.sta_ssid : "");
+    char json[160];
+    snprintf(json, sizeof(json),
+             "{\"ok\":true,\"sta_enabled\":%u,\"sta_ssid\":\"%s\"}",
+             next.sta_enabled ? 1U : 0U, next.sta_ssid);
+    return send_json(req, json);
+}
+
 esp_err_t wifi_reset_post(httpd_req_t *req)
 {
     settings_config_t next;
@@ -393,8 +547,14 @@ esp_err_t wifi_reset_post(httpd_req_t *req)
     /* Wi-Fi reset only touches Wi-Fi fields. Device name, volumes, control
      * source and track selection must survive it. */
     next.wifi_mode = 1;
+    next.wifi_role = 0;
     next.ap_password[0] = '\0';
     next.auto_off_min = 0;
+    next.wifi_tx_dbm = 10;
+    next.sta_enabled = 0;
+    next.sta_fallback = 1;
+    next.sta_ssid[0] = '\0';
+    next.sta_password[0] = '\0';
     strncpy(next.ap_ip, AP_IP_DEFAULT, sizeof(next.ap_ip) - 1);
     next.ap_ip[sizeof(next.ap_ip) - 1] = '\0';
     strncpy(next.ap_ssid, "ADDITIPUS AURA-X", sizeof(next.ap_ssid) - 1);

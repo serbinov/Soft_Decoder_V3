@@ -52,7 +52,17 @@ typedef struct {
 } wifi_ap_config_t;
 
 typedef struct {
+    uint8_t ssid[32];
+    uint8_t password[64];
+    uint8_t ssid_len;
+    struct {
+        wifi_auth_mode_t authmode;
+    } threshold;
+} wifi_sta_config_t;
+
+typedef struct {
     wifi_ap_config_t ap;
+    wifi_sta_config_t sta;
 } wifi_config_t;
 
 typedef struct {
@@ -76,10 +86,35 @@ typedef enum {
 } wifi_second_chan_t;
 
 typedef struct {
+    uint8_t ssid[33];
+    wifi_auth_mode_t authmode;
     int8_t rssi;
     uint8_t primary;
     wifi_second_chan_t second;
 } wifi_ap_record_t;
+
+typedef struct {
+    uint8_t ssid[32];
+    uint8_t ssid_len;
+    uint8_t bssid[6];
+    uint8_t channel;
+} wifi_event_sta_connected_t;
+
+typedef struct {
+    uint8_t ssid[32];
+    uint8_t ssid_len;
+    uint8_t bssid[6];
+    uint8_t reason;
+} wifi_event_sta_disconnected_t;
+
+typedef struct {
+    esp_netif_t *esp_netif;
+    struct {
+        esp_ip4_addr_t ip;
+        esp_ip4_addr_t netmask;
+        esp_ip4_addr_t gw;
+    } ip_info;
+} ip_event_got_ip_t;
 
 typedef struct {
     uint8_t mac[6];
@@ -117,5 +152,8 @@ esp_err_t esp_wifi_set_bandwidth(wifi_interface_t interface, wifi_bandwidth_t ba
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t type);
 esp_err_t esp_wifi_set_max_tx_power(int8_t power);
 esp_err_t esp_wifi_set_inactive_time(wifi_interface_t ifx, uint16_t sec);
+esp_err_t esp_wifi_connect(void);
+esp_err_t esp_wifi_disconnect(void);
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info);
 
 #endif /* MOCK_ESP_WIFI_H */

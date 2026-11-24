@@ -337,6 +337,12 @@ static void test_config_defaults(void)
     TEST_ASSERT_EQUAL_STRING("ADDITIPUS AURA-X", cfg.ap_ssid);
     TEST_ASSERT_EQUAL_STRING("", cfg.ap_password);
     TEST_ASSERT_EQUAL_UINT8(0, cfg.auto_off_min);
+    TEST_ASSERT_EQUAL_UINT8(10, cfg.wifi_tx_dbm);
+    TEST_ASSERT_EQUAL_UINT8(0, cfg.wifi_role);
+    TEST_ASSERT_EQUAL_UINT8(0, cfg.sta_enabled);
+    TEST_ASSERT_EQUAL_UINT8(1, cfg.sta_fallback);
+    TEST_ASSERT_EQUAL_STRING("", cfg.sta_ssid);
+    TEST_ASSERT_EQUAL_STRING("", cfg.sta_password);
     TEST_ASSERT_EQUAL_UINT8(20, cfg.master_volume);
     TEST_ASSERT_EQUAL_UINT8(20, cfg.engine_volume);
     TEST_ASSERT_EQUAL_UINT8(20, cfg.effects_volume);
@@ -353,6 +359,12 @@ static void test_config_roundtrip(void)
     strncpy(cfg.ap_ssid, "MyAP", sizeof(cfg.ap_ssid) - 1);
     strncpy(cfg.ap_password, "secret123", sizeof(cfg.ap_password) - 1);
     cfg.auto_off_min = 15;
+    cfg.wifi_tx_dbm = 5;
+    cfg.wifi_role = 1;
+    cfg.sta_enabled = 1;
+    cfg.sta_fallback = 0;
+    strncpy(cfg.sta_ssid, "HomeNet", sizeof(cfg.sta_ssid) - 1);
+    strncpy(cfg.sta_password, "homepass1", sizeof(cfg.sta_password) - 1);
     cfg.master_volume = 55;
     cfg.engine_volume = 70;
     cfg.effects_volume = 30;
@@ -369,6 +381,12 @@ static void test_config_roundtrip(void)
     TEST_ASSERT_EQUAL_STRING(cfg.ap_ssid, got.ap_ssid);
     TEST_ASSERT_EQUAL_STRING(cfg.ap_password, got.ap_password);
     TEST_ASSERT_EQUAL_UINT8(cfg.auto_off_min, got.auto_off_min);
+    TEST_ASSERT_EQUAL_UINT8(cfg.wifi_tx_dbm, got.wifi_tx_dbm);
+    TEST_ASSERT_EQUAL_UINT8(cfg.wifi_role, got.wifi_role);
+    TEST_ASSERT_EQUAL_UINT8(cfg.sta_enabled, got.sta_enabled);
+    TEST_ASSERT_EQUAL_UINT8(cfg.sta_fallback, got.sta_fallback);
+    TEST_ASSERT_EQUAL_STRING(cfg.sta_ssid, got.sta_ssid);
+    TEST_ASSERT_EQUAL_STRING(cfg.sta_password, got.sta_password);
     TEST_ASSERT_EQUAL_UINT8(cfg.master_volume, got.master_volume);
     TEST_ASSERT_EQUAL_UINT8(cfg.engine_volume, got.engine_volume);
     TEST_ASSERT_EQUAL_UINT8(cfg.effects_volume, got.effects_volume);

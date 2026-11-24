@@ -111,7 +111,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
-#define SETTINGS_CV7_VERSION 26
+#define SETTINGS_CV7_VERSION 28
 #define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
@@ -348,10 +348,21 @@ esp_err_t settings_load(settings_config_t *cfg)
     esp_err_t err;
 #define LOAD(call) do { err = (call); if (err != ESP_OK) { xSemaphoreGive(s_lock); return err; } } while (0)
     LOAD(nvs_read_u8("wifi_mode", &cfg->wifi_mode, 1));
+    LOAD(nvs_read_u8("w_role", &cfg->wifi_role, 0));
+    cfg->wifi_role = cfg->wifi_role ? 1U : 0U;
     LOAD(nvs_read_str("ap_ssid", cfg->ap_ssid, sizeof(cfg->ap_ssid), "ADDITIPUS AURA-X"));
     LOAD(nvs_read_str("ap_pass", cfg->ap_password, sizeof(cfg->ap_password), ""));
     LOAD(nvs_read_str("ap_ip", cfg->ap_ip, sizeof(cfg->ap_ip), "192.168.100.1"));
     LOAD(nvs_read_u8("auto_off", &cfg->auto_off_min, 0));
+    LOAD(nvs_read_u8("txp", &cfg->wifi_tx_dbm, 10));
+    if (cfg->wifi_tx_dbm < 5U) cfg->wifi_tx_dbm = 5U;
+    if (cfg->wifi_tx_dbm > 20U) cfg->wifi_tx_dbm = 20U;
+    LOAD(nvs_read_u8("sta_on", &cfg->sta_enabled, 0));
+    cfg->sta_enabled = cfg->sta_enabled ? 1U : 0U;
+    LOAD(nvs_read_u8("sta_fb", &cfg->sta_fallback, 1));
+    cfg->sta_fallback = cfg->sta_fallback ? 1U : 0U;
+    LOAD(nvs_read_str("sta_ssid", cfg->sta_ssid, sizeof(cfg->sta_ssid), ""));
+    LOAD(nvs_read_str("sta_pass", cfg->sta_password, sizeof(cfg->sta_password), ""));
     LOAD(nvs_read_u8("mvol", &cfg->master_volume, 20));
     /* CV63 is stored separately so an exact 0..255 value survives a reboot
      * instead of being re-quantized through the 0..100 % config field. */
@@ -395,10 +406,16 @@ static esp_err_t settings_store_locked(const settings_config_t *cfg)
     esp_err_t err;
 #define STORE(call) do { err = (call); if (err != ESP_OK) return err; } while (0)
     STORE(nvs_set_u8(s_h, "wifi_mode", cfg->wifi_mode));
+    STORE(nvs_set_u8(s_h, "w_role", cfg->wifi_role));
     STORE(nvs_set_str(s_h, "ap_ssid", cfg->ap_ssid));
     STORE(nvs_set_str(s_h, "ap_pass", cfg->ap_password));
     STORE(nvs_set_str(s_h, "ap_ip", cfg->ap_ip));
     STORE(nvs_set_u8(s_h, "auto_off", cfg->auto_off_min));
+    STORE(nvs_set_u8(s_h, "txp", cfg->wifi_tx_dbm));
+    STORE(nvs_set_u8(s_h, "sta_on", cfg->sta_enabled));
+    STORE(nvs_set_u8(s_h, "sta_fb", cfg->sta_fallback));
+    STORE(nvs_set_str(s_h, "sta_ssid", cfg->sta_ssid));
+    STORE(nvs_set_str(s_h, "sta_pass", cfg->sta_password));
     STORE(nvs_set_u8(s_h, "mvol", cfg->master_volume));
     STORE(nvs_set_u8(s_h, "cv63x", cfg->cv63_exact));
     STORE(nvs_set_u8(s_h, "evol", cfg->engine_volume));

@@ -306,6 +306,9 @@ void track_recover_from_storage(const char *audio_dir, const char *root_dir,
             s++;
         }
         /* n < SETTINGS_MAX_TRACKS here, so a free slot always exists. */
+        if (s > SETTINGS_MAX_TRACKS) {
+            break;
+        }
         used[s] = true;
         tracks[n].slot = (uint8_t)s;
         memcpy(tracks[n].file, rel[i], sizeof(tracks[n].file));

@@ -632,7 +632,7 @@ static void send_bemf_header(const motor_bemf_cal_info_t *info)
 {
     uint8_t n = info->count > MOTOR_BEMF_CAL_MAX_POINTS ? MOTOR_BEMF_CAL_MAX_POINTS
                                                         : info->count;
-    uint16_t tmp[MOTOR_BEMF_CAL_MAX_POINTS];
+    uint16_t tmp[MOTOR_BEMF_CAL_MAX_POINTS] = {0};
     char buf[160];
 
     send_line("/* BEMF calibration base - GENERATED. Replace the file");
@@ -800,11 +800,11 @@ static void handle_bemf_cmd(const char *line)
                  " %lu %lu %lu %lu",
                  (unsigned long)d.rail_mv, (unsigned long)d.bemf1_mv,
                  (unsigned long)d.bemf2_mv, (unsigned long)d.bemf_filtered_mv,
-                 d.bemf_valid ? 1 : 0, d.cal_valid ? 1 : 0,
-                 d.cal_active ? 1 : 0, (unsigned)d.cal_step,
+                 (unsigned)(d.bemf_valid ? 1 : 0), (unsigned)(d.cal_valid ? 1 : 0),
+                 (unsigned)(d.cal_active ? 1 : 0), (unsigned)d.cal_step,
                  (unsigned)d.applied_speed, (unsigned long)d.duty,
                  (long)d.error, (long)d.integral, (long)d.corr,
-                 d.pid_ok ? 1 : 0, (long)d.target,
+                 (unsigned)(d.pid_ok ? 1 : 0), (long)d.target,
                  (unsigned long)d.rail_motor_mv, (unsigned long)d.bemf1_motor_mv,
                  (unsigned long)d.bemf2_motor_mv,
                  (unsigned long)d.bemf_filtered_motor_mv);

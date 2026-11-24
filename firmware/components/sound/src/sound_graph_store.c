@@ -369,7 +369,7 @@ esp_err_t sg_store_save_force(const char *id, const char *json, size_t len,
 
 static esp_err_t selection_write(const char *payload)
 {
-    char path[SG_PATH_CAP];
+    char path[SG_PATH_CAP] = {0};
     esp_err_t err = ensure_dir();
     if (err == ESP_OK) { err = path_make(path, "selection", 0, NULL); }
     return err == ESP_OK ? record_write(path, payload) : err;
@@ -506,9 +506,14 @@ esp_err_t sg_store_seed_default(const char *id, const char *json, size_t len,
     const size_t placeholder_len = sizeof(placeholder) - 1U;
     const char *at = err == ESP_OK ? bounded_find(json, len, placeholder, placeholder_len) : NULL;
     if (err == ESP_OK && !at) { err = ESP_ERR_INVALID_ARG; }
-    size_t head = err == ESP_OK ? (size_t)(at - json) + sizeof(assets_open) - 1U : 0;
-    size_t tail_off = err == ESP_OK ? (size_t)(at - json) + placeholder_len : 0;
-    size_t tail_len = err == ESP_OK ? len - tail_off : 0;
+    size_t head = 0;
+    size_t tail_off = 0;
+    size_t tail_len = 0;
+    if (err == ESP_OK && at != NULL) {
+        head = (size_t)(at - json) + sizeof(assets_open) - 1U;
+        tail_off = (size_t)(at - json) + placeholder_len;
+        tail_len = len - tail_off;
+    }
     size_t cap = 0;
     char *out = NULL;
     size_t used = 0;

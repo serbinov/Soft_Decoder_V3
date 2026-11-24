@@ -162,11 +162,12 @@ static int sgr_best(sg_runner_t *r, const uint8_t *cand, int n)
     if (n <= 0) { return -1; }
     uint8_t maxp = 0;
     for (int i = 0; i < n; ++i) { uint8_t p = r->graph->transitions[cand[i]].priority; if (p > maxp) { maxp = p; } }
-    uint8_t group[SG_MAX_TRANSITIONS]; int g = 0; bool rnd = false;
+    uint8_t group[SG_MAX_TRANSITIONS] = {0}; int g = 0; bool rnd = false;
     for (int i = 0; i < n; ++i) {
         const sg_transition_t *e = &r->graph->transitions[cand[i]];
         if (e->priority == maxp) { group[g++] = cand[i]; if (e->condition.type == SG_RANDOM) { rnd = true; } }
     }
+    if (g == 0) { return -1; }
     if (!rnd || g <= 1) { return group[0]; }
     return group[sgr_rand(r) % (unsigned)g];
 }
@@ -202,7 +203,7 @@ void sg_runner_tick(sg_runner_t *r, uint8_t speed, int32_t accel, bool forward, 
                 } else { ch->done = true; }
             }
         }
-        uint8_t imm[SG_MAX_TRANSITIONS], pend[SG_MAX_TRANSITIONS]; int ni = 0, np = 0;
+        uint8_t imm[SG_MAX_TRANSITIONS] = {0}, pend[SG_MAX_TRANSITIONS] = {0}; int ni = 0, np = 0;
         const sg_state_t *cur = &r->graph->states[ch->state];
             /* An endless engine loop (or engine Start transition when the
              * throttle moves out of the band) should follow speed immediately

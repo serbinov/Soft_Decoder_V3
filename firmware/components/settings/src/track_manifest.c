@@ -57,19 +57,8 @@ typedef struct {
 /* Set while restoring from the manifest so the NVS writes it performs do not
  * immediately rewrite the file being read. */
 static bool s_manifest_loading;
-/* Set by settings_manifest_force_empty_once() so an intentional "clear
- * library" may still write an empty manifest over the last good backup. It is
- * consumed by the next successful sync/write. */
-static bool s_force_empty;
 static portMUX_TYPE s_manifest_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_manifest_owner;
-
-void settings_manifest_force_empty_once(void)
-{
-    portENTER_CRITICAL(&s_manifest_mux);
-    s_force_empty = true;
-    portEXIT_CRITICAL(&s_manifest_mux);
-}
 
 bool settings_manifest_write_allowed(void)
 {
@@ -171,17 +160,13 @@ static esp_err_t manifest_sync_owned(void)
     bool bindings_present = err == ESP_OK;
     if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) { free(ws); return err; }
 
-    /* A missing/unreadable NVS set (full erase, rejected blob) must not replace
-     * a still-valid manifest with an empty one: the file is the only backup
+    /* An accidental empty NVS (missing set, full erase, rejected blob) must not
+     * overwrite the manifest with an empty one: the file is the only backup
      * left until boot recovery restores from it. The loaders map an unusable
-     * blob to ESP_ERR_NOT_FOUND, so "absent" covers both. An intentional clear
-     * opts in through settings_manifest_force_empty_once(). */
-    bool force_empty;
-    portENTER_CRITICAL(&s_manifest_mux);
-    force_empty = s_force_empty;
-    portEXIT_CRITICAL(&s_manifest_mux);
-    if (!tracks_present && !cats_present && !bindings_present && !force_empty) {
-        ESP_LOGW(TAG, "manifest sync skipped: NVS library is empty and no explicit clear was requested");
+     * blob to ESP_ERR_NOT_FOUND, so "absent" covers both. An intentional full
+     * clear removes the manifest explicitly instead of syncing it empty. */
+    if (!tracks_present && !cats_present && !bindings_present) {
+        ESP_LOGW(TAG, "manifest sync skipped: NVS library is empty");
         free(ws);
         return ESP_OK;
     }
@@ -253,12 +238,6 @@ static esp_err_t manifest_sync_owned(void)
         return ESP_FAIL;
 #endif
     }
-    /* The explicit-clear opt-in applies to exactly one successful write. */
-    if (force_empty) {
-        portENTER_CRITICAL(&s_manifest_mux);
-        s_force_empty = false;
-        portEXIT_CRITICAL(&s_manifest_mux);
-    }
     return ESP_OK;
 }
 
@@ -292,10 +271,8 @@ esp_err_t settings_manifest_sync(void)
  * from the file that survives the NVS erase). The caller must already hold the
  * metadata lock (factory reset holds it across the NVS erase too, so no setter
  * can recreate the file in between). A missing file or unmounted storage is a
- * no-op success. This path deletes the file instead of writing an empty one, so
- * it needs no explicit-clear opt-in; settings_manifest_force_empty_once() is
- * for callers of settings_manifest_sync() that do want an empty manifest
- * written over the existing one. */
+ * no-op success. An intentional full clear removes the manifest explicitly
+ * here; an accidental empty NVS must not overwrite it (see manifest_sync_owned). */
 esp_err_t settings_manifest_remove_locked(void)
 {
     esp_err_t err = manifest_begin(false);

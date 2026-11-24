@@ -29,6 +29,11 @@
 - Хранение: sync manifest не пишет пустой manifest, если NVS пуст и явный clear не запрошен.
 - Web: гейты записи используют `motor_is_moving()` (целевая ИЛИ применённая скорость), а не только применённую.
 - Web: dead-man heartbeat привязан к IP клиента, последним скомандовавшего движение; `stop`/рельсы снимают привязку, второй клиент не продлевает чужой heartbeat.
+- cppcheck: исправлены предупреждения в `provision`, `track` и `sound`.
+- Журнал: `web_log_event()` до `web_log_init()` теперь дублирует событие в UART, поэтому сообщения загрузки не теряются полностью; в веб-журнал они по-прежнему не попадают.
+- Хранение: API принудительного опустошения manifest удалён; случайно пустой NVS больше не перезаписывает manifest, а явный полный сброс удаляет `tracks.txt` (`settings_manifest_remove_locked`).
+- Документация: `ARCHITECTURE.md` и `docs/known_issues.md` обновлены до версии 0.29 (новые размеры образа, REV-M7 как «не дефект», UART-fallback журнала).
+- CI: GitHub Actions обновлены до версий с поддержкой Node 24; предупреждение об устаревании MinGW64 подавлено.
 
 ### 2026-11-23 — v0.28 — Wi-Fi: сканирование сетей в режиме точки доступа
 
@@ -919,6 +924,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — fix: close remaining review items (cppcheck, S30 API, pre-init logs, CI actions)
 - 2026-11-24 (v0.29) — fix(web): initialize preview handle and rebuild v0.29 release
 - 2026-11-24 (v0.29) — release: rebuild v0.29 artifacts from hardened firmware
 - 2026-11-24 (v0.29) — docs: record completed hardening and operational notes

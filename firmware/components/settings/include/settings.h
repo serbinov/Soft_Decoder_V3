@@ -207,12 +207,6 @@ esp_err_t settings_func_bind_remove(func_binding_t *bind, size_t *count, size_t 
  * callers must not delete old WAVs until this backup succeeds. Worker retries. */
 esp_err_t settings_manifest_sync(void);
 esp_err_t settings_manifest_load(void);
-/* Opt in to writing an intentionally empty manifest on the next successful
- * sync: a missing/unreadable NVS library otherwise leaves the existing
- * tracks.txt untouched (it is the only backup after an NVS erase). The flag is
- * consumed by that one write, so a later empty-NVS sync skips again. Not needed
- * by the factory-reset removal path, which deletes the file outright. */
-void settings_manifest_force_empty_once(void);
 /* Persistent recovery marker: partial restores must be retried even if tracks
  * were already saved. Marker is cleared only after ALL metadata saves succeed. */
 esp_err_t settings_recovery_pending(bool *out);

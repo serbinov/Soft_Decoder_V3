@@ -66,6 +66,12 @@ esp_err_t web_log_init(void)
 void web_log_event(const char *tag, const char *fmt, ...)
 {
     if (s_evlog_mutex == NULL) {
+        char text[256];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(text, sizeof(text), fmt, ap);
+        va_end(ap);
+        ESP_LOGI(tag != NULL ? tag : "web", "%s", text);
         return;
     }
     web_evlog_t ev;

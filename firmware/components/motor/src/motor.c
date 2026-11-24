@@ -2546,6 +2546,9 @@ esp_err_t motor_bemf_wave_capture(uint16_t step_us, uint16_t duration_ms,
     if (xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(20)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    /* s_control_mutex serializes this capture with motor_tick(), and
+     * s_sample_active keeps the BEMF regulator out, so the ADC is not read
+     * concurrently here. motor_bemf_lock() is therefore not required. */
     uint32_t gen;
     uint32_t cur_duty;
     bool fwd;

@@ -16,11 +16,11 @@ jobs:
       run:
         working-directory: firmware
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: C host tests
@@ -48,7 +48,7 @@ jobs:
       run:
         working-directory: firmware
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: C host tests under ASan/UBSan
         run: |
           chmod +x test/run_tests.sh
@@ -62,11 +62,12 @@ jobs:
       run:
         working-directory: firmware
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: msys2/setup-msys2@v2
         id: msys2
         with:
           msystem: MINGW64
+          suppress-deprecation-warnings: msystem-mingw64
           update: false
           install: mingw-w64-x86_64-gcc
       - name: Measure coverage and enforce the gate
@@ -95,7 +96,7 @@ jobs:
       run:
         working-directory: firmware
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install cppcheck
         run: |
           sudo apt-get update
@@ -142,7 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build with ESP-IDF 6.0
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -208,17 +209,18 @@ jobs:
       run:
         working-directory: firmware
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - uses: msys2/setup-msys2@v2
         id: msys2
         with:
           msystem: MINGW64
+          suppress-deprecation-warnings: msystem-mingw64
           update: false
           install: mingw-w64-x86_64-gcc
       - name: Run test\run_tests.ps1

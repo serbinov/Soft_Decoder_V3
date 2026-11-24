@@ -919,6 +919,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — fix(web): initialize preview handle and rebuild v0.29 release
 - 2026-11-24 (v0.29) — release: rebuild v0.29 artifacts from hardened firmware
 - 2026-11-24 (v0.29) — docs: record completed hardening and operational notes
 - 2026-11-24 (v0.29) — feat(safety): complete remaining hardening across DCC, AUX, audio, pack and web

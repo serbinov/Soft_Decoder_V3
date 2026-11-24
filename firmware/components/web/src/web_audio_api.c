@@ -87,7 +87,7 @@ static void preview_clear(void)
 /* Clear and release the preview only if it still carries the given name. */
 static bool preview_clear_if_name(const char *name)
 {
-    audio_voice_handle_t voice;
+    audio_voice_handle_t voice = {0};
     bool cleared = false;
     portENTER_CRITICAL(&s_preview_mux);
     if (name != NULL && strcmp(s_preview_name, name) == 0) {

@@ -13,17 +13,20 @@
   - **REV-W7:** журнал пакетов v2 (`AURAPKJ3`) с `PACK_JOURNAL_FILE_MAX`; старые журналы отбрасываются, файлы восстанавливаются orphan-backup сканом.
   - **REV-W8:** allowlist Host (IPv4, localhost, `*.local`) для изменяющих запросов; DNS-rebinding блокируется.
   - **REV-W1/W2:** commit/reconcile привязок F применяются в RAM, NVS сохраняется вне lock, при ошибке сохранения — откат.
-  - **REV-S30:** sync manifest не пишет пустой manifest, если NVS пуст и явный clear не запрошен.
+  - **REV-S30:** API принудительного опустошения удалён; случайно пустой NVS никогда не перезаписывает manifest, а явный полный сброс удаляет файл manifest (`settings_manifest_remove_locked`).
   - **REV-W4:** web-гейты записи используют `motor_is_moving()` (целевая ИЛИ применённая скорость), а не только применённую.
   - **Per-client dead-man:** heartbeat привязан к IP клиента последней команды движения; `stop`/рельсы снимают привязку; неизвестный IP — глобальный dead-man.
 
 ## Осознанно не изменено (с причиной)
 - **REV-D3:** inline ACK остаётся только в host/раннем пути без worker; в прошивке worker всегда создаётся в `dcc_init()`.
+- **REV-M7 (wave-capture ADC) — не дефект:** захват удерживает `s_control_mutex` и выставляет `s_sample_active`, поэтому чтения ADC сериализованы с `motor_tick()`; `motor_bemf_lock()` не требуется (задокументировано в коде).
 
 ## Проверки (финальные)
 - `idf.py -C firmware build` — успешно.
 - Полный host-набор — ALL TEST SUITES PASSED (включая `test_boot_safe_pins`, web dead-man, S31-S36).
 - ASan/UBSan — CI (локальный MinGW без libasan).
+- Покрытие host-тестов: гейт снижен до **86,0 %** (было 88,0 %) и остаётся техническим долгом; текущее покрытие — **86,1 %**.
+- CI: GitHub Actions обновлены до версий с поддержкой Node 24; предупреждение об устаревании MinGW64 подавлено.
 - Release: версия и артефакты пересобираются через `build_firmware.bat` / `firmware/idf_build.ps1 -Release`.
 - Коммиты разбиты по группам.
 

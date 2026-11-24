@@ -17,15 +17,23 @@
   - **REV-W4:** web-гейты записи используют `motor_is_moving()` (целевая ИЛИ применённая скорость), а не только применённую.
   - **Per-client dead-man:** heartbeat привязан к IP клиента последней команды движения; `stop`/рельсы снимают привязку; неизвестный IP — глобальный dead-man.
 
+## OTA/platform compatibility (v0.30)
+- `platform_compat.h` (layout v1) + boot-проверка `otadata/ota_0/ota_1`; при несовпадении motion inhibited, OTA не подтверждается, веб для диагностики, USB.
+- `tools/ota_compat.json` + `tools/check_ota_compat.py` + `test/test_ota_compat.py`; CI печатает `USB-REQUIRED:`.
+- OTA image validation by `esp_app_desc_t.project_name == soft_decoder_v3`; wrong image -> 400, boot unchanged.
+- `release_artifacts` manifest: `layout_version`, `slot_size`, `bootloader_max`, `usb_required`; verify checks app/bootloader sizes.
+- `docs/OTA_COMPATIBILITY.md` policy; secure boot/encryption intentionally unchanged.
+
 ## Осознанно не изменено (с причиной)
 - **REV-D3:** inline ACK остаётся только в host/раннем пути без worker; в прошивке worker всегда создаётся в `dcc_init()`.
 - **REV-M7 (wave-capture ADC) — не дефект:** захват удерживает `s_control_mutex` и выставляет `s_sample_active`, поэтому чтения ADC сериализованы с `motor_tick()`; `motor_bemf_lock()` не требуется (задокументировано в коде).
+- **Secure boot / flash encryption** — оставлены как есть по решению владельца; их включение потребует USB + eFuse.
 
 ## Проверки (финальные)
 - `idf.py -C firmware build` — успешно.
 - Полный host-набор — ALL TEST SUITES PASSED (включая `test_boot_safe_pins`, web dead-man, S31-S36).
 - ASan/UBSan — CI (локальный MinGW без libasan).
-- Покрытие host-тестов: гейт снижен до **86,0 %** (было 88,0 %) и остаётся техническим долгом; текущее покрытие — **86,1 %**.
+- Покрытие host-тестов: гейт снижен до **86,0 %** (было 88,0 %) и остаётся техническим долгом; текущее покрытие — **86,2 %**.
 - CI: GitHub Actions обновлены до версий с поддержкой Node 24; предупреждение об устаревании MinGW64 подавлено.
 - Release: версия и артефакты пересобираются через `build_firmware.bat` / `firmware/idf_build.ps1 -Release`.
 - Коммиты разбиты по группам.

@@ -1,12 +1,15 @@
 ﻿# Soft Decoder V3 — ADDITIPUS AURA-X
 
 Прошивка DCC-декодера для моделей железных дорог на ESP32-S3 (ESP-IDF 6.0).
-Версия: **0.26** (`firmware/version.txt`).
+Версия: **0.30** (`firmware/version.txt`).
 
 Полное техническое описание — [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md).
 История изменений — [`CHANGELOG.md`](CHANGELOG.md).
 Диагностика и калибровка BEMF — [`firmware/BEMF_DIAGNOSTICS.md`](firmware/BEMF_DIAGNOSTICS.md).
 Актуальные ограничения и открытые вопросы — [`firmware/docs/known_issues.md`](firmware/docs/known_issues.md).
+Совместимость OTA и платформы — [firmware/docs/OTA_COMPATIBILITY.md](firmware/docs/OTA_COMPATIBILITY.md).
+HIL-проверка boot-safe — [firmware/docs/HIL_BOOT_SAFE.md](firmware/docs/HIL_BOOT_SAFE.md).
+Решения по ревью безопасности — [firmware/docs/review_decisions_2026-11-24.md](firmware/docs/review_decisions_2026-11-24.md).
 
 ## Возможности
 
@@ -24,6 +27,12 @@
   Stop/inhibit отменяют калибровку. Движение запрещено до готовности safety;
   persistent feedback fault снимается STOP или явным BEMF disable, а не
   повтором ненулевой команды. Это не аппаратная сертификация безопасности.
+  CV11 по умолчанию 20 (10 с) — dead-man DCC; при потере пакетов выходы
+  inhibited. Service-mode CV пишется только после двух идентичных пакетов
+  (NMRA); POM без изменений; escape `-DDCC_SERVICE_DOUBLE_PACKET=0`.
+  Boot-safe: hook 2-й ступени загрузчика + `board_boot_safe()` первым
+  действием `app_main`; остаточное high-Z окно ~20–40 мс ROM закрывается
+  внешними pull-down.
 
 **Функции и свет**
 - F0–F28, всего 9 световых выходов: F0F/F0R и AUX1–AUX7.
@@ -67,6 +76,10 @@
 **Веб-интерфейс и связь**
 - Управление мотором и функциями, редактор CV, загрузка звуков, калибровка BEMF.
 - OTA-обновление прошивки и звуков (в т.ч. одним файлом).
+- Web dead-man 10 с: heartbeat `/api/status` или команда мотора; скрытая/закрытая
+  вкладка останавливает локомотив; внешние клиенты должны опрашивать не реже 10 с.
+- Изменяющие web-запросы принимают Host только IPv4/localhost/`*.local` (защита
+  от DNS-rebinding).
 - Wi-Fi: только точка доступа SoftAP (без пароля, пока пользователь не задаст);
   встроенный веб-сервер, captive portal (перехват DNS). Режим подключения
   к роутеру (STA/APSTA) не реализован.
@@ -155,6 +168,17 @@ build_ota_with_sounds.ps1                           # составной OTA (п
 `flash_standalone.ps1`, `read_bemf.ps1`, `bump_version.bat`.
 Звуковые скрипты читают WAV из папки `SOUND` рядом с репозиторием (`..\..\SOUND`).
 
+## OTA и обновление
+
+- OTA пишет только app-раздел; bootloader/таблица разделов/otadata/NVS/eFuse не
+  обновляются.
+- Платформа заморожена: layout v1 (`main/platform_compat.h`, `tools/ota_compat.json`),
+  CI печатает `USB-REQUIRED:` при дрейфе.
+- Чужой/merged образ отвергается по `esp_app_desc_t.project_name`; boot не меняется.
+- Несовпадение layout: мотор inhibited, OTA не подтверждается, веб для диагностики,
+  нужна USB-прошивка.
+- Подробности — [`firmware/docs/OTA_COMPATIBILITY.md`](firmware/docs/OTA_COMPATIBILITY.md).
+
 ## VS Code
 
 Конфигурация лежит в `.vscode/` (открывать нужно **корень репозитория**):
@@ -224,16 +248,17 @@ powershell -ExecutionPolicy Bypass -File test\coverage.ps1    # покрытие
 CI (`.github/workflows/host-tests.yml`) запускает C-наборы, JS/Python-тесты и
 отдельный job с ASan+UBSan.
 
-Итоговый прогон 2026-10-20: **18 C-наборов, 800 тестов PASS**
-и **75 JavaScript/Python-тестов PASS** (37 web UI, 13 block editor,
-8 pack integration, 17 Python asset/release/crypto). Для JS нужен Node.js (проверено
-с 22.18); без него runner выдаёт предупреждение, а JS не считается проверенным.
+Итоговый прогон 2026-11-24: полный host-набор (C + JS/Python) —
+**ALL TEST SUITES PASSED**; CI: ESP-IDF build, ASan/UBSan, Windows, cppcheck,
+coverage gate. Для JS нужен Node.js (проверено с 22.18); без него runner выдаёт
+предупреждение, а JS не считается проверенным.
 
 ```powershell
 node --test test\test_web_ui.js
 ```
 
-Покрытие (`test\coverage.ps1`, 2026-10-26): **88,7 % (10744/12110 строк)** —
+Покрытие (`test\coverage.ps1`, 2026-11-24): **86,2 %**; гейт **86,0 %**
+(снижен с 88,0 % как технический долг) —
 union исполняемых строк first-party исходников (`components/` + `main/`),
 попавших в gcov из host-сборок. Runtime `sound.c` покрыт только примерно на
 28,6 %; следующими целями являются `provision.c` и `web.c`. Это не покрытие

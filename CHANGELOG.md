@@ -11,6 +11,13 @@
 
 ## Релизы
 
+### 2026-11-24 — v0.31 — TWDT-фикс после HIL
+
+- `track_adc_task` подписывается на TWDT и сбрасывает watchdog только после успешной подписки; самовосстановление при `ESP_ERR_NOT_FOUND` после re-init. Устранён спам `task_wdt: esp_task_wdt_reset: task not found` каждые 50 мс.
+- Web HIL: проверки `audio/play` и `func-map` помечаются SKIP при пустой библиотеке (0 треков), а не FAIL; добавлен статус SKIP в сводку.
+- HIL на стенде: COM 6/9 PASS (audio/auxio/dcc SKIP без рельсов), web 45 проверок, 2 SKIP (пустая библиотека), PASS.
+- Релиз 0.31 пересобран и проверен.
+
 ### 2026-11-24 — v0.30 — Защита OTA от платформенных изменений
 
 - `main/platform_compat.h` (layout v1) + boot-time проверка `otadata/ota_0/ota_1`; при несовпадении мотор inhibited, OTA не подтверждается, веб доступен для диагностики, требуется USB.
@@ -932,6 +939,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.31) — release: rebuild v0.31 and document TWDT fix
 - 2026-11-24 (v0.30) — fix(track): subscribe ADC task to TWDT; skip empty-library HIL checks
 - 2026-11-24 (v0.30) — docs: document v0.30 boot-safe, dead-man, OTA contract and current test status
 - 2026-11-24 (v0.30) — docs(release): publish v0.30 OTA contract and artifacts

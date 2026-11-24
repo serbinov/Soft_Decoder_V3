@@ -1007,6 +1007,7 @@ size_t web_func_bind_count_get(void)
 bool web_func_bind_at(size_t idx, func_binding_t *out)
 {
     if (out == NULL) return false;
+    memset(out, 0, sizeof(*out));
     if (s_func_mutex != NULL &&
         xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
         /* Abort the read: the caller must not see a half-copied record. */

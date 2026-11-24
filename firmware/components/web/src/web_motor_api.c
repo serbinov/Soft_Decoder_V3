@@ -60,6 +60,7 @@ static motor_ui_mode_t motor_ui_mode(uint8_t target, bool target_forward,
 
 esp_err_t motor_get(httpd_req_t *req)
 {
+    web_control_heartbeat();
     uint8_t target = 0, applied = 0;
     bool target_forward = true, applied_forward = true;
     motor_get_status(&target, &target_forward);

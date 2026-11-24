@@ -8,6 +8,7 @@
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 static const char *TAG = "settings";
 
@@ -207,15 +208,32 @@ static void nvs_discard_unusable_key_locked(const char *key)
     }
 }
 
-/* Never block a loader: only erase when the metadata lock is free right now.
- * A writer that owns s_lock keeps its key; the next load retries the discard. */
+/* True when this task already owns the metadata lock. A recursive take would
+ * fail on a plain mutex, so this lets the discard run under an existing lock. */
+static bool settings_lock_held_by_current_task(void)
+{
+#if defined(ESP_PLATFORM)
+    return s_lock != NULL &&
+           xSemaphoreGetMutexHolder(s_lock) == xTaskGetCurrentTaskHandle();
+#else
+    /* Host stubs do not track mutex owners; use the non-blocking take path. */
+    return false;
+#endif
+}
+
+/* Never block a loader: erase directly when this task already owns s_lock,
+ * otherwise only when the metadata lock is free right now. A writer that owns
+ * s_lock keeps its key; the next load retries the discard. */
 static void nvs_discard_unusable_key(const char *key)
 {
-    if (s_lock == NULL || xSemaphoreTake(s_lock, 0) != pdTRUE) {
+    if (settings_lock_held_by_current_task()) {
+        nvs_discard_unusable_key_locked(key);
         return;
     }
-    nvs_discard_unusable_key_locked(key);
-    xSemaphoreGive(s_lock);
+    if (s_lock != NULL && xSemaphoreTake(s_lock, 0) == pdTRUE) {
+        nvs_discard_unusable_key_locked(key);
+        xSemaphoreGive(s_lock);
+    }
 }
 
 /* Clear the recovery marker under the metadata lock (caller holds s_lock). */

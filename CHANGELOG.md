@@ -11,6 +11,16 @@
 
 ## Релизы
 
+### 2026-11-24 — v0.29 — Безопасность приводов, boot-safe и web dead-man
+
+- Boot-safe: hook 2-й ступени загрузчика (`bootloader_components/board_boot_safe`) и `board_boot_safe()` первым действием `app_main` прижимают IN1/IN2, AUX, SD_MODE, I2S и ACK к 0 сразу после ROM; пины flash/PSRAM, USB, UART0 и внешней NOR не затрагиваются. Соответствие маске и `pinmap.h` проверяет `test/test_boot_safe_pins.py`.
+- Мотор/BEMF: клиппинг ШИМ после трима CV66/95; anti-windup PID; детектор потери BEMF теперь срабатывает и при отказе выборки АЦП; пауза 50 мс перед реверсом; heartbeat мотора только после взятия мьютекса.
+- DCC/web: стоп не теряется при занятом control-мьютексе; DCC-задача не блокируется на `s_func_mutex`; service ACK-пин прижат при старте; снимок статуса скорости под критической секцией.
+- Web: dead-man 10 с (heartbeat `/api/status` или команда мотора) останавливает локомотив; явный web-стоп снимает brownout-защёлку; BEMF-окно/raw-duty/запись CV адреса и consist отклоняются на ходу; DNS-hijack привязан к SoftAP.
+- Хранение: загрузка настроек больше не уходит в boot-loop при TYPE_MISMATCH или ошибке записи CV (работа из RAM + retry); проверка blob’ов manifest/category/track; discard NVS-ключей под lock; busy-storage factory reset не стирает NVS.
+- Build/CI: `esp_driver_gpio` добавлен в зависимости auxio/main; `run_tests.sh` получил паритет с PowerShell-раннером; `test_boot_safe_pins.py` добавлен в CI.
+- Прочее: CV11 по умолчанию 20 (10 с), pinmap отвергает GPIO26–32, preview-состояние web под мьютексом, emergency reset повторно применяется после освобождения lock.
+
 ### 2026-11-23 — v0.28 — Wi-Fi: сканирование сетей в режиме точки доступа
 
 - В режиме «Точка доступа» радио запускается как APSTA: STA-интерфейс не
@@ -900,6 +910,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — fix(web,settings): address self-review findings
 - 2026-11-24 (v0.29) — docs(release): record review decisions, HIL and ship v0.29
 - 2026-11-24 (v0.29) — test: cover safety fixes, dead-man and boot-safe pin mask
 - 2026-11-24 (v0.29) — fix(safety): harden motor, DCC, web, settings and storage paths

@@ -698,15 +698,39 @@ static void dns_server_task(void *arg)
     uint32_t ap_ip = 0;
     memcpy(&ap_ip, s_ap_ip_bytes, sizeof(ap_ip));   /* already network order */
     /* Bind to the SoftAP address so the hijack stays off any STA interface.
-     * Fall back to ANY only if the AP address is not published yet. */
+     * If that address cannot be bound (AP not up yet or replaced), retry on
+     * ANY with a fresh socket so DNS is not lost for the task's lifetime. */
     addr.sin_addr.s_addr = (ap_ip != 0U) ? ap_ip : htonl(INADDR_ANY);
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        ESP_LOGE(TAG, "dns: bind failed");
+        int err = errno;
+        if (ap_ip == 0U) {
+            ESP_LOGE(TAG, "dns: bind failed (%d)", err);
+            close(sock);
+            vTaskDelete(NULL);
+            return;
+        }
+        ESP_LOGW(TAG, "DNS hijack bind to AP failed (%d), falling back to ANY", err);
         close(sock);
-        vTaskDelete(NULL);
-        return;
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock < 0) {
+            ESP_LOGE(TAG, "dns: socket failed");
+            vTaskDelete(NULL);
+            return;
+        }
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+            ESP_LOGE(TAG, "dns: bind to ANY failed (%d)", errno);
+            close(sock);
+            vTaskDelete(NULL);
+            return;
+        }
+        ESP_LOGI(TAG, "DNS hijack bound to ANY");
+    } else if (ap_ip != 0U) {
+        esp_ip4_addr_t ap = { .addr = ap_ip };
+        ESP_LOGI(TAG, "DNS hijack bound to AP " IPSTR, IP2STR(&ap));
+    } else {
+        ESP_LOGI(TAG, "DNS hijack bound to ANY");
     }
-    ESP_LOGI(TAG, "DNS hijack running on :53");
 
     /* Receive timeout so the loop can observe s_dns_run after the AP is
      * stopped instead of blocking forever on recvfrom. */

@@ -169,7 +169,10 @@ static esp_err_t func_bind_get(httpd_req_t *req)
                 (unsigned)count);
     for (size_t i = 0; i < count; ++i) {
         func_binding_t binding;
-        (void)web_func_bind_at(i, &binding);
+        if (!web_func_bind_at(i, &binding)) {
+            free(json);
+            return send_json(req, "{\"ok\":false,\"error\":\"busy\"}");
+        }
         const func_binding_t *b = &binding;
         buf_appendf(json, cap, &used,
                     "%s{\"fn\":%u,\"type\":%u,\"id\":%u,\"dir\":%u,\"state\":%u,"
@@ -205,7 +208,8 @@ static esp_err_t func_map_post_binding(httpd_req_t *req, const char *query)
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad idx");
         }
         func_binding_t victim;
-        (void)web_func_bind_at(idx, &victim);
+        if (!web_func_bind_at(idx, &victim))
+            return send_json(req, "{\"ok\":false,\"error\":\"busy\"}");
         if (sound_graph_active() && (victim.target_type == FUNC_TARGET_SOUND || victim.target_type == FUNC_TARGET_SLOT))
             return graph_error(req, "409 Conflict", "graph mode: use /sound-editor/blocks.html");
         if (!web_func_bind_remove(idx)) {

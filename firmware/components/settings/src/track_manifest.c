@@ -342,10 +342,11 @@ static esp_err_t manifest_load_owned(void)
         } else if (fields[0][0] == 'T' && fields[0][1] == '\0' && n >= 6) {
             unsigned slot = (unsigned)strtoul(fields[1], NULL, 10);
             unsigned cat = (unsigned)strtoul(fields[2], NULL, 10);
-            /* Mirror the writer: slot 1..SETTINGS_MAX_TRACKS, a non-empty file
-             * and only the two category values the format defines. */
+            /* Mirror the writer: slot 1..SETTINGS_MAX_TRACKS and only the two
+             * category values the format defines. An empty file name is a
+             * legitimate track (the writer permits it), so keep it. */
             if (slot < 1U || slot > SETTINGS_MAX_TRACKS || tcount >= SETTINGS_MAX_TRACKS ||
-                fields[4][0] == '\0' || cat > SETTINGS_TRACK_CAT_EFFECTS) {
+                cat > SETTINGS_TRACK_CAT_EFFECTS) {
                 continue;
             }
             settings_track_t *t = &ws->tracks[tcount];

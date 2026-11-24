@@ -420,6 +420,7 @@ bool web_control_deadman_tick(void)
     if (!expired) return false;
 
     (void)motor_set_speed(0, forward);
+    web_motion_changed(0, forward);
     ESP_LOGW("web_control", "web dead-man: no heartbeat for %d s, motor stopped",
              (int)(WEB_DEADMAN_TIMEOUT_US / 1000000));
     return true;

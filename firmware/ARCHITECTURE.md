@@ -58,6 +58,14 @@ DCC-декодер для модели железной дороги с:
 - OTA rollback включён (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`): новая
   прошивка стартует как PENDING_VERIFY и подтверждается в конце `app_main`
   (`esp_ota_mark_app_valid_cancel_rollback()`); аварийный старт откатывает её.
+- Boot-safe при старте: hook 2-й ступени загрузчика
+  (`bootloader_components/board_boot_safe`, `bootloader_before_init`) прижимает
+  актуаторы (IN1/IN2, AUX, SD_MODE, I2S, ACK) к 0 сразу после ROM; затем первым
+  действием `app_main` вызывается `board_boot_safe()`. Пины flash/PSRAM, USB,
+  UART0 и внешней NOR не трогаются. Остаточное high-Z окно — только ROM
+  (~20–40 мс), закрывается внешними pull-down. Соответствие маски и
+  `pinmap.h` проверяет `test/test_boot_safe_pins.py`.
+  Подробности решений и HIL-процедура: docs/review_decisions_2026-11-24.md, docs/HIL_BOOT_SAFE.md.
 - Power management выключен: light sleep «усыплял» бы радио AP
   (загрузка падала до ~2 КБ/с), см. `sdkconfig.defaults`.
 
@@ -560,7 +568,8 @@ firmware/
 - Задачи: **`prov_listen`**, стек 8192, prio 4.
 
 ### app_main (`main/app_main.c`)
-- Порядок старта: `pinmap_validate` → `motor_boot_safe` → `storage_init/mount`
+- Порядок старта: `board_boot_safe` (motor coast + AUX/AMP/ACK low) →
+  `pinmap_validate` → `storage_init/mount`
   (не фатально: без внешней NOR звук отключён) → `settings_init` → `provision_try` →
   `motor_init` (inhibited) → `audio_init` → `sound_init` → `dcc_init`
   (control disabled) → recovery метаданных → `web_init` (AUX/map readiness) →

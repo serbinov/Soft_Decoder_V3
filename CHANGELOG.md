@@ -900,6 +900,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — feat(boot-safe): drive actuator pins low from bootloader and app start
 - 2026-11-24 (v0.28) — feat(web): WiFi client mode, TX power and OTA-safe routing
 - 2026-11-17 (v0.26) — fix(sound-editor): rebuild bundle from LF sources for CI stamps
 - 2026-11-17 (v0.26) — fix(ci): update provision task budget to the 24 KiB listener stack

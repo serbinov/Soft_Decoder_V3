@@ -39,6 +39,12 @@ typedef enum {
 #define AUXIO_STROBE_PATTERN_MS 130U
 #define AUXIO_STROBE_MIN_PERIOD_MS 80U
 
+/* Put every AUX GPIO in a safe OFF state as early as possible in boot,
+ * before auxio_init()/LEDC/MCPWM are configured. All pins are driven
+ * low with an internal pull-down so a floating gate cannot turn an
+ * output on while storage/NVS/provisioning run. */
+esp_err_t auxio_boot_safe(void);
+
 esp_err_t auxio_init(void);
 
 /* Enable/disable an output without changing its configured effect/PWM. */

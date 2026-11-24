@@ -30,17 +30,99 @@ typedef struct {
 
 static audio_voice_handle_t s_preview_voice;
 static char s_preview_name[WEB_LIB_NAME_MAX];
+static portMUX_TYPE s_preview_mux = portMUX_INITIALIZER_UNLOCKED;
+
+/* Bounded copy of the visible preview name for JSON formatting. The caller
+ * formats and sends outside the lock so a concurrent play/stop cannot tear the
+ * buffer. */
+static void preview_name_snapshot(char *out, size_t out_size)
+{
+    portENTER_CRITICAL(&s_preview_mux);
+    size_t n = 0;
+    while (n + 1U < out_size && s_preview_name[n] != '\0') {
+        out[n] = s_preview_name[n];
+        ++n;
+    }
+    out[n] = '\0';
+    portEXIT_CRITICAL(&s_preview_mux);
+}
+
+/* Take the current preview out of the shared slot. The caller owns the returned
+ * handle and must release it outside the lock. */
+static audio_voice_handle_t preview_take(void)
+{
+    audio_voice_handle_t voice;
+    portENTER_CRITICAL(&s_preview_mux);
+    voice = s_preview_voice;
+    memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+    s_preview_name[0] = '\0';
+    portEXIT_CRITICAL(&s_preview_mux);
+    return voice;
+}
+
+/* Publish a successfully started preview. name == NULL keeps it unnamed. */
+static void preview_publish(audio_voice_handle_t voice, const char *name)
+{
+    portENTER_CRITICAL(&s_preview_mux);
+    s_preview_voice = voice;
+    if (name != NULL) {
+        size_t n = 0;
+        while (n + 1U < sizeof(s_preview_name) && name[n] != '\0') {
+            s_preview_name[n] = name[n];
+            ++n;
+        }
+        s_preview_name[n] = '\0';
+    } else {
+        s_preview_name[0] = '\0';
+    }
+    portEXIT_CRITICAL(&s_preview_mux);
+}
+
+static void preview_clear(void)
+{
+    audio_voice_handle_t voice = preview_take();
+    audio_voice_release_owned(voice);
+}
+
+/* Clear and release the preview only if it still carries the given name. */
+static bool preview_clear_if_name(const char *name)
+{
+    audio_voice_handle_t voice;
+    bool cleared = false;
+    portENTER_CRITICAL(&s_preview_mux);
+    if (name != NULL && strcmp(s_preview_name, name) == 0) {
+        voice = s_preview_voice;
+        memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+        s_preview_name[0] = '\0';
+        cleared = true;
+    }
+    portEXIT_CRITICAL(&s_preview_mux);
+    if (cleared) audio_voice_release_owned(voice);
+    return cleared;
+}
 
 /* A finished preview voice keeps its handle and name until the next play or an
  * explicit stop. The library/status pollers must see the preview as finished
  * even when another voice (engine sound, graph effect) is still playing. */
 static void preview_sync(void)
 {
-    if (s_preview_name[0] == '\0') return;
-    if (audio_voice_get_state(s_preview_voice) != AUDIO_VOICE_FINISHED) return;
-    audio_voice_release_owned(s_preview_voice);
-    memset(&s_preview_voice, 0, sizeof(s_preview_voice));
-    s_preview_name[0] = '\0';
+    audio_voice_handle_t voice;
+    bool pending;
+    portENTER_CRITICAL(&s_preview_mux);
+    voice = s_preview_voice;
+    pending = s_preview_name[0] != '\0';
+    portEXIT_CRITICAL(&s_preview_mux);
+    if (!pending) return;
+    if (audio_voice_get_state(voice) != AUDIO_VOICE_FINISHED) return;
+    portENTER_CRITICAL(&s_preview_mux);
+    /* Only clear if a new preview did not replace this handle meanwhile. */
+    if (s_preview_voice.voice == voice.voice &&
+        s_preview_voice.generation == voice.generation) {
+        memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+        s_preview_name[0] = '\0';
+    }
+    portEXIT_CRITICAL(&s_preview_mux);
+    audio_voice_release_owned(voice);
 }
 
 /* GET /api/sound-files — list of installed *.wav names for the block editor. */
@@ -161,8 +243,10 @@ esp_err_t audio_status_get(httpd_req_t *req)
     if (!web_cfg_read(&cfg)) {
         return send_json(req, "{\"ok\":false,\"error\":\"config busy\"}");
     }
+    char preview[WEB_LIB_NAME_MAX];
+    preview_name_snapshot(preview, sizeof(preview));
     char pe[WEB_LIB_NAME_MAX * 2];
-    json_escape(s_preview_name, pe, sizeof(pe));
+    json_escape(preview, pe, sizeof(pe));
     char json[320];
     snprintf(json, sizeof(json),
              "{\"ok\":true,\"playing\":%s,\"active_slot\":%u,\"master_volume\":%u,"
@@ -231,17 +315,16 @@ esp_err_t audio_play_post(httpd_req_t *req)
             snprintf(abs_path, sizeof(abs_path), WEB_AUDIO_DIR "/%s.wav", base);
         }
         uint8_t vol = audio_library_volume_lookup(base);
+        audio_voice_handle_t voice = preview_take();
         esp_err_t err = ESP_OK;
-        if (audio_voice_get_state(s_preview_voice) == AUDIO_VOICE_FINISHED)
-            err = audio_voice_alloc_owned(&s_preview_voice);
+        if (audio_voice_get_state(voice) == AUDIO_VOICE_FINISHED)
+            err = audio_voice_alloc_owned(&voice);
         if (err == ESP_OK)
-            err = audio_voice_play_owned(&s_preview_voice, abs_path, false, vol);
+            err = audio_voice_play_owned(&voice, abs_path, false, vol);
         if (err != ESP_OK) {
-            audio_voice_release_owned(s_preview_voice);
-            memset(&s_preview_voice, 0, sizeof(s_preview_voice));
-            s_preview_name[0] = '\0';
+            audio_voice_release_owned(voice);
         } else {
-            snprintf(s_preview_name, sizeof(s_preview_name), "%s", base);
+            preview_publish(voice, base);
             web_log_event("Звук", "плей: %s", base);
         }
         char json[64];
@@ -265,15 +348,15 @@ esp_err_t audio_play_post(httpd_req_t *req)
             char abs_path[160];
             snprintf(abs_path, sizeof(abs_path), WEB_USERDATA_DIR "/%s", tracks[i].file);
             esp_err_t err = ESP_OK;
-            if (audio_voice_get_state(s_preview_voice) == AUDIO_VOICE_FINISHED)
-                err = audio_voice_alloc_owned(&s_preview_voice);
+            audio_voice_handle_t voice = preview_take();
+            if (audio_voice_get_state(voice) == AUDIO_VOICE_FINISHED)
+                err = audio_voice_alloc_owned(&voice);
             if (err == ESP_OK)
-                err = audio_voice_play_owned(&s_preview_voice, abs_path, false, web_get_voice_volume(slot));
+                err = audio_voice_play_owned(&voice, abs_path, false, web_get_voice_volume(slot));
             if (err != ESP_OK) {
-                audio_voice_release_owned(s_preview_voice);
-                memset(&s_preview_voice, 0, sizeof(s_preview_voice));
+                audio_voice_release_owned(voice);
             } else {
-                s_preview_name[0] = '\0';
+                preview_publish(voice, NULL);
             }
             if (err == ESP_OK) {
                 web_log_event("Звук", "слот %u", (unsigned)slot);
@@ -288,9 +371,7 @@ esp_err_t audio_play_post(httpd_req_t *req)
 
 esp_err_t audio_stop_post(httpd_req_t *req)
 {
-    audio_voice_release_owned(s_preview_voice);
-    memset(&s_preview_voice, 0, sizeof(s_preview_voice));
-    s_preview_name[0] = '\0';
+    preview_clear();
     web_log_event("Звук", "стоп предпрослушивания");
     return send_json(req, "{\"ok\":true}");
 }
@@ -385,8 +466,10 @@ esp_err_t audio_library_get(httpd_req_t *req)
     size_t used = 0;
     buf_appendf(json, WEB_LIB_JSON_MAX, &used, "{\"ok\":true,\"count\":%u,\"total\":%u,\"preview\":\"",
                 (unsigned)n, (unsigned)total);
+    char preview[WEB_LIB_NAME_MAX];
+    preview_name_snapshot(preview, sizeof(preview));
     char pe[WEB_LIB_NAME_MAX * 2];
-    json_escape(s_preview_name, pe, sizeof(pe));
+    json_escape(preview, pe, sizeof(pe));
     buf_appendf(json, WEB_LIB_JSON_MAX, &used, "%s\",\"files\":[", pe);
     for (size_t i = 0; i < n; ++i) {
         uint8_t vol = 100;
@@ -422,9 +505,14 @@ esp_err_t audio_library_volume_post(httpd_req_t *req)
     esp_err_t err = audio_library_volume_set(base, vol);
     if (err != ESP_OK)
         return send_json(req, "{\"ok\":false,\"error\":\"save failed\"}");
-    if (s_preview_name[0] != '\0' && strcmp(s_preview_name, base) == 0 &&
-        audio_voice_get_state(s_preview_voice) != AUDIO_VOICE_FINISHED) {
-        (void)audio_voice_set_volume_live(s_preview_voice.voice, vol);
+    audio_voice_handle_t voice;
+    bool matches;
+    portENTER_CRITICAL(&s_preview_mux);
+    matches = s_preview_name[0] != '\0' && strcmp(s_preview_name, base) == 0;
+    voice = s_preview_voice;
+    portEXIT_CRITICAL(&s_preview_mux);
+    if (matches && audio_voice_get_state(voice) != AUDIO_VOICE_FINISHED) {
+        (void)audio_voice_set_volume_live(voice.voice, vol);
     }
     return send_json(req, "{\"ok\":true}");
 }
@@ -495,11 +583,7 @@ esp_err_t audio_library_delete_post(httpd_req_t *req)
         }
         return graph_error(req, "409 Conflict", "file bound to a track slot");
     }
-    if (strcmp(s_preview_name, base) == 0) {
-        audio_voice_release_owned(s_preview_voice);
-        memset(&s_preview_voice, 0, sizeof(s_preview_voice));
-        s_preview_name[0] = '\0';
-    }
+    (void)preview_clear_if_name(base);
     char path[192];
     if (!web_lib_resolve_path(base, path, sizeof(path))) {
         snprintf(path, sizeof(path), WEB_AUDIO_DIR "/%s.wav", base);
@@ -594,12 +678,10 @@ esp_err_t sound_file_raw_get(httpd_req_t *req)
 
 void web_audio_preview_stop(void)
 {
-    audio_voice_release_owned(s_preview_voice);
-    memset(&s_preview_voice, 0, sizeof(s_preview_voice));
-    s_preview_name[0] = '\0';
+    preview_clear();
 }
 
 void web_audio_preview_clear_if(const char *base)
 {
-    if (base != NULL && strcmp(s_preview_name, base) == 0) web_audio_preview_stop();
+    (void)preview_clear_if_name(base);
 }

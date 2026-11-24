@@ -264,7 +264,12 @@ esp_err_t settings_manifest_remove_locked(void)
 {
     esp_err_t err = manifest_begin(false);
     if (err == ESP_ERR_NOT_FOUND) return ESP_OK;      /* same-task restore setter */
-    if (err == ESP_ERR_INVALID_STATE) return ESP_OK;  /* storage unavailable: nothing to clear */
+    if (err == ESP_ERR_INVALID_STATE) {
+        /* Unmounted: there is no manifest to clear. Mounted but busy
+         * (maintenance/lease): fail so the caller keeps the reset pending
+         * instead of erasing NVS while tracks.txt survives. */
+        return storage_is_mounted() ? ESP_ERR_INVALID_STATE : ESP_OK;
+    }
     if (err != ESP_OK) return err;
     esp_err_t rm = ESP_OK;
     if (remove(MANIFEST_PATH) != 0 && errno != ENOENT) {
@@ -336,7 +341,11 @@ static esp_err_t manifest_load_owned(void)
             declared = true;
         } else if (fields[0][0] == 'T' && fields[0][1] == '\0' && n >= 6) {
             unsigned slot = (unsigned)strtoul(fields[1], NULL, 10);
-            if (slot < 1U || slot > SETTINGS_MAX_TRACKS || tcount >= SETTINGS_MAX_TRACKS) {
+            unsigned cat = (unsigned)strtoul(fields[2], NULL, 10);
+            /* Mirror the writer: slot 1..SETTINGS_MAX_TRACKS, a non-empty file
+             * and only the two category values the format defines. */
+            if (slot < 1U || slot > SETTINGS_MAX_TRACKS || tcount >= SETTINGS_MAX_TRACKS ||
+                fields[4][0] == '\0' || cat > SETTINGS_TRACK_CAT_EFFECTS) {
                 continue;
             }
             settings_track_t *t = &ws->tracks[tcount];
@@ -345,37 +354,75 @@ static esp_err_t manifest_load_owned(void)
             t->enabled = strtoul(fields[3], NULL, 10) != 0U;
             (void)strncpy(t->file, fields[4], sizeof(t->file) - 1U);
             (void)strncpy(t->label, fields[5], sizeof(t->label) - 1U);
-            ws->cats[slot - 1U] = (strtoul(fields[2], NULL, 10) != 0U) ? 1U : 0U;
+            ws->cats[slot - 1U] = (cat != 0U) ? 1U : 0U;
             tcount++;
         } else if (fields[0][0] == 'F' && fields[0][1] == '\0' && n >= 7) {
             unsigned idx = (unsigned)strtoul(fields[1], NULL, 10);
-            if (idx >= SETTINGS_FUNC_MAP_COUNT) {
+            unsigned slot_a = (unsigned)strtoul(fields[2], NULL, 10);
+            unsigned slot_b = (unsigned)strtoul(fields[3], NULL, 10);
+            unsigned aux = (unsigned)strtoul(fields[4], NULL, 10);
+            unsigned dir = (unsigned)strtoul(fields[5], NULL, 10);
+            unsigned speed = (unsigned)strtoul(fields[6], NULL, 10);
+            /* Mirror the writer: a valid function index and only the defined
+             * output/channel bits. The remaining fields are byte payloads. */
+            if (idx >= SETTINGS_FUNC_MAP_COUNT ||
+                (aux & ~(unsigned)SETTINGS_FUNC_OUT_ALL) != 0U ||
+                slot_a > 0xFFU || slot_b > 0xFFU ||
+                dir > 0xFFU || speed > 0xFFU) {
                 continue;
             }
-            ws->fmap[idx].slot_a = (uint8_t)strtoul(fields[2], NULL, 10);
-            ws->fmap[idx].slot_b = (uint8_t)strtoul(fields[3], NULL, 10);
-            ws->fmap[idx].aux_mask = (uint16_t)strtoul(fields[4], NULL, 10);
-            ws->fmap[idx].dir = (uint8_t)strtoul(fields[5], NULL, 10);
-            ws->fmap[idx].speed = (uint8_t)strtoul(fields[6], NULL, 10);
+            ws->fmap[idx].slot_a = (uint8_t)slot_a;
+            ws->fmap[idx].slot_b = (uint8_t)slot_b;
+            ws->fmap[idx].aux_mask = (uint16_t)aux;
+            ws->fmap[idx].dir = (uint8_t)dir;
+            ws->fmap[idx].speed = (uint8_t)speed;
             have_fmap = true;
         } else if (fields[0][0] == 'B' && fields[0][1] == '\0' && n >= 13 &&
                    bcount < FUNC_BIND_MAX) {
+            unsigned idx = (unsigned)strtoul(fields[1], NULL, 10);
+            unsigned fn = (unsigned)strtoul(fields[2], NULL, 10);
+            unsigned type = (unsigned)strtoul(fields[3], NULL, 10);
+            unsigned id = (unsigned)strtoul(fields[4], NULL, 10);
+            unsigned dir = (unsigned)strtoul(fields[5], NULL, 10);
+            unsigned state = (unsigned)strtoul(fields[6], NULL, 10);
+            unsigned mode = (unsigned)strtoul(fields[7], NULL, 10);
+            unsigned flags = (unsigned)strtoul(fields[8], NULL, 10);
+            unsigned short_table = (unsigned)strtoul(fields[9], NULL, 10);
+            unsigned short_ms = (unsigned)strtoul(fields[10], NULL, 10);
+            unsigned min_ms = (unsigned)strtoul(fields[11], NULL, 10);
+            unsigned fade_ms = (unsigned)strtoul(fields[12], NULL, 10);
+            bool valid = idx < FUNC_BIND_MAX && fn < SETTINGS_FUNC_MAP_COUNT &&
+                         type <= FUNC_TARGET_LOGIC &&
+                         dir <= 0xFFU && state <= 0xFFU && mode <= 0xFFU &&
+                         flags <= 0xFFU && short_table <= 0xFFU &&
+                         short_ms <= 0xFFFFU && min_ms <= 0xFFFFU && fade_ms <= 0xFFFFU;
+            if (valid) {
+                switch (type) {
+                    case FUNC_TARGET_OUTPUT: valid = id <= 8U; break;
+                    case FUNC_TARGET_LOGIC: valid = id >= 1U && id <= 8U; break;
+                    case FUNC_TARGET_SLOT: valid = id >= 1U && id <= SETTINGS_MAX_TRACKS; break;
+                    default: valid = id <= 0xFFU; break; /* legacy SOUND/none */
+                }
+            }
+            if (!valid) {
+                continue;
+            }
             func_binding_t *b = &ws->binds[bcount];
             memset(b, 0, sizeof(*b));
             /* idx (fields[1]) mirrors the array position; the record is
              * appended in order so the slot is implicit. */
             b->used = 1;
-            b->fn = (uint8_t)strtoul(fields[2], NULL, 10);
-            b->target_type = (uint8_t)strtoul(fields[3], NULL, 10);
-            b->target_id = (uint8_t)strtoul(fields[4], NULL, 10);
-            b->dir = (uint8_t)strtoul(fields[5], NULL, 10);
-            b->state = (uint8_t)strtoul(fields[6], NULL, 10);
-            b->mode = (uint8_t)strtoul(fields[7], NULL, 10);
-            b->flags = (uint8_t)strtoul(fields[8], NULL, 10);
-            b->short_table = (uint8_t)strtoul(fields[9], NULL, 10);
-            b->short_ms = (uint16_t)strtoul(fields[10], NULL, 10);
-            b->min_ms = (uint16_t)strtoul(fields[11], NULL, 10);
-            b->fade_ms = (uint16_t)strtoul(fields[12], NULL, 10);
+            b->fn = (uint8_t)fn;
+            b->target_type = (uint8_t)type;
+            b->target_id = (uint8_t)id;
+            b->dir = (uint8_t)dir;
+            b->state = (uint8_t)state;
+            b->mode = (uint8_t)mode;
+            b->flags = (uint8_t)flags;
+            b->short_table = (uint8_t)short_table;
+            b->short_ms = (uint16_t)short_ms;
+            b->min_ms = (uint16_t)min_ms;
+            b->fade_ms = (uint16_t)fade_ms;
             bcount++;
             have_bind = true;
         }

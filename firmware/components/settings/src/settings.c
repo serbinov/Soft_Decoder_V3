@@ -111,7 +111,7 @@ static uint32_t cv_crc32(const uint8_t *data, size_t len)
 
 /* Decoder version (minor) — single source of truth is version.txt; CV7 mirrors
  * its minor. Bump both together. */
-#define SETTINGS_CV7_VERSION 28
+#define SETTINGS_CV7_VERSION 29
 #define SETTINGS_CV29_DEFAULT 0x02U
 
 /* Minimal NMRA baseline + motor PID defaults. */
@@ -124,6 +124,7 @@ static void cv_set_defaults(void)
     s_cv[6] = 128;    /* Vmid: half PWM at step 63 (linear 0..max curve) */
     s_cv[7] = SETTINGS_CV7_VERSION; /* decoder version (matches version.txt) */
     s_cv[8] = 0;      /* manufacturer (read-only) */
+    s_cv[11] = 20;    /* packet timeout: 20 x 0.5 s = 10 s (0 disables; avoids a runaway on signal loss) */
     s_cv[29] = SETTINGS_CV29_DEFAULT; /* 28 steps, analog disabled */
     s_cv[54] = 128;   /* BEMF Kp (~1.05) */
     s_cv[55] = 60;    /* BEMF Ki (~0.07) */
@@ -181,6 +182,11 @@ static esp_err_t nvs_read_u8(const char *key, uint8_t *out, uint8_t def)
         *out = v;
         return ESP_OK;
     }
+    /* A single wrong-typed key must not abort the whole settings load. */
+    if (err == ESP_ERR_NVS_TYPE_MISMATCH || err == ESP_ERR_NVS_INVALID_LENGTH) {
+        *out = def;
+        return ESP_OK;
+    }
     return err;
 }
 
@@ -192,12 +198,24 @@ static bool blob_error_is_unusable(esp_err_t err)
     return err == ESP_ERR_NVS_INVALID_LENGTH || err == ESP_ERR_NVS_TYPE_MISMATCH;
 }
 
-static void nvs_discard_unusable_key(const char *key)
+/* Erase + commit; the caller must already own s_lock. */
+static void nvs_discard_unusable_key_locked(const char *key)
 {
     esp_err_t err = nvs_erase_key(s_h, key);
     if (err == ESP_OK) {
         (void)nvs_commit(s_h);
     }
+}
+
+/* Never block a loader: only erase when the metadata lock is free right now.
+ * A writer that owns s_lock keeps its key; the next load retries the discard. */
+static void nvs_discard_unusable_key(const char *key)
+{
+    if (s_lock == NULL || xSemaphoreTake(s_lock, 0) != pdTRUE) {
+        return;
+    }
+    nvs_discard_unusable_key_locked(key);
+    xSemaphoreGive(s_lock);
 }
 
 /* Clear the recovery marker under the metadata lock (caller holds s_lock). */
@@ -229,6 +247,11 @@ static esp_err_t nvs_read_u16(const char *key, uint16_t *out, uint16_t def)
         *out = v;
         return ESP_OK;
     }
+    /* A single wrong-typed key must not abort the whole settings load. */
+    if (err == ESP_ERR_NVS_TYPE_MISMATCH || err == ESP_ERR_NVS_INVALID_LENGTH) {
+        *out = def;
+        return ESP_OK;
+    }
     return err;
 }
 
@@ -239,7 +262,8 @@ static esp_err_t nvs_read_str(const char *key, char *out, size_t len, const char
     if (err != ESP_OK) {
         /* Missing, truncated or corrupt: always fall back to the documented
          * default instead of leaving the field empty. */
-        if (err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_NVS_INVALID_LENGTH) return err;
+        if (err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_NVS_INVALID_LENGTH &&
+            err != ESP_ERR_NVS_TYPE_MISMATCH) return err;
         strncpy(out, def, len - 1);
         out[len - 1] = '\0';
     }
@@ -284,7 +308,8 @@ esp_err_t settings_init(void)
     uint8_t record[CV_RECORD_SIZE];
     size_t record_len = sizeof(record);
     err = nvs_get_blob(s_h, "cv_record", record, &record_len);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_NVS_INVALID_LENGTH) return err;
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && err != ESP_ERR_NVS_INVALID_LENGTH &&
+        err != ESP_ERR_NVS_TYPE_MISMATCH) return err;
     bool valid_record = false;
     if (err == ESP_OK && record_len == sizeof(record) &&
         memcmp(record, "CV\1\0\1\2", CV_RECORD_HEADER) == 0) {
@@ -298,9 +323,10 @@ esp_err_t settings_init(void)
     uint32_t stored_crc = 0;
     esp_err_t crc_err = nvs_get_u32(s_h, "cv_crc", &stored_crc);
     if (err == ESP_ERR_NVS_NOT_FOUND && legacy_err != ESP_OK &&
-        legacy_err != ESP_ERR_NVS_NOT_FOUND && legacy_err != ESP_ERR_NVS_INVALID_LENGTH) return legacy_err;
+        legacy_err != ESP_ERR_NVS_NOT_FOUND && legacy_err != ESP_ERR_NVS_INVALID_LENGTH &&
+        legacy_err != ESP_ERR_NVS_TYPE_MISMATCH) return legacy_err;
     if (err == ESP_ERR_NVS_NOT_FOUND && legacy_err == ESP_OK && crc_err != ESP_OK &&
-        crc_err != ESP_ERR_NVS_NOT_FOUND) return crc_err;
+        crc_err != ESP_ERR_NVS_NOT_FOUND && crc_err != ESP_ERR_NVS_TYPE_MISMATCH) return crc_err;
     if (valid_record || (err == ESP_ERR_NVS_NOT_FOUND && legacy_err == ESP_OK &&
         crc_err == ESP_OK && len == sizeof(blob) && stored_crc == cv_crc32(blob, len))) {
         memcpy(s_cv, valid_record ? record + CV_RECORD_HEADER : blob, sizeof(s_cv));
@@ -315,7 +341,14 @@ esp_err_t settings_init(void)
     }
     err = s_cv_pending ? cv_store_locked() : ESP_OK;
     s_last_error = err;
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        /* A failed boot-time CV write must not abort init: the decoder runs
+         * from RAM with s_cv_pending still set and the persistence worker
+         * retries the blob write. */
+        ESP_LOGW(TAG, "CV record write failed (%s): running from RAM, the "
+                      "persistence worker will retry", esp_err_to_name(err));
+        err = ESP_OK;
+    }
     settings_config_t cfg;
     err = settings_load(&cfg);
     bool recovering = false;
@@ -373,7 +406,7 @@ esp_err_t settings_load(settings_config_t *cfg)
     } else if (cv63_err == ESP_ERR_NVS_NOT_FOUND) {
         cfg->cv63_exact = volume_pct_to_cv(cfg->master_volume);
     } else if (blob_error_is_unusable(cv63_err)) {
-        nvs_discard_unusable_key("cv63x");
+        nvs_discard_unusable_key_locked("cv63x");
         cfg->cv63_exact = volume_pct_to_cv(cfg->master_volume);
     } else {
         xSemaphoreGive(s_lock);
@@ -762,6 +795,14 @@ esp_err_t settings_tracks_load(settings_track_t *tracks, size_t *count)
         /* Defensive: a legacy/corrupt blob might not be NUL-terminated. */
         tracks[i].file[sizeof(tracks[i].file) - 1U] = '\0';
         tracks[i].label[sizeof(tracks[i].label) - 1U] = '\0';
+        /* The slot range is validated: a length match alone does not prove
+         * this is our track layout, so reject records the writer could never
+         * emit instead of using garbage. */
+        if (tracks[i].slot < 1U || tracks[i].slot > SETTINGS_MAX_TRACKS) {
+            nvs_discard_unusable_key("tracks");
+            *count = 0;
+            return ESP_ERR_NOT_FOUND;
+        }
     }
     return ESP_OK;
 }
@@ -798,7 +839,8 @@ esp_err_t settings_track_cats_load(uint8_t *cats, size_t *count)
     size_t len = sizeof(uint8_t) * SETTINGS_MAX_TRACKS;
     esp_err_t err = nvs_get_blob(s_h, "track_cat", cats, &len);
     bool unusable = err == ESP_OK &&
-                    (len > sizeof(uint8_t) * SETTINGS_MAX_TRACKS ||
+                    (len == 0U ||
+                     len > sizeof(uint8_t) * SETTINGS_MAX_TRACKS ||
                      (len % sizeof(uint8_t)) != 0U);
     if (err != ESP_OK || unusable) {
         for (size_t i = 0; i < SETTINGS_MAX_TRACKS; ++i) {
@@ -1364,7 +1406,7 @@ esp_err_t settings_recovery_pending(bool *out)
     }
     if (blob_error_is_unusable(err)) {
         /* A legacy/corrupt marker must not abort boot recovery. */
-        nvs_discard_unusable_key("recover");
+        nvs_discard_unusable_key_locked("recover");
         *out = false;
         s_recovery_marker = false;
         settings_metadata_unlock();

@@ -22,11 +22,14 @@ static bool pinmap_board_allows_strapping(int pin)
 
 static bool pinmap_valid_output(int pin)
 {
+    if (pin >= 26 && pin <= 32) return false;   /* SPI0/1 flash + PSRAM */
 #ifdef GPIO_IS_VALID_OUTPUT_GPIO
     return GPIO_IS_VALID_OUTPUT_GPIO(pin) != 0;
 #else
     /* Host fallback mirroring the ESP32-S3 mask used by this board. Do not use
-     * GPIO_PIN_COUNT as the upper bound: it varies between IDF versions. */
+     * GPIO_PIN_COUNT as the upper bound: it varies between IDF versions. The
+     * SPI0/1 flash and PSRAM pins 26..32 are rejected above, for both this
+     * fallback and the IDF output mask. */
     return pin >= 0 && pin <= 48 &&
            pin != 22 && pin != 23 && pin != 24 && pin != 25;
 #endif

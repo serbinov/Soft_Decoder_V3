@@ -37,6 +37,11 @@ typedef enum {
 #define AUDIO_RATE_MIN 500
 #define AUDIO_RATE_MAX 3000
 
+/* Drive MAX98357A SD_MODE low (amplifier shutdown) as early as possible
+ * in boot, before audio_init()/I2S. Prevents the amp from being enabled
+ * by a floating SD_MODE while storage/provisioning run. */
+esp_err_t audio_boot_safe(void);
+
 esp_err_t audio_init(void);
 esp_err_t audio_validate_wav(const char *path);
 /* Read-only inspection during graph Apply, after playback is quiescent.

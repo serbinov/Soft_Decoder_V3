@@ -97,6 +97,8 @@ esp_err_t control_source_post(httpd_req_t *req)
             return send_json(req, "{\"ok\":false,\"error\":\"mode save failed\"}");
         }
     }
+    /* Start the dead-man grace period now that the switch to web is stored. */
+    web_control_heartbeat();
     web_control_bump_generation();
     web_log_event("Источник", "%s", next.control_source == 1 ? "Веб" : "Рельсы");
     web_cfg_unlock();
@@ -195,6 +197,7 @@ esp_err_t cv_read_get(httpd_req_t *req)
 
 esp_err_t dcc_status_get(httpd_req_t *req)
 {
+    web_control_heartbeat();
     int64_t last = dcc_last_packet_us();
     int64_t age = -1;
     if (last > 0) {
@@ -253,6 +256,16 @@ esp_err_t cv_write_post(httpd_req_t *req)
     }
     if (!parse_u8(query, "value", &value)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad value");
+    }
+    if (idx == 1U || idx == 8U || idx == 17U || idx == 18U || idx == 19U ||
+        idx == 21U || idx == 22U || idx == 29U) {
+        uint8_t applied = 0U;
+        bool applied_forward = false;
+        motor_get_applied_speed(&applied, &applied_forward);
+        (void)applied_forward;
+        if (applied != 0U) {
+            return send_json(req, "{\"ok\":false,\"error\":\"motor moving\"}");
+        }
     }
     esp_err_t werr = settings_cv_write(idx, value);
     if (werr != ESP_OK) {

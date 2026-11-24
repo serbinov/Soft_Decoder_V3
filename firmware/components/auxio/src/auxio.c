@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "driver/mcpwm_prelude.h"
 #include "esp_log.h"
@@ -210,6 +211,27 @@ static void effect_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(20));
         iters++;
     }
+}
+
+esp_err_t auxio_boot_safe(void)
+{
+    gpio_config_t cfg = {
+        .pin_bit_mask = 0,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    for (int i = 0; i < AUXIO_CH_COUNT; ++i) {
+        cfg.pin_bit_mask |= (1ULL << s_gpios[i]);
+    }
+    esp_err_t err = gpio_config(&cfg);
+    if (err != ESP_OK) return err;
+    for (int i = 0; i < AUXIO_CH_COUNT; ++i) {
+        err = gpio_set_level((gpio_num_t)s_gpios[i], 0);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
 }
 
 esp_err_t auxio_init(void)

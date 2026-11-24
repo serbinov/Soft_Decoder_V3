@@ -48,6 +48,8 @@ static const char *TAG = "motor";
 #define MOTOR_SAMPLE_DIV_MIN 1U
 #define MOTOR_SAMPLE_DIV_MAX 32U
 #define KICK_TICKS   (120 / MOTOR_TICK_MS)
+/* 10 ms ticks of zero-duty coast before the bridge is reversed. */
+#define MOTOR_REVERSE_DEAD_TICKS 5U
 #define FEEDBACK_FRESH_US 100000
 
 /* The CV2/CV5/CV6 curve is zero at step 1 when Vstart is zero. A small floor
@@ -152,6 +154,7 @@ static volatile uint16_t s_applied_state;
 
 static uint32_t s_ramp_acc;
 static bool s_was_stopped = true;
+static uint8_t s_reverse_hold;
 
 /* Bounded raw-PWM bench mode (web /api/motor/duty). */
 static bool s_test_active;
@@ -352,6 +355,7 @@ static uint32_t speed_duty(uint8_t speed)
 
 static void IRAM_ATTR pwm_channel(ledc_channel_t channel, uint32_t duty)
 {
+    if (duty > LEDC_MAX) duty = LEDC_MAX;
     ledc_ll_set_duty_int_part(LEDC_LL_GET_HW(), LEDC_MODE, channel, duty);
     ledc_ll_set_idle_level(LEDC_LL_GET_HW(), LEDC_MODE, channel, 0);
     ledc_ll_set_sig_out_en(LEDC_LL_GET_HW(), LEDC_MODE, channel, duty != 0U);
@@ -622,6 +626,17 @@ static bool bemf_plausible_for_duty(uint32_t mag, uint32_t rail, uint32_t duty)
     return mag <= allowed;
 }
 
+static void bemf_note_loss(void)
+{
+    s_bemf_valid = false;
+    s_bemf_valid_ticks = 0;
+    if (s_bemf_acquired && ++s_bemf_loss_ticks >= BEMF_LOSS_TICKS) {
+        s_bemf_acquired = false;
+        s_pid_integral = 0.0f;
+        s_pid_prev_error = 0.0f;
+    }
+}
+
 /* Only a signal above the noise floor and below the rail ceiling is usable.
  * A zero/equal differential means "no measurable back-EMF", not "valid zero
  * speed": treating it as valid used to wind the old PID up and fault-stop a
@@ -635,15 +650,9 @@ static void bemf_update(void)
                      s_bemf2_mv > MOTOR_BEMF_PIN_MAX_MV;
     bool plausible = !saturated && rail > 300U && mag >= bemf_floor_mv(rail) &&
                      (float)mag <= (float)rail * BEMF_CEILING &&
-                     bemf_plausible_for_duty(mag, rail, s_last_duty);
+                     bemf_plausible_for_duty(mag, rail, s_last_duty_avg);
     if (!plausible) {
-        s_bemf_valid = false;
-        s_bemf_valid_ticks = 0;
-        if (s_bemf_acquired && ++s_bemf_loss_ticks >= BEMF_LOSS_TICKS) {
-            s_bemf_acquired = false;
-            s_pid_integral = 0.0f;
-            s_pid_prev_error = 0.0f;
-        }
+        bemf_note_loss();
         return;
     }
     if (!s_bemf_filter_primed) {
@@ -827,8 +836,17 @@ static uint32_t bemf_regulate(uint32_t base, uint8_t applied, uint32_t rail, boo
     float enter = (float)rail * (base < 250U ? 0.035f : 0.030f);
     float leave = (float)rail * (base < 250U ? 0.025f : 0.020f);
     bool inside = s_bemf_deadband ? (fabsf(error) < enter) : (fabsf(error) < leave);
+    bool entering = inside && !s_bemf_deadband;
     s_bemf_deadband = inside;
     if (inside) {
+        if (entering) {
+            /* Re-seed the integral from the last applied correction so a wound
+             * integral cannot hold a permanent offset inside the deadband. */
+            s_pid_integral = (s_pid_ki > 0.0f)
+                                 ? clampf(s_last_corr / s_pid_ki, -BEMF_INTEGRAL_LIMIT,
+                                          BEMF_INTEGRAL_LIMIT)
+                                 : 0.0f;
+        }
         float limit = clampf((float)base * 0.50f, BEMF_CORR_LIMIT_MIN, BEMF_CORR_LIMIT_MAX);
         float hold = clampf(s_pid_ki * s_pid_integral * 0.5f, -limit, limit);
         hold = clampf(hold, s_last_corr - BEMF_CORR_SLEW, s_last_corr + BEMF_CORR_SLEW);
@@ -852,13 +870,21 @@ static uint32_t bemf_regulate(uint32_t base, uint8_t applied, uint32_t rail, boo
     float derivative = (error - s_pid_prev_error) / dt;
     s_pid_prev_error = error;
 
-    float corr = s_pid_kp * error + s_pid_ki * s_pid_integral + s_pid_kd * derivative;
+    float corr_raw = (s_pid_kp * error + s_pid_ki * s_pid_integral +
+                      s_pid_kd * derivative) * 0.5f;
     float limit = (float)base * 0.50f;
     limit = clampf(limit, BEMF_CORR_LIMIT_MIN, BEMF_CORR_LIMIT_MAX);
-    corr = clampf(corr * 0.5f, -limit, limit);
+    float corr = clampf(corr_raw, -limit, limit);
     corr = clampf(corr, s_last_corr - BEMF_CORR_SLEW, s_last_corr + BEMF_CORR_SLEW);
-    s_pid_integral = clampf(s_pid_integral + error * dt,
-                            -BEMF_INTEGRAL_LIMIT, BEMF_INTEGRAL_LIMIT);
+    if (corr_raw > -limit && corr_raw < limit) {
+        s_pid_integral = clampf(s_pid_integral + error * dt,
+                                -BEMF_INTEGRAL_LIMIT, BEMF_INTEGRAL_LIMIT);
+    } else if (s_pid_ki > 0.0f) {
+        /* Anti-windup: back-calculate the integral to the saturation value. */
+        float i_sat = clampf(limit / s_pid_ki, -BEMF_INTEGRAL_LIMIT, BEMF_INTEGRAL_LIMIT);
+        if (corr_raw > 0.0f) s_pid_integral = fminf(s_pid_integral, i_sat);
+        else                 s_pid_integral = fmaxf(s_pid_integral, -i_sat);
+    }
 
     float duty = (float)base + corr;
     if (duty < 0.0f) duty = 0.0f;
@@ -874,15 +900,16 @@ static uint32_t bemf_regulate(uint32_t base, uint8_t applied, uint32_t rail, boo
 
 static void motor_tick(void)
 {
-    portENTER_CRITICAL(&s_output_mux);
-    s_last_tick_us = esp_timer_get_time();
-    portEXIT_CRITICAL(&s_output_mux);
     motor_bemf_cal_watchdog();
 
     if (s_control_mutex == NULL ||
         xSemaphoreTake(s_control_mutex, pdMS_TO_TICKS(MOTOR_TICK_MS)) != pdTRUE) {
         return;
     }
+
+    portENTER_CRITICAL(&s_output_mux);
+    s_last_tick_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_output_mux);
 
     portENTER_CRITICAL(&s_output_mux);
     uint32_t generation = s_output_generation;
@@ -1003,7 +1030,12 @@ static void motor_tick(void)
     uint8_t applied = s_applied_speed;
     uint8_t applied_prev = applied;
     bool forward_prev = s_applied_forward;
-    bool reversing = (s_applied_forward != target_forward) && (applied > 0U);
+    bool dir_change = (s_applied_forward != target_forward);
+    bool reversing = dir_change && (applied > 0U);
+    bool reverse_hold = dir_change && (applied == 0U);
+    if (!dir_change) {
+        s_reverse_hold = 0;      /* normal operation: no pending reversal */
+    }
 
     if (reversing) {
         if (cv4 == 0U) {
@@ -1018,6 +1050,18 @@ static void motor_tick(void)
             }
             if (applied == 0U) s_ramp_acc = 0;
         }
+    } else if (reverse_hold) {
+        /* Rotor at rest in the old direction: coast for the dead time, then
+         * switch. Do not ramp toward the target while holding. */
+        if (s_reverse_hold == 0U) {
+            s_reverse_hold = MOTOR_REVERSE_DEAD_TICKS;
+        } else if (--s_reverse_hold == 0U) {
+            s_applied_forward = target_forward;
+            s_was_stopped = false;   /* no kickstart on a reversal */
+            s_kick_left = 0;
+            s_kick_duty = 0;
+        }
+        applied = 0U;
     } else if (calibration) {
         applied = target;
         s_ramp_acc = 0;
@@ -1040,7 +1084,7 @@ static void motor_tick(void)
     }
 
     s_applied_speed = applied;
-    if (!reversing || applied == 0U) {
+    if (!dir_change && applied == 0U) {
         s_applied_forward = target_forward;
     }
     if (s_applied_forward != forward_prev) {
@@ -1058,6 +1102,7 @@ static void motor_tick(void)
     uint8_t trim = 128;
     if (motor_cv_read(s_applied_forward ? 66U : 95U, &trim) == ESP_OK && trim != 128U) {
         duty_base = (duty_base * (uint32_t)trim + 64U) / 128U;
+        if (duty_base > LEDC_MAX) duty_base = LEDC_MAX;
     }
     /* Calibrated feed-forward: the duty the sweep actually used for this
      * notch. The PID then holds the same BEMF instead of correcting the
@@ -1127,8 +1172,7 @@ static void motor_tick(void)
         if (bemf_sample_window()) {
             bemf_update();
         } else {
-            s_bemf_valid = false;
-            s_bemf_valid_ticks = 0;
+            bemf_note_loss();
         }
     }
 
@@ -2534,10 +2578,10 @@ esp_err_t motor_bemf_wave_capture(uint16_t step_us, uint16_t duration_ms,
             esp_rom_delay_us(step_us);
         }
     }
-    (void)apply_pwm(cur_duty, fwd, gen);
     portENTER_CRITICAL(&s_output_mux);
     s_sample_active = false;
     portEXIT_CRITICAL(&s_output_mux);
+    (void)apply_pwm(cur_duty, fwd, gen);
     xSemaphoreGive(s_control_mutex);
     *out_count = n;
     if (duty != NULL) *duty = cur_duty;

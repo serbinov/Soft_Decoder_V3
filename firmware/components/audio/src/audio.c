@@ -204,6 +204,17 @@ static esp_err_t i2s_setup(void)
     return i2s_channel_enable(s_tx);
 }
 
+esp_err_t audio_boot_safe(void)
+{
+    gpio_config_t sd = {
+        .pin_bit_mask = 1ULL << PIN_AUDIO_SD_MODE,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    esp_err_t err = gpio_config(&sd);
+    if (err != ESP_OK) return err;
+    return gpio_set_level((gpio_num_t)PIN_AUDIO_SD_MODE, 0);
+}
+
 esp_err_t audio_init(void)
 {
     if (s_initialized || s_mixer_ready) {
@@ -228,13 +239,7 @@ esp_err_t audio_init(void)
         voice_requests_reset(&s_voice[v]);
     }
 
-    gpio_config_t sd = {
-        .pin_bit_mask = 1ULL << PIN_AUDIO_SD_MODE,
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    esp_err_t err = gpio_config(&sd);
-    if (err != ESP_OK) { goto fail; }
-    err = gpio_set_level((gpio_num_t)PIN_AUDIO_SD_MODE, 0);
+    esp_err_t err = audio_boot_safe();
     if (err != ESP_OK) { goto fail; }
     err = i2s_setup();
     if (err != ESP_OK) {

@@ -114,6 +114,11 @@ static volatile uint8_t s_last_speed128;
 static volatile uint8_t s_last_step;
 static volatile uint8_t s_last_speed_mode;
 static volatile bool s_last_forward = true;
+/* Protects the published last-speed snapshot above as one consistent record:
+ * the DCC task writes it while dcc_get_speed_status() reads it from the httpd
+ * task. Kept separate from s_edge_mux so a task-context reader never nests
+ * with ISR-critical state. */
+static portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint8_t s_consist_addr;
 static bool s_consist_reverse;
 static bool s_direction_reverse;
@@ -425,20 +430,24 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         forward ^= reverse ^ (via_consist && consist_reverse);
         uint8_t raw = ext & 0x7FU;
         if (raw == 1U) {
+            portENTER_CRITICAL(&s_status_mux);
             s_last_speed128 = 0;
             s_last_step = 0;
             s_last_speed_mode = 128;
             s_last_forward = forward;
+            portEXIT_CRITICAL(&s_status_mux);
             if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
             return;
         }
         if (is_broadcast && raw != 0U) return;
         s_function_forward = forward;
         uint8_t speed = (raw >= 2U) ? (uint8_t)(raw - 1U) : 0U;
+        portENTER_CRITICAL(&s_status_mux);
         s_last_speed128 = speed;
         s_last_step = 0;
         s_last_speed_mode = 128;
         s_last_forward = forward;
+        portEXIT_CRITICAL(&s_status_mux);
         if (s_speed_cb != NULL) {
             s_speed_cb(speed, forward);
         }
@@ -452,10 +461,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         if (mode14) {
             uint8_t step14 = instr & 0x0FU;
             if (step14 == 1U) {
+                portENTER_CRITICAL(&s_status_mux);
                 s_last_speed128 = 0;
                 s_last_step = 0;
                 s_last_speed_mode = 14;
                 s_last_forward = forward;
+                portEXIT_CRITICAL(&s_status_mux);
                 if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
                 return;
             }
@@ -463,10 +474,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
             s_function_forward = forward;
             uint8_t step = step14 >= 2U ? (uint8_t)(step14 - 1U) : 0U;
             uint8_t speed = step != 0U ? dcc_speed_from_14step(step) : 0U;
+            portENTER_CRITICAL(&s_status_mux);
             s_last_speed128 = speed;
             s_last_step = step;
             s_last_speed_mode = 14;
             s_last_forward = forward;
+            portEXIT_CRITICAL(&s_status_mux);
             emit_function(0, (instr & 0x10U) != 0, function_via_consist, forward, cv21, cv22);
             if (s_speed_cb != NULL) {
                 s_speed_cb(speed, forward);
@@ -475,10 +488,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         }
         uint8_t code = (uint8_t)(((instr & 0x0FU) << 1) | ((instr & 0x10U) >> 4));
         if (code == 1U) {
+            portENTER_CRITICAL(&s_status_mux);
             s_last_speed128 = 0;
             s_last_step = 0;
             s_last_speed_mode = 28;
             s_last_forward = forward;
+            portEXIT_CRITICAL(&s_status_mux);
             if (s_emergency_stop_cb != NULL) s_emergency_stop_cb();
             return;
         }
@@ -487,10 +502,12 @@ static void dispatch(const uint8_t *packet, uint8_t len)
         uint8_t step = code >= 2U ? (uint8_t)(code - 1U) : 0U;
         if (step > 28U) step = 28U;
         uint8_t speed = step != 0U ? dcc_speed_from_28step(step) : 0U;
+        portENTER_CRITICAL(&s_status_mux);
         s_last_speed128 = speed;
         s_last_step = step;
         s_last_speed_mode = 28;
         s_last_forward = forward;
+        portEXIT_CRITICAL(&s_status_mux);
         if (s_speed_cb != NULL) {
             s_speed_cb(speed, forward);
         }
@@ -922,12 +939,12 @@ void dcc_register_speed_cb(dcc_speed_cb_t cb) { s_speed_cb = cb; }
 void dcc_get_speed_status(uint8_t *speed128, uint8_t *step, bool *forward,
                           uint8_t *mode)
 {
-    portENTER_CRITICAL(&s_edge_mux);
+    portENTER_CRITICAL(&s_status_mux);
     uint8_t speed = s_last_speed128;
     uint8_t notch = s_last_step;
     uint8_t packet_mode = s_last_speed_mode;
     bool fwd = s_last_forward;
-    portEXIT_CRITICAL(&s_edge_mux);
+    portEXIT_CRITICAL(&s_status_mux);
     if (speed128 != NULL) *speed128 = speed;
     if (step != NULL) *step = notch;
     if (forward != NULL) *forward = fwd;

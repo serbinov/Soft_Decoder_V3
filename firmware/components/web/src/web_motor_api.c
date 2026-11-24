@@ -175,7 +175,11 @@ esp_err_t motor_post(httpd_req_t *req)
                       forward ? "вперёд" : "назад");
     }
     esp_err_t err = motor_set_speed(speed, forward);
-    if (err == ESP_OK) web_motion_changed(speed, forward);
+    if (err == ESP_OK) {
+        web_motion_changed(speed, forward);
+        web_control_motion_note(speed, forward);
+        if (speed == 0U) web_control_notify_clean_stop();
+    }
     web_control_give();
     if (err != ESP_OK) return send_json(req, "{\"ok\":false,\"error\":\"motor rejected\"}");
 
@@ -206,6 +210,14 @@ esp_err_t motor_duty_post(httpd_req_t *req)
     if (!web_actuation_ready() || web_maintenance_active() || web_cfg()->control_source == 0) {
         web_control_give();
         return send_json(req, "{\"ok\":false,\"error\":\"control unavailable\"}");
+    }
+    uint8_t applied = 0U;
+    bool applied_forward = false;
+    motor_get_applied_speed(&applied, &applied_forward);
+    (void)applied_forward;
+    if (applied != 0U) {
+        web_control_give();
+        return send_json(req, "{\"ok\":false,\"error\":\"motor moving\"}");
     }
     esp_err_t err = motor_test_duty(duty, forward, ms);
     web_control_give();

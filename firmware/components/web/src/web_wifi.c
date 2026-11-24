@@ -694,8 +694,12 @@ static void dns_server_task(void *arg)
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons(53),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
     };
+    uint32_t ap_ip = 0;
+    memcpy(&ap_ip, s_ap_ip_bytes, sizeof(ap_ip));   /* already network order */
+    /* Bind to the SoftAP address so the hijack stays off any STA interface.
+     * Fall back to ANY only if the AP address is not published yet. */
+    addr.sin_addr.s_addr = (ap_ip != 0U) ? ap_ip : htonl(INADDR_ANY);
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         ESP_LOGE(TAG, "dns: bind failed");
         close(sock);

@@ -38,10 +38,16 @@ static bool s_func_tracks_valid;
 static bool s_motion_forward = true;
 static uint8_t s_motion_speed;
 static bool s_motion_initialized;
+static portMUX_TYPE s_emergency_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_emergency_pending;
 
 
 /* Heap size of the /api/audio/tracks JSON frame (was a 8 KB stack buffer). */
 #define WEB_TRACKS_JSON_MAX 8192
+
+/* Bounded wait: the DCC task also decodes the emergency stop, so it must
+ * never park indefinitely on the function lock held by HTTP/NVS work. */
+#define WEB_FUNC_LOCK_WAIT_MS 30U
 
 static const char *const WEB_OUT_NAMES[9] = {
     "F0F", "F0R", "AUX1", "AUX2", "AUX3", "AUX4", "AUX5", "AUX6", "AUX7"
@@ -249,6 +255,26 @@ static void func_outputs_force_off_locked(void)
     s_logic_active = 0;
 }
 
+/* Apply an emergency reset that could not take s_func_mutex at the time.
+ * Caller must hold s_func_mutex. Never holds the spinlock across driver or
+ * audio calls. */
+static void func_emergency_pending_apply_locked(void)
+{
+    bool pending;
+    portENTER_CRITICAL(&s_emergency_mux);
+    pending = s_emergency_pending;
+    portEXIT_CRITICAL(&s_emergency_mux);
+    if (!pending) return;
+    memset(s_fn, 0, sizeof(s_fn));
+    func_outputs_force_off_locked();
+    sound_set_logic(false, false, false, false, s_logic_notch);
+    s_motion_speed = 0;
+    s_motion_initialized = true;
+    portENTER_CRITICAL(&s_emergency_mux);
+    s_emergency_pending = false;
+    portEXIT_CRITICAL(&s_emergency_mux);
+}
+
 static void logic_collect_cb(void *ctx, uint8_t target_type, uint8_t target_id, bool active)
 {
     if (target_type != FUNC_TARGET_LOGIC || !active ||
@@ -339,9 +365,14 @@ void web_motion_changed(uint8_t speed, bool forward)
     /* Sample before waiting: an emergency reset that runs while this task is
      * blocked on the function lock must invalidate this update. */
     uint32_t epoch = web_control_safety_epoch_get();
-    if (s_func_mutex != NULL) {
-        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Drop this motion update: the outputs keep their current state and the
+         * next DCC speed report retries instead of parking the decoder task. */
+        ESP_LOGW(TAG_FUNC, "web_motion_changed: function lock busy, update dropped");
+        return;
     }
+    func_emergency_pending_apply_locked();
     if (web_control_safety_epoch_get() != epoch) {
         s_motion_speed = 0;
         s_motion_forward = true;
@@ -379,6 +410,9 @@ void web_emergency_reset(void)
      * touching the shared state. This is lock-free and cannot be starved by a
      * handler that holds s_func_mutex across slow I/O. */
     web_control_safety_epoch_bump();
+    portENTER_CRITICAL(&s_emergency_mux);
+    s_emergency_pending = true;
+    portEXIT_CRITICAL(&s_emergency_mux);
     bool locked = false;
     if (s_func_mutex != NULL) {
         /* Never block a DCC/safety callback behind an HTTP handler that holds
@@ -395,6 +429,11 @@ void web_emergency_reset(void)
     sound_set_logic(false, false, false, false, s_logic_notch);
     s_motion_speed = 0;
     s_motion_initialized = true;
+    if (locked) {
+        portENTER_CRITICAL(&s_emergency_mux);
+        s_emergency_pending = false;
+        portEXIT_CRITICAL(&s_emergency_mux);
+    }
     if (locked) xSemaphoreGive(s_func_mutex);
 }
 
@@ -421,8 +460,16 @@ void web_func_audio_slots(uint8_t fn, uint8_t *slot_a, uint8_t *slot_b)
  * (init / upload / delete), never from web_apply_function(). */
 static void func_tracks_cache_refresh(void)
 {
-    bool locked = s_func_mutex != NULL &&
-        xSemaphoreTake(s_func_mutex, portMAX_DELAY) == pdTRUE;
+    bool locked = false;
+    if (s_func_mutex != NULL) {
+        if (xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+            /* Keep the previous snapshot: a later refresh (upload/delete) will
+             * rebuild it once the lock is free again. */
+            ESP_LOGW(TAG_FUNC, "func_tracks_cache_refresh: function lock busy, skipped");
+            return;
+        }
+        locked = true;
+    }
     size_t count = 0;
     esp_err_t err = settings_tracks_load(s_func_tracks, &count);
     if (err == ESP_OK) {
@@ -451,9 +498,15 @@ void web_apply_function(uint8_t fn, bool state)
         return;
     }
     uint32_t epoch = web_control_safety_epoch_get();
-    if (s_func_mutex != NULL) {
-        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Do not touch s_fn or the outputs: a partially applied function would
+         * keep the emergency stop from winning. The next packet retries. */
+        ESP_LOGW(TAG_FUNC, "web_apply_function: function lock busy, F%u dropped",
+                 (unsigned)fn);
+        return;
     }
+    func_emergency_pending_apply_locked();
     /* An emergency reset may have completed while we were waiting for the
      * function lock. Do not apply anything in that case. */
     if (web_control_safety_epoch_get() != epoch) {
@@ -664,8 +717,12 @@ static bool web_func_bind_commit(func_binding_t *tmp, size_t n)
     if (settings_func_bind_save(tmp, n) != ESP_OK) {
         return false;
     }
-    if (s_func_mutex != NULL) {
-        (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Abort without adopting the candidate: the RAM list and the outputs
+         * stay exactly as they were. */
+        ESP_LOGW(TAG_FUNC, "web_func_bind_commit: function lock busy, not committed");
+        return false;
     }
     memcpy(s_func_bind, tmp, sizeof(s_func_bind));
     s_func_bind_count = n;
@@ -790,7 +847,12 @@ void web_func_refresh_tracks(void)
 uint32_t web_func_levels(void)
 {
     uint32_t levels = 0;
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Fail-safe snapshot: report no active functions instead of blocking. */
+        ESP_LOGW(TAG_FUNC, "web_func_levels: function lock busy");
+        return 0U;
+    }
     for (uint8_t fn = 0; fn < WEB_FN_COUNT; ++fn) if (s_fn[fn]) levels |= 1UL << fn;
     if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
     return levels;
@@ -798,7 +860,15 @@ uint32_t web_func_levels(void)
 
 void web_func_io_state(uint16_t *outputs, uint16_t *logic, uint32_t *functions)
 {
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Never read the shared mirrors unlocked: return an empty snapshot. */
+        ESP_LOGW(TAG_FUNC, "web_func_io_state: function lock busy");
+        *outputs = 0U;
+        *logic = 0U;
+        *functions = 0U;
+        return;
+    }
     *outputs = s_outputs_applied;
     *logic = s_logic_active;
     uint32_t fn = 0;
@@ -822,8 +892,15 @@ void web_func_track_cat_set(size_t index, uint8_t cat)
 esp_err_t web_func_reconcile_slots(const bool *slots)
 {
     esp_err_t result = ESP_OK;
-    bool func_locked = s_func_mutex != NULL &&
-        xSemaphoreTake(s_func_mutex, portMAX_DELAY) == pdTRUE;
+    bool func_locked = false;
+    if (s_func_mutex != NULL) {
+        if (xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+            /* Abort without pruning: an unlocked edit could race the apply path. */
+            ESP_LOGW(TAG_FUNC, "web_func_reconcile_slots: function lock busy, skipped");
+            return ESP_ERR_TIMEOUT;
+        }
+        func_locked = true;
+    }
     bool map_changed = false;
     for (uint8_t fn = 0; fn < SETTINGS_FUNC_MAP_COUNT; ++fn) {
         if (s_func_map[fn].slot_a != 0U &&
@@ -898,7 +975,13 @@ bool web_func_slots_referenced(const bool *slot_used)
 
 void web_func_states(bool out[WEB_FN_COUNT])
 {
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Fail-safe snapshot: report every function off instead of blocking. */
+        ESP_LOGW(TAG_FUNC, "web_func_states: function lock busy");
+        memset(out, 0, sizeof(s_fn));
+        return;
+    }
     memcpy(out, s_fn, sizeof(s_fn));
     if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
 }
@@ -910,7 +993,12 @@ const char *web_func_output_name(uint8_t ch)
 
 size_t web_func_bind_count_get(void)
 {
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Fail-safe snapshot: report an empty list instead of blocking. */
+        ESP_LOGW(TAG_FUNC, "web_func_bind_count_get: function lock busy");
+        return 0U;
+    }
     size_t count = s_func_bind_count;
     if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
     return count;
@@ -919,7 +1007,12 @@ size_t web_func_bind_count_get(void)
 bool web_func_bind_at(size_t idx, func_binding_t *out)
 {
     if (out == NULL) return false;
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Abort the read: the caller must not see a half-copied record. */
+        ESP_LOGW(TAG_FUNC, "web_func_bind_at: function lock busy");
+        return false;
+    }
     bool ok = idx < s_func_bind_count && idx < FUNC_BIND_MAX;
     if (ok) *out = s_func_bind[idx];
     if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
@@ -928,7 +1021,13 @@ bool web_func_bind_at(size_t idx, func_binding_t *out)
 
 void web_func_aux_snapshot(settings_aux_cfg_t out[SETTINGS_AUX_COUNT])
 {
-    if (s_func_mutex != NULL) (void)xSemaphoreTake(s_func_mutex, portMAX_DELAY);
+    if (s_func_mutex != NULL &&
+        xSemaphoreTake(s_func_mutex, pdMS_TO_TICKS(WEB_FUNC_LOCK_WAIT_MS)) != pdTRUE) {
+        /* Fail-safe snapshot: report the factory-default AUX config. */
+        ESP_LOGW(TAG_FUNC, "web_func_aux_snapshot: function lock busy");
+        memset(out, 0, sizeof(s_aux_cfg));
+        return;
+    }
     memcpy(out, s_aux_cfg, sizeof(s_aux_cfg));
     if (s_func_mutex != NULL) xSemaphoreGive(s_func_mutex);
 }

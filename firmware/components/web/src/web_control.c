@@ -6,6 +6,7 @@
 #include "web_internal.h"
 
 #include "audio.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -348,4 +349,85 @@ static void maintenance_end_impl(void)
 void web_maintenance_end(void)
 {
     maintenance_end_impl();
+}
+
+#define WEB_DEADMAN_TIMEOUT_US (10LL * 1000 * 1000)
+
+static portMUX_TYPE s_deadman_mux = portMUX_INITIALIZER_UNLOCKED;
+static int64_t s_deadman_hb_us;
+static uint8_t s_deadman_speed;
+static bool s_deadman_forward = true;
+static void (*s_clean_stop_cb)(void);
+
+void web_control_heartbeat(void)
+{
+    portENTER_CRITICAL(&s_deadman_mux);
+    s_deadman_hb_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_deadman_mux);
+}
+
+void web_control_motion_note(uint8_t speed, bool forward)
+{
+    portENTER_CRITICAL(&s_deadman_mux);
+    s_deadman_hb_us = esp_timer_get_time();
+    s_deadman_speed = (speed > 0U) ? speed : 0U;
+    s_deadman_forward = forward;
+    portEXIT_CRITICAL(&s_deadman_mux);
+}
+
+bool web_control_deadman_tick(void)
+{
+    if (web_cfg()->control_source == 0U) {        /* rails/DCC owns control */
+        portENTER_CRITICAL(&s_deadman_mux);
+        s_deadman_speed = 0U;
+        portEXIT_CRITICAL(&s_deadman_mux);
+        return false;
+    }
+    int64_t now = esp_timer_get_time();
+    uint8_t speed;
+    bool forward;
+    int64_t hb;
+    portENTER_CRITICAL(&s_deadman_mux);
+    speed = s_deadman_speed;
+    forward = s_deadman_forward;
+    hb = s_deadman_hb_us;
+    portEXIT_CRITICAL(&s_deadman_mux);
+
+    if (speed == 0U) {
+        /* Seed from actual motion (e.g. control switched to web while the
+         * loco was already running) and start a fresh grace period. */
+        uint8_t applied = 0U;
+        bool applied_forward = true;
+        motor_get_applied_speed(&applied, &applied_forward);
+        if (applied == 0U) return false;
+        portENTER_CRITICAL(&s_deadman_mux);
+        if (s_deadman_speed == 0U) {
+            s_deadman_speed = applied;
+            s_deadman_forward = applied_forward;
+            s_deadman_hb_us = now;
+        }
+        portEXIT_CRITICAL(&s_deadman_mux);
+        return false;
+    }
+    if (now - hb < WEB_DEADMAN_TIMEOUT_US) return false;
+
+    /* Re-check under the lock so a command that arrived meanwhile wins. */
+    bool expired;
+    portENTER_CRITICAL(&s_deadman_mux);
+    expired = (s_deadman_speed == speed && s_deadman_hb_us == hb);
+    if (expired) s_deadman_speed = 0U;
+    portEXIT_CRITICAL(&s_deadman_mux);
+    if (!expired) return false;
+
+    (void)motor_set_speed(0, forward);
+    ESP_LOGW("web_control", "web dead-man: no heartbeat for %d s, motor stopped",
+             (int)(WEB_DEADMAN_TIMEOUT_US / 1000000));
+    return true;
+}
+
+void web_control_set_clean_stop_cb(void (*cb)(void)) { s_clean_stop_cb = cb; }
+void web_control_notify_clean_stop(void)
+{
+    void (*cb)(void) = s_clean_stop_cb;
+    if (cb != NULL) cb();
 }

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -16,6 +17,7 @@
 #include "nvs_flash.h"
 
 #include "audio.h"
+#include "auxio.h"
 #include "dcc.h"
 #include "default_scheme_data.h"
 #include "motor.h"
@@ -60,6 +62,31 @@ static void update_decoder_address(void)
     dcc_reload_config();
 }
 
+static bool brownout_clear_if_safe(void)
+{
+    bool cleared = false;
+    portENTER_CRITICAL(&s_safety_mux);
+    s_brownout_latched = false;
+    s_brownout_block_logged = false;
+    if (!s_motor_stall_latched) {
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, false);
+        cleared = true;
+    }
+    portEXIT_CRITICAL(&s_safety_mux);
+    if (cleared) {
+        ESP_LOGW(TAG, "BROWNOUT latch cleared by a clean stop");
+        web_log_event("Power", "brownout recovery: clean stop received");
+    } else {
+        ESP_LOGW(TAG, "BROWNOUT latch cleared; stall inhibit retained");
+    }
+    return cleared;
+}
+
+static void brownout_clear_on_clean_stop(void)
+{
+    if (s_brownout_latched) (void)brownout_clear_if_safe();
+}
+
 /* G-RTOS-4: a brownout reset may leave the throttle at the last non-zero
  * speed. Latch motion off at boot and only release it after an explicit stop
  * (or a clean power cycle). Returning true means the command was consumed by
@@ -79,13 +106,7 @@ static bool brownout_blocks_motion(uint8_t speed128)
         }
         return true;
     }
-    s_brownout_latched = false;
-    s_brownout_block_logged = false;
-    if (!s_motor_stall_latched) {
-        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, false);
-    }
-    ESP_LOGW(TAG, "BROWNOUT latch cleared by a clean stop");
-    web_log_event("Power", "brownout recovery: clean stop received");
+    (void)brownout_clear_if_safe();
     return false;
 }
 
@@ -102,44 +123,51 @@ static void on_dcc_speed(uint8_t speed128, bool forward)
     if (motor_bemf_cal_active()) {
         return;
     }
-    if (web_control_rails_begin(NULL)) {
-        /* A brownout recovery latch applies only while the rails own control;
-         * a DCC speed must not clear it in web mode. */
-        if (brownout_blocks_motion(speed128)) {
-            web_control_rails_end();
-            return;
+    if (!web_control_rails_begin(NULL)) {
+        /* Never drop a stop because the control mutex/lease is momentarily
+         * busy: if the rails still own control, stop source-independently. */
+        if (speed128 == 0U && web_control_source_is_rails()) {
+            (void)motor_set_speed(0, forward);
+            web_motion_changed(0, forward);
         }
-        /* Log every decoded speed change so the actual command received from
-         * the throttle can be compared with what the motor does (only on a
-         * change or an accept/reject transition, so a refreshing command
-         * station does not flood the log). */
-        static bool have_last;
-        static uint8_t last_speed;
-        static bool last_forward;
-        static bool last_ok;
-        bool changed = !have_last || speed128 != last_speed || forward != last_forward;
-        esp_err_t err = motor_set_speed(speed128, forward);
-        if (err == ESP_OK) {
-            if (changed || !last_ok) {
-                ESP_LOGI(TAG, "DCC speed: %u %s", (unsigned)speed128,
-                         forward ? "fwd" : "rev");
-            }
-            track_note_dcc_motor_command();
-        /* Re-evaluate the function direction/speed gates (web.c skips the
-         * update when nothing actually changed). */
-            web_motion_changed(speed128, forward);
-        } else if (changed || last_ok) {
-            ESP_LOGW(TAG, "DCC speed rejected: %u %s (%s, inhibited=%d, cal=%d)",
-                     (unsigned)speed128, forward ? "fwd" : "rev",
-                     esp_err_to_name(err), (int)motor_is_inhibited(),
-                     (int)motor_bemf_cal_active());
-        }
-        have_last = true;
-        last_speed = speed128;
-        last_forward = forward;
-        last_ok = (err == ESP_OK);
-        web_control_rails_end();
+        return;
     }
+    /* A brownout recovery latch applies only while the rails own control;
+     * a DCC speed must not clear it in web mode. */
+    if (brownout_blocks_motion(speed128)) {
+        web_control_rails_end();
+        return;
+    }
+    /* Log every decoded speed change so the actual command received from
+     * the throttle can be compared with what the motor does (only on a
+     * change or an accept/reject transition, so a refreshing command
+     * station does not flood the log). */
+    static bool have_last;
+    static uint8_t last_speed;
+    static bool last_forward;
+    static bool last_ok;
+    bool changed = !have_last || speed128 != last_speed || forward != last_forward;
+    esp_err_t err = motor_set_speed(speed128, forward);
+    if (err == ESP_OK) {
+        if (changed || !last_ok) {
+            ESP_LOGI(TAG, "DCC speed: %u %s", (unsigned)speed128,
+                     forward ? "fwd" : "rev");
+        }
+        track_note_dcc_motor_command();
+    /* Re-evaluate the function direction/speed gates (web.c skips the
+     * update when nothing actually changed). */
+        web_motion_changed(speed128, forward);
+    } else if (changed || last_ok) {
+        ESP_LOGW(TAG, "DCC speed rejected: %u %s (%s, inhibited=%d, cal=%d)",
+                 (unsigned)speed128, forward ? "fwd" : "rev",
+                 esp_err_to_name(err), (int)motor_is_inhibited(),
+                 (int)motor_bemf_cal_active());
+    }
+    have_last = true;
+    last_speed = speed128;
+    last_forward = forward;
+    last_ok = (err == ESP_OK);
+    web_control_rails_end();
 }
 
 /* Both the DCC stream (rails mode) and the web UI apply a function through the
@@ -478,10 +506,16 @@ static void safety_task(void *arg)
         return;
     }
 
+    static uint32_t iters;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(SAFETY_PERIOD_MS));
         (void)esp_task_wdt_reset();
         safety_step(&timeout_active);
+        (void)web_control_deadman_tick();
+        if (++iters == 600U) {
+            ESP_LOGI(TAG, "safety stack high-water: %u bytes",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
     }
 }
 
@@ -533,22 +567,51 @@ static void recover_tracks_from_storage(void)
     }
 }
 
+/* Drive every actuator pin to its inactive level before anything else
+ * (logging, NVS, provisioning). Only the board's load pins are touched:
+ * flash/PSRAM, USB, UART and the external NOR are never driven. */
+static esp_err_t board_boot_safe(void)
+{
+    motor_boot_safe();
+    esp_err_t err = auxio_boot_safe();
+    if (err != ESP_OK) return err;
+    err = audio_boot_safe();
+    if (err != ESP_OK) return err;
+    gpio_config_t ack = {
+        .pin_bit_mask = 1ULL << PIN_ACK_LOAD,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    err = gpio_config(&ack);
+    if (err == ESP_OK) err = gpio_set_level((gpio_num_t)PIN_ACK_LOAD, 0);
+    return err;
+}
+
 void app_main(void)
 {
+    /* First firmware action: every actuator to its inactive level. */
+    esp_err_t boot_safe_err = board_boot_safe();
+
     int reset_reason = esp_reset_reason();
     s_brownout_latched = reset_reason == ESP_RST_BROWNOUT;
     ESP_LOGI(TAG, "Soft Decoder V3 boot (reset=%d%s)", reset_reason,
              s_brownout_latched ? " BROWNOUT" : "");
+    if (boot_safe_err != ESP_OK) {
+        ESP_LOGW(TAG, "board boot-safe failed: %s", esp_err_to_name(boot_safe_err));
+    }
     if (s_brownout_latched) {
         /* A brownout may have interrupted a moving locomotive. Do not resume
          * the last duty: inhibit motion until a clean stop or power cycle. */
         ESP_LOGE(TAG, "BROWNOUT reset: motion latched off until a clean stop/power cycle");
     }
-
-    ESP_ERROR_CHECK(pinmap_validate());
-    /* Coast the H-bridge immediately: until motor_init() the IN1/IN2 pins would
-     * float (storage/NVS init takes a moment), which can make the motor twitch. */
-    motor_boot_safe();
+    /* Validate after the outputs are safe: a bad map must inhibit motion,
+     * not abort the boot with floating pins. */
+    if (pinmap_validate() != ESP_OK) {
+        ESP_LOGE(TAG, "Pin map validation failed: motion inhibited");
+        (void)motor_set_inhibit_reason(MOTOR_INHIBIT_SAFETY, true);
+    }
     ESP_ERROR_CHECK(storage_init());
     /* Storage is optional: without the external W25Q128 (or if its LittleFS
      * fails to mount) the decoder must keep running with sound disabled, so a
@@ -616,6 +679,8 @@ void app_main(void)
             return;
         }
     }
+
+    (void)web_control_set_clean_stop_cb(brownout_clear_on_clean_stop);
 
     if (s_brownout_latched) {
         web_log_event("Power", "brownout: motion latched until stop/power cycle");

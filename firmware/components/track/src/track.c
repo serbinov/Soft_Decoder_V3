@@ -2,6 +2,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -183,6 +184,7 @@ static void track_adc_task(void *arg)
     uint32_t iters = 0;
     while (s_iter_cap == 0U || iters < s_iter_cap) {
         track_adc_step(&was_driving);
+        (void)esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(50));
         iters++;
     }

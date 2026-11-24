@@ -33,6 +33,18 @@ esp_err_t web_maintenance_begin(bool exclusive_fs);
 void web_maintenance_end(void);
 bool web_maintenance_active(void);
 
+/* Web dead-man: while web control is active, the browser must keep polling
+ * (/api/status) or sending motor commands. If no heartbeat arrives for
+ * WEB_DEADMAN_TIMEOUT_US, the safety task stops the motor. */
+void web_control_heartbeat(void);
+void web_control_motion_note(uint8_t speed, bool forward);
+bool web_control_deadman_tick(void);
+
+/* An explicit web stop (speed 0) is a clean stop and may clear the
+ * brown-out motion latch, like a DCC stop. */
+void web_control_set_clean_stop_cb(void (*cb)(void));
+void web_control_notify_clean_stop(void);
+
 /* Per-voice volume (0..100) for a function/slot sound. Slot 1 is the engine
  * (uses engine volume), all other slots are effects (uses effects volume);
  * the category can be changed per slot via /api/track/category. */

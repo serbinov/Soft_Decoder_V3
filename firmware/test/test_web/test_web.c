@@ -34,6 +34,8 @@
 #include "audio.h"
 #include "sound.h"
 #include "auxio.h"
+#include "motor.h"
+#include "settings.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 
@@ -69,6 +71,19 @@ esp_err_t test_metadata_sync(void);
 int test_atomic_rename(const char *from, const char *to);
 int test_binary_open(const char *path, int flags, int mode);
 esp_err_t httpd_resp_send_chunk(httpd_req_t *req, const char *buf, ssize_t len);
+
+/* Fault-injection hooks mapped onto a few library calls below. */
+void web_control_safety_epoch_bump(void);
+esp_err_t test_settings_save_deferred(const settings_config_t *cfg);
+bool test_web_cfg_lock(TickType_t wait);
+esp_err_t test_audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
+                                      bool loop, uint8_t volume);
+size_t test_bemf_log_copy(motor_bemf_cal_step_log_t *out, size_t max);
+esp_err_t test_bemf_wave_capture(uint16_t step_us, uint16_t duration_ms,
+                                 motor_bemf_wave_point_t *points, uint16_t max_points,
+                                 uint16_t *out_count, uint32_t *duty, bool *forward);
+esp_err_t test_query_key_value(const char *query, const char *key, char *val,
+                               size_t val_size);
 
 /* Keep the filesystem writes inside the repository working tree. */
 #define WEB_USERDATA_DIR "web_tmp"
@@ -120,14 +135,26 @@ esp_err_t test_web_hdr_value_str(httpd_req_t *req, const char *field, char *val,
 #define open test_binary_open
 #include "../../components/web/src/web_http.c"
 #include "../../components/web/src/web_log.c"
+#define settings_save_deferred test_settings_save_deferred
 #include "../../components/web/src/web_config.c"
+#undef settings_save_deferred
 #include "../../components/web/src/web_control.c"
+#define audio_voice_play_owned test_audio_voice_play_owned
 #include "../../components/web/src/web_func.c"
+#undef audio_voice_play_owned
 #include "../../components/web/src/web_func_api.c"
 #include "../../components/web/src/web_graph_api.c"
+#define motor_bemf_cal_log_copy test_bemf_log_copy
+#define motor_bemf_wave_capture test_bemf_wave_capture
+#define httpd_query_key_value test_query_key_value
 #include "../../components/web/src/web_bemf_api.c"
+#undef motor_bemf_cal_log_copy
+#undef motor_bemf_wave_capture
+#undef httpd_query_key_value
 #include "../../components/web/src/web_motor_api.c"
+#define web_cfg_lock test_web_cfg_lock
 #include "../../components/web/src/web_settings_api.c"
+#undef web_cfg_lock
 #include "../../components/web/src/web_audio_lib.c"
 #include "../../components/web/src/web_audio_api.c"
 #include "../../components/web/src/web_transfer.c"
@@ -157,6 +184,74 @@ esp_err_t test_web_hdr_value_str(httpd_req_t *req, const char *field, char *val,
 #define sg_store_list sg_store_list_stub
 #include "../../test_libs/teststubs/web_stubs.c"
 #undef sg_store_list
+
+/* Controllable fault injection for the white-box edge-path tests. */
+static int test_epoch_bump_on_aux;
+static int test_epoch_bump_on_play;
+static bool test_cfg_lock_fail;
+static esp_err_t test_deferred_save_err;
+static size_t test_bemf_log_count;
+static motor_bemf_cal_step_log_t test_bemf_log_entries[MOTOR_BEMF_CAL_LOG_MAX];
+static esp_err_t test_bemf_wave_ret;
+static uint16_t test_bemf_wave_count;
+static uint16_t test_bemf_wave_last_step_us;
+static uint16_t test_bemf_wave_last_duration_ms;
+
+esp_err_t test_settings_save_deferred(const settings_config_t *cfg)
+{
+    esp_err_t err = settings_save_deferred(cfg);
+    return test_deferred_save_err != ESP_OK ? test_deferred_save_err : err;
+}
+
+bool test_web_cfg_lock(TickType_t wait)
+{
+    return test_cfg_lock_fail ? false : web_cfg_lock(wait);
+}
+
+esp_err_t test_audio_voice_play_owned(audio_voice_handle_t *handle, const char *path,
+                                      bool loop, uint8_t volume)
+{
+    esp_err_t err = audio_voice_play_owned(handle, path, loop, volume);
+    if (test_epoch_bump_on_play > 0) {
+        --test_epoch_bump_on_play;
+        web_control_safety_epoch_bump();
+    }
+    return err;
+}
+
+size_t test_bemf_log_copy(motor_bemf_cal_step_log_t *out, size_t max)
+{
+    size_t n = test_bemf_log_count < max ? test_bemf_log_count : max;
+    if (out != NULL && n > 0U) memcpy(out, test_bemf_log_entries, n * sizeof(out[0]));
+    return n;
+}
+
+esp_err_t test_bemf_wave_capture(uint16_t step_us, uint16_t duration_ms,
+                                 motor_bemf_wave_point_t *points, uint16_t max_points,
+                                 uint16_t *out_count, uint32_t *duty, bool *forward)
+{
+    test_bemf_wave_last_step_us = step_us;
+    test_bemf_wave_last_duration_ms = duration_ms;
+    if (test_bemf_wave_ret != ESP_OK) return test_bemf_wave_ret;
+    uint16_t n = test_bemf_wave_count < max_points ? test_bemf_wave_count : max_points;
+    if (points != NULL) {
+        for (uint16_t i = 0; i < n; ++i) {
+            points[i].us = (uint16_t)(100U + i);
+            points[i].b1_mv = (uint16_t)(1000U + i);
+            points[i].b2_mv = (uint16_t)(900U + i);
+        }
+    }
+    if (out_count != NULL) *out_count = n;
+    if (duty != NULL) *duty = 321U;
+    if (forward != NULL) *forward = true;
+    return ESP_OK;
+}
+
+esp_err_t test_query_key_value(const char *query, const char *key, char *val,
+                               size_t val_size)
+{
+    return parse_query(query, key, val, val_size) ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
 
 /* web_stubs.c lists a single fixed "demo" project. The reference action needs
  * the built-in project to be present, so retain the shared mock implementation
@@ -226,6 +321,10 @@ esp_err_t test_sound_inhibit(bool inhibited)
 }
 esp_err_t test_aux_enabled(uint8_t channel, bool enabled)
 {
+    if (test_epoch_bump_on_aux > 0) {
+        --test_epoch_bump_on_aux;
+        web_control_safety_epoch_bump();
+    }
     return test_aux_enable_err != ESP_OK ? test_aux_enable_err : auxio_set_enabled(channel, enabled);
 }
 esp_err_t test_async_complete(httpd_req_t *req)
@@ -455,6 +554,16 @@ void setUp(void)
     mock_task_startup_hook = NULL;
     mock_sem_take_fail = 0;
     mock_mutex_create_fail = 0;
+    test_epoch_bump_on_aux = 0;
+    test_epoch_bump_on_play = 0;
+    test_cfg_lock_fail = false;
+    test_deferred_save_err = ESP_OK;
+    test_bemf_log_count = 0;
+    memset(test_bemf_log_entries, 0, sizeof(test_bemf_log_entries));
+    test_bemf_wave_ret = ESP_OK;
+    test_bemf_wave_count = 0;
+    test_bemf_wave_last_step_us = 0;
+    test_bemf_wave_last_duration_ms = 0;
     mock_timer_now_us = 0;
     mock_motor_emergency_stop_calls = 0;
     memset(&test_ap_config, 0, sizeof(test_ap_config));
@@ -1699,6 +1808,69 @@ static void test_web_deadman_same_client_heartbeat_keeps_alive(void)
     TEST_ASSERT_EQUAL_INT(1, mock_motor_set_speed_calls);
 }
 
+static void test_deadman_clear_and_seed(void)
+{
+    web_control_set_clean_stop_cb(NULL);
+    web_control_deadman_clear_client();
+
+    s_cfg.control_source = 1;
+    s_deadman_speed = 0;
+    s_deadman_client_ip = 0;
+    mock_motor_applied_speed = 10;
+    mock_motor_forward = true;
+    mock_timer_now_us = 5000;
+    TEST_ASSERT_FALSE(web_control_deadman_tick());
+    TEST_ASSERT_EQUAL_UINT8(10, s_deadman_speed);
+    TEST_ASSERT_TRUE(s_deadman_forward);
+
+    s_deadman_speed = 0;
+    s_deadman_client_ip = 0;
+    mock_motor_applied_speed = 0;
+}
+
+static void test_set_actuation_ready_maintenance_and_inhibit_fail(void)
+{
+    s_maintenance_owner = (TaskHandle_t)2;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, web_set_actuation_ready(true));
+    s_maintenance_owner = NULL;
+
+    mock_audio_inhibit_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, web_set_actuation_ready(false));
+    TEST_ASSERT_FALSE(web_actuation_ready());
+    mock_audio_inhibit_ret = 0;
+    s_actuation_ready = true;
+}
+
+static void test_maintenance_reserve_stopped_guard(void)
+{
+    s_actuation_ready = false;
+    s_maintenance_owner = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, web_control_maintenance_reserve(true));
+    TEST_ASSERT_FALSE(web_maintenance_active());
+    s_actuation_ready = true;
+}
+
+static void test_maintenance_end_init_and_take_fail(void)
+{
+    s_maintenance_owner = (TaskHandle_t)1; /* current task handle */
+    s_maintenance_exclusive_fs = false;
+    s_control_mutex = NULL;
+    mock_mutex_create_fail = 1;
+    web_maintenance_end();
+    TEST_ASSERT_NULL(s_maintenance_owner);
+    TEST_ASSERT_FALSE(web_actuation_ready());
+    mock_mutex_create_fail = 0;
+    s_control_mutex = (SemaphoreHandle_t)1;
+
+    s_maintenance_owner = (TaskHandle_t)1;
+    mock_sem_take_fail = 1;
+    web_maintenance_end();
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_NOT_NULL(s_maintenance_owner);
+    s_maintenance_owner = NULL;
+    s_actuation_ready = true;
+}
+
 static void test_mode_get(void)
 {
     httpd_req_t req = make_req(0);
@@ -2044,6 +2216,147 @@ static void test_bemf_mode_queries_and_actuation_gates(void)
     TEST_ASSERT_EQUAL_INT(0, mock_bemf_cal_cancel_calls);
 }
 
+static void test_bemf_name_defaults(void)
+{
+    TEST_ASSERT_EQUAL_STRING("failed", bemf_result_name((motor_bemf_cal_state_t)99));
+    TEST_ASSERT_EQUAL_STRING("idle", bemf_phase_name(99));
+    TEST_ASSERT_EQUAL_STRING("start", bemf_error_name((motor_bemf_cal_error_t)99));
+}
+
+static void test_bemf_cal_get_windows_and_steps(void)
+{
+    httpd_req_t req = make_req(0);
+    memset(&mock_bemf_cal_info, 0, sizeof(mock_bemf_cal_info));
+    mock_bemf_cal_info.profile.window_count = 2;
+    mock_bemf_cal_info.profile.window_us[0] = 111;
+    mock_bemf_cal_info.profile.window_frac[0] = 512;
+    mock_bemf_cal_info.profile.window_us[1] = 222;
+    mock_bemf_cal_info.profile.window_frac[1] = 1024;
+
+    test_bemf_log_count = 2;
+    memset(test_bemf_log_entries, 0, sizeof(test_bemf_log_entries));
+    test_bemf_log_entries[0].step = 1;
+    test_bemf_log_entries[0].duty = 200;
+    test_bemf_log_entries[0].speed = 5;
+    test_bemf_log_entries[0].rail_mv = 10000;
+    test_bemf_log_entries[0].b1_mv = 1200;
+    test_bemf_log_entries[0].b2_mv = 1100;
+    test_bemf_log_entries[0].diff_mv = 100;
+    test_bemf_log_entries[0].frac = 512;
+    test_bemf_log_entries[0].quality = 77;
+    test_bemf_log_entries[0].state = MOTOR_BEMF_CAL_STEP_NO_SIGNAL;
+    test_bemf_log_entries[1].step = 2;
+    test_bemf_log_entries[1].frac = 1024;
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"windows\":[{\"us\":111"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"us\":222"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"steps\":[{\"s\":1"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"s\":2"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"q\":77"));
+}
+
+static void test_bemf_cal_get_alloc_failure(void)
+{
+    httpd_req_t req = make_req(0);
+    reset_resp();
+    mock_alloc_fail_at = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_get(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+}
+
+static void test_bemf_cal_post_apply_pid_values(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_bemf_cal_start_ret = ESP_OK;
+
+    reset_resp();
+    set_query("start=1&apply_pid=yes");
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_TRUE(mock_bemf_cal_config.apply_pid);
+
+    reset_resp();
+    set_query("start=1&apply_pid=no");
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_FALSE(mock_bemf_cal_config.apply_pid);
+
+    reset_resp();
+    set_query("start=1&apply_pid=0");
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_FALSE(mock_bemf_cal_config.apply_pid);
+
+    reset_resp();
+    set_query("start=1&apply_pid=maybe");
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+}
+
+static void test_bemf_cal_post_invalid_profile_error(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_bemf_cal_start_ret = ESP_ERR_INVALID_ARG;
+    set_query("start=1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_cal_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "invalid profile"));
+    mock_bemf_cal_start_ret = ESP_OK;
+}
+
+static void test_bemf_window_query_and_paths(void)
+{
+    httpd_req_t req = make_req(0);
+    s_maintenance_owner = NULL;
+    s_actuation_ready = false;
+    set_query("");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control unavailable"));
+
+    s_actuation_ready = true;
+    mock_motor_applied_speed = 0;
+    test_bemf_wave_ret = ESP_OK;
+    test_bemf_wave_count = 0;
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_EQUAL_UINT16(100, test_bemf_wave_last_step_us);
+    TEST_ASSERT_EQUAL_UINT16(20, test_bemf_wave_last_duration_ms);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"duty\":321"));
+
+    set_query("ms=10&step=40");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_EQUAL_UINT16(40, test_bemf_wave_last_step_us);
+    TEST_ASSERT_EQUAL_UINT16(10, test_bemf_wave_last_duration_ms);
+
+    set_query("ms=40&step=10");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_EQUAL_UINT16(100, test_bemf_wave_last_step_us);
+    TEST_ASSERT_EQUAL_UINT16(20, test_bemf_wave_last_duration_ms);
+
+    test_bemf_wave_ret = ESP_FAIL;
+    set_query("");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "capture failed"));
+
+    test_bemf_wave_ret = ESP_OK;
+    test_bemf_wave_count = 2;
+    mock_alloc_fail_at = 0;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+
+    mock_alloc_fail_at = -1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, bemf_window_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"us\":100"));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"b1\":1000"));
+    test_bemf_wave_count = 0;
+}
+
 static void test_motor_get_post(void)
 {
     httpd_req_t req = make_req(0);
@@ -2108,6 +2421,95 @@ static void test_motor_duty_rejected_while_moving(void)
     mock_motor_applied_speed = 0;
     s_actuation_ready = true;
     reset_resp();
+}
+
+static void test_motor_ui_mode_names(void)
+{
+    TEST_ASSERT_EQUAL_STRING("idle", motor_ui_mode_name(MOTOR_UI_IDLE));
+    TEST_ASSERT_EQUAL_STRING("start", motor_ui_mode_name(MOTOR_UI_START));
+    TEST_ASSERT_EQUAL_STRING("accel", motor_ui_mode_name(MOTOR_UI_ACCEL));
+    TEST_ASSERT_EQUAL_STRING("decel", motor_ui_mode_name(MOTOR_UI_DECEL));
+    TEST_ASSERT_EQUAL_STRING("cruise", motor_ui_mode_name(MOTOR_UI_CRUISE));
+    TEST_ASSERT_EQUAL_STRING("reverse", motor_ui_mode_name(MOTOR_UI_REVERSE));
+    TEST_ASSERT_EQUAL_STRING("inhibited", motor_ui_mode_name(MOTOR_UI_INHIBITED));
+    TEST_ASSERT_EQUAL_STRING("no_tick", motor_ui_mode_name(MOTOR_UI_NO_TICK));
+    TEST_ASSERT_EQUAL_STRING("unknown", motor_ui_mode_name(MOTOR_UI_UNKNOWN));
+    TEST_ASSERT_EQUAL_STRING("unknown", motor_ui_mode_name((motor_ui_mode_t)99));
+}
+
+static void test_motor_get_mode_variants(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.rail_offset_mv = 10;
+    mock_motor_last_tick_us = 1;
+    mock_timer_now_us = 1000;
+    mock_motor_forward = true;
+
+    mock_motor_speed = 30;
+    mock_motor_applied_speed = 10;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"modeName\":\"accel\""));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"railTrackMv\":16010"));
+
+    mock_motor_speed = 10;
+    mock_motor_applied_speed = 30;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"modeName\":\"decel\""));
+
+    mock_motor_speed = 20;
+    mock_motor_applied_speed = 20;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"modeName\":\"cruise\""));
+
+    mock_motor_applied_speed = 0;
+    mock_motor_speed = 0;
+    s_cfg.rail_offset_mv = 0;
+    mock_timer_now_us = 0;
+    reset_resp();
+}
+
+static void test_motor_post_control_guards(void)
+{
+    httpd_req_t req = make_req(0);
+    set_query("speed=10&forward=1");
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control busy"));
+
+    mock_sem_take_fail = 0;
+    s_actuation_ready = true;
+    s_cfg.control_source = 0;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control unavailable"));
+    s_cfg.control_source = 1;
+}
+
+static void test_motor_duty_post_guards(void)
+{
+    httpd_req_t req = make_req(0);
+    set_query("duty=abc");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_duty_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("duty=100&ms=100");
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_duty_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control busy"));
+
+    mock_sem_take_fail = 0;
+    s_cfg.control_source = 1;
+    s_actuation_ready = false;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_duty_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control unavailable"));
+    s_actuation_ready = true;
 }
 
 static void test_functions_get(void)
@@ -3339,6 +3741,401 @@ static void test_web_func_map_set_preserves_sound_bindings(void)
     TEST_ASSERT_EQUAL_UINT8(FUNC_TARGET_OUTPUT, s_func_bind[0].target_type);
 }
 
+static void test_web_voice_volume_lock_fallback(void)
+{
+    s_cfg.engine_volume = 80;
+    s_cfg.effects_volume = 40;
+    s_track_cat_loaded = true;
+    s_track_cat[0] = SETTINGS_TRACK_CAT_ENGINE;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL_UINT8(80, web_get_voice_volume(1));
+    mock_sem_take_fail = 0;
+}
+
+static void test_func_bind_migrate_keeps_sound_binding(void)
+{
+    memset(mock_binds, 0, sizeof(mock_binds));
+    mock_binds[0].used = 1;
+    mock_binds[0].fn = 2;
+    mock_binds[0].target_type = FUNC_TARGET_SOUND;
+    mock_binds[0].target_id = 5;
+    mock_binds_count = 1;
+    mock_bind_load_ret = ESP_ERR_NOT_FOUND;
+
+    memset(s_func_map, 0, sizeof(s_func_map));
+    s_func_map[1].aux_mask = SETTINGS_FUNC_OUT_F0F;
+    s_func_bind_count = 1;
+    s_func_bind_present = false;
+
+    TEST_ASSERT_EQUAL(ESP_OK, func_bind_load());
+    TEST_ASSERT_EQUAL_UINT32(2, s_func_bind_count);
+    TEST_ASSERT_TRUE(s_func_bind_present);
+    bool found = false;
+    for (size_t i = 0; i < s_func_bind_count; ++i) {
+        if (s_func_bind[i].target_type == FUNC_TARGET_SOUND &&
+            s_func_bind[i].target_id == 5) {
+            found = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found);
+}
+
+static void test_func_bind_load_error_clears(void)
+{
+    mock_bind_load_ret = ESP_FAIL;
+    s_func_bind_count = 5;
+    s_func_bind_present = false;
+    TEST_ASSERT_EQUAL(ESP_FAIL, func_bind_load());
+    TEST_ASSERT_EQUAL_UINT32(0, s_func_bind_count);
+    TEST_ASSERT_TRUE(s_func_bind_present);
+    mock_bind_load_ret = ESP_ERR_NOT_FOUND;
+}
+
+static void test_func_bind_seed_factory_save_failure(void)
+{
+    mock_bind_save_ret = ESP_FAIL;
+    TEST_ASSERT_FALSE(func_bind_seed_factory());
+    mock_bind_save_ret = 0;
+}
+
+static void test_web_func_init_seeds_empty_store(void)
+{
+    mock_bind_load_ret = ESP_ERR_NOT_FOUND;
+    mock_binds_count = 0;
+    memset(mock_binds, 0, sizeof(mock_binds));
+    mock_bind_version = 0;
+    mock_bind_version_ret = ESP_ERR_NOT_FOUND;
+    mock_bind_save_ret = 0;
+    mock_cats_load_ret = 0;
+    mock_map_load_ret = 0;
+    mock_aux_load_ret = 0;
+    mock_auxio_init_ret = 0;
+    mock_mutex_create_fail = 0;
+    memset(mock_map, 0, sizeof(mock_map));
+    mock_map_count = 0;
+    memset(s_func_map, 0, sizeof(s_func_map));
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
+    s_func_bind_present = false;
+    s_func_mutex = NULL;
+
+    unsigned saves_before = mock_bind_save_calls;
+    TEST_ASSERT_EQUAL(ESP_OK, web_func_init());
+    TEST_ASSERT_TRUE(s_func_bind_count > 0U);
+    TEST_ASSERT_TRUE(s_func_bind_present);
+    TEST_ASSERT_TRUE(mock_bind_save_calls > saves_before);
+
+    mock_bind_version = SETTINGS_FUNC_BIND_VERSION;
+    mock_bind_version_ret = ESP_OK;
+}
+
+static void test_func_var_resolve_and_logic_callback(void)
+{
+    memset(s_func_map, 0, sizeof(s_func_map));
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 2;
+    s_func_bind_present = true;
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[0].target_id = AUXIO_CH_AUX1;
+    s_func_bind[0].dir = FUNC_DIR_ANY;
+    s_func_bind[0].state = FUNC_STATE_ANY;
+    s_func_bind[0].flags = FUNC_FLAG_COND;
+    s_func_bind[0].short_table = 1;
+    s_func_bind[0].short_ms = 0; /* compare op 0 (==) */
+    s_func_bind[0].min_ms = 0;
+    s_func_bind[1].used = 1;
+    s_func_bind[1].fn = 1;
+    s_func_bind[1].target_type = FUNC_TARGET_SOUND;
+    s_func_bind[1].target_id = 1;
+    s_func_bind[1].dir = FUNC_DIR_ANY;
+    s_func_bind[1].state = FUNC_STATE_ANY;
+
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    memset(s_fn, 0, sizeof(s_fn));
+    s_actuation_ready = true;
+    s_maintenance_owner = NULL;
+    s_motion_initialized = true;
+    s_motion_speed = 0;
+    s_motion_forward = true;
+
+    web_apply_function(1, true);
+    TEST_ASSERT_TRUE(s_fn[1]);
+    TEST_ASSERT_EQUAL_INT(1, mock_auxio_enabled_state[AUXIO_CH_AUX1]);
+}
+
+static void test_web_motion_changed_lock_busy(void)
+{
+    s_actuation_ready = true;
+    s_maintenance_owner = NULL;
+    s_motion_initialized = false;
+    s_motion_speed = 0;
+    s_motion_forward = true;
+    mock_sem_take_fail = 1;
+    web_motion_changed(7, true);
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_EQUAL_UINT8(0, s_motion_speed);
+    TEST_ASSERT_FALSE(s_motion_initialized);
+}
+
+static void test_web_motion_changed_epoch_after_apply(void)
+{
+    memset(s_func_map, 0, sizeof(s_func_map));
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 1;
+    s_func_bind_present = true;
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[0].target_id = AUXIO_CH_AUX1;
+    s_func_bind[0].dir = FUNC_DIR_ANY;
+    s_func_bind[0].state = FUNC_STATE_ANY;
+
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    memset(s_fn, 0, sizeof(s_fn));
+    s_fn[1] = true;
+    s_actuation_ready = true;
+    s_maintenance_owner = NULL;
+    s_motion_initialized = false;
+    s_motion_speed = 0;
+    s_motion_forward = true;
+
+    test_epoch_bump_on_aux = 1;
+    web_motion_changed(10, true);
+    TEST_ASSERT_EQUAL_UINT8(0, s_motion_speed);
+    TEST_ASSERT_TRUE(s_motion_forward);
+    TEST_ASSERT_TRUE(s_motion_initialized);
+    TEST_ASSERT_EQUAL_UINT16(0, s_outputs_applied);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_AUX1]);
+}
+
+static void test_web_apply_function_lock_busy(void)
+{
+    s_actuation_ready = true;
+    s_maintenance_owner = NULL;
+    s_fn[2] = false;
+    mock_sem_take_fail = 1;
+    web_apply_function(2, true);
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_FALSE(s_fn[2]);
+}
+
+static void test_web_apply_function_epoch_after_outputs(void)
+{
+    memset(s_func_map, 0, sizeof(s_func_map));
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 1;
+    s_func_bind_present = true;
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_OUTPUT;
+    s_func_bind[0].target_id = AUXIO_CH_AUX1;
+    s_func_bind[0].dir = FUNC_DIR_ANY;
+    s_func_bind[0].state = FUNC_STATE_ANY;
+
+    memset(mock_auxio_enabled_state, 0, sizeof(mock_auxio_enabled_state));
+    s_outputs_applied = 0;
+    memset(s_fn, 0, sizeof(s_fn));
+    s_actuation_ready = true;
+    s_maintenance_owner = NULL;
+    s_motion_initialized = true;
+    s_motion_speed = 0;
+    s_motion_forward = true;
+
+    test_epoch_bump_on_aux = 1;
+    web_apply_function(1, true);
+    TEST_ASSERT_FALSE(s_fn[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, s_outputs_applied);
+    TEST_ASSERT_EQUAL_INT(0, mock_auxio_enabled_state[AUXIO_CH_AUX1]);
+}
+
+static void test_web_apply_function_epoch_after_sound(void)
+{
+    memset(s_func_map, 0, sizeof(s_func_map));
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
+    s_func_bind_present = false;
+    s_func_map[1].slot_a = 3;
+    s_func_map[1].slot_b = 0;
+    s_func_map[1].aux_mask = 0;
+    s_func_map[1].dir = SETTINGS_FUNC_DIR_NONE;
+    s_func_map[1].speed = SETTINGS_FUNC_SPD_NONE;
+
+    mock_sound_scheme_enabled = 0;
+    mock_tracks_count = 1;
+    mock_tracks[0].slot = 3;
+    mock_tracks[0].enabled = true;
+    snprintf(mock_tracks[0].file, sizeof(mock_tracks[0].file), "audio/slot3.wav");
+    mock_tracks_load_ret = 0;
+    func_tracks_cache_refresh();
+
+    memset(s_fn, 0, sizeof(s_fn));
+    s_actuation_ready = true;
+    s_maintenance_owner = NULL;
+    s_motion_initialized = true;
+    s_motion_speed = 0;
+    s_motion_forward = true;
+
+    test_epoch_bump_on_play = 1;
+    web_apply_function(1, true);
+    TEST_ASSERT_FALSE(s_fn[1]);
+}
+
+static void test_web_func_bind_commit_lock_busy(void)
+{
+    func_binding_t b;
+    memset(&b, 0, sizeof(b));
+    b.used = 1;
+    b.fn = 1;
+    b.target_type = FUNC_TARGET_OUTPUT;
+    b.target_id = AUXIO_CH_F0F;
+    s_func_mutex = (SemaphoreHandle_t)1;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_FALSE(web_func_bind_add(&b));
+    mock_sem_take_fail = 0;
+}
+
+static void test_web_func_bind_commit_rollback(void)
+{
+    func_binding_t b;
+    memset(&b, 0, sizeof(b));
+    b.used = 1;
+    b.fn = 1;
+    b.target_type = FUNC_TARGET_SOUND;
+    b.target_id = 1;
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
+    s_func_bind_present = false;
+    s_func_mutex = NULL;
+    mock_bind_save_ret = ESP_FAIL;
+    TEST_ASSERT_FALSE(web_func_bind_add(&b));
+    TEST_ASSERT_EQUAL_UINT32(0, s_func_bind_count);
+    TEST_ASSERT_FALSE(s_func_bind_present);
+    mock_bind_save_ret = 0;
+    s_func_mutex = (SemaphoreHandle_t)1;
+}
+
+static void test_web_func_lock_busy_snapshots(void)
+{
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL_UINT32(0, web_func_levels());
+
+    uint16_t outputs = 1, logic = 1;
+    uint32_t functions = 1;
+    web_func_io_state(&outputs, &logic, &functions);
+    TEST_ASSERT_EQUAL_UINT16(0, outputs);
+    TEST_ASSERT_EQUAL_UINT16(0, logic);
+    TEST_ASSERT_EQUAL_UINT32(0, functions);
+
+    bool states[WEB_FN_COUNT];
+    memset(states, 1, sizeof(states));
+    web_func_states(states);
+    for (size_t i = 0; i < WEB_FN_COUNT; ++i) TEST_ASSERT_FALSE(states[i]);
+
+    TEST_ASSERT_EQUAL_UINT32(0, web_func_bind_count_get());
+    func_binding_t b;
+    TEST_ASSERT_FALSE(web_func_bind_at(0, &b));
+
+    settings_aux_cfg_t aux[SETTINGS_AUX_COUNT];
+    memset(aux, 0xFF, sizeof(aux));
+    web_func_aux_snapshot(aux);
+    for (size_t i = 0; i < SETTINGS_AUX_COUNT; ++i) {
+        TEST_ASSERT_EQUAL_UINT8(0, aux[i].level);
+        TEST_ASSERT_EQUAL_UINT8(0, aux[i].effect);
+    }
+    mock_sem_take_fail = 0;
+}
+
+static void test_web_func_tracks_not_found(void)
+{
+    mock_tracks_load_ret = ESP_ERR_NOT_FOUND;
+    func_tracks_cache_refresh();
+    TEST_ASSERT_EQUAL_UINT32(0, s_func_tracks_count);
+    TEST_ASSERT_TRUE(s_func_tracks_valid);
+    mock_tracks_load_ret = 0;
+}
+
+static void test_web_func_reconcile_slots_prunes(void)
+{
+    bool slots[SETTINGS_MAX_TRACKS + 1] = { false };
+    slots[2] = true;
+    memset(s_func_map, 0, sizeof(s_func_map));
+    s_func_map[0].slot_a = 5;
+    s_func_map[0].slot_b = (uint8_t)(SETTINGS_MAX_TRACKS + 1);
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 2;
+    s_func_bind[0].used = 1;
+    s_func_bind[0].fn = 1;
+    s_func_bind[0].target_type = FUNC_TARGET_SLOT;
+    s_func_bind[0].target_id = 5;
+    s_func_bind[1].used = 1;
+    s_func_bind[1].fn = 1;
+    s_func_bind[1].target_type = FUNC_TARGET_SLOT;
+    s_func_bind[1].target_id = 2;
+    mock_map_save_ret = 0;
+    mock_bind_save_ret = 0;
+    s_func_mutex = (SemaphoreHandle_t)1;
+    unsigned map_saves = (unsigned)mock_map_save_calls;
+    unsigned bind_saves = (unsigned)mock_bind_save_calls;
+
+    TEST_ASSERT_EQUAL(ESP_OK, web_func_reconcile_slots(slots));
+    TEST_ASSERT_EQUAL_UINT8(0, s_func_map[0].slot_a);
+    TEST_ASSERT_EQUAL_UINT8(0, s_func_map[0].slot_b);
+    TEST_ASSERT_EQUAL_UINT32(1, s_func_bind_count);
+    TEST_ASSERT_EQUAL_UINT8(2, s_func_bind[0].target_id);
+    TEST_ASSERT_EQUAL_UINT32(map_saves + 1U, (unsigned)mock_map_save_calls);
+    TEST_ASSERT_EQUAL_UINT32(bind_saves + 1U, (unsigned)mock_bind_save_calls);
+}
+
+static void test_web_func_reconcile_slots_lock_busy(void)
+{
+    bool slots[SETTINGS_MAX_TRACKS + 1] = { false };
+    s_func_mutex = (SemaphoreHandle_t)1;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, web_func_reconcile_slots(slots));
+    mock_sem_take_fail = 0;
+}
+
+static void test_web_func_reconcile_slots_rollback(void)
+{
+    bool slots[SETTINGS_MAX_TRACKS + 1] = { false };
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
+    s_func_mutex = (SemaphoreHandle_t)1;
+
+    memset(s_func_map, 0, sizeof(s_func_map));
+    s_func_map[0].slot_a = 5;
+    mock_map_save_ret = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, web_func_reconcile_slots(slots));
+    TEST_ASSERT_EQUAL_UINT8(5, s_func_map[0].slot_a);
+
+    memset(s_func_map, 0, sizeof(s_func_map));
+    s_func_map[0].slot_a = 5;
+    s_func_mutex = NULL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, web_func_reconcile_slots(slots));
+    TEST_ASSERT_EQUAL_UINT8(5, s_func_map[0].slot_a);
+
+    s_func_mutex = (SemaphoreHandle_t)1;
+    mock_map_save_ret = 0;
+}
+
+static void test_web_func_slots_referenced_map_branch(void)
+{
+    bool used[SETTINGS_MAX_TRACKS + 1] = { false };
+    memset(s_func_bind, 0, sizeof(s_func_bind));
+    s_func_bind_count = 0;
+    memset(s_func_map, 0, sizeof(s_func_map));
+    s_func_map[0].slot_b = 3;
+    s_func_mutex = (SemaphoreHandle_t)1;
+    used[3] = true;
+    TEST_ASSERT_TRUE(web_func_slots_referenced(used));
+    used[3] = false;
+    TEST_ASSERT_FALSE(web_func_slots_referenced(used));
+}
+
 /* ---------- small branch gaps ---------- */
 
 static void test_utf8_four_byte_and_outputs_init(void)
@@ -3736,6 +4533,349 @@ static void test_device_get_post(void)
     reset_resp();
     TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
     TEST_ASSERT_EQUAL_STRING("NewName", s_cfg.device_name);
+}
+
+static void test_control_source_post_invalid_and_mode_read_fail(void)
+{
+    httpd_req_t req = make_req(0);
+    s_cfg.control_source = 1;
+
+    set_query("source=pwm");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    mock_cv_read_ret = ESP_FAIL;
+    set_query("source=rails");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "mode read failed"));
+    TEST_ASSERT_EQUAL_UINT8(1, s_cfg.control_source);
+    mock_cv_read_ret = 0;
+}
+
+static void test_mode_post_guards(void)
+{
+    httpd_req_t req = make_req(0);
+
+    set_query("mode=bogus");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mode_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("mode=dc");
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mode_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "control busy"));
+    mock_sem_take_fail = 0;
+
+    s_maintenance_owner = (TaskHandle_t)2;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mode_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "maintenance"));
+    s_maintenance_owner = NULL;
+}
+
+static void test_settings_config_busy_guards(void)
+{
+    httpd_req_t req = make_req(0);
+
+    mock_sem_take_fail = 1;
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_reset_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    set_query("connect=0");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    set_query("dbm=10");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    set_query("ap_ssid=AP");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+
+    mock_sem_take_fail = 0;
+
+    /* The control lease is separate from the config lock: only the latter is
+     * made to fail here. */
+    test_cfg_lock_fail = true;
+    set_query("source=web");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, control_source_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+    test_cfg_lock_fail = false;
+    set_query("");
+}
+
+static void test_cv_write_commit_failure(void)
+{
+    httpd_req_t req = make_req(0);
+    mock_cv_commit_ret = ESP_FAIL;
+    mock_motor_applied_speed = 0;
+    set_query("index=1&value=5&commit=1");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, cv_write_post(&req));
+    TEST_ASSERT_EQUAL_INT(1, mock_cv_commit_calls);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"ok\":false"));
+    mock_cv_commit_ret = 0;
+}
+
+static void test_wifi_get_status_variants(void)
+{
+    httpd_req_t req = make_req(0);
+    s_wifi_started = true;
+
+    s_cfg.wifi_role = 0;
+    s_sta_connected = false;
+    s_ap_active = false;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"ap_running\""));
+
+    s_cfg.wifi_role = 1;
+    s_sta_connected = true;
+    s_ap_active = false;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"sta_running\""));
+
+    s_sta_connected = false;
+    s_ap_active = true;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"ap_fallback\""));
+
+    s_ap_active = false;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_get(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"status\":\"sta_waiting\""));
+
+    s_wifi_started = false;
+    s_cfg.wifi_role = 0;
+}
+
+static void test_wifi_post_validation_and_errors(void)
+{
+    httpd_req_t req = make_req(0);
+    char long65[66];
+    char q[128];
+    memset(long65, 'A', sizeof(long65) - 1U);
+    long65[sizeof(long65) - 1U] = '\0';
+
+    set_query("");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    snprintf(q, sizeof(q), "ap_ssid=%s", long65);
+    set_query(q);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_send_err_msg, "invalid SSID"));
+
+    snprintf(q, sizeof(q), "ap_password=%s", long65);
+    set_query(q);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_send_err_msg, "invalid password"));
+
+    snprintf(q, sizeof(q), "ap_ip=%s", long65);
+    set_query(q);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_send_err_msg, "invalid IP"));
+
+    s_maintenance_owner = (TaskHandle_t)2;
+    set_query("ap_ssid=AP");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "maintenance busy"));
+    s_maintenance_owner = NULL;
+
+    mock_settings_save_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_settings_save_ret = 0;
+    set_query("");
+}
+
+static void test_wifi_tx_post_errors(void)
+{
+    httpd_req_t req = make_req(0);
+
+    set_query("");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("dbm=%zz");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("dbm=10");
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+    mock_sem_take_fail = 0;
+
+    test_deferred_save_err = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    test_deferred_save_err = ESP_OK;
+
+    s_wifi_started = true;
+    mock_wifi_set_max_tx_power_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_tx_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "tx power not applied"));
+    mock_wifi_set_max_tx_power_ret = 0;
+    s_wifi_started = false;
+    set_query("");
+}
+
+static void test_wifi_sta_post_errors(void)
+{
+    httpd_req_t req = make_req(0);
+    char z64[65];
+    char q[128];
+    memset(z64, 'z', sizeof(z64) - 1U);
+    z64[sizeof(z64) - 1U] = '\0';
+
+    set_query("");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("connect=1&ssid=Home&password=%zz");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("connect=1&ssid=Home");
+    mock_sem_take_fail = 1;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "config busy"));
+    mock_sem_take_fail = 0;
+
+    snprintf(q, sizeof(q), "connect=1&ssid=Home&password=%s", z64);
+    set_query(q);
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_send_err_msg, "PSK must be hex"));
+
+    s_maintenance_owner = (TaskHandle_t)2;
+    set_query("connect=1&ssid=Home");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "maintenance busy"));
+    s_maintenance_owner = NULL;
+
+    mock_settings_save_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_sta_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_settings_save_ret = 0;
+    set_query("");
+}
+
+static void test_wifi_reset_and_factory_errors(void)
+{
+    httpd_req_t req = make_req(0);
+
+    s_maintenance_owner = (TaskHandle_t)2;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_reset_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "maintenance busy"));
+
+    s_maintenance_owner = NULL;
+    mock_settings_save_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, wifi_reset_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_settings_save_ret = 0;
+
+    s_maintenance_owner = (TaskHandle_t)2;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, factory_reset_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "maintenance busy"));
+
+    s_maintenance_owner = NULL;
+    mock_factory_reset_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, factory_reset_post(&req));
+    TEST_ASSERT_EQUAL_STRING("500 Internal Server Error", mock_resp_status);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "reset failed"));
+    mock_factory_reset_ret = 0;
+    s_actuation_ready = true;
+}
+
+static void test_device_post_rail_offset(void)
+{
+    httpd_req_t req = make_req(0);
+
+    mock_settings_save_ret = ESP_FAIL;
+    set_query("name=X");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_settings_save_ret = 0;
+
+    set_query("rail_offset=abc");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("rail_offset=6000");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("rail_offset=250");
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
+    TEST_ASSERT_EQUAL_UINT16(250, s_cfg.rail_offset_mv);
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "\"railOffsetMv\":250"));
+
+    mock_settings_save_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, device_post(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "save failed"));
+    mock_settings_save_ret = 0;
+    s_cfg.rail_offset_mv = 0;
+    set_query("");
 }
 
 static void test_storage_get(void)
@@ -5238,6 +6378,12 @@ static esp_err_t test_mutation_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t test_mutation_fail_handler(httpd_req_t *req)
+{
+    (void)req;
+    return ESP_FAIL;
+}
+
 static void test_mutation_dispatch_csrf_guard(void)
 {
     httpd_req_t req = make_req(0);
@@ -5281,6 +6427,87 @@ static void test_mutation_dispatch_csrf_guard(void)
     TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
     TEST_ASSERT_EQUAL_INT(HTTPD_403_FORBIDDEN, mock_resp_send_err_code);
     TEST_ASSERT_EQUAL_INT(3, test_mutation_calls);
+}
+
+static void test_mutation_dispatch_rejects_bad_origin_and_query(void)
+{
+    httpd_req_t req = make_req(0);
+    char big[300];
+    memset(big, 'a', sizeof(big) - 1U);
+    big[sizeof(big) - 1U] = '\0';
+    set_csrf_headers(big, NULL, NULL);
+    TEST_ASSERT_FALSE(request_same_origin(&req));
+    set_csrf_headers(NULL, NULL, NULL);
+
+    s_test_route = (web_route_t){ .uri = "", .method = HTTP_POST,
+        .handler = test_mutation_handler, .admit = WEB_ADMIT_PLAIN };
+    req.user_ctx = &s_test_route;
+
+    memset(mock_query, 'a', WEB_QUERY_MAX);
+    mock_query[WEB_QUERY_MAX] = '\0';
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_400_BAD_REQUEST, mock_resp_send_err_code);
+
+    set_query("");
+    req.user_ctx = NULL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(HTTPD_500_INTERNAL_SERVER_ERROR, mock_resp_send_err_code);
+
+    s_test_route.admit = WEB_ADMIT_TRANSFER;
+    req.user_ctx = &s_test_route;
+    s_up_aborted = true;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "transfer busy"));
+    s_up_aborted = false;
+    set_query("");
+}
+
+static void test_mutation_dispatch_storage_and_maintenance(void)
+{
+    httpd_req_t req = make_req(0);
+    s_test_route = (web_route_t){ .uri = "", .method = HTTP_POST,
+        .handler = test_mutation_handler, .admit = WEB_ADMIT_STORAGE };
+    req.user_ctx = &s_test_route;
+    set_query("");
+    mock_storage_access_ret = 0;
+    int calls = test_mutation_calls;
+
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_EQUAL_INT(calls + 1, test_mutation_calls);
+
+    mock_storage_access_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "storage unavailable or maintenance"));
+    mock_storage_access_ret = 0;
+
+    s_test_route.admit = WEB_ADMIT_MAINTENANCE;
+    s_test_route.handler = test_mutation_fail_handler;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "delete admission failed"));
+    TEST_ASSERT_FALSE(web_maintenance_active());
+
+    s_test_route.admit = WEB_ADMIT_JSON;
+    mock_storage_access_ret = ESP_FAIL;
+    reset_resp();
+    TEST_ASSERT_EQUAL(ESP_OK, mutation_dispatch(&req));
+    TEST_ASSERT_NOT_NULL(strstr(mock_resp_body, "storage unavailable or maintenance"));
+    TEST_ASSERT_EQUAL_STRING("503 Service Unavailable", mock_resp_status);
+    mock_storage_access_ret = 0;
+}
+
+static void test_web_init_alloc_failure(void)
+{
+    s_cfg_mutex = NULL;
+    mock_mutex_create_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, web_init());
+    mock_mutex_create_fail = 0;
+    s_cfg_mutex = (SemaphoreHandle_t)1;
 }
 
 static void seed_graph(void)
@@ -6286,6 +7513,8 @@ int main(void)
     RUN_TEST(test_graph_referenced_uploads_fail_closed);
     RUN_TEST(test_graph_factory_reset_selection_and_failure);
     RUN_TEST(test_mutation_dispatch_csrf_guard);
+    RUN_TEST(test_mutation_dispatch_rejects_bad_origin_and_query);
+    RUN_TEST(test_mutation_dispatch_storage_and_maintenance);
     RUN_TEST(test_named_upload_preserves_persisted_mds_reference);
     RUN_TEST(test_named_replacement_failure_preserves_original);
     RUN_TEST(test_named_slot_rebind_retains_other_project_assets);
@@ -6375,6 +7604,10 @@ int main(void)
     RUN_TEST(test_web_deadman_inactive_in_rails_mode);
     RUN_TEST(test_web_deadman_other_client_cannot_keep_alive);
     RUN_TEST(test_web_deadman_same_client_heartbeat_keeps_alive);
+    RUN_TEST(test_deadman_clear_and_seed);
+    RUN_TEST(test_set_actuation_ready_maintenance_and_inhibit_fail);
+    RUN_TEST(test_maintenance_reserve_stopped_guard);
+    RUN_TEST(test_maintenance_end_init_and_take_fail);
     RUN_TEST(test_mode_get);
     RUN_TEST(test_mode_post);
     RUN_TEST(test_bemf_cal_get);
@@ -6389,8 +7622,18 @@ int main(void)
     RUN_TEST(test_bemf_start_reset_still_gated);
     RUN_TEST(test_bemf_mode_durable_before_runtime);
     RUN_TEST(test_bemf_mode_queries_and_actuation_gates);
+    RUN_TEST(test_bemf_name_defaults);
+    RUN_TEST(test_bemf_cal_get_windows_and_steps);
+    RUN_TEST(test_bemf_cal_get_alloc_failure);
+    RUN_TEST(test_bemf_cal_post_apply_pid_values);
+    RUN_TEST(test_bemf_cal_post_invalid_profile_error);
+    RUN_TEST(test_bemf_window_query_and_paths);
     RUN_TEST(test_motor_get_post);
     RUN_TEST(test_motor_duty_rejected_while_moving);
+    RUN_TEST(test_motor_ui_mode_names);
+    RUN_TEST(test_motor_get_mode_variants);
+    RUN_TEST(test_motor_post_control_guards);
+    RUN_TEST(test_motor_duty_post_guards);
     RUN_TEST(test_functions_get);
     RUN_TEST(test_function_post);
     RUN_TEST(test_function_post_all_f_to_all_aux);
@@ -6448,6 +7691,25 @@ int main(void)
     RUN_TEST(test_logic_bindings_apply_runtime_actions);
     RUN_TEST(test_func_map_post_binding);
     RUN_TEST(test_web_func_map_set_preserves_sound_bindings);
+    RUN_TEST(test_web_voice_volume_lock_fallback);
+    RUN_TEST(test_func_bind_migrate_keeps_sound_binding);
+    RUN_TEST(test_func_bind_load_error_clears);
+    RUN_TEST(test_func_bind_seed_factory_save_failure);
+    RUN_TEST(test_web_func_init_seeds_empty_store);
+    RUN_TEST(test_func_var_resolve_and_logic_callback);
+    RUN_TEST(test_web_motion_changed_lock_busy);
+    RUN_TEST(test_web_motion_changed_epoch_after_apply);
+    RUN_TEST(test_web_apply_function_lock_busy);
+    RUN_TEST(test_web_apply_function_epoch_after_outputs);
+    RUN_TEST(test_web_apply_function_epoch_after_sound);
+    RUN_TEST(test_web_func_bind_commit_lock_busy);
+    RUN_TEST(test_web_func_bind_commit_rollback);
+    RUN_TEST(test_web_func_lock_busy_snapshots);
+    RUN_TEST(test_web_func_tracks_not_found);
+    RUN_TEST(test_web_func_reconcile_slots_prunes);
+    RUN_TEST(test_web_func_reconcile_slots_lock_busy);
+    RUN_TEST(test_web_func_reconcile_slots_rollback);
+    RUN_TEST(test_web_func_slots_referenced_map_branch);
     RUN_TEST(test_utf8_four_byte_and_outputs_init);
     RUN_TEST(test_captive_handler);
     RUN_TEST(test_start_dns_hijack);
@@ -6464,6 +7726,16 @@ int main(void)
     RUN_TEST(test_wifi_scan_get);
     RUN_TEST(test_wifi_and_factory_reset);
     RUN_TEST(test_device_get_post);
+    RUN_TEST(test_control_source_post_invalid_and_mode_read_fail);
+    RUN_TEST(test_mode_post_guards);
+    RUN_TEST(test_settings_config_busy_guards);
+    RUN_TEST(test_cv_write_commit_failure);
+    RUN_TEST(test_wifi_get_status_variants);
+    RUN_TEST(test_wifi_post_validation_and_errors);
+    RUN_TEST(test_wifi_tx_post_errors);
+    RUN_TEST(test_wifi_sta_post_errors);
+    RUN_TEST(test_wifi_reset_and_factory_errors);
+    RUN_TEST(test_device_post_rail_offset);
     RUN_TEST(test_storage_get);
     RUN_TEST(test_task_inputs_and_clientlog);
     RUN_TEST(test_log_get);
@@ -6474,6 +7746,7 @@ int main(void)
     RUN_TEST(test_web_init_clamps_aux);
     RUN_TEST(test_web_init_wifi_on);
     RUN_TEST(test_web_init_server_fail);
+    RUN_TEST(test_web_init_alloc_failure);
     RUN_TEST(test_ota_safe_name_and_slot);
     RUN_TEST(test_ota_stream_read);
     RUN_TEST(test_ota_guards);

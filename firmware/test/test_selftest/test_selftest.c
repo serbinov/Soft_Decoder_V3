@@ -82,7 +82,36 @@ static size_t mock_selftest_fread(void *p, size_t sz, size_t n, FILE *f)
 #include "../../components/selftest/src/selftest.c"
 #undef static
 
+/* Rename the shared NVS stubs so individual opens/erases can be failed. */
+#define nvs_open stub_nvs_open
+#define nvs_erase_key stub_nvs_erase_key
 #include "../../test_libs/teststubs/stubs.c"
+#undef nvs_open
+#undef nvs_erase_key
+
+esp_err_t stub_nvs_open(const char *name, int open_mode, nvs_handle_t *out_handle);
+esp_err_t stub_nvs_erase_key(nvs_handle_t handle, const char *key);
+
+static int g_nvs_open_fail_at; /* 1-based call index, 0 = off */
+static int g_nvs_open_calls;
+static bool g_nvs_erase_not_found;
+
+esp_err_t nvs_open(const char *name, int open_mode, nvs_handle_t *out_handle)
+{
+    ++g_nvs_open_calls;
+    if (g_nvs_open_fail_at > 0 && g_nvs_open_calls == g_nvs_open_fail_at) {
+        return ESP_FAIL;
+    }
+    return stub_nvs_open(name, open_mode, out_handle);
+}
+
+esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
+{
+    if (g_nvs_erase_not_found) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    return stub_nvs_erase_key(handle, key);
+}
 
 /* ---- injectable collaborators ---- */
 static uint32_t g_heap = 100000u;
@@ -376,6 +405,9 @@ void setUp(void)
     mock_nvs_get_u32_err = 0;
     mock_nvs_set_u32_err = 0;
     mock_nvs_u32_corrupt = 0;
+    g_nvs_open_fail_at = 0;
+    g_nvs_open_calls = 0;
+    g_nvs_erase_not_found = false;
     g_aux_set_err = ESP_OK;
     g_aux_set_fail_after = -1;
     g_aux_enabled = false;
@@ -547,6 +579,31 @@ static void test_selftest_nvs_failures(void)
     TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
     TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
     mock_nvs_u32_corrupt = 0;
+}
+
+static void test_selftest_nvs_readonly_reopen_failure(void)
+{
+    selftest_report_t r;
+    /* First open (write) succeeds; the read-back open is refused. */
+    g_nvs_open_fail_at = 2;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
+}
+
+static void test_selftest_nvs_cleanup_open_failure(void)
+{
+    selftest_report_t r;
+    /* Write and read-back opens succeed; the cleanup open is refused. */
+    g_nvs_open_fail_at = 3;
+    TEST_ASSERT_EQUAL_UINT8(5, selftest_run(&r));
+    TEST_ASSERT_EQUAL(SELFTEST_FAIL, state_of(&r, "nvs"));
+}
+
+static void test_selftest_nvs_cleanup_not_found_is_ok(void)
+{
+    /* A scratch key already gone is a successful cleanup, not a failure. */
+    g_nvs_erase_not_found = true;
+    TEST_ASSERT_EQUAL(SELFTEST_PASS, check_nvs());
 }
 
 static void test_selftest_adc_audio_auxio_fail(void)
@@ -792,6 +849,9 @@ int main(void)
     RUN_TEST(test_selftest_heap_and_pinmap_fail);
     RUN_TEST(test_selftest_settings_cv_fail_modes);
     RUN_TEST(test_selftest_nvs_failures);
+    RUN_TEST(test_selftest_nvs_readonly_reopen_failure);
+    RUN_TEST(test_selftest_nvs_cleanup_open_failure);
+    RUN_TEST(test_selftest_nvs_cleanup_not_found_is_ok);
     RUN_TEST(test_selftest_adc_audio_auxio_fail);
     RUN_TEST(test_adc_failure_cannot_be_reported_as_pass);
     RUN_TEST(test_dcc_check_uses_age_and_overruns);

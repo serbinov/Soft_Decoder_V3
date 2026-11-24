@@ -29,7 +29,34 @@ int fsync(int fd); /* MinGW has no fsync(); provided at the bottom */
 #undef static
 #undef xTaskGetCurrentTaskHandle
 
+/* Rename the shared stubs whose failure paths the host tests need to inject. */
+#define esp_flash_read_id stub_esp_flash_read_id
+#define esp_vfs_littlefs_unregister_partition stub_esp_vfs_littlefs_unregister_partition
 #include "../../test_libs/teststubs/stubs.c"
+#undef esp_flash_read_id
+#undef esp_vfs_littlefs_unregister_partition
+
+esp_err_t stub_esp_flash_read_id(esp_flash_t *chip, uint32_t *out_id);
+esp_err_t stub_esp_vfs_littlefs_unregister_partition(const esp_partition_t *partition);
+
+static int g_flash_id_fail;
+static esp_err_t g_unregister_err = ESP_OK;
+
+esp_err_t esp_flash_read_id(esp_flash_t *chip, uint32_t *out_id)
+{
+    if (g_flash_id_fail) {
+        return ESP_FAIL;
+    }
+    return stub_esp_flash_read_id(chip, out_id);
+}
+
+esp_err_t esp_vfs_littlefs_unregister_partition(const esp_partition_t *partition)
+{
+    if (g_unregister_err != ESP_OK) {
+        return g_unregister_err;
+    }
+    return stub_esp_vfs_littlefs_unregister_partition(partition);
+}
 
 #ifdef _WIN32
 int fsync(int fd)
@@ -73,6 +100,8 @@ void setUp(void)
     s_maintenance_owner = NULL;
     s_lifecycle_busy = false;
     g_current_task = (TaskHandle_t)1;
+    g_flash_id_fail = 0;
+    g_unregister_err = ESP_OK;
 
     (void)MKDIR(STORAGE_MOUNT_POINT);
     wipe_bench_file();
@@ -134,6 +163,14 @@ static void test_storage_init_size_probe_fail(void)
     mock_flash_size = 0;
     TEST_ASSERT_EQUAL(ESP_OK, storage_init());
     TEST_ASSERT_EQUAL(STORAGE_BACKEND_NONE, storage_get_backend());
+}
+
+/* A chip whose JEDEC ID cannot be read still mounts with its detected size. */
+static void test_storage_init_jedec_id_read_fail(void)
+{
+    g_flash_id_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(STORAGE_BACKEND_EXTERNAL_NOR, storage_get_backend());
 }
 
 /* ---- mount ---- */
@@ -238,6 +275,32 @@ static void test_storage_erase_chip_fail(void)
     TEST_ASSERT_FALSE(storage_is_mounted());
 }
 
+static void test_storage_erase_chip_unavailable(void)
+{
+    /* Maintenance is drained and owned, but no external NOR was probed. */
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_SUPPORTED, storage_erase_chip(NULL));
+    storage_maintenance_end();
+}
+
+static void test_storage_erase_chip_size_unknown(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+    mock_flash_size = 0; /* get_size succeeds but reports an unusable size */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, storage_erase_chip(NULL));
+}
+
+static void test_storage_erase_chip_unmount_fail(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, storage_init());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_mount());
+    TEST_ASSERT_EQUAL(ESP_OK, storage_maintenance_begin());
+    g_unregister_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, storage_erase_chip(NULL));
+    TEST_ASSERT_TRUE(storage_is_mounted());
+}
+
 /* ---- free bytes ---- */
 
 static void test_storage_free_bytes(void)
@@ -296,6 +359,7 @@ int main(void)
     RUN_TEST(test_storage_init_register_fail);
     RUN_TEST(test_storage_init_small_chip);
     RUN_TEST(test_storage_init_size_probe_fail);
+    RUN_TEST(test_storage_init_jedec_id_read_fail);
     RUN_TEST(test_storage_mount_unavailable);
     RUN_TEST(test_storage_mount_ok_and_idempotent);
     RUN_TEST(test_storage_mount_lfs_fail);
@@ -306,6 +370,9 @@ int main(void)
     RUN_TEST(test_storage_erase_chip_ok);
     RUN_TEST(test_storage_erase_chip_requires_maintenance);
     RUN_TEST(test_storage_erase_chip_fail);
+    RUN_TEST(test_storage_erase_chip_unavailable);
+    RUN_TEST(test_storage_erase_chip_size_unknown);
+    RUN_TEST(test_storage_erase_chip_unmount_fail);
     RUN_TEST(test_storage_free_bytes);
     RUN_TEST(test_format_requires_drained_maintenance);
     return UNITY_END();

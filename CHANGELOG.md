@@ -948,6 +948,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-25 (v0.32) — test: raise host coverage to 91% with branch/error-path tests
 - 2026-11-25 (v0.32) — test: fix enum fidelity/CWD and add per-client, journal and moving-gate tests
 - 2026-11-25 (v0.32) — fix(release): HIL findings (CSRF 403, COM HIL sound skip) and sync-conflict guard
 - 2026-11-25 (v0.31) — test(hil): play a library file when no legacy track slots are assigned

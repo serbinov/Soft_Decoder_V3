@@ -101,7 +101,8 @@ esp_err_t settings_manifest_sync(void) { return ESP_OK; }
 esp_err_t settings_manifest_load(void) { return ESP_ERR_NOT_FOUND; }
 esp_err_t settings_manifest_remove(void) { return ESP_OK; }
 bool settings_manifest_write_allowed(void) { return true; }
-bool settings_manifest_restore_in_progress(void) { return false; }
+static bool g_manifest_restore_in_progress;
+bool settings_manifest_restore_in_progress(void) { return g_manifest_restore_in_progress; }
 
 static esp_err_t g_manifest_remove_error;
 esp_err_t settings_manifest_remove_locked(void) { return g_manifest_remove_error; }
@@ -152,6 +153,7 @@ void setUp(void)
     g_before_take_hook = NULL;
     g_lock_depth = 0;
     g_manifest_remove_error = ESP_OK;
+    g_manifest_restore_in_progress = false;
     mock_timer_now_us = 0;
     memset(&s_cv, 0, sizeof(s_cv));
     cv_set_defaults();
@@ -1698,9 +1700,340 @@ static void test_bemf_curve_save_propagates_io_errors(void)
     TEST_ASSERT_EQUAL_UINT32(0, g_lock_depth);
 }
 
+/* ---- Additional coverage: helpers, fallbacks, duty calibration ---- */
+
+static void test_volume_pct_from_cv63_helper(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(0, settings_volume_pct_from_cv63(0));
+    TEST_ASSERT_EQUAL_UINT8(100, settings_volume_pct_from_cv63(255));
+    TEST_ASSERT_EQUAL_UINT8(50, settings_volume_pct_from_cv63(128));
+    TEST_ASSERT_EQUAL_UINT8(cv_to_volume_pct(37), settings_volume_pct_from_cv63(37));
+}
+
+/* A wrong-typed u16 and string key both fall back to their defaults instead of
+ * aborting the whole settings load. */
+static void test_settings_load_u16_and_string_type_mismatch(void)
+{
+    s_cfg_valid = false;
+    uint8_t junk[2] = { 1, 2 };
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("rail_off", junk, sizeof(junk)));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "ap_ssid", 1));
+
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    TEST_ASSERT_EQUAL_UINT16(0, cfg.rail_offset_mv);
+    TEST_ASSERT_EQUAL_STRING("ADDITIPUS AURA-X", cfg.ap_ssid);
+}
+
+/* A corrupt CV base record, legacy blob or legacy CRC must leave init on the
+ * default path without returning the wrong-typed key as an I/O error. */
+static void test_settings_init_cv_record_error_variants(void)
+{
+    /* Wrong-typed cv_record: the trailing unexpected-error test is evaluated. */
+    mock_nvs_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "cv_record", 1));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());
+    TEST_ASSERT_EQUAL_UINT8(3, s_cv[1]);
+
+    /* Missing record + wrong-typed legacy blob: legacy error filter runs. */
+    mock_nvs_reset();
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "cv", 1));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());
+    TEST_ASSERT_EQUAL_UINT8(3, s_cv[1]);
+
+    /* Missing record + valid legacy blob + wrong-typed CRC: the legacy base is
+     * not trusted and defaults are used instead of the stored 77. */
+    mock_nvs_reset();
+    uint8_t legacy[sizeof(s_cv)];
+    memcpy(legacy, s_cv, sizeof(legacy));
+    legacy[1] = 77;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("cv", legacy, sizeof(legacy)));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "cv_crc", 1));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_init());
+    TEST_ASSERT_EQUAL_UINT8(3, s_cv[1]);
+}
+
+/* Without a valid cached config the exact CV63 field is derived from the
+ * volume percentage before it is persisted. */
+static void test_normalize_cv63_without_valid_cache(void)
+{
+    settings_config_t cfg;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_load(&cfg));
+    cfg.master_volume = 50;
+    cfg.cv63_exact = 0;
+    s_cfg_valid = false;
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_save(&cfg));
+    TEST_ASSERT_EQUAL_UINT8(volume_pct_to_cv(50), s_cv[63]);
+    uint8_t stored = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u8(s_h, "cv63x", &stored));
+    TEST_ASSERT_EQUAL_UINT8(volume_pct_to_cv(50), stored);
+}
+
+/* recovery_clear_locked() is a no-op while the manifest restore is running,
+ * clears the durable marker otherwise, and keeps it when persistence fails. */
+static void test_recovery_clear_marker_paths(void)
+{
+    settings_track_t track;
+    memset(&track, 0, sizeof(track));
+    track.slot = 1;
+    track.enabled = true;
+
+    /* Restore in progress: the marker must survive this save. */
+    s_recovery_marker = true;
+    g_manifest_restore_in_progress = true;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_save(&track, 1));
+    TEST_ASSERT_TRUE(s_recovery_marker);
+    uint8_t flag = 0xFF;
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_u8(s_h, "recover", &flag));
+    g_manifest_restore_in_progress = false;
+
+    /* Normal save: marker written as 0 and cleared in RAM. */
+    s_recovery_marker = true;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_tracks_save(&track, 1));
+    TEST_ASSERT_FALSE(s_recovery_marker);
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_get_u8(s_h, "recover", &flag));
+    TEST_ASSERT_EQUAL_UINT8(0, flag);
+
+    /* The metadata setter fails after the blob/commit succeeded: the marker is
+     * retained so the next save retries the clear. */
+    s_recovery_marker = true;
+    g_set_calls = 0;
+    g_set_error = ESP_FAIL;
+    g_fail_at = 2; /* 1 = tracks blob, 2 = recovery marker */
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_tracks_save(&track, 1));
+    TEST_ASSERT_TRUE(s_recovery_marker);
+    g_set_error = ESP_OK;
+    g_fail_at = 0;
+}
+
+/* The persistence worker defers a manifest restore to the next boot and syncs
+ * normally when no recovery is pending. */
+static void test_pending_flush_manifest_restore_and_sync(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "recover", 1));
+    s_pending = false;
+    s_cv_pending = false;
+    s_manifest_pending = true;
+    s_pending_us = 0;
+    mock_timer_now_us = SETTINGS_FLUSH_DELAY_US + 1;
+
+    TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+    settings_flush_status_t status;
+    settings_flush_status(&status);
+    TEST_ASSERT_FALSE(status.manifest_pending);
+    TEST_ASSERT_TRUE(s_recovery_marker);
+
+    /* No recovery pending: the worker syncs the manifest instead. */
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_erase_key(s_h, "recover"));
+    s_pending = false;
+    s_cv_pending = false;
+    s_manifest_pending = true;
+    s_pending_us = 0;
+    mock_timer_now_us += SETTINGS_FLUSH_DELAY_US + 1;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_pending_flush());
+}
+
+/* Wrong-typed and out-of-range track records are unusable bases: the key is
+ * dropped and the loader reports "not found" instead of returning garbage. */
+static void test_tracks_load_type_mismatch_and_invalid_slot(void)
+{
+    settings_track_t tracks[SETTINGS_MAX_TRACKS];
+    size_t count = 99;
+
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "tracks", 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_tracks_load(tracks, &count));
+    TEST_ASSERT_EQUAL_UINT32(0, count);
+    size_t len = sizeof(tracks);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_blob(s_h, "tracks", tracks, &len));
+
+    settings_track_t bad[2];
+    memset(bad, 0, sizeof(bad));
+    bad[0].slot = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("tracks", bad, sizeof(bad)));
+    count = 99;
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_tracks_load(tracks, &count));
+    TEST_ASSERT_EQUAL_UINT32(0, count);
+    len = sizeof(tracks);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_blob(s_h, "tracks", tracks, &len));
+
+    memset(bad, 0, sizeof(bad));
+    bad[0].slot = 1;
+    bad[1].slot = SETTINGS_MAX_TRACKS + 1;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("tracks", bad, sizeof(bad)));
+    count = 99;
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_tracks_load(tracks, &count));
+    TEST_ASSERT_EQUAL_UINT32(0, count);
+}
+
+/* Empty and wrong-typed category blobs fall back to the default layout and are
+ * discarded so a later save can recreate the current layout. */
+static void test_track_cats_load_unusable_blobs(void)
+{
+    uint8_t cats[SETTINGS_MAX_TRACKS];
+    size_t count = 0;
+
+    /* Zero-length blob: err == OK but the length is unusable. */
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("track_cat", NULL, 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_track_cats_load(cats, &count));
+    TEST_ASSERT_EQUAL_UINT32(SETTINGS_MAX_TRACKS, count);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_TRACK_CAT_ENGINE, cats[0]);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_TRACK_CAT_EFFECTS, cats[1]);
+    size_t len = sizeof(cats);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_blob(s_h, "track_cat", cats, &len));
+
+    /* Wrong-typed blob: the unusable predicate is false, the error predicate
+     * is true, so the key is still dropped. */
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(s_h, "track_cat", 1));
+    count = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, settings_track_cats_load(cats, &count));
+    TEST_ASSERT_EQUAL_UINT32(SETTINGS_MAX_TRACKS, count);
+    len = sizeof(cats);
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, nvs_get_blob(s_h, "track_cat", cats, &len));
+}
+
+static void test_func_bind_version_save_timeout(void)
+{
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_func_bind_version_save(SETTINGS_FUNC_BIND_VERSION));
+    mock_sem_take_fail = 0;
+}
+
+static void fill_duty(settings_bemf_duty_t *cal)
+{
+    memset(cal, 0, sizeof(*cal));
+    cal->version = SETTINGS_BEMF_DUTY_VERSION;
+    cal->count = 3;
+    cal->speed[0] = 10;
+    cal->speed[1] = 60;
+    cal->speed[2] = 126;
+    cal->duty[0] = 100;
+    cal->duty[1] = 500;
+    cal->duty[2] = 1000;
+}
+
+static void test_bemf_duty_validate_rules(void)
+{
+    settings_bemf_duty_t cal;
+    fill_duty(&cal);
+
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(NULL));
+
+    cal.version = (uint8_t)(SETTINGS_BEMF_DUTY_VERSION + 1U);
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.version = SETTINGS_BEMF_DUTY_VERSION;
+
+    cal.count = 1;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.count = SETTINGS_BEMF_CAL_MAX_POINTS + 1U;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.count = 3;
+
+    cal.speed[0] = 0;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.speed[0] = 10;
+    cal.speed[1] = 127;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.speed[1] = 60;
+
+    cal.duty[0] = 0;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.duty[0] = 100;
+    cal.duty[1] = 1024;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.duty[1] = 500;
+
+    cal.speed[1] = 10; /* not strictly increasing */
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.speed[1] = 60;
+
+    cal.duty[1] = 50; /* decreasing duty */
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.duty[1] = 500;
+
+    cal.duty[0] = 100; /* flat curve: final duty must exceed the first */
+    cal.duty[1] = 100;
+    cal.duty[2] = 100;
+    TEST_ASSERT_FALSE(settings_bemf_duty_validate(&cal));
+    cal.duty[1] = 500;
+    cal.duty[2] = 1000;
+    TEST_ASSERT_TRUE(settings_bemf_duty_validate(&cal));
+}
+
+static void test_bemf_duty_load_save_clear(void)
+{
+    settings_bemf_duty_t cal;
+    fill_duty(&cal);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_duty_load(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, settings_bemf_duty_load(&cal));
+
+    fill_duty(&cal); /* the failed load zeroes its output */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_duty_save(&cal));
+    settings_bemf_duty_t got;
+    memset(&got, 0xFF, sizeof(got));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_duty_load(&got));
+    TEST_ASSERT_EQUAL_MEMORY(&cal, &got, sizeof(cal));
+
+    /* A record with a different length is rejected, not reinterpreted. */
+    uint8_t short_blob[sizeof(settings_bemf_duty_t) - 1U];
+    memset(short_blob, 0, sizeof(short_blob));
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("bemf_duty", short_blob, sizeof(short_blob)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, settings_bemf_duty_load(&got));
+
+    /* Oversized blob is rejected by the read itself. */
+    uint8_t long_blob[sizeof(settings_bemf_duty_t) + 8U];
+    memset(long_blob, 0, sizeof(long_blob));
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("bemf_duty", long_blob, sizeof(long_blob)));
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, settings_bemf_duty_load(&got));
+
+    /* Right-sized but invalid content. */
+    settings_bemf_duty_t invalid;
+    fill_duty(&invalid);
+    invalid.count = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, mock_nvs_force_blob("bemf_duty", &invalid, sizeof(invalid)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_duty_load(&got));
+
+    /* Save validation and I/O error propagation. */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_duty_save(NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, settings_bemf_duty_save(&invalid));
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_duty_save(&cal));
+    mock_sem_take_fail = 0;
+
+    g_set_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_bemf_duty_save(&cal));
+    g_set_error = ESP_OK;
+
+    g_commit_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, settings_bemf_duty_save(&cal));
+    g_commit_error = ESP_OK;
+
+    /* Clear removes the record; a missing key is success. */
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_duty_clear());
+    TEST_ASSERT_EQUAL(ESP_ERR_NVS_NOT_FOUND, settings_bemf_duty_load(&got));
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_duty_clear());
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, settings_bemf_duty_clear());
+    mock_sem_take_fail = 0;
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_volume_pct_from_cv63_helper);
+    RUN_TEST(test_settings_load_u16_and_string_type_mismatch);
+    RUN_TEST(test_settings_init_cv_record_error_variants);
+    RUN_TEST(test_normalize_cv63_without_valid_cache);
+    RUN_TEST(test_recovery_clear_marker_paths);
+    RUN_TEST(test_pending_flush_manifest_restore_and_sync);
+    RUN_TEST(test_tracks_load_type_mismatch_and_invalid_slot);
+    RUN_TEST(test_track_cats_load_unusable_blobs);
+    RUN_TEST(test_func_bind_version_save_timeout);
+    RUN_TEST(test_bemf_duty_validate_rules);
+    RUN_TEST(test_bemf_duty_load_save_clear);
     RUN_TEST(test_bemf_mode_save_propagates_persistence_errors);
     RUN_TEST(test_bemf_curve_save_propagates_io_errors);
     RUN_TEST(test_cal_save_guard_rejects_cancel_between_validation_and_lock);

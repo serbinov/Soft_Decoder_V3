@@ -86,9 +86,8 @@ jobs:
           $pct = [double]::Parse($match.Groups[1].Value.Replace(",", "."),
                                 [Globalization.CultureInfo]::InvariantCulture)
           Write-Host ("First-party line coverage: {0:N2}%" -f $pct)
-          # Floor lowered from 88.0: the gate was already red at 87.0 % before the
-          # safety work; keep a non-regressing floor until coverage is raised.
-          if ($pct -lt 86.0) { throw "Coverage $pct% is below the 86.0% gate" }
+          # Restored to 90.0 % after the branch/error-path test push (local 91.0 %).
+          if ($pct -lt 90.0) { throw "Coverage $pct% is below the 90.0% gate" }
 
   static-analysis:
     name: Static analysis (cppcheck)

@@ -28,6 +28,7 @@ static void test_delay_until(TickType_t *last, TickType_t period);
 static TickType_t test_tick_count(void);
 static BaseType_t test_task_create(void (*task)(void *), const char *name, uint32_t stack,
                                    void *arg, UBaseType_t priority, TaskHandle_t *handle);
+static SemaphoreHandle_t test_mutex_create(void);
 
 #define static
 #define adc_oneshot_read test_adc_read
@@ -36,6 +37,7 @@ static BaseType_t test_task_create(void (*task)(void *), const char *name, uint3
 #define vTaskDelayUntil test_delay_until
 #define xTaskGetTickCount test_tick_count
 #define xTaskCreate test_task_create
+#define xSemaphoreCreateMutex test_mutex_create
 #include "../../components/motor/src/motor.c"
 #undef static
 #undef adc_oneshot_read
@@ -44,10 +46,22 @@ static BaseType_t test_task_create(void (*task)(void *), const char *name, uint3
 #undef vTaskDelayUntil
 #undef xTaskGetTickCount
 #undef xTaskCreate
+#undef xSemaphoreCreateMutex
 
 #include "../../test_libs/teststubs/stubs.c"
 
 static uint32_t g_coast_calls;
+static int g_mutex_create_calls;
+static int g_mutex_create_fail_at = -1;
+
+static SemaphoreHandle_t test_mutex_create(void)
+{
+    ++g_mutex_create_calls;
+    if (g_mutex_create_fail_at >= 0 && g_mutex_create_calls >= g_mutex_create_fail_at) {
+        return NULL;
+    }
+    return xSemaphoreCreateMutex();
+}
 
 static esp_err_t test_adc_read(adc_oneshot_unit_handle_t unit, adc_channel_t channel,
                                int *raw)
@@ -96,6 +110,9 @@ static bool g_bemf_use = true;
 static uint16_t g_bemf_window = SETTINGS_BEMF_WINDOW_DEFAULT_US;
 static esp_err_t g_save_error;
 static esp_err_t g_cv_write_error;
+static esp_err_t g_snapshot_error;
+static esp_err_t g_bemf_use_save_error;
+static esp_err_t g_bemf_duty_clear_error;
 
 esp_err_t settings_cv_write(uint16_t index, uint8_t value)
 {
@@ -112,6 +129,7 @@ esp_err_t settings_cv_commit(void)
 
 esp_err_t settings_cv_snapshot(uint8_t out[SETTINGS_CV_COUNT + 1])
 {
+    if (g_snapshot_error != ESP_OK) return g_snapshot_error;
     memcpy(out, g_cv, sizeof(g_cv));
     return ESP_OK;
 }
@@ -209,6 +227,7 @@ esp_err_t settings_bemf_duty_save(const settings_bemf_duty_t *cal)
 
 esp_err_t settings_bemf_duty_clear(void)
 {
+    if (g_bemf_duty_clear_error != ESP_OK) return g_bemf_duty_clear_error;
     g_bemf_duty_valid = false;
     memset(&g_bemf_duty, 0, sizeof(g_bemf_duty));
     return ESP_OK;
@@ -223,6 +242,7 @@ esp_err_t settings_bemf_use_load(bool *out)
 
 esp_err_t settings_bemf_use_save(bool enabled)
 {
+    if (g_bemf_use_save_error != ESP_OK) return g_bemf_use_save_error;
     g_bemf_use = enabled;
     return ESP_OK;
 }
@@ -332,6 +352,46 @@ static void static_error_bemf_adc(int channel)
 {
     if (channel == (int)(PIN_BEMF1 - 1)) {
         mock_adc_raw[channel] = mv_to_raw(100);
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[channel] = 0;
+    }
+}
+
+static unsigned g_median_idx;
+
+static void median_probe_bemf_adc(int channel)
+{
+    static const int raw_values[3] = { 300, 100, 200 };
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        if (g_median_idx < 3U) mock_adc_raw[channel] = raw_values[g_median_idx++];
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[channel] = 0;
+    }
+}
+
+static void rising_sweep_bemf_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        uint32_t duty = s_last_duty;
+        uint32_t mv = duty > 0U ? 200U + (duty * 3U) / 2U : 0U;
+        mock_adc_raw[channel] = mv_to_raw((int)mv);
+    } else if (channel == (int)(PIN_BEMF2 - 1)) {
+        mock_adc_raw[channel] = 0;
+    }
+}
+
+static void slow_failing_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        mock_timer_now_us += 5000;
+    }
+}
+
+static void window_specific_bemf_adc(int channel)
+{
+    if (channel == (int)(PIN_BEMF1 - 1)) {
+        int mv = s_bemf_settle_us < 500U ? 100 : 500;
+        mock_adc_raw[channel] = mv_to_raw(mv);
     } else if (channel == (int)(PIN_BEMF2 - 1)) {
         mock_adc_raw[channel] = 0;
     }
@@ -486,6 +546,24 @@ static void cleanup_abandoned_calibration(void)
     s_stop_requested = false;
 }
 
+static void drop_motor_mutexes(void)
+{
+    if (s_control_mutex != NULL) {
+        vSemaphoreDelete(s_control_mutex);
+        s_control_mutex = NULL;
+    }
+    if (s_adc_mutex != NULL) {
+        vSemaphoreDelete(s_adc_mutex);
+        s_adc_mutex = NULL;
+    }
+}
+
+static void nudge_clock_forward(TickType_t ticks)
+{
+    (void)ticks;
+    mock_timer_now_us += 50000;
+}
+
 void setUp(void)
 {
     g_adc_hook = NULL;
@@ -496,6 +574,12 @@ void setUp(void)
     g_delay_count = 0;
     g_save_error = ESP_OK;
     g_cv_write_error = ESP_OK;
+    g_snapshot_error = ESP_OK;
+    g_bemf_use_save_error = ESP_OK;
+    g_bemf_duty_clear_error = ESP_OK;
+    g_mutex_create_calls = 0;
+    g_mutex_create_fail_at = -1;
+    g_median_idx = 0;
     g_cal_valid = false;
     g_bemf_use = true;
     g_bemf_window = SETTINGS_BEMF_WINDOW_DEFAULT_US;
@@ -504,6 +588,7 @@ void setUp(void)
     memset(&g_bemf_duty, 0, sizeof(g_bemf_duty));
     mock_timer_now_us = 0;
     mock_adc_ok = 1;
+    mock_adc_config_ok = 1;
     mock_task_create_ok = 1;
     mock_task_create_fail_after = -1;
     mock_task_create_calls = 0;
@@ -1590,6 +1675,677 @@ static void test_low_packets_reset_on_stop(void)
     TEST_ASSERT_FALSE(d.low_packet);
 }
 
+/* ---- added coverage tests ------------------------------------------- */
+
+static void test_adc_config_channel_rejects_bad_gpio(void)
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_adc_config_channel(0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_adc_config_channel(ADC1_GPIO_MAX + 1));
+    TEST_ASSERT_EQUAL(ESP_OK, motor_adc_config_channel(ADC1_GPIO_MIN));
+}
+
+static void test_bemf_lock_without_mutex_fails(void)
+{
+    SemaphoreHandle_t saved = s_adc_mutex;
+    s_adc_mutex = NULL;
+    TEST_ASSERT_FALSE(motor_bemf_lock());
+    motor_bemf_unlock();
+    s_adc_mutex = saved;
+}
+
+static void test_bemf_sample_window_lock_timeout(void)
+{
+    s_bemf_adc_ready = true;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_FALSE(bemf_sample_window());
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, s_bemf_sample_error);
+    mock_sem_take_fail = 0;
+}
+
+static void test_bemf_sample_window_settle_fallback(void)
+{
+    s_bemf_adc_ready = true;
+    s_bemf_settle_us = 0;
+    TEST_ASSERT_TRUE(bemf_sample_window());
+    TEST_ASSERT_TRUE(mock_rom_delay_us_total >= BEMF_SETTLE_US);
+    s_bemf_settle_us = BEMF_SETTLE_US;
+}
+
+static void test_bemf_sample_window_median_sort(void)
+{
+    g_median_idx = 0;
+    g_adc_hook = median_probe_bemf_adc;
+    TEST_ASSERT_TRUE(bemf_sample_window());
+    g_adc_hook = NULL;
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)200U * MOTOR_ADC_FULL_SCALE_MV / MOTOR_ADC_MAX_RAW,
+                             s_bemf1_mv);
+    TEST_ASSERT_EQUAL_UINT32(s_bemf1_mv, s_bemf_mag_mv);
+}
+
+static void test_bemf_regulate_low_speed_warmup(void)
+{
+    set_stored_curve();
+    s_bemf_acquired = true;
+    s_bemf_valid = true;
+    s_low_speed_warmup_ticks = 0;
+    bool closed = true;
+    uint32_t duty = bemf_regulate(200U, 10U, 1000U, &closed);
+    TEST_ASSERT_EQUAL_UINT32(200U, duty);
+    TEST_ASSERT_FALSE(closed);
+    TEST_ASSERT_EQUAL_UINT16(1U, s_low_speed_warmup_ticks);
+}
+
+static void test_bemf_regulate_dt_clamp(void)
+{
+    set_stored_curve();
+    s_bemf_acquired = true;
+    s_bemf_valid = true;
+    s_bemf_filtered = 0.0f;
+    s_pid_integral = 0.0f;
+    s_pid_prev_error = 0.0f;
+    s_last_pid_us = 1000;
+    mock_timer_now_us = 6000;
+    bool closed = false;
+    (void)bemf_regulate(512U, 63U, 1000U, &closed);
+    TEST_ASSERT_TRUE(closed);
+    TEST_ASSERT_EQUAL_INT64(6000, s_last_pid_us);
+}
+
+static void test_bemf_regulate_negative_integral_backcalc(void)
+{
+    set_stored_curve();
+    s_bemf_acquired = true;
+    s_bemf_valid = true;
+    s_bemf_filtered = 2000.0f;
+    s_pid_integral = -4000.0f;
+    s_pid_prev_error = 0.0f;
+    s_last_pid_us = 0;
+    mock_timer_now_us = 0;
+    bool closed = false;
+    uint32_t duty = bemf_regulate(260U, 63U, 1000U, &closed);
+    TEST_ASSERT_TRUE(closed);
+    TEST_ASSERT_TRUE(s_pid_integral > -4000.0f);
+    TEST_ASSERT_TRUE(s_pid_integral < 0.0f);
+    TEST_ASSERT_TRUE(duty < 260U);
+}
+
+static void test_calibrated_duty_curve_used_as_base(void)
+{
+    settings_bemf_duty_t dc;
+    memset(&dc, 0, sizeof(dc));
+    dc.version = SETTINGS_BEMF_DUTY_VERSION;
+    dc.count = 2U;
+    dc.speed[0] = 1U;
+    dc.speed[1] = 126U;
+    dc.duty[0] = 100U;
+    dc.duty[1] = 900U;
+    TEST_ASSERT_EQUAL(ESP_OK, settings_bemf_duty_save(&dc));
+    cal_duty_reload();
+    TEST_ASSERT_TRUE(s_bemf_duty_valid);
+    tick_speed(50U, true, 1);
+    TEST_ASSERT_EQUAL_UINT32(s_bemf_duty_table[50], mock_ledc_duty[LEDC_CHANNEL_0]);
+}
+
+static void test_bemf_sample_failure_notes_loss(void)
+{
+    set_stored_curve();
+    g_adc_hook = duty_bemf_adc;
+    tick_speed(63U, true, 6);
+    TEST_ASSERT_TRUE(s_bemf_acquired);
+    s_bemf_valid = false;
+    mock_adc_ok = 0;
+    motor_tick();
+    mock_adc_ok = 1;
+    g_adc_hook = NULL;
+    TEST_ASSERT_FALSE(s_bemf_valid);
+    TEST_ASSERT_TRUE(s_bemf_loss_ticks >= 1U);
+}
+
+static void test_motor_task_realigns_after_long_tick(void)
+{
+    g_delay_hook = nudge_clock_forward;
+    s_motor_iter_cap = 2U;
+    motor_task(NULL);
+    s_motor_iter_cap = 0U;
+    g_delay_hook = refresh_rail;
+    TEST_ASSERT_TRUE(motor_last_tick_us() > 0);
+}
+
+static void test_motor_init_control_mutex_failure(void)
+{
+    drop_motor_mutexes();
+    g_mutex_create_calls = 0;
+    g_mutex_create_fail_at = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, motor_init());
+    g_mutex_create_fail_at = -1;
+    TEST_ASSERT_FALSE(s_init);
+    TEST_ASSERT_NULL(s_control_mutex);
+    TEST_ASSERT_NULL(s_adc_mutex);
+}
+
+static void test_motor_init_adc_mutex_failure(void)
+{
+    drop_motor_mutexes();
+    g_mutex_create_calls = 0;
+    g_mutex_create_fail_at = 2;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_init());
+    g_mutex_create_fail_at = -1;
+    TEST_ASSERT_NOT_NULL(s_control_mutex);
+    TEST_ASSERT_NULL(s_adc_mutex);
+    TEST_ASSERT_FALSE(s_bemf_adc_ready);
+    TEST_ASSERT_TRUE(s_init);
+}
+
+static void test_motor_init_adc_config_failure(void)
+{
+    drop_motor_mutexes();
+    mock_adc_config_ok = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_init());
+    mock_adc_config_ok = 1;
+    TEST_ASSERT_FALSE(s_bemf_adc_ready);
+    TEST_ASSERT_TRUE(s_init);
+}
+
+static void test_motor_init_window_fallback(void)
+{
+    drop_motor_mutexes();
+    g_bemf_window = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_init());
+    TEST_ASSERT_EQUAL_UINT16(BEMF_SETTLE_US, s_bemf_settle_us);
+    TEST_ASSERT_TRUE(s_init);
+}
+
+static void test_motor_init_task_failure(void)
+{
+    drop_motor_mutexes();
+    mock_task_create_ok = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, motor_init());
+    mock_task_create_ok = 1;
+    TEST_ASSERT_FALSE(s_init);
+    TEST_ASSERT_NOT_NULL(s_control_mutex);
+    TEST_ASSERT_NOT_NULL(s_adc_mutex);
+}
+
+static void test_motor_set_speed_clears_test_mode(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(300U, true, 1000U));
+    TEST_ASSERT_TRUE(s_test_active);
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_speed(20U, true));
+    TEST_ASSERT_FALSE(s_test_active);
+    TEST_ASSERT_EQUAL_UINT16(0U, s_test_duty);
+    TEST_ASSERT_EQUAL_UINT8(20U, s_target_speed);
+}
+
+static void test_motor_is_moving_reports_target_or_applied(void)
+{
+    TEST_ASSERT_FALSE(motor_is_moving());
+    tick_speed(10U, true, 1);
+    TEST_ASSERT_TRUE(motor_is_moving());
+    motor_stop();
+    motor_tick();
+    TEST_ASSERT_FALSE(motor_is_moving());
+}
+
+static void test_motor_test_duty_validation(void)
+{
+    bool saved_init = s_init;
+    s_init = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_test_duty(100U, true, 100U));
+    s_init = saved_init;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_test_duty(LEDC_MAX + 1U, true, 100U));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, motor_test_duty(100U, true, 0U));
+
+    SemaphoreHandle_t saved_mutex = s_control_mutex;
+    s_control_mutex = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_test_duty(100U, true, 100U));
+    s_control_mutex = saved_mutex;
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_test_duty(100U, true, 100U));
+    mock_sem_take_fail = 0;
+
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_test_duty(100U, true, 100U));
+    cleanup_abandoned_calibration();
+
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_inhibited(true));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_test_duty(100U, true, 100U));
+    TEST_ASSERT_EQUAL(ESP_OK, motor_set_inhibited(false));
+
+    s_sample_active = true;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_test_duty(100U, true, 100U));
+    s_sample_active = false;
+
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(0U, true, 100U));
+    TEST_ASSERT_FALSE(s_test_active);
+}
+
+static void test_motor_test_mode_tick_drives_open_loop(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(300U, false, 1000U));
+    uint16_t duty = 0U;
+    bool fwd = true;
+    uint32_t left = 0U;
+    TEST_ASSERT_TRUE(motor_test_info(&duty, &fwd, &left));
+    TEST_ASSERT_EQUAL_UINT16(300U, duty);
+    TEST_ASSERT_FALSE(fwd);
+    TEST_ASSERT_TRUE(left > 0U && left <= 1000U);
+
+    motor_tick();
+    TEST_ASSERT_EQUAL_UINT32(300U, mock_ledc_duty[LEDC_CHANNEL_1]);
+    TEST_ASSERT_EQUAL_UINT32(0U, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_applied_speed);
+    TEST_ASSERT_EQUAL_UINT32(300U, s_last_duty_avg);
+    TEST_ASSERT_FALSE(s_low_packet_active);
+    TEST_ASSERT_TRUE(motor_test_info(NULL, NULL, NULL));
+
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(300U, true, 6000U));
+    left = 0U;
+    TEST_ASSERT_TRUE(motor_test_info(NULL, NULL, &left));
+    TEST_ASSERT_TRUE(left <= MOTOR_TEST_MAX_MS);
+
+    motor_emergency_stop();
+    TEST_ASSERT_FALSE(s_test_active);
+}
+
+static void test_motor_test_duty_low_packets(void)
+{
+    motor_emergency_stop();
+    motor_tick();
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(40U, true, 1000U));
+
+    uint32_t sum = 0U;
+    uint32_t packets = 0U;
+    for (uint32_t i = 0U; i < MOTOR_PACKET_DUTY; ++i) {
+        motor_tick();
+        uint32_t d = mock_ledc_duty[LEDC_CHANNEL_0];
+        sum += d;
+        if (d == MOTOR_PACKET_DUTY) {
+            ++packets;
+        } else {
+            TEST_ASSERT_EQUAL_UINT32(0U, d);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(40U * MOTOR_PACKET_DUTY, sum);
+    TEST_ASSERT_EQUAL_UINT32(40U, packets);
+    TEST_ASSERT_TRUE(s_low_packet_active);
+    motor_emergency_stop();
+}
+
+static void test_motor_test_mode_deadline_and_inhibit_stop(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(300U, true, 1000U));
+    mock_timer_now_us = 100000;
+    s_test_deadline_us = esp_timer_get_time() - 1;
+    motor_tick();
+    TEST_ASSERT_FALSE(s_test_active);
+    TEST_ASSERT_EQUAL_UINT32(0U, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_applied_speed);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_target_speed);
+
+    TEST_ASSERT_EQUAL(ESP_OK, motor_test_duty(300U, true, 1000U));
+    s_inhibited = true;
+    motor_tick();
+    TEST_ASSERT_FALSE(s_test_active);
+    TEST_ASSERT_EQUAL_UINT32(0U, mock_ledc_duty[LEDC_CHANNEL_0]);
+    s_inhibited = false;
+}
+
+static void test_motor_tick_snapshot_failure_stops(void)
+{
+    g_snapshot_error = ESP_FAIL;
+    motor_tick();
+    g_snapshot_error = ESP_OK;
+    uint8_t applied = 9U;
+    motor_get_applied_speed(&applied, NULL);
+    TEST_ASSERT_EQUAL_UINT8(0U, applied);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_target_speed);
+    TEST_ASSERT_EQUAL_UINT32(0U, mock_ledc_duty[LEDC_CHANNEL_0]);
+    TEST_ASSERT_TRUE(s_stop_requested);
+}
+
+static void test_cal_drive_control_timeout(void)
+{
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_FALSE(cal_drive(s_output_generation, 100U, true));
+    mock_sem_take_fail = 0;
+}
+
+static void test_cal_sample_limit_control_error(void)
+{
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    uint32_t gen = s_output_generation;
+    uint16_t frac = 0U;
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(CAL_SAMPLE_FAIL,
+                      cal_sample_limit(gen, 200U, true, BEMF_CEILING, &frac));
+    mock_sem_take_fail = 0;
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_CONTROL, info.reason);
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_sample_limit_adc_error(void)
+{
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    uint32_t gen = s_output_generation;
+    uint16_t frac = 0U;
+    mock_adc_ok = 0;
+    TEST_ASSERT_EQUAL(CAL_SAMPLE_FAIL,
+                      cal_sample_limit(gen, 200U, true, BEMF_CEILING, &frac));
+    mock_adc_ok = 1;
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_ADC, info.reason);
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_window_probe_drive_failure(void)
+{
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    motor_bemf_profile_t prof;
+    memset(&prof, 0, sizeof(prof));
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_FALSE(cal_window_probe(s_output_generation, &prof));
+    mock_sem_take_fail = 0;
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_window_probe_picks_stable_plateau(void)
+{
+    motor_set_rail_voltage_mv(1000U);
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    motor_bemf_profile_t prof;
+    memset(&prof, 0, sizeof(prof));
+    g_adc_hook = window_specific_bemf_adc;
+    TEST_ASSERT_TRUE(cal_window_probe(s_output_generation, &prof));
+    g_adc_hook = NULL;
+    TEST_ASSERT_EQUAL_UINT8(MOTOR_BEMF_CAL_WINDOW_STEPS, prof.window_count);
+    TEST_ASSERT_TRUE(prof.window_frac[0] < prof.window_frac[1]);
+    TEST_ASSERT_EQUAL_UINT16(500U, prof.optimal_us);
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_sweep_starts_from_cv2_hint(void)
+{
+    g_cv[2] = 220U;
+    motor_set_rail_voltage_mv(2500U);
+    g_adc_hook = sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
+    g_create_hook = run_task_now;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    g_delay_hook = refresh_rail;
+    g_adc_hook = NULL;
+
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
+    TEST_ASSERT_EQUAL_UINT8(86U, info.profile.pwm_start_pct);
+    TEST_ASSERT_TRUE(info.count >= 2U);
+}
+
+static void test_cal_sweep_curve_ends_at_full_speed(void)
+{
+    g_cv[5] = 200U;
+    motor_set_rail_voltage_mv(2500U);
+    g_adc_hook = sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
+    g_create_hook = run_task_now;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    g_delay_hook = refresh_rail;
+    g_adc_hook = NULL;
+
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
+    TEST_ASSERT_EQUAL_UINT8(126U, info.speed[info.count - 1U]);
+}
+
+static void test_cal_sweep_downsamples_to_max_points(void)
+{
+    motor_set_rail_voltage_mv(2500U);
+    g_adc_hook = rising_sweep_bemf_adc;
+    g_delay_hook = sweep_rail_refresh;
+    g_create_hook = run_task_now;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    g_delay_hook = refresh_rail;
+    g_adc_hook = NULL;
+
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
+    TEST_ASSERT_EQUAL_UINT8(SETTINGS_BEMF_CAL_MAX_POINTS, info.count);
+    TEST_ASSERT_EQUAL_UINT8(126U, info.speed[info.count - 1U]);
+}
+
+static void test_cal_finish_rejects_invalid_curve(void)
+{
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    uint32_t gen = s_output_generation;
+    settings_bemf_cal_t cal;
+    memset(&cal, 0, sizeof(cal));
+    cal.count = 1U;
+    cal.speed[0] = 1U;
+    cal.frac[0] = 100U;
+    motor_bemf_profile_t prof;
+    memset(&prof, 0, sizeof(prof));
+    cal_finish(gen, &cal, true, &prof, false);
+
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_FAILED, info.result);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_CURVE, info.reason);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, info.error_code);
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_finish_incomplete_reason(void)
+{
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    uint32_t gen = s_output_generation;
+    settings_bemf_cal_t cal;
+    memset(&cal, 0, sizeof(cal));
+    motor_bemf_profile_t prof;
+    memset(&prof, 0, sizeof(prof));
+    cal_finish(gen, &cal, false, &prof, false);
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_NO_RISE, info.reason);
+    cleanup_abandoned_calibration();
+
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    gen = s_output_generation;
+    cal.count = 2U;
+    cal.speed[0] = 1U;
+    cal.speed[1] = 126U;
+    cal.frac[0] = 100U;
+    cal.frac[1] = 800U;
+    cal_finish(gen, &cal, false, &prof, false);
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_ERR_CURVE, info.reason);
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_finish_missing_duty_and_use_save_error(void)
+{
+    set_stored_curve();
+    settings_bemf_cal_t cal = g_cal;
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    uint32_t gen = s_output_generation;
+    s_cal_duty_last_valid = false;
+    g_bemf_use_save_error = ESP_FAIL;
+    motor_bemf_profile_t prof;
+    memset(&prof, 0, sizeof(prof));
+    cal_finish(gen, &cal, true, &prof, false);
+    g_bemf_use_save_error = ESP_OK;
+
+    motor_bemf_cal_info_t info;
+    motor_bemf_cal_info(&info);
+    TEST_ASSERT_EQUAL(MOTOR_BEMF_CAL_SUCCEEDED, info.result);
+    TEST_ASSERT_TRUE(s_cal_valid);
+    cleanup_abandoned_calibration();
+}
+
+static void test_cal_start_control_timeout(void)
+{
+    motor_bemf_cal_config_t cfg;
+    motor_bemf_cal_default_config(&cfg);
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, motor_bemf_cal_start_ex(&cfg));
+    mock_sem_take_fail = 0;
+}
+
+static void test_cal_log_copy_limits(void)
+{
+    s_cal_log_count = 3U;
+    for (unsigned i = 0U; i < 3U; ++i) {
+        memset(&s_cal_log[i], 0, sizeof(s_cal_log[i]));
+        s_cal_log[i].step = (uint8_t)(i + 1U);
+    }
+    motor_bemf_cal_step_log_t out[4];
+    memset(out, 0, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT32(2U, (uint32_t)motor_bemf_cal_log_copy(out, 2U));
+    TEST_ASSERT_EQUAL_UINT8(2U, out[1].step);
+    TEST_ASSERT_EQUAL_UINT32(3U, (uint32_t)motor_bemf_cal_log_copy(out, 4U));
+    TEST_ASSERT_EQUAL_UINT8(3U, out[2].step);
+    TEST_ASSERT_EQUAL_UINT32(0U, (uint32_t)motor_bemf_cal_log_copy(NULL, 4U));
+    TEST_ASSERT_EQUAL_UINT32(0U, (uint32_t)motor_bemf_cal_log_copy(out, 0U));
+    s_cal_log_count = 0U;
+}
+
+static void test_cal_clear_duty_error_is_logged(void)
+{
+    g_bemf_duty_clear_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_OK, motor_bemf_cal_clear());
+    g_bemf_duty_clear_error = ESP_OK;
+    TEST_ASSERT_TRUE(s_cal_valid);
+}
+
+static void test_bemf_diag_control_timeout(void)
+{
+    motor_bemf_diag_t d;
+    memset(&d, 0xAA, sizeof(d));
+    mock_sem_take_fail = 1;
+    motor_bemf_diag(&d);
+    mock_sem_take_fail = 0;
+    TEST_ASSERT_EQUAL_UINT32(0U, d.rail_mv);
+    TEST_ASSERT_EQUAL_UINT32(0U, d.duty);
+}
+
+static void test_wave_capture_argument_validation(void)
+{
+    motor_bemf_wave_point_t pts[4];
+    uint16_t count = 7U;
+    uint32_t duty = 0U;
+    bool fwd = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      motor_bemf_wave_capture(20U, 1U, NULL, 4U, &count, &duty, &fwd));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      motor_bemf_wave_capture(20U, 1U, pts, 4U, NULL, &duty, &fwd));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      motor_bemf_wave_capture(20U, 1U, pts, 0U, &count, &duty, &fwd));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      motor_bemf_wave_capture(19U, 1U, pts, 4U, &count, &duty, &fwd));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      motor_bemf_wave_capture(20U, 0U, pts, 4U, &count, &duty, &fwd));
+
+    bool saved_ready = s_bemf_adc_ready;
+    s_bemf_adc_ready = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      motor_bemf_wave_capture(20U, 1U, pts, 4U, &count, &duty, &fwd));
+    s_bemf_adc_ready = saved_ready;
+
+    SemaphoreHandle_t saved_mutex = s_control_mutex;
+    s_control_mutex = NULL;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      motor_bemf_wave_capture(20U, 1U, pts, 4U, &count, &duty, &fwd));
+    s_control_mutex = saved_mutex;
+
+    mock_sem_take_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT,
+                      motor_bemf_wave_capture(20U, 1U, pts, 4U, &count, &duty, &fwd));
+    mock_sem_take_fail = 0;
+}
+
+static void test_wave_capture_busy_during_calibration(void)
+{
+    g_create_hook = capture_task;
+    start_calibration_and_run();
+    g_create_hook = NULL;
+    motor_bemf_wave_point_t pts[2];
+    uint16_t count = 0U;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      motor_bemf_wave_capture(20U, 1U, pts, 2U, &count, NULL, NULL));
+    TEST_ASSERT_EQUAL_UINT16(0U, count);
+    cleanup_abandoned_calibration();
+}
+
+static void test_wave_capture_samples_and_restores_drive(void)
+{
+    tick_speed(30U, true, 1);
+    uint32_t expected_duty = s_last_duty;
+    g_adc_hook = NULL;
+    mock_adc_raw[PIN_BEMF1 - 1] = 2048;
+    mock_adc_raw[PIN_BEMF2 - 1] = 0;
+
+    motor_bemf_wave_point_t pts[6];
+    uint16_t count = 0U;
+    uint32_t duty = 0U;
+    bool fwd = false;
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      motor_bemf_wave_capture(20U, 1U, pts, 5U, &count, &duty, &fwd));
+    TEST_ASSERT_EQUAL_UINT16(5U, count);
+    TEST_ASSERT_EQUAL_UINT32(expected_duty, duty);
+    TEST_ASSERT_TRUE(fwd);
+    TEST_ASSERT_FALSE(s_sample_active);
+    TEST_ASSERT_EQUAL_UINT32(expected_duty, mock_ledc_duty[LEDC_CHANNEL_0]);
+    for (uint16_t i = 0U; i < count; ++i) {
+        TEST_ASSERT_EQUAL_UINT16((uint16_t)((uint32_t)2048U * MOTOR_ADC_FULL_SCALE_MV /
+                                            MOTOR_ADC_MAX_RAW),
+                                 pts[i].b1_mv);
+        TEST_ASSERT_EQUAL_UINT16(0U, pts[i].b2_mv);
+    }
+}
+
+static void test_wave_capture_reports_no_samples(void)
+{
+    g_adc_hook = slow_failing_adc;
+    mock_adc_ok = 0;
+    motor_bemf_wave_point_t pts[4];
+    uint16_t count = 7U;
+    uint32_t duty = 0U;
+    bool fwd = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+                      motor_bemf_wave_capture(20U, 1U, pts, 4U, &count, &duty, &fwd));
+    mock_adc_ok = 1;
+    g_adc_hook = NULL;
+    TEST_ASSERT_EQUAL_UINT16(0U, count);
+    TEST_ASSERT_FALSE(s_sample_active);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1674,5 +2430,47 @@ int main(void)
     RUN_TEST(test_cal_apply_pid_write_failure_is_reported);
     RUN_TEST(test_low_duty_emits_packets);
     RUN_TEST(test_low_packets_reset_on_stop);
+    RUN_TEST(test_adc_config_channel_rejects_bad_gpio);
+    RUN_TEST(test_bemf_lock_without_mutex_fails);
+    RUN_TEST(test_bemf_sample_window_lock_timeout);
+    RUN_TEST(test_bemf_sample_window_settle_fallback);
+    RUN_TEST(test_bemf_sample_window_median_sort);
+    RUN_TEST(test_bemf_regulate_low_speed_warmup);
+    RUN_TEST(test_bemf_regulate_dt_clamp);
+    RUN_TEST(test_bemf_regulate_negative_integral_backcalc);
+    RUN_TEST(test_calibrated_duty_curve_used_as_base);
+    RUN_TEST(test_bemf_sample_failure_notes_loss);
+    RUN_TEST(test_motor_task_realigns_after_long_tick);
+    RUN_TEST(test_motor_init_control_mutex_failure);
+    RUN_TEST(test_motor_init_adc_mutex_failure);
+    RUN_TEST(test_motor_init_adc_config_failure);
+    RUN_TEST(test_motor_init_window_fallback);
+    RUN_TEST(test_motor_init_task_failure);
+    RUN_TEST(test_motor_set_speed_clears_test_mode);
+    RUN_TEST(test_motor_is_moving_reports_target_or_applied);
+    RUN_TEST(test_motor_test_duty_validation);
+    RUN_TEST(test_motor_test_mode_tick_drives_open_loop);
+    RUN_TEST(test_motor_test_duty_low_packets);
+    RUN_TEST(test_motor_test_mode_deadline_and_inhibit_stop);
+    RUN_TEST(test_motor_tick_snapshot_failure_stops);
+    RUN_TEST(test_cal_drive_control_timeout);
+    RUN_TEST(test_cal_sample_limit_control_error);
+    RUN_TEST(test_cal_sample_limit_adc_error);
+    RUN_TEST(test_cal_window_probe_drive_failure);
+    RUN_TEST(test_cal_window_probe_picks_stable_plateau);
+    RUN_TEST(test_cal_sweep_starts_from_cv2_hint);
+    RUN_TEST(test_cal_sweep_curve_ends_at_full_speed);
+    RUN_TEST(test_cal_sweep_downsamples_to_max_points);
+    RUN_TEST(test_cal_finish_rejects_invalid_curve);
+    RUN_TEST(test_cal_finish_incomplete_reason);
+    RUN_TEST(test_cal_finish_missing_duty_and_use_save_error);
+    RUN_TEST(test_cal_start_control_timeout);
+    RUN_TEST(test_cal_log_copy_limits);
+    RUN_TEST(test_cal_clear_duty_error_is_logged);
+    RUN_TEST(test_bemf_diag_control_timeout);
+    RUN_TEST(test_wave_capture_argument_validation);
+    RUN_TEST(test_wave_capture_busy_during_calibration);
+    RUN_TEST(test_wave_capture_samples_and_restores_drive);
+    RUN_TEST(test_wave_capture_reports_no_samples);
     return UNITY_END();
 }

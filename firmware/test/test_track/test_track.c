@@ -22,7 +22,31 @@ void web_control_rails_end(void);
 #include "../../components/track/src/track.c"
 #undef static
 
+/* Rename the shared watchdog stubs so the task loop's re-enrol path can be
+ * driven when a reset reports that the task was evicted from the WDT. */
+#define esp_task_wdt_add stub_task_wdt_add
+#define esp_task_wdt_reset stub_task_wdt_reset
 #include "../../test_libs/teststubs/stubs.c"
+#undef esp_task_wdt_add
+#undef esp_task_wdt_reset
+
+esp_err_t stub_task_wdt_add(TaskHandle_t task);
+esp_err_t stub_task_wdt_reset(void);
+
+static esp_err_t g_wdt_reset_result = ESP_OK;
+static int g_wdt_add_calls;
+
+esp_err_t esp_task_wdt_add(TaskHandle_t task)
+{
+    ++g_wdt_add_calls;
+    return stub_task_wdt_add(task);
+}
+
+esp_err_t esp_task_wdt_reset(void)
+{
+    (void)stub_task_wdt_reset();
+    return g_wdt_reset_result;
+}
 
 /* ---- collaborators of track.c ---- */
 static uint8_t g_cv[SETTINGS_CV_COUNT + 1];
@@ -144,6 +168,9 @@ void setUp(void)
     g_motion_calls = 0;
     g_motion_speed = 0;
     g_motion_forward = false;
+    g_wdt_reset_result = ESP_OK;
+    g_wdt_add_calls = 0;
+    mock_task_wdt_reset_calls = 0;
     memset(mock_adc_raw, 0, sizeof(mock_adc_raw));
     mock_adc_ok = 1;
     mock_gpio_get_level = 0;
@@ -333,6 +360,17 @@ static void test_track_task_loop_bounded(void)
     TEST_ASSERT_EQUAL_UINT32(1, g_speed_calls);
 }
 
+static void test_track_task_wdt_reenroll_after_reset_not_found(void)
+{
+    /* A reset that reports ESP_ERR_NOT_FOUND means the task left the WDT;
+     * the loop must add itself again on the next iteration. */
+    g_wdt_reset_result = ESP_ERR_NOT_FOUND;
+    s_iter_cap = 2;
+    track_adc_task(NULL);
+    TEST_ASSERT_EQUAL_INT(2, g_wdt_add_calls);
+    TEST_ASSERT_EQUAL_INT(2, mock_task_wdt_reset_calls);
+}
+
 /* ---- track_init ---- */
 
 static void test_track_init_ok(void)
@@ -519,6 +557,7 @@ int main(void)
     RUN_TEST(test_track_step_reverse_polarity_debounce);
     RUN_TEST(test_track_step_stops_when_leaving_dc);
     RUN_TEST(test_track_task_loop_bounded);
+    RUN_TEST(test_track_task_wdt_reenroll_after_reset_not_found);
     RUN_TEST(test_track_init_ok);
     RUN_TEST(test_track_init_unit_failure);
     RUN_TEST(test_track_init_channel_failure);

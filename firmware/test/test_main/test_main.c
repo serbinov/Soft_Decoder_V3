@@ -24,11 +24,35 @@ static int no_files_mkdir(const char *path, int mode)
 #endif
 static int g_reset_reason;
 static int test_reset_reason(void) { return g_reset_reason; }
+
+/* ESP_ERROR_CHECK aborts the real boot. Allow a test to arm a jump so a fatal
+ * init failure can be observed without killing the host runner; unarmed calls
+ * keep the production abort. */
+static jmp_buf g_error_check_exit;
+static int g_error_check_armed;
+static esp_err_t g_error_check_err;
+static void test_error_check(esp_err_t err)
+{
+    if (err == ESP_OK) { return; }
+    if (g_error_check_armed) {
+        g_error_check_err = err;
+        longjmp(g_error_check_exit, 1);
+    }
+    fprintf(stderr, "ESP_ERROR_CHECK failed: %d at app_main.c\n", (int)err);
+    abort();
+}
+#undef ESP_ERROR_CHECK
+#define ESP_ERROR_CHECK(x) test_error_check(x)
 #define esp_reset_reason test_reset_reason
 #define mkdir no_files_mkdir
 #include "../../main/app_main.c"
 #undef mkdir
 #undef esp_reset_reason
+#undef ESP_ERROR_CHECK
+#define ESP_ERROR_CHECK(x) \
+    do { esp_err_t __ec = (x); if (__ec != ESP_OK) { \
+        fprintf(stderr, "ESP_ERROR_CHECK failed: %d at %s:%d\n", (int)__ec, __FILE__, __LINE__); \
+        abort(); } } while (0)
 #define esp_ota_mark_app_valid_cancel_rollback sdk_mark_app_valid_cancel_rollback
 #define vTaskDelay sdk_task_delay
 #include "../../test_libs/teststubs/stubs.c"
@@ -75,24 +99,39 @@ static dcc_cv_read_cb_t g_read_cb;
 static dcc_reset_cb_t g_reset_cb, g_estop_cb, g_hard_cb;
 static bool g_cal_active;
 
-esp_err_t pinmap_validate(void) { return ESP_OK; }
+/* Boot-stage fault injection. Defaults keep every existing test on the happy
+ * path; each boot test flips exactly one knob. */
+static esp_err_t g_pinmap_err, g_storage_mount_err, g_audio_init_err, g_auxio_boot_err;
+static esp_err_t g_storage_init_err, g_settings_init_err, g_motor_init_err, g_dcc_init_err;
+static esp_err_t g_web_recovery_err, g_ota_confirm_err, g_graph_force_read_err;
+static int g_storage_init_calls, g_settings_init_calls, g_motor_init_calls, g_dcc_init_calls;
+static bool g_provision_handled;
+static esp_err_t g_flush_err;
+static int g_flush_fail_remaining;
+static int g_worker_iterations, g_safety_iterations;
+static bool g_allow_unleased;
+static const char *g_selection_id;
+static track_recover_result_t g_track_recover;
+static int g_web_logs;
+
+esp_err_t pinmap_validate(void) { return g_pinmap_err; }
 void motor_boot_safe(void) { g_mask = MOTOR_INHIBIT_CONTROL; }
-esp_err_t motor_init(void) { return ESP_OK; }
-esp_err_t storage_init(void) { return ESP_OK; }
-esp_err_t storage_mount(void) { return ESP_OK; }
+esp_err_t motor_init(void) { ++g_motor_init_calls; return g_motor_init_err; }
+esp_err_t storage_init(void) { ++g_storage_init_calls; return g_storage_init_err; }
+esp_err_t storage_mount(void) { return g_storage_mount_err; }
 storage_backend_t storage_get_backend(void) { return STORAGE_BACKEND_NONE; }
 bool storage_is_mounted(void) { return g_storage_mounted; }
 void motor_bemf_cal_watchdog(void) { ++g_cal_watchdog_calls; }
 bool motor_bemf_cal_active(void) { return g_cal_active; }
 bool motor_is_inhibited(void) { return (g_mask & MOTOR_INHIBIT_CONTROL) != 0; }
-esp_err_t settings_init(void) { return ESP_OK; }
-esp_err_t audio_init(void) { return ESP_OK; }
-esp_err_t auxio_boot_safe(void) { return ESP_OK; }
+esp_err_t settings_init(void) { ++g_settings_init_calls; return g_settings_init_err; }
+esp_err_t audio_init(void) { return g_audio_init_err; }
+esp_err_t auxio_boot_safe(void) { return g_auxio_boot_err; }
 esp_err_t audio_boot_safe(void) { return ESP_OK; }
 esp_err_t sound_init(void) { return g_sound_init_err; }
 esp_err_t sg_store_selection(char *id, size_t capacity, uint32_t *revision, bool *selected)
 {
-    snprintf(id, capacity, "%s", "saved_graph");
+    snprintf(id, capacity, "%s", g_selection_id);
     *revision = 2;
     *selected = g_graph_selected;
     /* A corrupt record still belongs to graph mode, which seed_default refuses
@@ -131,6 +170,7 @@ esp_err_t sg_store_select_legacy(void)
 }
 esp_err_t sg_store_read(const char *id, uint32_t revision, char **out, size_t *length, uint32_t *actual)
 {
+    if (g_graph_force_read_err != ESP_OK) { return g_graph_force_read_err; }
     /* Per-attempt failures: the selected project can break while the built-in
      * fallback loaded afterwards still succeeds. */
     g_graph_reading_default = strcmp(id, SG_DEFAULT_PROJECT_ID) == 0;
@@ -161,18 +201,18 @@ esp_err_t sound_graph_install(const sg_graph_t *graph, const char *id, uint32_t 
     return ESP_OK;
 }
 void sound_graph_fail_closed(void) { ++g_graph_faults; }
-esp_err_t dcc_init(void) { g_enabled = false; return ESP_OK; }
-bool provision_try(void) { return false; }
+esp_err_t dcc_init(void) { g_enabled = false; ++g_dcc_init_calls; return g_dcc_init_err; }
+bool provision_try(void) { return g_provision_handled; }
 void provision_listener_start(void) { ++g_listener; }
 void track_recover_from_storage(const char *audio, const char *root,
                                 track_recover_result_t *out)
 {
     TEST_ASSERT_EQUAL_STRING("/userdata/audio", audio);
     TEST_ASSERT_EQUAL_STRING("/userdata", root);
-    memset(out, 0, sizeof(*out));
+    *out = g_track_recover;
 }
 esp_err_t web_init(void) { g_boot_mode = true; return g_web_err; }
-esp_err_t web_storage_recovery(void) { return ESP_OK; }
+esp_err_t web_storage_recovery(void) { return g_web_recovery_err; }
 esp_err_t track_init(void) { return g_track_err; }
 esp_err_t web_set_actuation_ready(bool ready)
 {
@@ -192,7 +232,7 @@ esp_err_t esp_ota_mark_app_valid_cancel_rollback(void)
     TEST_ASSERT_TRUE(g_admitted);
     TEST_ASSERT_TRUE(g_enabled);
     ++g_confirm;
-    return ESP_OK;
+    return g_ota_confirm_err;
 }
 bool track_is_dc_mode(void) { return g_dc; }
 bool web_control_is_rails(void)
@@ -222,7 +262,7 @@ esp_err_t motor_set_speed(uint8_t speed, bool forward)
 {
     (void)speed;
     (void)forward;
-    TEST_ASSERT_EQUAL_INT(1, g_lease_depth);
+    TEST_ASSERT_TRUE(g_lease_depth == 1 || g_allow_unleased);
     ++g_motor_calls;
     return g_motor_err;
 }
@@ -240,7 +280,7 @@ void web_motion_changed(uint8_t speed, bool forward)
 {
     (void)speed;
     (void)forward;
-    TEST_ASSERT_EQUAL_INT(1, g_lease_depth);
+    TEST_ASSERT_TRUE(g_lease_depth == 1 || g_allow_unleased);
     ++g_motion;
 }
 void web_apply_function(uint8_t fn, bool state)
@@ -258,6 +298,7 @@ void web_log_event(const char *tag, const char *format, ...)
 {
     (void)tag;
     (void)format;
+    ++g_web_logs;
 }
 esp_err_t motor_set_inhibit_reason(motor_inhibit_reason_t reason, bool inhibited)
 {
@@ -291,7 +332,15 @@ esp_err_t settings_cv_write(uint16_t cv, uint8_t value)
     return ESP_OK;
 }
 void settings_cv_commit_deferred(void) { ++g_deferred; }
-esp_err_t settings_pending_flush(void) { ++g_flush; return ESP_OK; }
+esp_err_t settings_pending_flush(void)
+{
+    ++g_flush;
+    if (g_flush_fail_remaining > 0) {
+        --g_flush_fail_remaining;
+        return g_flush_err;
+    }
+    return ESP_OK;
+}
 esp_err_t settings_cv_hard_reset(void)
 {
     ++g_hard_reset_calls;
@@ -311,11 +360,11 @@ void vTaskDelay(TickType_t ticks)
 {
     if (g_bound_safety) {
         TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(10), ticks);
-        if (++g_safety_delays > 3U) { longjmp(g_safety_exit, 1); }
+        if (++g_safety_delays > (unsigned)g_safety_iterations) { longjmp(g_safety_exit, 1); }
     }
     if (g_bound_worker) {
         TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(100), ticks);
-        if (++g_worker_delays > 1) { longjmp(g_worker_exit, 1); }
+        if (++g_worker_delays > g_worker_iterations) { longjmp(g_worker_exit, 1); }
     }
     sdk_task_delay(ticks);
     if (g_bound_safety) { g_tick = esp_timer_get_time(); }
@@ -364,6 +413,21 @@ void setUp(void)
     g_install_revision = 0;
     g_volume = g_listener = g_confirm = g_hard_reset_calls = 0;
     g_mask = MOTOR_INHIBIT_CONTROL;
+    g_pinmap_err = g_storage_mount_err = g_audio_init_err = g_auxio_boot_err = ESP_OK;
+    g_storage_init_err = g_settings_init_err = g_motor_init_err = g_dcc_init_err = ESP_OK;
+    g_web_recovery_err = g_ota_confirm_err = g_graph_force_read_err = ESP_OK;
+    g_storage_init_calls = g_settings_init_calls = g_motor_init_calls = g_dcc_init_calls = 0;
+    g_provision_handled = false;
+    g_flush_err = ESP_OK;
+    g_flush_fail_remaining = 0;
+    g_worker_iterations = 1;
+    g_safety_iterations = 3;
+    g_allow_unleased = false;
+    g_selection_id = "saved_graph";
+    memset(&g_track_recover, 0, sizeof(g_track_recover));
+    g_web_logs = 0;
+    g_error_check_armed = 0;
+    g_error_check_err = ESP_OK;
     mock_timer_now_us = 1000000;
     g_tick = g_packet = mock_timer_now_us;
     memset(g_cv, 0, sizeof(g_cv));
@@ -969,6 +1033,292 @@ static void test_emergency_stop_requests_audio_stop_immediately(void)
     TEST_ASSERT_TRUE(g_sound_requests >= 2);
 }
 
+/* A fatal ESP_ERROR_CHECK stage must abort the boot before admission. */
+static void boot_expect_abort(void)
+{
+    g_error_check_err = ESP_OK;
+    g_error_check_armed = 1;
+    if (setjmp(g_error_check_exit) == 0) {
+        app_main();
+        TEST_FAIL_MESSAGE("Fatal init did not abort the boot");
+    }
+    g_error_check_armed = 0;
+    TEST_ASSERT_TRUE(g_error_check_err != ESP_OK);
+}
+
+static void assert_boot_never_admitted(void)
+{
+    TEST_ASSERT_FALSE(g_enabled);
+    TEST_ASSERT_FALSE(g_admitted);
+    TEST_ASSERT_EQUAL_INT(0, g_confirm);
+    TEST_ASSERT_EQUAL_INT(0, g_listener);
+    TEST_ASSERT_EQUAL_INT(0, mock_task_create_calls);
+}
+
+static void test_boot_storage_init_failure_aborts_before_settings(void)
+{
+    g_storage_init_err = ESP_FAIL;
+    boot_expect_abort();
+    TEST_ASSERT_EQUAL_INT(1, g_storage_init_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_settings_init_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_motor_init_calls);
+    assert_boot_never_admitted();
+}
+
+static void test_boot_settings_init_failure_aborts_before_motor(void)
+{
+    g_settings_init_err = ESP_FAIL;
+    boot_expect_abort();
+    TEST_ASSERT_EQUAL_INT(1, g_storage_init_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_settings_init_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_motor_init_calls);
+    assert_boot_never_admitted();
+}
+
+static void test_boot_motor_init_failure_aborts_before_dcc(void)
+{
+    g_motor_init_err = ESP_FAIL;
+    boot_expect_abort();
+    TEST_ASSERT_EQUAL_INT(1, g_motor_init_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_dcc_init_calls);
+    assert_boot_never_admitted();
+}
+
+static void test_boot_dcc_init_failure_aborts_before_tasks(void)
+{
+    g_dcc_init_err = ESP_FAIL;
+    boot_expect_abort();
+    TEST_ASSERT_EQUAL_INT(1, g_dcc_init_calls);
+    TEST_ASSERT_FALSE(g_boot_mode);
+    assert_boot_never_admitted();
+}
+
+static void test_boot_board_safe_failure_is_nonfatal(void)
+{
+    g_auxio_boot_err = ESP_FAIL;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_boot_pinmap_failure_inhibits_motion_but_boots(void)
+{
+    g_pinmap_err = ESP_FAIL;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_boot_storage_mount_failure_keeps_running(void)
+{
+    g_storage_mount_err = ESP_FAIL;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_boot_provisioning_handled_keeps_running(void)
+{
+    g_provision_handled = true;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_boot_web_storage_recovery_failure_keeps_running(void)
+{
+    g_web_recovery_err = ESP_FAIL;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_boot_audio_init_failure_keeps_running(void)
+{
+    g_audio_init_err = ESP_FAIL;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+    TEST_ASSERT_TRUE(g_boot_mode);
+}
+
+static void test_boot_ota_confirm_failure_is_logged_not_fatal(void)
+{
+    g_ota_confirm_err = ESP_FAIL;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_boot_ota_rollback_invalid_state_is_silent(void)
+{
+    g_ota_confirm_err = ESP_ERR_OTA_ROLLBACK_INVALID_STATE;
+    app_main();
+    TEST_ASSERT_TRUE(g_admitted);
+    TEST_ASSERT_TRUE(g_enabled);
+    TEST_ASSERT_EQUAL_INT(1, g_confirm);
+}
+
+static void test_brownout_clear_retains_stall_inhibit(void)
+{
+    s_brownout_latched = true;
+    s_motor_stall_latched = true;
+    g_mask |= MOTOR_INHIBIT_SAFETY;
+    TEST_ASSERT_FALSE(brownout_clear_if_safe());
+    TEST_ASSERT_FALSE(s_brownout_latched);
+    TEST_ASSERT_BITS_HIGH(MOTOR_INHIBIT_SAFETY, g_mask);
+}
+
+static void test_dcc_stop_bypasses_busy_control_lease(void)
+{
+    /* The control mutex is held by an HTTP handler, so a lease cannot be
+     * taken, but the rails still own control: a DCC stop must reach the
+     * motor source-independently, while a nonzero speed is dropped. */
+    g_rails = true;
+    g_control_lock_held = true;
+    g_allow_unleased = true;
+    int motor = g_motor_calls, motion = g_motion, notes = g_notes, ends = g_lease_ends;
+
+    on_dcc_speed(30, true);
+    TEST_ASSERT_EQUAL_INT(motor, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(motion, g_motion);
+
+    on_dcc_speed(0, true);
+    TEST_ASSERT_EQUAL_INT(motor + 1, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(motion + 1, g_motion);
+    TEST_ASSERT_EQUAL_INT(notes, g_notes);
+    TEST_ASSERT_EQUAL_INT(ends, g_lease_ends);
+    TEST_ASSERT_EQUAL_INT(0, g_lease_depth);
+}
+
+static void test_hard_reset_before_actuation_ready_is_ignored(void)
+{
+    g_boot_mode = true;
+    g_admitted = false;
+    on_dcc_hard_reset();
+    TEST_ASSERT_EQUAL_INT(0, g_motor_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_functions);
+    TEST_ASSERT_EQUAL_INT(0, g_hard_reset_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_emergency_resets);
+}
+
+static void test_cv_read_callback_reports_settings_result(void)
+{
+    uint8_t value = 0;
+    g_cv[1] = 42;
+    TEST_ASSERT_TRUE(on_dcc_cv_read(1, &value));
+    TEST_ASSERT_EQUAL_UINT8(42, value);
+    TEST_ASSERT_FALSE(on_dcc_cv_read(0, &value));
+    TEST_ASSERT_FALSE(on_dcc_cv_read(SETTINGS_CV_COUNT + 1, &value));
+}
+
+static void test_persistence_wdt_subscription_failure_is_nonfatal(void)
+{
+    mock_task_wdt_add_err = ESP_FAIL;
+    run_one_persistence_iteration();
+    TEST_ASSERT_EQUAL_INT(1, g_flush);
+    TEST_ASSERT_EQUAL_INT(0, mock_task_wdt_reset_calls);
+}
+
+static void test_persistence_flush_deferral_and_resume(void)
+{
+    g_worker_iterations = 2;
+
+    g_flush_err = ESP_FAIL;
+    g_flush_fail_remaining = 1;
+    run_one_persistence_iteration();
+    TEST_ASSERT_EQUAL_INT(2, g_flush);
+
+    /* ESP_ERR_TIMEOUT is the expected maintenance deferral: no state change. */
+    g_flush = 0;
+    g_flush_err = ESP_ERR_TIMEOUT;
+    g_flush_fail_remaining = 1;
+    run_one_persistence_iteration();
+    TEST_ASSERT_EQUAL_INT(2, g_flush);
+}
+
+static void test_selection_failure_recovers_builtin_project(void)
+{
+    g_selection_err = ESP_FAIL;
+    g_seed_err = ESP_OK;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(1, g_graph_installs);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_faults);
+    TEST_ASSERT_EQUAL_STRING(SG_DEFAULT_PROJECT_ID, g_install_id);
+    TEST_ASSERT_EQUAL_UINT32(7, g_install_revision);
+    TEST_ASSERT_EQUAL_INT(1, g_legacy_select_calls);
+}
+
+static void test_selected_default_project_failure_fails_closed(void)
+{
+    g_graph_selected = true;
+    g_selection_id = SG_DEFAULT_PROJECT_ID;
+    g_graph_force_read_err = ESP_ERR_NOT_FOUND;
+    restore_sound_graph();
+    TEST_ASSERT_EQUAL_INT(1, g_graph_faults);
+    TEST_ASSERT_EQUAL_INT(0, g_graph_installs);
+    TEST_ASSERT_EQUAL_INT(0, g_legacy_select_calls);
+}
+
+static void test_safety_task_reports_stack_high_water(void)
+{
+    s_safety_ready = xQueueCreate(1, sizeof(esp_err_t));
+    TEST_ASSERT_NOT_NULL(s_safety_ready);
+    g_bound_safety = true;
+    g_safety_iterations = 650;
+    if (setjmp(g_safety_exit) == 0) {
+        safety_task(NULL);
+        TEST_FAIL_MESSAGE("Safety loop unexpectedly returned");
+    }
+    g_bound_safety = false;
+    TEST_ASSERT_EQUAL_UINT32(651, g_safety_delays);
+    TEST_ASSERT_EQUAL_INT(650, mock_task_wdt_reset_calls);
+    TEST_ASSERT_FALSE(s_motor_stall_latched);
+}
+
+static void test_track_recovery_reports_each_outcome(void)
+{
+    g_track_recover.error = ESP_FAIL;
+    g_track_recover.retry_pending = true;
+    recover_tracks_from_storage();
+
+    g_track_recover.error = ESP_OK;
+    g_track_recover.retry_pending = false;
+    g_track_recover.had_nvs = true;
+    g_track_recover.count = 5;
+    recover_tracks_from_storage();
+
+    g_track_recover.had_nvs = false;
+    g_track_recover.from_manifest = true;
+    int logs = g_web_logs;
+    recover_tracks_from_storage();
+    TEST_ASSERT_EQUAL_INT(logs + 1, g_web_logs);
+
+    g_track_recover.from_manifest = false;
+    g_track_recover.files_found = 0;
+    logs = g_web_logs;
+    recover_tracks_from_storage();
+    TEST_ASSERT_EQUAL_INT(logs + 1, g_web_logs);
+
+    g_track_recover.files_found = 3;
+    g_track_recover.rebuilt = true;
+    logs = g_web_logs;
+    recover_tracks_from_storage();
+    TEST_ASSERT_EQUAL_INT(logs, g_web_logs);
+
+    g_track_recover.rebuilt = false;
+    recover_tracks_from_storage();
+    TEST_ASSERT_EQUAL_INT(logs, g_web_logs);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1011,5 +1361,27 @@ int main(void)
     RUN_TEST(test_brownout_clears_on_web_clean_stop);
     RUN_TEST(test_persistence_worker_owns_flush_and_deferred_cleanup);
     RUN_TEST(test_persistence_worker_skips_recovered_timeout_cleanup);
+    RUN_TEST(test_boot_storage_init_failure_aborts_before_settings);
+    RUN_TEST(test_boot_settings_init_failure_aborts_before_motor);
+    RUN_TEST(test_boot_motor_init_failure_aborts_before_dcc);
+    RUN_TEST(test_boot_dcc_init_failure_aborts_before_tasks);
+    RUN_TEST(test_boot_board_safe_failure_is_nonfatal);
+    RUN_TEST(test_boot_pinmap_failure_inhibits_motion_but_boots);
+    RUN_TEST(test_boot_storage_mount_failure_keeps_running);
+    RUN_TEST(test_boot_provisioning_handled_keeps_running);
+    RUN_TEST(test_boot_web_storage_recovery_failure_keeps_running);
+    RUN_TEST(test_boot_audio_init_failure_keeps_running);
+    RUN_TEST(test_boot_ota_confirm_failure_is_logged_not_fatal);
+    RUN_TEST(test_boot_ota_rollback_invalid_state_is_silent);
+    RUN_TEST(test_brownout_clear_retains_stall_inhibit);
+    RUN_TEST(test_dcc_stop_bypasses_busy_control_lease);
+    RUN_TEST(test_hard_reset_before_actuation_ready_is_ignored);
+    RUN_TEST(test_cv_read_callback_reports_settings_result);
+    RUN_TEST(test_persistence_wdt_subscription_failure_is_nonfatal);
+    RUN_TEST(test_persistence_flush_deferral_and_resume);
+    RUN_TEST(test_selection_failure_recovers_builtin_project);
+    RUN_TEST(test_selected_default_project_failure_fails_closed);
+    RUN_TEST(test_safety_task_reports_stack_high_water);
+    RUN_TEST(test_track_recovery_reports_each_outcome);
     return UNITY_END();
 }

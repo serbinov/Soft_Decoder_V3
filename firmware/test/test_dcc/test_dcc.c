@@ -1735,6 +1735,122 @@ static void test_consist_address_alias_keeps_baseline_functions(void)
     TEST_ASSERT_EQUAL_INT(0, g_speed_calls);
 }
 
+/* ---- coverage: remaining dcc.c branches ---- */
+
+/* read_cv() must reject a missing read callback or a NULL destination, and an
+ * ops-mode bit-manipulation packet must not write when the CV cannot be read. */
+static void test_read_cv_null_guards(void)
+{
+    uint8_t value = 0x5A;
+    s_cv_read_cb = NULL;
+    TEST_ASSERT_FALSE(read_cv(4, &value));
+    TEST_ASSERT_EQUAL_UINT8(0x5A, value);
+
+    /* instr 0xE8 = 1110_10_00 (cc=2 bit-manip, CV4); data 0xF8: D=1 write,
+     * value=1, bit=0. This reaches read_cv() with no callback set. */
+    const uint8_t pkt[] = {0x03, 0xE8, 0x03, 0xF8, 0x03 ^ 0xE8 ^ 0x03 ^ 0xF8};
+    feed_packet(pkt, sizeof(pkt), 12);
+    TEST_ASSERT_EQUAL_INT(0, g_cv_write_calls);
+
+    s_cv_read_cb = on_cv_read;
+    TEST_ASSERT_FALSE(read_cv(4, NULL));
+}
+
+/* CV21/22 gate only Groups One and Two (F0-F12); extended functions must be
+ * emitted even when the consist mask is empty. The packet path calls the
+ * function callback directly for F13+, so exercise the helper itself. */
+static void test_emit_function_extended_bypasses_consist_mask(void)
+{
+    g_fn_state[13] = false;
+    g_fn_state[28] = true;
+    emit_function(13, true, true, false, 0, 0);
+    emit_function(28, false, true, false, 0, 0);
+    TEST_ASSERT_EQUAL_INT(2, g_fn_calls);
+    TEST_ASSERT_TRUE(g_fn_state[13]);
+    TEST_ASSERT_FALSE(g_fn_state[28]);
+}
+
+/* A receiver-start failure must be published to the startup queue and end the
+ * task before it touches the half-period queue. */
+static void test_dcc_task_startup_error_reports_and_aborts(void)
+{
+    QueueHandle_t startup = xQueueCreate(1, sizeof(esp_err_t));
+    TEST_ASSERT_NOT_NULL(startup);
+    mock_gpio_isr_install_err = ESP_FAIL;
+
+    dcc_task(startup);
+    mock_gpio_isr_install_err = 0;
+
+    esp_err_t reported = ESP_OK;
+    TEST_ASSERT_EQUAL(pdTRUE, xQueueReceive(startup, &reported, 0));
+    TEST_ASSERT_EQUAL(ESP_FAIL, reported);
+    TEST_ASSERT_FALSE(s_parser_running);
+
+    vQueueDelete(startup);
+}
+
+/* Config-mutex allocation failure unwinds the half-period queue. */
+static void test_dcc_init_config_mutex_fail(void)
+{
+    mock_mutex_create_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, dcc_init());
+    mock_mutex_create_fail = 0;
+    TEST_ASSERT_NULL(s_queue);
+    TEST_ASSERT_NULL(s_ack_queue);
+    TEST_ASSERT_NULL(s_start_queue);
+    TEST_ASSERT_NULL(s_config_mux);
+}
+
+/* If the startup task never publishes a status, dcc_init() reports invalid
+ * state instead of claiming the receiver is up. The early return does not run
+ * the fail label, so release the queues/mutex here. */
+static void test_dcc_init_startup_status_missing(void)
+{
+    mock_queue_send_fail = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, dcc_init());
+    mock_queue_send_fail = 0;
+    TEST_ASSERT_FALSE(s_initialized);
+
+    if (s_start_queue != NULL) { vQueueDelete(s_start_queue); s_start_queue = NULL; }
+    if (s_ack_queue != NULL) { vQueueDelete(s_ack_queue); s_ack_queue = NULL; }
+    if (s_queue != NULL) { vQueueDeleteWithCaps(s_queue); s_queue = NULL; }
+    if (s_config_mux != NULL) { vSemaphoreDelete(s_config_mux); s_config_mux = NULL; }
+}
+
+/* dcc_get_speed_status() snapshots the last decoded speed vector and tolerates
+ * any combination of NULL outputs. */
+static void test_dcc_get_speed_status_snapshots(void)
+{
+    s_last_speed128 = 73;
+    s_last_step = 12;
+    s_last_speed_mode = 28;
+    s_last_forward = true;
+
+    uint8_t speed = 0, step = 0, mode = 0;
+    bool forward = false;
+    dcc_get_speed_status(&speed, &step, &forward, &mode);
+    TEST_ASSERT_EQUAL_UINT8(73, speed);
+    TEST_ASSERT_EQUAL_UINT8(12, step);
+    TEST_ASSERT_TRUE(forward);
+    TEST_ASSERT_EQUAL_UINT8(28, mode);
+
+    dcc_get_speed_status(NULL, NULL, NULL, NULL);
+}
+
+/* dcc_register_emergency_stop_cb/dcc_register_hard_reset_cb store the hooks. */
+static void test_dcc_register_estop_and_hard_reset_cbs(void)
+{
+    dcc_register_emergency_stop_cb(NULL);
+    TEST_ASSERT_NULL(s_emergency_stop_cb);
+    dcc_register_emergency_stop_cb(on_emergency);
+    TEST_ASSERT_TRUE(s_emergency_stop_cb == on_emergency);
+
+    dcc_register_hard_reset_cb(NULL);
+    TEST_ASSERT_NULL(s_hard_reset_cb);
+    dcc_register_hard_reset_cb(on_hard_reset);
+    TEST_ASSERT_TRUE(s_hard_reset_cb == on_hard_reset);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1833,5 +1949,12 @@ RUN_TEST(test_dcc_28step_sound_scale);
     RUN_TEST(test_init_start_queue_failure);
     RUN_TEST(test_control_gate_blocks_write_until_reenabled);
     RUN_TEST(test_consist_address_alias_keeps_baseline_functions);
+    RUN_TEST(test_read_cv_null_guards);
+    RUN_TEST(test_emit_function_extended_bypasses_consist_mask);
+    RUN_TEST(test_dcc_task_startup_error_reports_and_aborts);
+    RUN_TEST(test_dcc_init_config_mutex_fail);
+    RUN_TEST(test_dcc_init_startup_status_missing);
+    RUN_TEST(test_dcc_get_speed_status_snapshots);
+    RUN_TEST(test_dcc_register_estop_and_hard_reset_cbs);
     return UNITY_END();
 }

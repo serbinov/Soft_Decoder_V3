@@ -924,6 +924,7 @@ Host tests: `test/run_tests.ps1` green, `test/coverage.ps1` first-party 100 %.
 Новые — сверху.
 
 <!-- AUTO-LOG -->
+- 2026-11-24 (v0.29) — ci: suppress cppcheck false positives and update artifact action
 - 2026-11-24 (v0.29) — docs(release): finalize 0.29 sizes, notes and rebuilt artifacts
 - 2026-11-24 (v0.29) — fix: close remaining review items (cppcheck, S30 API, pre-init logs, CI actions)
 - 2026-11-24 (v0.29) — fix(web): initialize preview handle and rebuild v0.29 release

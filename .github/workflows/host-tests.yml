@@ -109,6 +109,10 @@ jobs:
             --inline-suppr \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
+            --suppress=syntaxError:components/pinmap/src/pinmap.c \
+            --suppress=unknownMacro:components/web/src/web_settings_api.c \
+            --suppress=unknownMacro:components/web/src/web_wifi.c \
+            --suppress=syntaxError:main/default_scheme_data.c \
             --std=c11 --quiet \
             -I components/dcc/include \
             -I components/pinmap/include \
@@ -132,7 +136,7 @@ jobs:
           fi
       - name: Upload cppcheck report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cppcheck-report
           path: firmware/cppcheck.txt
@@ -191,7 +195,7 @@ jobs:
           print(f"release manifest version OK: {version}")
           PY
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-esp32s3
           path: |

@@ -260,6 +260,15 @@ label{color:var(--text);font-weight:600}
 .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,16px);opacity:0;pointer-events:none;z-index:300;max-width:min(92vw,560px);padding:10px 14px;border-radius:9px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--good);box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:12px;line-height:1.35;transition:opacity .18s,transform .18s;overflow-wrap:anywhere}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast.bad{border-left-color:var(--bad)}
+.export-mask{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;align-items:center;justify-content:center;z-index:400;padding:16px}
+html[data-theme=light] .export-mask{background:rgba(20,30,60,.45)}
+.export-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;width:min(92vw,420px);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.export-title{font-size:15px;font-weight:800;margin-bottom:4px}
+.export-sub{font-size:12px;color:var(--muted);margin-bottom:12px;overflow-wrap:anywhere}
+.export-bar{height:10px;background:var(--input);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:10px 0 6px}
+.export-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .12s ease}
+.export-meta{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.export-file{font-size:11px;color:var(--muted);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:14px}
 @media(max-width:480px){.pack-stats{grid-template-columns:1fr}}
 
 @media(max-width:760px){
@@ -817,6 +826,16 @@ label{color:var(--text);font-weight:600}
     </div>
   </div>
 
+  <div class="export-mask" id="export_mask" role="dialog" aria-modal="true" aria-labelledby="export_title" aria-describedby="export_sub">
+    <div class="export-card">
+      <div class="export-title" id="export_title" data-i18n="pack_export_title">Экспорт звуков и схемы</div>
+      <div class="export-sub" id="export_sub"></div>
+      <div class="export-bar" id="export_bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="export_bar_i"></i></div>
+      <div class="export-meta"><span id="export_count">0 / 0</span><span id="export_pct">0%</span></div>
+      <div class="export-file" id="export_file"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 </div>
@@ -897,7 +916,7 @@ pack_uploading:'пакет ',pack_done:'пакет загружен, звуко�
 cat_engine:'двигатель',cat_effects:'эффекты',cat_short_engine:'ДВ',cat_short_effect:'ЭФ',
 cat_engine_title:'Двигатель (громкость «Двигатель»)',cat_effect_title:'Эффект (громкость «Эффекты»)',
 upload_wav:'Загрузить WAV',del_track_title:'Удалить звук',del_sound_confirm:'Удалить звук «',del_sound_confirm_b:'» с устройства?',
-pw_export_msg:'Пароль для экспорта (минимум 8 символов):',pw_import_msg:'Пакет защищён паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль или повреждённый пакет',pw_short:'пароль должен быть не короче 8 символов',pw_min_hint:'Минимум {n} символов: {cur}/{n}',pack_legacy_warn:'старый формат защиты пакета; пересохраните пакет с новым паролем',pack_checking:'проверка пароля...',pack_exporting:'Экспорт звуков и схемы...',pack_exported:'Звуки и схема сохранены: ',pack_stats_title:'Звуковой пакет и схема',pack_save_title:'Сохранить звуковой пакет и схему?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 560 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
+pw_export_msg:'Пароль для экспорта (минимум 8 символов):',pw_import_msg:'Пакет защищён паролем. Введите пароль для импорта:',pw_wrong:'неверный пароль или повреждённый пакет',pw_short:'пароль должен быть не короче 8 символов',pw_min_hint:'Минимум {n} символов: {cur}/{n}',pack_legacy_warn:'старый формат защиты пакета; пересохраните пакет с новым паролем',pack_checking:'проверка пароля...',pack_exporting:'Экспорт звуков и схемы...',pack_export_title:'Экспорт звуков и схемы',pack_export_sub_used:'Звуков в схеме: ',pack_export_sub_all:'Схема не выбрана — экспортируются все звуки: ',pack_export_preparing:'подготовка…',pack_export_encrypt:'шифрование пакета…',pack_exported:'Звуки и схема сохранены: ',pack_stats_title:'Звуковой пакет и схема',pack_save_title:'Сохранить звуковой пакет и схему?',pack_export_btn:'Сохранить',pack_export_too_big:'Пакет больше 15 МБ. Сохранить его можно, но импортировать на декодер не получится: удалите часть звуков или перекодируйте их в ADPCM.',pack_exported_big:'Пакет сохранён, но он больше 15 МБ: импорт на декодер невозможен.',pack_export_cancelled:'экспорт отменён',pack_stat_sounds:'Звуки',pack_stat_size:'Размер пакета',pack_stat_audio:'Аудио',pack_stat_format:'Формат',pack_stat_rate:'Частота',pack_stat_scheme:'Звуковая схема',pack_stat_pw:'Пароль',pack_pw_yes:'есть',pack_pw_no:'нет',pack_scheme_none:'нет',pack_import_btn:'Импортировать',pack_replace_warn:'ВНИМАНИЕ: текущие звуки и схема на устройстве будут заменены.',pack_replace_warn_sounds:'ВНИМАНИЕ: текущие звуки на устройстве будут заменены, звуковая схема останется.',pack_invalid:'некорректный звуковой пакет: ',pack_err_header:'повреждённый заголовок',pack_err_version:'неподдерживаемая версия',pack_err_index:'повреждённый индекс',pack_err_entry:'неверная запись звука: ',pack_err_adpcm_stereo:'стерео ADPCM не поддерживается: ',pack_compressed:'сжато в ADPCM: ',pack_repaired:'исправлено повреждённых записей: ',pack_err_name:'недопустимое имя звука',pack_err_dup:'повторяющееся имя звука: ',pack_err_bounds:'данные выходят за границы файла',pack_err_size:'несовпадение размера данных',pack_err_no_audio:'в пакете нет звуковых файлов',pack_err_scheme:'повреждённая звуковая схема',pack_err_missing:'схема ссылается на отсутствующий звук: ',pack_err_library_big:'в библиотеке больше 560 звуков, экспорт невозможен: ',pack_states:'состояний',pack_transitions:'переходов',pack_effects:'эффектов',hz:'Гц',wav_bad_ext:'нужен файл .wav: ',wav_uploaded:'загружен звук: ',
 cv_title:'CV',cv_num:'Номер CV',cv_value:'Значение',cv_write:'Записать',cv_factory:'К заводским параметрам CV',cv_search_ph:'Поиск CV...',cv_show_table:'Таблица CV67..94',
 nothing_found:'Ничего не найдено',readonly:'только чтение',
 wifi_title:'Настройки WiFi',wifi_ip:'IP-адрес точки доступа',wifi_ssid:'Имя точки доступа (SSID)',
@@ -979,7 +998,7 @@ pack_uploading:'pack ',pack_done:'pack uploaded, sounds: ',pack_scheme_loaded:' 
 cat_engine:'engine',cat_effects:'effects',cat_short_engine:'ENG',cat_short_effect:'FX',
 cat_engine_title:'Engine (uses «Engine» volume)',cat_effect_title:'Effect (uses «Effects» volume)',
 upload_wav:'Upload WAV',del_track_title:'Delete sound',del_sound_confirm:'Delete sound "',del_sound_confirm_b:'" from the device?',
-pw_export_msg:'Password for export (at least 8 characters):',pw_import_msg:'This sound pack is password-protected. Enter password to import:',pw_wrong:'wrong password or damaged sound pack',pw_short:'password must be at least 8 characters',pw_min_hint:'At least {n} characters: {cur}/{n}',pack_legacy_warn:'legacy pack protection; re-save with a new password',pack_checking:'checking password...',pack_exporting:'Exporting sounds & scheme...',pack_exported:'Sounds & scheme saved: ',pack_stats_title:'Sound pack & scheme',pack_save_title:'Save sound pack & scheme?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 560 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
+pw_export_msg:'Password for export (at least 8 characters):',pw_import_msg:'This sound pack is password-protected. Enter password to import:',pw_wrong:'wrong password or damaged sound pack',pw_short:'password must be at least 8 characters',pw_min_hint:'At least {n} characters: {cur}/{n}',pack_legacy_warn:'legacy pack protection; re-save with a new password',pack_checking:'checking password...',pack_exporting:'Exporting sounds & scheme...',pack_export_title:'Export sounds & scheme',pack_export_sub_used:'Sounds used by the scheme: ',pack_export_sub_all:'No scheme selected — exporting all sounds: ',pack_export_preparing:'preparing…',pack_export_encrypt:'encrypting pack…',pack_exported:'Sounds & scheme saved: ',pack_stats_title:'Sound pack & scheme',pack_save_title:'Save sound pack & scheme?',pack_export_btn:'Save',pack_export_too_big:'The pack is larger than 15 MB. It can still be saved, but it cannot be imported into the decoder: remove some sounds or re-encode them as ADPCM.',pack_exported_big:'Pack saved, but it is larger than 15 MB: it cannot be imported into the decoder.',pack_export_cancelled:'export cancelled',pack_stat_sounds:'Sounds',pack_stat_size:'Pack size',pack_stat_audio:'Audio',pack_stat_format:'Format',pack_stat_rate:'Sample rate',pack_stat_scheme:'Sound scheme',pack_stat_pw:'Password',pack_pw_yes:'yes',pack_pw_no:'no',pack_scheme_none:'none',pack_import_btn:'Import',pack_replace_warn:'WARNING: the current sounds and scheme on the device will be replaced.',pack_replace_warn_sounds:'WARNING: the current sounds on the device will be replaced; the sound scheme is kept.',pack_invalid:'invalid sound pack: ',pack_err_header:'corrupted header',pack_err_version:'unsupported version',pack_err_index:'corrupted index',pack_err_entry:'invalid sound entry: ',pack_err_adpcm_stereo:'stereo ADPCM is not supported: ',pack_compressed:'compressed to ADPCM: ',pack_repaired:'repaired malformed entries: ',pack_err_name:'invalid sound name',pack_err_dup:'duplicate sound name: ',pack_err_bounds:'payload outside the file',pack_err_size:'data size mismatch',pack_err_no_audio:'pack contains no sound files',pack_err_scheme:'corrupted sound scheme',pack_err_missing:'scheme references a missing sound: ',pack_err_library_big:'the library has more than 560 sounds, cannot export: ',pack_states:'states',pack_transitions:'transitions',pack_effects:'effects',hz:'Hz',wav_bad_ext:'expected a .wav file: ',wav_uploaded:'uploaded sound: ',
 cv_title:'CV',cv_num:'CV number',cv_value:'Value',cv_write:'Write',cv_factory:'Reset CV to factory defaults',cv_search_ph:'Search CV...',cv_show_table:'Table CV67..94',
 nothing_found:'Nothing found',readonly:'is read-only',
 wifi_title:'WiFi settings',wifi_ip:'Access point IP address',wifi_ssid:'Access point name (SSID)',
@@ -3054,17 +3073,21 @@ function schemeBytesForPack(project,entries){
   if(json.length>131072)throw new Error(t('pack_err_scheme'));
   return json;
 }
+function schemeSoundFiles(project){var out=[],seen={};var states=project&&Array.isArray(project.states)?project.states:[];for(var i=0;i<states.length;i++){var f=states[i]&&states[i].file?String(states[i].file):'';if(!f||seen[f])continue;seen[f]=1;out.push(f);}return out;}
+function exportProgressShow(total,used,libraryTotal,hasScheme){var mask=byId('export_mask');if(!mask)return;mask.style.display='flex';var sub=byId('export_sub');if(sub)sub.textContent=hasScheme?(t('pack_export_sub_used')+used+' / '+libraryTotal):(t('pack_export_sub_all')+libraryTotal);exportProgressSet(0,total,'',t('pack_export_preparing'));}
+function exportProgressPreparing(){var mask=byId('export_mask');if(!mask)return;mask.style.display='flex';var sub=byId('export_sub');if(sub)sub.textContent=t('pack_export_preparing');exportProgressSet(0,0,'',t('pack_export_preparing'));}
+function exportProgressSet(done,total,file,phase){var pct=total>0?Math.max(0,Math.min(100,Math.round(done/total*100))):0;var bar=byId('export_bar');if(bar&&bar.setAttribute)bar.setAttribute('aria-valuenow',String(pct));var fill=byId('export_bar_i');if(fill)fill.style.width=pct+'%';var cnt=byId('export_count');if(cnt)cnt.textContent=done+' / '+total;var p=byId('export_pct');if(p)p.textContent=pct+'%';var f=byId('export_file');if(f)f.textContent=phase||file||'';}
+function exportProgressHide(){var mask=byId('export_mask');if(mask)mask.style.display='none';}
 async function exportSoundPack(){
   if(uploadBusy){log(t('tag_sound'),t('upload_busy'));return;}
   var pw=await promptPasswordDialog(t('pw_export_msg'),{minLen:8,showHint:true});
   if(pw===null)return;
   if(!pw||pw.length<8){log(t('tag_sound'),t('pw_short'));return;}
   showSetting('panel_snd');
-  toast(t('pack_exporting'));
+  exportProgressPreparing();
   log(t('tag_sound'),t('pack_exporting'));
   try{
     await loadLibrary();
-    if(libTotal>560)throw new Error(t('pack_err_library_big')+libTotal);
     var devName='';
     try{
       var dev=await api('/api/device',{timeout:4000,cache:'no-store'});
@@ -3096,31 +3119,47 @@ async function exportSoundPack(){
         throw new Error(t('st_no_active_project'));
       }
     }
-    var entries=[];
+    var usedFiles=projectObj?schemeSoundFiles(projectObj):[];
+    var byName={};for(var bi=0;bi<libFiles.length;bi++)byName[libFiles[bi].name]=libFiles[bi];
+    var filesToExport=libFiles;
+    if(projectObj){
+      filesToExport=[];
+      for(var ui=0;ui<usedFiles.length;ui++){
+        var base=usedFiles[ui].replace(/\.wav$/i,'');
+        var lf=byName[base];
+        if(!lf)throw new Error(t('pack_err_missing')+usedFiles[ui]);
+        filesToExport.push(lf);
+      }
+      if(!filesToExport.length)throw new Error(t('pack_err_no_audio'));
+    }
+    if(filesToExport.length>560)throw new Error(t('pack_err_library_big')+filesToExport.length);
+    exportProgressShow(filesToExport.length,filesToExport.length,libFiles.length,!!projectObj);
+    var entries=new Array(filesToExport.length);
     var compressed=0;
     packRepairs=[];
-    for(var i=0;i<libFiles.length;i++){
-      if((i%25)===0)toast(t('pack_exporting')+' '+(i+1)+'/'+libFiles.length);
-      var f=libFiles[i];
-      var r=null,lastStatus=0;
-      for(var attempt=0;attempt<3;attempt++){
-        r=await fetch('/api/audio/raw/'+encodeURIComponent(f.name),{cache:'no-store'});
-        if(r.ok)break;
-        lastStatus=r.status;
-        if(r.status<500)break;
-        await new Promise(function(res){setTimeout(res,150);});
+    var next=0,doneCount=0;
+    async function exportWorker(){
+      for(;;){
+        var idx=next++;if(idx>=filesToExport.length)return;
+        var f=filesToExport[idx];
+        exportProgressSet(doneCount,filesToExport.length,f.name,'');
+        var r=null,lastStatus=0;
+        for(var attempt=0;attempt<3;attempt++){r=await fetch('/api/audio/raw/'+encodeURIComponent(f.name),{cache:'no-store'});if(r.ok)break;lastStatus=r.status;if(r.status<500)break;await new Promise(function(res){setTimeout(res,150);});}
+        if(!r||!r.ok)throw new Error('raw fetch failed: '+f.name+(lastStatus?' ('+lastStatus+')':''));
+        var ab=await r.arrayBuffer();
+        var rate=Number(r.headers.get('X-Audio-Rate'))||22050;
+        var ch=Number(r.headers.get('X-Audio-Channels'))||1;
+        var bits=Number(r.headers.get('X-Audio-Bits'))||16;
+        var vol=Number(f.vol);if(isNaN(vol))vol=100;
+        entries[idx]=packPrepareEntry(f.name,vol,ch,bits,rate,new Uint8Array(ab));
+        doneCount++;exportProgressSet(doneCount,filesToExport.length,f.name,'');
       }
-      if(!r||!r.ok)throw new Error('raw fetch failed: '+f.name+(lastStatus?' ('+lastStatus+')':''));
-      var ab=await r.arrayBuffer();
-      var rate=Number(r.headers.get('X-Audio-Rate'))||22050;
-      var ch=Number(r.headers.get('X-Audio-Channels'))||1;
-      var bits=Number(r.headers.get('X-Audio-Bits'))||16;
-      var vol=Number(f.vol);if(isNaN(vol))vol=100;
-      var entry=packPrepareEntry(f.name,vol,ch,bits,rate,new Uint8Array(ab));
-      if(bits===16)compressed++;
-      entries.push(entry);
     }
-    if(compressed)log(t('tag_sound'),t('pack_compressed')+compressed+'/'+libFiles.length);
+    var workers=[];for(var w=0;w<Math.min(4,filesToExport.length);w++)workers.push(exportWorker());
+    await Promise.all(workers);
+    for(var ci=0;ci<entries.length;ci++){if(entries[ci]&&entries[ci].bits===16)compressed++;}
+    packRepairs.sort();
+    if(compressed)log(t('tag_sound'),t('pack_compressed')+compressed+'/'+filesToExport.length);
     if(packRepairs.length)log(t('tag_sound'),t('pack_repaired')+packRepairs.join(', '));
     if(projectObj){
       entries.push({name:'__aura_scheme__',vol:0,ch:0,bits:0,rate:0,data:schemeBytesForPack(projectObj,entries)});
@@ -3160,6 +3199,8 @@ async function exportSoundPack(){
       asp.set(e.data,runningOff);
       runningOff+=e.data.length;
     }
+    exportProgressSet(filesToExport.length,filesToExport.length,'',t('pack_export_encrypt'));
+    await new Promise(function(res){setTimeout(res,30);});
     var finalBytes=await encryptAspBytes(asp,pw);
     var tooBig=finalBytes.length>15*1024*1024;
     var check=parseAspPack(asp);
@@ -3167,6 +3208,7 @@ async function exportSoundPack(){
     var fname=packFileBase((projectObj&&projectObj.name)||devName||projId||'sound_pack')+'.asp';
     var blob=new Blob([finalBytes],{type:'application/octet-stream'});
     var dlUrl=URL.createObjectURL(blob);
+    exportProgressHide();
     var proceed=await showSavePackDialog(fname,finalBytes.length,{url:dlUrl,name:fname},tooBig,packRepairs.length);
     if(!proceed){
       try{URL.revokeObjectURL(dlUrl);}catch(e){}
@@ -3177,6 +3219,7 @@ async function exportSoundPack(){
     log(t('tag_sound'),t('pack_exported')+fname);
     toast(tooBig?t('pack_exported_big'):(t('pack_exported')+fname+' ('+fmtBytes(finalBytes.length)+')'),tooBig);
   }catch(e){
+    exportProgressHide();
     log(t('tag_sound'),t('err_prefix')+e.message);
     toast(t('err_prefix')+e.message,true);
   }

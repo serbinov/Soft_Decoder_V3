@@ -57,6 +57,7 @@ function fixture(t) {
     if (!elements.has(id)) elements.set(id, {
       value: '', checked: false, disabled: false, files: [], style: {}, children: [],
       classList: { add() {}, remove() {}, toggle() {} },
+      setAttribute() {},
       addEventListener() {}, querySelectorAll: () => [], appendChild() {}, prepend() {}
     });
     return elements.get(id);
@@ -782,6 +783,71 @@ test('export uses an explicit project id instead of the active scheme', async t 
   const info = context.parseAspPack(new Uint8Array(plain));
   assert.equal(info.scheme.id, 'other');
   assert.equal(downloadName, 'Other.asp');
+});
+
+test('schemeSoundFiles keeps unique non-empty sound files', t => {
+  const { context } = fixture(t);
+  const files = context.schemeSoundFiles({ states: [
+    { file: 'a.wav' }, { file: 'a.wav' }, { file: '' }, { file: 'b.wav' }
+  ] });
+  assert.deepEqual(Array.from(files), ['a.wav', 'b.wav']);
+});
+
+test('export preparing subtitle never claims no scheme before loading', t => {
+  const { context, element } = fixture(t);
+  context.exportProgressPreparing();
+  assert.equal(element('export_mask').style.display, 'flex');
+  const sub = element('export_sub').textContent;
+  assert.equal(sub, context.t('pack_export_preparing'));
+  assert.ok(!sub.includes('Схема не выбрана'));
+  assert.ok(!sub.includes('No scheme selected'));
+  context.exportProgressHide();
+});
+
+test('sound-pack export filters unused sounds and drives the progress modal', async t => {
+  const { context, element } = fixture(t);
+  const rawUrls = [], snapshots = [];
+  context.uploadBusy = false;
+  context.promptPasswordDialog = async () => 'password123';
+  context.loadLibrary = async () => {
+    context.libFiles = [{ name: 'used', vol: 100 }, { name: 'unused', vol: 100 }];
+    context.libTotal = 2;
+  };
+  context.api = async (url) => {
+    if (url === '/api/device') return { ok: true, name: 'Loco' };
+    if (url === '/api/sound/graph/state') return { ok: true, id: 'proj', revision: 3 };
+    if (url.indexOf('/api/sound/graph/project') === 0)
+      return { ok: true, project: { format: 'sound-graph', schemaVersion: 1, id: 'proj',
+        name: 'Loco', states: [{ id: 's', file: 'used.wav' }], transitions: [], effects: [] } };
+    if (url.indexOf('/api/func-map') === 0) return { ok: false };
+    if (url.indexOf('/api/aux/cfg') === 0) return { ok: false };
+    return { ok: false };
+  };
+  context.fetch = async (url) => {
+    rawUrls.push(url);
+    return { ok: true, status: 200,
+      headers: new Headers({ 'X-Audio-Rate': '22050', 'X-Audio-Channels': '1', 'X-Audio-Bits': '16' }),
+      arrayBuffer: async () => new Uint8Array([1, 0, 2, 0]).buffer };
+  };
+  context.packPrepareEntry = (name, vol, ch, bits, rate, data) => {
+    snapshots.push({ display: element('export_mask').style.display,
+      count: element('export_count').textContent, pct: element('export_pct').textContent });
+    return { name, vol, ch, bits, rate, data: new Uint8Array(data) };
+  };
+  context.encryptAspBytes = async (bytes) => bytes;
+  context.showSavePackDialog = async () => {
+    assert.equal(element('export_mask').style.display, 'none');
+    return false;
+  };
+  if (!URL.createObjectURL) URL.createObjectURL = () => 'blob:test';
+  if (!URL.revokeObjectURL) URL.revokeObjectURL = () => {};
+  await context.exportSoundPack();
+  assert.deepEqual(rawUrls, ['/api/audio/raw/used']);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].display, 'flex');
+  assert.equal(element('export_count').textContent, '1 / 1');
+  assert.equal(element('export_pct').textContent, '100%');
+  assert.equal(element('export_mask').style.display, 'none');
 });
 
 test('password dialog requires eight characters and shows the counter', async t => {

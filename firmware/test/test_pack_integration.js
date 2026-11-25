@@ -264,7 +264,7 @@ test('Python pack --only-from keeps only requested sounds', () => {
   assert.ok(!fs.existsSync(path.join(out, 'Drop.wav')), 'unselected sound is not packed');
 });
 
-test('JS export -> Python unpack: real files, scheme manifest and volumes', async t => {
+test('JS export -> Python unpack: only scheme sounds, real files, manifest and volumes', async t => {
   const dir = tmpDir('export');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const h = harness();
@@ -278,8 +278,8 @@ test('JS export -> Python unpack: real files, scheme manifest and volumes', asyn
   const plain = await h.ctx.decryptAspBytes(new Uint8Array(bytes), 'password8');
   assert.ok(plain, 'exported pack is password-protected and decrypts');
   const info = h.ctx.parseAspPack(new Uint8Array(plain));
-  assert.equal(info.audio.length, 4);
-  assert.equal(info.adpcm, 4, 'all PCM (16 and 8 bit) is compressed to ADPCM on export');
+  assert.equal(info.audio.length, 3);
+  assert.equal(info.adpcm, 3, 'all PCM (16 and 8 bit) is compressed to ADPCM on export');
   assert.equal(info.pcm, 0);
   assert.equal(info.scheme.id, 'packtest');
   const asp = path.join(dir, 'pack.asp');
@@ -287,7 +287,7 @@ test('JS export -> Python unpack: real files, scheme manifest and volumes', asyn
   const out = path.join(dir, 'out');
   runPython([asp, '--unpack', '-o', out]);
 
-  for (const file of ['Horn.wav', 'Brake.wav', 'LoFi.wav', 'Unused.wav', 'scheme.json', 'volumes.txt']) {
+  for (const file of ['Horn.wav', 'Brake.wav', 'LoFi.wav', 'scheme.json', 'volumes.txt']) {
     assert.ok(fs.existsSync(path.join(out, file)), file + ' extracted');
   }
   const scheme = JSON.parse(fs.readFileSync(path.join(out, 'scheme.json'), 'utf8'));
@@ -305,9 +305,9 @@ test('JS export -> Python unpack: real files, scheme manifest and volumes', asyn
   }
   assert.deepEqual(
     fs.readFileSync(path.join(out, 'volumes.txt'), 'utf8').trim().split(/\r?\n/).sort(),
-    ['Brake=80', 'Horn=55', 'LoFi=90', 'Unused=100']
+    ['Brake=80', 'Horn=55', 'LoFi=90']
   );
-  assert.equal(fs.existsSync(path.join(out, 'Unused.wav')), true, 'all library sounds are packed');
+  assert.equal(fs.existsSync(path.join(out, 'Unused.wav')), false, 'unused library sounds are not packed');
   const lofi = readWavInfo(path.join(out, 'LoFi.wav'));
   assert.equal(lofi.bits, 4);
   assert.equal(lofi.rate, 15625);
